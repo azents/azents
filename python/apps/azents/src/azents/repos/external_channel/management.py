@@ -13,7 +13,6 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -139,8 +138,6 @@ class ExternalChannelManagementRepository:
         connection.socket_heartbeat_at = None
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
-        route.status = ExternalChannelRouteStatus.ACTIVE
-        route.deactivated_at = None
         await session.flush()
         return _connection(connection, route)
 
@@ -312,8 +309,6 @@ class ExternalChannelManagementRepository:
             return None
         connection, route = row
         connection.status = ExternalChannelConnectionStatus.DISCONNECTING
-        route.status = ExternalChannelRouteStatus.INACTIVE
-        route.deactivated_at = now
         bindings = list(
             (
                 await session.scalars(
@@ -632,7 +627,6 @@ def _connection(
         provider=connection.provider,
         transport=connection.transport,
         status=connection.status,
-        route_status=route.status,
         provider_app_id=connection.provider_app_id,
         provider_tenant_id=connection.provider_tenant_id,
         provider_bot_user_id=connection.provider_bot_user_id,

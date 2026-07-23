@@ -16,7 +16,6 @@ from azents.core.enums import (
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelResourceStatus,
-    ExternalChannelRouteStatus,
     InputBufferKind,
     InputBufferSchedulingMode,
 )
@@ -132,6 +131,19 @@ class ExternalChannelAccessService:
             )
             if request_snapshot is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
+            route = await self.repository.get_routable_route_by_id(
+                session,
+                route_id=request_snapshot.route_id,
+            )
+            if route is None:
+                raise ExternalChannelAccessDecisionError(
+                    "The External Channel route is unavailable."
+                )
+            binding = await self.repository.lock_active_binding_by_route_resource(
+                session,
+                route_id=request_snapshot.route_id,
+                resource_id=request_snapshot.resource_id,
+            )
             resource = await self.repository.lock_resource(
                 session,
                 resource_id=request_snapshot.resource_id,
@@ -140,20 +152,7 @@ class ExternalChannelAccessService:
                 session,
                 access_request_id=access_request_id,
             )
-            route = await self.repository.get_agent_route(
-                session,
-                route_id=request.route_id,
-            )
             if request.status is ExternalChannelAccessRequestStatus.ALLOWED:
-                if route is None:
-                    raise ExternalChannelAccessDecisionError(
-                        "The External Channel route does not exist."
-                    )
-                binding = await self.repository.get_active_binding_by_route_resource(
-                    session,
-                    route_id=request.route_id,
-                    resource_id=request.resource_id,
-                )
                 grant = await self.repository.get_active_access_grant(
                     session,
                     agent_id=route.agent_id,
@@ -186,10 +185,6 @@ class ExternalChannelAccessService:
                     grant=grant,
                 )
             self._require_pending(request, now=now)
-            if route is None or route.status is not ExternalChannelRouteStatus.ACTIVE:
-                raise ExternalChannelAccessDecisionError(
-                    "The External Channel route is not active."
-                )
             if (
                 resource is None
                 or resource.status is not ExternalChannelResourceStatus.ACTIVE
@@ -215,15 +210,8 @@ class ExternalChannelAccessService:
                     "The external participant is blocked."
                 )
 
-            existing_binding = (
-                await self.repository.lock_active_binding_by_route_resource(
-                    session,
-                    route_id=request.route_id,
-                    resource_id=request.resource_id,
-                )
-            )
-            if existing_binding is not None:
-                agent_session_id = existing_binding.agent_session_id
+            if binding is not None:
+                agent_session_id = binding.agent_session_id
             elif request.agent_session_id is not None:
                 raise ExternalChannelAccessDecisionError(
                     "The linked External Channel binding is no longer active."

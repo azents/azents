@@ -155,6 +155,10 @@ class _ConnectionUnavailable(Exception):
     reason: str
 
 
+class _HydrationRoutingUnavailable(Exception):
+    """Hydration cannot continue after routing eligibility is lost."""
+
+
 @dataclasses.dataclass
 class ExternalChannelEventProcessorService:
     """Claim admitted provider events and apply idempotent domain effects."""
@@ -245,6 +249,12 @@ class ExternalChannelEventProcessorService:
         """Create the initial invocation batch when every activation fence passes."""
         now = _now()
         async with self.session_manager() as session:
+            route = await self.repository.get_routable_route_by_binding_id(
+                session,
+                binding_id=binding_id,
+            )
+            if route is None:
+                return False
             binding = await self.repository.lock_binding(
                 session,
                 binding_id=binding_id,
@@ -266,11 +276,7 @@ class ExternalChannelEventProcessorService:
             boundary = _resource_boundary(resource)
             if boundary is None:
                 return False
-            route = await self.repository.get_agent_route(
-                session,
-                route_id=binding.route_id,
-            )
-            if route is None:
+            if binding.route_id != route.id:
                 return False
             unresolved = await self.repository.correlated_event_count_before_boundary(
                 session,
@@ -580,14 +586,12 @@ class ExternalChannelEventProcessorService:
     ) -> ExternalChannelPersistedMessage:
         now = _now()
         async with self.session_manager() as session:
-            route = await self.repository.get_active_route_by_connection_id(
+            route = await self.repository.get_routable_route_by_connection_id(
                 session,
                 connection_id=event.connection_id,
             )
             if route is None:
-                raise SlackEventExcluded(
-                    "No active Agent route owns the Slack connection."
-                )
+                raise SlackEventExcluded("No active Agent owns the Slack connection.")
             agent = await self.agent_repository.get_by_id(session, route.agent_id)
             if (
                 agent is None
@@ -651,6 +655,11 @@ class ExternalChannelEventProcessorService:
                 raise SlackEventExcluded(
                     "Unrecognized connection-authored Slack message was ignored."
                 )
+            binding = await self.repository.lock_active_binding_by_route_resource(
+                session,
+                route_id=route.id,
+                resource_id=resource.id,
+            )
             locked_resource = await self.repository.lock_resource(
                 session,
                 resource_id=resource.id,
@@ -660,11 +669,6 @@ class ExternalChannelEventProcessorService:
             resource = locked_resource
             if resource.status is not ExternalChannelResourceStatus.ACTIVE:
                 raise SlackEventExcluded("The external conversation is unavailable.")
-            binding = await self.repository.lock_active_binding_by_route_resource(
-                session,
-                route_id=route.id,
-                resource_id=resource.id,
-            )
             wake_session_id: str | None = None
 
             persisted_revision = await self._persist_normalized_message(
@@ -1127,15 +1131,40 @@ class ExternalChannelEventProcessorService:
         bot_token: str,
     ) -> None:
         now = _now()
+        routing_unavailable = False
+        resource: ExternalChannelResource | None = None
         async with self.session_manager() as session:
-            resource = await self.repository.mark_resource_hydration_running(
+            route = await self.repository.get_routable_route_by_connection_id(
                 session,
-                resource_id=resource_id,
-                started_at=now,
+                connection_id=configuration.id,
             )
-            if resource is None:
-                raise RuntimeError("External Channel resource disappeared.")
-            await session.commit()
+            if route is None:
+                routing_unavailable = True
+            else:
+                await self.repository.lock_active_binding_by_route_resource(
+                    session,
+                    route_id=route.id,
+                    resource_id=resource_id,
+                )
+                resource = await self.repository.mark_resource_hydration_running(
+                    session,
+                    resource_id=resource_id,
+                    started_at=now,
+                )
+                if resource is None:
+                    raise RuntimeError("External Channel resource disappeared.")
+                await session.commit()
+        if routing_unavailable:
+            await self._complete_hydration(
+                configuration=configuration,
+                resource_id=resource_id,
+                status=ExternalChannelHydrationStatus.INCOMPLETE,
+                error_kind="routing_unavailable",
+                error_summary="External Channel routing became unavailable.",
+            )
+            return
+        if resource is None:
+            raise RuntimeError("External Channel resource disappeared.")
         if _hydration_terminal(resource.hydration_status):
             return
         labels = resource.labels or {}
@@ -1143,7 +1172,6 @@ class ExternalChannelEventProcessorService:
         thread_ts = labels.get("thread_ts")
         if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
             raise RuntimeError("External Channel Slack resource labels are invalid.")
-        route = await self._active_route(configuration.id)
         cursor = resource.hydration_cursor
         bounded = False
         high_watermark = resource.hydration_high_watermark_position
@@ -1159,12 +1187,12 @@ class ExternalChannelEventProcessorService:
                 )
                 latest_activity = None
                 async with self.session_manager() as session:
-                    current_resource = await self.repository.lock_resource(
+                    route = await self.repository.get_routable_route_by_connection_id(
                         session,
-                        resource_id=resource_id,
+                        connection_id=configuration.id,
                     )
-                    if current_resource is None:
-                        raise RuntimeError("External Channel resource disappeared.")
+                    if route is None:
+                        raise _HydrationRoutingUnavailable
                     binding = (
                         await self.repository.lock_active_binding_by_route_resource(
                             session,
@@ -1172,6 +1200,12 @@ class ExternalChannelEventProcessorService:
                             resource_id=resource_id,
                         )
                     )
+                    current_resource = await self.repository.lock_resource(
+                        session,
+                        resource_id=resource_id,
+                    )
+                    if current_resource is None:
+                        raise RuntimeError("External Channel resource disappeared.")
                     for history_message in page.messages:
                         persisted_revision = await self._persist_normalized_message(
                             session,
@@ -1216,6 +1250,15 @@ class ExternalChannelEventProcessorService:
                     break
             else:
                 bounded = True
+        except _HydrationRoutingUnavailable:
+            await self._complete_hydration(
+                configuration=configuration,
+                resource_id=resource_id,
+                status=ExternalChannelHydrationStatus.INCOMPLETE,
+                error_kind="routing_unavailable",
+                error_summary="External Channel routing became unavailable.",
+            )
+            return
         except SlackProviderResourceUnavailable:
             await self._complete_hydration(
                 configuration=configuration,
@@ -1492,16 +1535,6 @@ class ExternalChannelEventProcessorService:
         }:
             raise SlackEventExcluded("External Channel connection is not active.")
         return configuration
-
-    async def _active_route(self, connection_id: str) -> ExternalChannelAgentRoute:
-        async with self.session_manager() as session:
-            route = await self.repository.get_active_route_by_connection_id(
-                session,
-                connection_id=connection_id,
-            )
-        if route is None:
-            raise SlackEventExcluded("External Channel route is not active.")
-        return route
 
 
 def _now() -> datetime.datetime:

@@ -166,7 +166,6 @@ __all__ = [
     "ExternalChannelDeliveryStatus",
     "ExternalChannelProvider",
     "ExternalChannelProviderIdentity",
-    "ExternalChannelRouteStatus",
     "ExternalChannelTransport",
     "ExternalChannelWorkStatus",
     "GcpConfig",
@@ -519,7 +518,6 @@ from azentspublicclient.models.external_channel_delivery_operation import Extern
 from azentspublicclient.models.external_channel_delivery_status import ExternalChannelDeliveryStatus as ExternalChannelDeliveryStatus
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider as ExternalChannelProvider
 from azentspublicclient.models.external_channel_provider_identity import ExternalChannelProviderIdentity as ExternalChannelProviderIdentity
-from azentspublicclient.models.external_channel_route_status import ExternalChannelRouteStatus as ExternalChannelRouteStatus
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport as ExternalChannelTransport
 from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus as ExternalChannelWorkStatus
 from azentspublicclient.models.gcp_config import GcpConfig as GcpConfig

@@ -19,8 +19,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-07-22
-spec_version: 1
+last_verified_at: 2026-07-23
+spec_version: 2
 ---
 
 # External Channel Authorization
@@ -49,7 +49,7 @@ Supported decisions are `allow_session`, `allow_agent`, `deny`, and `block`.
 - **Deny** resolves only the current request.
 - **Block** resolves the request and creates an Agent-scoped block that takes precedence over grants.
 
-The decision transaction locks the resource and request, verifies active route/resource/Agent state, creates the External Channel AgentSession only when no active binding exists, and writes the binding, grant, and decision atomically. Repeating the same compatible Allow decision returns the existing binding and grant. Conflicting or stale decisions return a conflict instead of creating parallel state.
+The decision transaction locks the route connection, active binding, resource, and request in that order, verifies an `active` or `degraded` connection plus the route relationship, active resource, and Agent lifecycle state, creates the External Channel AgentSession only when no active binding exists, and writes the binding, grant, and decision atomically. Repeating the same compatible Allow decision returns the existing binding and grant. Conflicting or stale decisions return a conflict instead of creating parallel state.
 
 ## Activation and Context Release
 
@@ -65,4 +65,5 @@ Agent administrators can revoke active grants or remove blocks. Grant revocation
 
 ## Changelog
 
+- **2026-07-23** (spec_version 2) — Removed route lifecycle state from authorization admission; route identity remains while Agent lifecycle and resource state determine eligibility.
 - **2026-07-22** (spec_version 1) — Promoted external-principal isolation, opaque approval, idempotent decisions, scoped grants/blocks, hydration-fenced activation, and same-binding pending-context release.

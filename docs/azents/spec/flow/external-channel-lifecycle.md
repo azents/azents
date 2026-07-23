@@ -18,8 +18,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-22
-spec_version: 4
+last_verified_at: 2026-07-23
+spec_version: 5
 ---
 
 # External Channel Lifecycle
@@ -29,23 +29,22 @@ spec_version: 4
 Disconnecting a binding terminally marks it disconnected, ends active Channel Work, removes never-projected pending context for that binding route/resource, and commits progress cleanup delivery when needed. Canonical provider messages and already projected AgentSession history remain.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
-terminalizes the connection and its Agent route, terminates owned active
-resources/bindings/work, clears credentials, and commits terminal local state before
-provider cleanup runs. Repeating the command is safe. Disconnected connection rows
-remain durable history roots but are excluded from the active management list.
+terminalizes the connection, terminates owned active resources/bindings/work, clears
+credentials, and commits terminal local state before provider cleanup runs. Repeating
+the command is safe. Disconnected connection rows remain durable history roots but
+are excluded from the active management list.
 
 Editing a visible Slack connection replaces App ID, HTTP/Socket transport, and the
 complete submitted credential set in one operation. It clears stale provider
-identity, capability, health, lease, and gap projections, reactivates the route, and
-immediately validates the replacement configuration. No lifecycle status prevents
-editing a visible connection, and no transport fallback occurs.
+identity, capability, health, lease, and gap projections and immediately validates
+the replacement configuration. No lifecycle status prevents editing a visible
+connection, and no transport fallback occurs.
 
 Provider credential and permission failures move only connection health to
-`reconnect_required`; they preserve Agent routes, bindings, and work. Slack App
-uninstall clears provider credentials and terminalizes provider resources while
-preserving the route for later reconfiguration. Explicit manager disconnect remains
-the route-removal boundary. In-flight validation results are generation-fenced so
-they cannot overwrite a newer edit or disconnect.
+`reconnect_required`; they preserve route relationships, bindings, and work. Slack
+App uninstall clears provider credentials and terminalizes provider resources while
+preserving the route relationship for later reconfiguration. In-flight validation
+results are generation-fenced so they cannot overwrite a newer edit or disconnect.
 
 ## Session Archive and Restore
 
@@ -79,11 +78,11 @@ Connection, route, resource, canonical event, principal, message, revision, Agen
 
 ## Agent Decommission
 
-Agent deletion is asynchronous and irreversible. Decommission fences new routing and invocation, archives/terminalizes owned Session state through the normal lifecycle participant, commits provider cleanup intents, and removes direct Agent-owned routes and authorization policy only after required lifecycle work is complete. The finalizer never bypasses restrictive ownership boundaries.
+Agent deletion is asynchronous and irreversible. Its lifecycle status fences new routing and invocation, then decommission archives/terminalizes owned Session state through the normal lifecycle participant, commits provider cleanup intents, and removes direct Agent-owned routes and authorization policy only after required lifecycle work is complete. The finalizer never bypasses restrictive ownership boundaries.
 
 ## Operational Projection
 
-Agent Settings shows active connection/route health, reconnect requirement,
+Agent Settings shows active connection health, reconnect requirement,
 revocation, transport, complete connection editing, and unconditional disconnect.
 Disconnected connections disappear from this active list. Session Channels remains
 readable after archive and displays disconnected bindings, ended work, truncation,
@@ -91,6 +90,7 @@ and delivery outcomes. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 5) — Removed route lifecycle transitions. Connection status owns disconnect and provider health, while Agent lifecycle owns new-execution eligibility.
 - **2026-07-22** (spec_version 4) — Kept provider health failures and App uninstall independent from Agent route lifecycle and fenced stale validation results.
 - **2026-07-22** (spec_version 3) — Made connection disconnect unconditional and idempotent, committed terminal state before provider cleanup, omitted disconnected rows from active management, and replaced reconnect/transport actions with complete Slack configuration editing.
 - **2026-07-22** (spec_version 2) — Preserved already-fenced participant snapshots across registry growth while retaining restrictive finalization safety.

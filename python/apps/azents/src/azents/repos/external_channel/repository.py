@@ -27,7 +27,6 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -196,15 +195,6 @@ class ExternalChannelRepository:
         )
         if rdb is None:
             return None
-        recover_legacy_route = (
-            status is ExternalChannelConnectionStatus.ACTIVE
-            and rdb.status
-            in {
-                ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
-                ExternalChannelConnectionStatus.DEGRADED,
-            }
-            and rdb.disconnected_at is not None
-        )
         rdb.status = status
         if provider_tenant_id is not None:
             rdb.provider_tenant_id = provider_tenant_id
@@ -222,37 +212,6 @@ class ExternalChannelRepository:
         if status is ExternalChannelConnectionStatus.ACTIVE:
             rdb.last_verified_at = checked_at
             rdb.disconnected_at = None
-            if recover_legacy_route:
-                active_route_id = await session.scalar(
-                    sa.select(RDBExternalChannelAgentRoute.id).where(
-                        RDBExternalChannelAgentRoute.connection_id == connection_id,
-                        RDBExternalChannelAgentRoute.status
-                        == ExternalChannelRouteStatus.ACTIVE,
-                    )
-                )
-                if active_route_id is None:
-                    recoverable_route = await session.scalar(
-                        sa.select(RDBExternalChannelAgentRoute)
-                        .join(
-                            RDBAgent,
-                            RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
-                        )
-                        .where(
-                            RDBExternalChannelAgentRoute.connection_id == connection_id,
-                            RDBExternalChannelAgentRoute.status
-                            == ExternalChannelRouteStatus.INACTIVE,
-                            RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
-                        )
-                        .order_by(
-                            RDBExternalChannelAgentRoute.updated_at.desc(),
-                            RDBExternalChannelAgentRoute.id.desc(),
-                        )
-                        .limit(1)
-                        .with_for_update()
-                    )
-                    if recoverable_route is not None:
-                        recoverable_route.status = ExternalChannelRouteStatus.ACTIVE
-                        recoverable_route.deactivated_at = None
         await session.flush()
         await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelConnection.model_validate(rdb)
@@ -662,19 +621,96 @@ class ExternalChannelRepository:
             await self._create(session, RDBExternalChannelAgentRoute, create)
         )
 
-    async def get_active_route_by_connection_id(
+    async def get_routable_route_by_connection_id(
         self,
         session: AsyncSession,
         *,
         connection_id: str,
     ) -> ExternalChannelAgentRoute | None:
-        """Fetch the active route selected for a connection."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelAgentRoute).where(
-                RDBExternalChannelAgentRoute.connection_id == connection_id,
-                RDBExternalChannelAgentRoute.status
-                == ExternalChannelRouteStatus.ACTIVE,
+        """Lock and fetch a routable route for one connection."""
+        return await self._get_routable_route(
+            session,
+            connection_id=connection_id,
+            route_id=None,
+        )
+
+    async def get_routable_route_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        route_id: str,
+    ) -> ExternalChannelAgentRoute | None:
+        """Lock and fetch one route if its connection admits new execution."""
+        return await self._get_routable_route(
+            session,
+            connection_id=None,
+            route_id=route_id,
+        )
+
+    async def get_routable_route_by_binding_id(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+    ) -> ExternalChannelAgentRoute | None:
+        """Lock and fetch the route owning one routable binding."""
+        return await self._get_routable_route(
+            session,
+            connection_id=None,
+            route_id=None,
+            binding_id=binding_id,
+        )
+
+    async def _get_routable_route(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str | None,
+        route_id: str | None,
+        binding_id: str | None = None,
+    ) -> ExternalChannelAgentRoute | None:
+        """Serialize routable selection with connection state transitions."""
+        predicates = [
+            RDBExternalChannelConnection.status.in_(
+                (
+                    ExternalChannelConnectionStatus.ACTIVE,
+                    ExternalChannelConnectionStatus.DEGRADED,
+                )
+            ),
+            RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+        ]
+        if connection_id is not None:
+            predicates.append(
+                RDBExternalChannelAgentRoute.connection_id == connection_id
             )
+        if route_id is not None:
+            predicates.append(RDBExternalChannelAgentRoute.id == route_id)
+        statement = (
+            sa.select(RDBExternalChannelAgentRoute)
+            .join(
+                RDBExternalChannelConnection,
+                RDBExternalChannelConnection.id
+                == RDBExternalChannelAgentRoute.connection_id,
+            )
+            .join(
+                RDBAgent,
+                RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+            )
+        )
+        if binding_id is not None:
+            statement = statement.join(
+                RDBExternalChannelBinding,
+                RDBExternalChannelBinding.route_id == RDBExternalChannelAgentRoute.id,
+            )
+            predicates.append(RDBExternalChannelBinding.id == binding_id)
+        rdb = await session.scalar(
+            statement.where(*predicates)
+            .order_by(
+                RDBExternalChannelAgentRoute.updated_at.desc(),
+                RDBExternalChannelAgentRoute.id.desc(),
+            )
+            .limit(1)
+            .with_for_update(of=RDBExternalChannelConnection)
         )
         return self._as(ExternalChannelAgentRoute, rdb)
 
@@ -843,6 +879,12 @@ class ExternalChannelRepository:
         )
         if rdb is None:
             return None
+        if rdb.hydration_status in {
+            ExternalChannelHydrationStatus.COMPLETE,
+            ExternalChannelHydrationStatus.BOUNDED,
+            ExternalChannelHydrationStatus.INCOMPLETE,
+        }:
+            return ExternalChannelResource.model_validate(rdb)
         rdb.hydration_status = status
         rdb.hydration_cursor = None
         rdb.reconciliation_boundary_received_at = boundary.received_at

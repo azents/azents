@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelProvider,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
 )
 from azents.repos.external_channel.management import (
@@ -32,7 +31,6 @@ def _connection() -> ManagedConnection:
         provider=ExternalChannelProvider.SLACK,
         transport=ExternalChannelTransport.HTTP,
         status=ExternalChannelConnectionStatus.DISCONNECTED,
-        route_status=ExternalChannelRouteStatus.INACTIVE,
         provider_app_id="A1",
         provider_tenant_id=None,
         provider_bot_user_id=None,
@@ -66,16 +64,12 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     assert "signing_secret" not in guidance.manifest_json
 
 
-async def test_repeated_disconnect_reterminalizes_route_without_status_guard() -> None:
+async def test_repeated_disconnect_reterminalizes_connection() -> None:
     """An already disconnected row still passes through terminalization."""
     connection = SimpleNamespace(
         status=ExternalChannelConnectionStatus.DISCONNECTED,
     )
-    route = SimpleNamespace(
-        status=ExternalChannelRouteStatus.ACTIVE,
-        deactivated_at=None,
-        id="route-1",
-    )
+    route = SimpleNamespace(id="route-1")
     session = AsyncMock(spec=AsyncSession)
     scalars = Mock()
     scalars.all.return_value = []
@@ -94,8 +88,6 @@ async def test_repeated_disconnect_reterminalizes_route_without_status_guard() -
 
     assert cleanup_ids == ()
     assert connection.status is ExternalChannelConnectionStatus.DISCONNECTING
-    assert route.status is ExternalChannelRouteStatus.INACTIVE
-    assert route.deactivated_at == now
     session.flush.assert_awaited_once()
 
 

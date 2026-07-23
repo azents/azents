@@ -25,7 +25,6 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelRouteMode,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -115,16 +114,14 @@ class ExternalChannelConnectionConfiguration(_Record):
 
 
 class ExternalChannelAgentRoute(_Record):
-    """Connection-to-Agent route independent from provider credentials."""
+    """Persistent connection-to-Agent relationship."""
 
     id: str
     connection_id: str
     agent_id: str
-    status: ExternalChannelRouteStatus
     route_mode: ExternalChannelRouteMode
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    deactivated_at: datetime.datetime | None
 
 
 class ExternalChannelAgentRouteCreate(_Record):
@@ -132,7 +129,6 @@ class ExternalChannelAgentRouteCreate(_Record):
 
     connection_id: str
     agent_id: str
-    status: ExternalChannelRouteStatus
     route_mode: ExternalChannelRouteMode
 
 

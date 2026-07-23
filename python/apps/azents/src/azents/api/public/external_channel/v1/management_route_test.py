@@ -18,7 +18,6 @@ from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelProvider,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
     WorkspaceUserRole,
 )
@@ -41,7 +40,6 @@ def _connection() -> ManagedConnection:
         provider=ExternalChannelProvider.SLACK,
         transport=ExternalChannelTransport.HTTP,
         status=ExternalChannelConnectionStatus.CONFIGURING,
-        route_status=ExternalChannelRouteStatus.ACTIVE,
         provider_app_id="A1",
         provider_tenant_id=None,
         provider_bot_user_id=None,

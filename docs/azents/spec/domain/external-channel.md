@@ -29,8 +29,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-07-22
-spec_version: 3
+last_verified_at: 2026-07-23
+spec_version: 4
 ---
 
 # External Channel
@@ -55,7 +55,7 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 | Record | Current contract |
 | --- | --- |
 | Connection | Workspace-owned provider app identity, selected transport, encrypted credentials, capability/health snapshot, terminal disconnect state, and Socket lease/gap state. |
-| Agent route | Binds one connection to an Agent. Current Slack management creates a dedicated active route. |
+| Agent route | Persistent connection-to-Agent relationship. Current Slack management creates a dedicated route. |
 | Resource | One Slack thread with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. |
 | Event | Durable provider envelope admission keyed by connection and provider event identity. Processing is at-least-once and domain writes are idempotent. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
@@ -68,13 +68,13 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 
 ## State Invariants
 
-- Active connections may be `configuring`, `active`, `degraded`, or `reconnect_required`; disconnect is terminal and does not silently fall back to another transport.
-- Provider health transitions do not deactivate Agent routes. Explicit manager disconnect and Agent decommission remain the route lifecycle boundaries.
+- Connection status owns provider ingress and credential health: it may be `configuring`, `active`, `degraded`, `reconnect_required`, `disconnecting`, or `disconnected`; disconnect is terminal and does not silently fall back to another transport.
+- A route has no lifecycle state. A dedicated connection has exactly one route; platform routing may later permit multiple routes. New execution requires a locked `active` or `degraded` connection and active Agent lifecycle, so disconnect cannot commit between admission and related writes. Provider health, reconnect, disconnect, and Agent decommission never write route state.
 - A resource is `active`, `unavailable`, or `deleted`; hydration is `pending`, `running`, `complete`, `bounded`, or `incomplete`.
 - A binding is either active or disconnected. Activation moves from `waiting_hydration` to `active` only after the admitted-event reconciliation boundary is clear.
 - Message revisions never rewrite an already projected revision. Later edits or deletes remain distinct corrections.
-- A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, active route, and active resource. Blocks take precedence.
-- Restore never reactivates a disconnected binding, ended work item, removed pending context, route, or connection.
+- A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, route relationship, and active resource. Blocks take precedence.
+- Restore never reactivates a disconnected binding, ended work item, removed pending context, or connection.
 
 ## Management Surface
 
@@ -104,10 +104,11 @@ and terminal disconnect state. Approval links contain only an opaque access-requ
 ID and require an authenticated Agent administrator; unauthorized and missing
 requests are returned as not found.
 
-Connection responses expose provider identity, capabilities, health, route, and redacted credential state. They never return ciphertext or decrypted secret values.
+Connection responses expose provider identity, capabilities, health, route relationship, and redacted credential state. They never return ciphertext or decrypted secret values.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 4) — Removed route lifecycle state from persistence, routing, management responses, and UI. Connection health, Agent lifecycle, and binding/work/resource state now own their respective admission and termination decisions.
 - **2026-07-22** (spec_version 3) — Separated provider health from Agent route lifecycle, fenced stale validation results, and required Slack conversation metadata scopes.
 - **2026-07-22** (spec_version 2) — Added copy-ready Slack App setup guidance, App/Token ownership validation, complete connection replacement, unconditional idempotent disconnect, and active-list filtering for disconnected connections.
 - **2026-07-22** (spec_version 1) — Promoted the External Channel ownership model, persistence graph, management API, security boundaries, Slack-first provider scope, and Session binding contract.

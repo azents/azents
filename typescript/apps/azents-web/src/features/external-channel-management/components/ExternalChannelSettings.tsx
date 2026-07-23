@@ -108,12 +108,6 @@ function ConnectionRow({
               <Badge color="gray" variant="outline">
                 {t(`transport.${connection.transport}`)}
               </Badge>
-              <Badge
-                color={connection.route_status === "active" ? "green" : "gray"}
-                variant="dot"
-              >
-                {t(`route.${connection.route_status}`)}
-              </Badge>
             </Group>
             <Text size="sm" c="dimmed" mt={4}>
               {connection.provider_tenant_id ?? t("identityUnavailable")}
