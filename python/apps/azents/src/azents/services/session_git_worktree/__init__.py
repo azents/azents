@@ -1595,6 +1595,20 @@ class SessionGitWorktreeService:
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
         ) as exc:
+            logger.warning(
+                "Git worktree cleanup Runner operation failed",
+                exc_info=True,
+                extra={
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "worktree_id": allocation.id,
+                    "runner_error_code": (
+                        exc.code
+                        if isinstance(exc, RuntimeRunnerOperationFailedError)
+                        else type(exc).__name__
+                    ),
+                },
+            )
             await self._mark_cleanup_failed(
                 worktree_id=allocation.id,
                 reason=_cleanup_operation_failure_summary(exc),
@@ -1634,6 +1648,7 @@ class SessionGitWorktreeService:
                 deadline_at=_git_operation_deadline(),
             )
         except (
+            RuntimeRunnerOperationCanceledError,
             RuntimeRunnerOperationFailedError,
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
