@@ -1040,6 +1040,7 @@ def azents_runtime_provider_docker_container(
     container_network: Network,
     azents_runtime_control_container: DockerContainer,
     azents_runtime_provider_docker_image: str,
+    runtime_provider_resource_id: str,
     runtime_provider_credential: str,
 ) -> Generator[DockerContainer, None, None]:
     """Docker Runtime Provider container."""
@@ -1059,7 +1060,7 @@ def azents_runtime_provider_docker_container(
             .with_volume_mapping(data_root, data_root, "rw")
             .with_env("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
             .with_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
-            .with_env("AZ_RUNTIME_PROVIDER_ID", _RUNTIME_PROVIDER_ID)
+            .with_env("AZ_RUNTIME_PROVIDER_ID", runtime_provider_resource_id)
             .with_env("AZ_RUNTIME_PROVIDER_DOCKER_NETWORK", container_network.name)
             .with_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT", data_root)
             .with_env(
@@ -1072,7 +1073,7 @@ def azents_runtime_provider_docker_container(
         with container:
             _wait_for_runtime_provider_registered(
                 container,
-                provider_id=_RUNTIME_PROVIDER_ID,
+                provider_id=runtime_provider_resource_id,
                 secret_values=(runtime_provider_credential,),
             )
             yield container
@@ -1240,12 +1241,11 @@ def system_bootstrap_evidence(
 
 
 @pytest.fixture(scope="session")
-def runtime_provider_credential(
-    azents_public_server_url: str,
+def runtime_provider_resource_id(
     azents_admin_server_url: str,
     system_bootstrap_evidence: SystemBootstrapEvidence,
 ) -> str:
-    """Enroll the E2E Docker Provider through the supported HTTP APIs."""
+    """Return the durable ID of the bootstrapped E2E Docker Provider."""
     authorization = {
         "Authorization": f"Bearer {system_bootstrap_evidence.access_token}"
     }
@@ -1276,12 +1276,26 @@ def runtime_provider_credential(
     provider_id = matching_providers[0].get("id")
     if not isinstance(provider_id, str):
         pytest.fail("Runtime Provider inventory item did not contain an ID")
+    return provider_id
+
+
+@pytest.fixture(scope="session")
+def runtime_provider_credential(
+    azents_public_server_url: str,
+    azents_admin_server_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+    runtime_provider_resource_id: str,
+) -> str:
+    """Enroll the E2E Docker Provider through the supported HTTP APIs."""
+    authorization = {
+        "Authorization": f"Bearer {system_bootstrap_evidence.access_token}"
+    }
 
     expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5)
     grant_response = requests.post(
         (
             f"{azents_admin_server_url}/runtime-provider-enrollment/v1/"
-            f"runtime-providers/{provider_id}/enrollment-grants"
+            f"runtime-providers/{runtime_provider_resource_id}/enrollment-grants"
         ),
         headers=authorization,
         json={"expires_at": expires_at.isoformat()},
