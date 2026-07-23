@@ -10,6 +10,7 @@ from azents.core.enums import (
     ExternalChannelActionMode,
     ExternalChannelWorkTaskStatus,
 )
+from azents.core.external_channel_file import MAX_EXTERNAL_CHANNEL_FILES
 from azents.core.external_channel_progress import (
     MAX_EXTERNAL_CHANNEL_TASK_SOURCES,
     MAX_EXTERNAL_CHANNEL_TASK_TEXT_LENGTH,
@@ -107,6 +108,11 @@ class FinishChannelActionInput(BaseModel):
         min_length=1,
         max_length=SLACK_MARKDOWN_TEXT_MAX_LENGTH,
     )
+    files: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_EXTERNAL_CHANNEL_FILES,
+    )
 
 
 class ContinueChannelActionInput(BaseModel):
@@ -136,16 +142,28 @@ class ContinueChannelActionInput(BaseModel):
         default=None,
         max_length=MAX_EXTERNAL_CHANNEL_WORK_TASKS,
     )
+    files: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_EXTERNAL_CHANNEL_FILES,
+    )
 
     @model_validator(mode="after")
     def validate_update(self) -> "ContinueChannelActionInput":
         """Require a meaningful update and at least one unfinished task."""
-        if self.message is None and self.title is None and self.todo_update is None:
+        if (
+            self.message is None
+            and self.title is None
+            and self.todo_update is None
+            and self.files is None
+        ):
             raise ValueError(
                 "Continue requires a message, title, task update, or a combination."
             )
         if self.todo_update is not None and self.title is None:
             raise ValueError("A Channel Work task update requires a work title.")
+        if self.files is not None and self.message is None:
+            raise ValueError("Channel file publication requires a message.")
         if self.title is not None and not self.title.endswith(("…", "...")):
             raise ValueError("Channel Work titles must end with an ellipsis.")
         if self.todo_update is not None and not any(
@@ -348,6 +366,40 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                 ]
             )
             try:
+                existing = await self.service.find_existing_action(
+                    session_id=self.session_id,
+                    client_tool_call_id=execution.call_id,
+                )
+                if existing is not None:
+                    result, request_payload = existing
+                    _validate_existing_tool_request(
+                        request_payload,
+                        value=value,
+                        tasks=tasks,
+                    )
+                    return json.dumps(
+                        _result_payload(result),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                runtime_context = (
+                    None
+                    if self.runtime_context_store is None
+                    else self.runtime_context_store.get()
+                )
+                manifests = ()
+                if value.files is not None:
+                    if runtime_context is None:
+                        raise ExternalChannelFileTransferError(
+                            "Runtime file storage is unavailable for this run."
+                        )
+                    manifests = await self.file_transfer_service.prepare_outbound(
+                        session_id=self.session_id,
+                        agent_id=self.agent_id,
+                        binding_id=value.binding,
+                        paths=value.files,
+                        file_storage=runtime_context.file_storage,
+                    )
                 result = await self.service.execute(
                     session_id=self.session_id,
                     agent_id=self.agent_id,
@@ -362,6 +414,12 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         else value.title
                     ),
                     tasks=tasks,
+                    files=manifests,
+                    file_storage=(
+                        None
+                        if runtime_context is None
+                        else runtime_context.file_storage
+                    ),
                 )
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None
@@ -547,3 +605,37 @@ def _result_payload(result: ChannelActionCommit) -> dict[str, object]:
             for delivery in result.deliveries
         ],
     }
+
+
+def _validate_existing_tool_request(
+    request_payload: dict[str, object],
+    *,
+    value: ChannelActionVariant,
+    tasks: list[ChannelWorkTask] | None,
+) -> None:
+    expected: dict[str, object] = {
+        "binding": value.binding,
+        "mode": value.mode,
+        "message": value.message,
+    }
+    if isinstance(value, ContinueChannelActionInput):
+        if value.title is not None:
+            expected["title"] = value.title
+        if tasks is not None:
+            expected["todo_update"] = [task.model_dump(mode="json") for task in tasks]
+    expected = {key: item for key, item in expected.items() if item is not None}
+    persisted_without_files = {
+        key: item for key, item in request_payload.items() if key != "files"
+    }
+    persisted_files = request_payload.get("files")
+    if value.files is None:
+        files_match = persisted_files is None
+    elif isinstance(persisted_files, list):
+        files_match = [
+            item.get("path") if isinstance(item, dict) else None
+            for item in persisted_files
+        ] == value.files
+    else:
+        files_match = False
+    if persisted_without_files != expected or not files_match:
+        raise ValueError("Client tool call identity conflicts with an action.")

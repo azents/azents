@@ -4,10 +4,12 @@ import asyncio
 import datetime
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Annotated, assert_never
+from pathlib import PurePosixPath
+from typing import Annotated, assert_never, cast
 
 import httpx
 from fastapi import Depends
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -16,6 +18,10 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
+)
+from azents.core.external_channel_file import (
+    MAX_EXTERNAL_CHANNEL_FILES,
+    ExternalChannelOutboundFileManifest,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -30,10 +36,17 @@ from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
+from azents.services.external_channel.file_transfer import (
+    ExternalChannelFileTransferError,
+    iter_external_channel_outbound_file_chunks,
+)
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
     SlackConversationClient,
+    SlackOutboundFile,
+    SlackOutboundFileContentError,
 )
+from azents.services.file_storage import FileStorage, RangedFileStorage
 
 
 async def get_slack_delivery_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -96,6 +109,20 @@ class ExternalChannelActionService:
                 agent_id=agent_id,
             )
 
+    async def find_existing_action(
+        self,
+        *,
+        session_id: str,
+        client_tool_call_id: str,
+    ) -> tuple[ChannelActionCommit, dict[str, object]] | None:
+        """Resolve a duplicate Tool call before touching its Runtime sources."""
+        async with self.session_manager() as session:
+            return await self.repository.find_action_by_client_tool_call(
+                session,
+                session_id=session_id,
+                client_tool_call_id=client_tool_call_id,
+            )
+
     async def execute(
         self,
         *,
@@ -108,6 +135,8 @@ class ExternalChannelActionService:
         message: str | None,
         title: str | None,
         tasks: Sequence[ChannelWorkTask] | None,
+        files: Sequence[ExternalChannelOutboundFileManifest],
+        file_storage: FileStorage | None,
     ) -> ChannelActionCommit:
         """Commit canonical state, then attempt every provider intent once."""
         async with self.session_manager() as session:
@@ -122,6 +151,7 @@ class ExternalChannelActionService:
                 message=message,
                 title=title,
                 tasks=tasks,
+                files=files,
                 now=datetime.datetime.now(datetime.UTC),
             )
             await session.commit()
@@ -156,7 +186,11 @@ class ExternalChannelActionService:
                         )
                         await session.commit()
                     continue
-                outcome = await self.attempt_delivery(delivery.id)
+                outcome = await self.attempt_delivery(
+                    delivery.id,
+                    file_storage=file_storage,
+                    agent_id=agent_id,
+                )
                 if delivery.operation is ExternalChannelDeliveryOperation.REPLY:
                     reply_delivered = outcome is ExternalChannelDeliveryStatus.DELIVERED
         async with self.session_manager() as session:
@@ -188,16 +222,26 @@ class ExternalChannelActionService:
     async def attempt_delivery(
         self,
         delivery_attempt_id: str,
+        *,
+        file_storage: FileStorage | None = None,
+        agent_id: str | None = None,
     ) -> ExternalChannelDeliveryStatus | None:
         """Attempt one pending provider operation without automatic retry."""
         target = await self.prepare_delivery(delivery_attempt_id)
         if target is None:
             return None
-        return await self.attempt_prepared_delivery(target)
+        return await self.attempt_prepared_delivery(
+            target,
+            file_storage=file_storage,
+            agent_id=agent_id,
+        )
 
     async def attempt_prepared_delivery(
         self,
         target: ChannelDeliveryTarget,
+        *,
+        file_storage: FileStorage | None = None,
+        agent_id: str | None = None,
     ) -> ExternalChannelDeliveryStatus | None:
         """Attempt a target captured before connection credentials were purged."""
         if target.status is not ExternalChannelDeliveryStatus.PENDING:
@@ -212,7 +256,11 @@ class ExternalChannelActionService:
         if not started:
             return None
         try:
-            result = await self._deliver(target)
+            result = await self._deliver(
+                target,
+                file_storage=file_storage,
+                agent_id=agent_id,
+            )
         except asyncio.CancelledError:
             await asyncio.shield(
                 self._record_unknown_after_cancellation(target.delivery_attempt_id)
@@ -274,6 +322,9 @@ class ExternalChannelActionService:
     async def _deliver(
         self,
         target: ChannelDeliveryTarget,
+        *,
+        file_storage: FileStorage | None,
+        agent_id: str | None,
     ) -> SlackControlMessageResult:
         if target.encrypted_credentials is None:
             return SlackControlMessageResult(
@@ -288,6 +339,8 @@ class ExternalChannelActionService:
                 return await self._deliver_slack(
                     target,
                     bot_token=credentials.bot_token,
+                    file_storage=file_storage,
+                    agent_id=agent_id,
                 )
             case _ as unreachable:
                 assert_never(unreachable)
@@ -297,6 +350,8 @@ class ExternalChannelActionService:
         target: ChannelDeliveryTarget,
         *,
         bot_token: str,
+        file_storage: FileStorage | None,
+        agent_id: str | None,
     ) -> SlackControlMessageResult:
         payload = target.request_payload
         tenant_id = target.provider_tenant_id
@@ -319,6 +374,44 @@ class ExternalChannelActionService:
                 text = payload.get("text")
                 if not isinstance(text, str):
                     return _invalid_payload()
+                files = _outbound_files(payload.get("files"))
+                if files is None:
+                    return _invalid_payload()
+                if files:
+                    if (
+                        file_storage is None
+                        or agent_id is None
+                        or not callable(getattr(file_storage, "read_range", None))
+                    ):
+                        return SlackControlMessageResult(
+                            status="failed",
+                            provider_message_key=None,
+                            error_kind="runtime_file_source_unavailable",
+                            error_summary=(
+                                "The original Runtime file source is unavailable."
+                            ),
+                        )
+                    ranged_storage = cast(RangedFileStorage, file_storage)
+                    source_agent_id = agent_id
+                    return await self.slack_client.post_file_message(
+                        bot_token=bot_token,
+                        tenant_id=tenant_id,
+                        channel_id=channel_id,
+                        thread_ts=thread_ts,
+                        markdown_text=text,
+                        files=[
+                            SlackOutboundFile(
+                                filename=file.filename,
+                                length=file.expected_size,
+                                content=lambda file=file: _slack_outbound_content(
+                                    file_storage=ranged_storage,
+                                    manifest=file,
+                                    agent_id=source_agent_id,
+                                ),
+                            )
+                            for file in files
+                        ],
+                    )
                 return await self.slack_client.post_message(
                     bot_token=bot_token,
                     tenant_id=tenant_id,
@@ -383,6 +476,49 @@ def _invalid_payload() -> SlackControlMessageResult:
         error_kind="provider_payload_invalid",
         error_summary="The committed provider request is incomplete.",
     )
+
+
+def _outbound_files(
+    value: object,
+) -> tuple[ExternalChannelOutboundFileManifest, ...] | None:
+    if value is None:
+        return ()
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(value) > MAX_EXTERNAL_CHANNEL_FILES
+    ):
+        return None
+    try:
+        files = tuple(
+            ExternalChannelOutboundFileManifest.model_validate(item) for item in value
+        )
+    except ValidationError:
+        return None
+    if any(
+        not PurePosixPath(file.path).is_absolute()
+        or PurePosixPath(file.filename).name != file.filename
+        for file in files
+    ):
+        return None
+    return files
+
+
+async def _slack_outbound_content(
+    *,
+    file_storage: RangedFileStorage,
+    manifest: ExternalChannelOutboundFileManifest,
+    agent_id: str,
+) -> AsyncIterator[bytes]:
+    try:
+        async for chunk in iter_external_channel_outbound_file_chunks(
+            file_storage=file_storage,
+            manifest=manifest,
+            agent_id=agent_id,
+        ):
+            yield chunk
+    except ExternalChannelFileTransferError as error:
+        raise SlackOutboundFileContentError from error
 
 
 def _blocks(value: object) -> list[dict[str, object]] | None:

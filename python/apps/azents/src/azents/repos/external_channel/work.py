@@ -22,6 +22,7 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
+from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
 )
@@ -307,6 +308,7 @@ class ExternalChannelWorkRepository:
         message: str | None,
         title: str | None,
         tasks: Sequence[ChannelWorkTask] | None,
+        files: Sequence[ExternalChannelOutboundFileManifest],
         now: datetime.datetime,
     ) -> ChannelActionCommit:
         """Commit work transition, action identity, and provider intents atomically."""
@@ -321,9 +323,16 @@ class ExternalChannelWorkRepository:
             **({"message": message} if message is not None else {}),
             **({"title": title} if title is not None else {}),
             **({"todo_update": requested_tasks} if requested_tasks is not None else {}),
+            **(
+                {"files": [item.model_dump(mode="json") for item in files]}
+                if files
+                else {}
+            ),
         }
         if mode is ExternalChannelActionMode.FINISH and message is None:
             raise ValueError("Finish requires a final External Channel reply.")
+        if files and message is None:
+            raise ValueError("Channel file publication requires a message.")
         existing = await session.scalar(
             sa.select(RDBExternalChannelAction).where(
                 RDBExternalChannelAction.agent_session_id == session_id,
@@ -427,7 +436,7 @@ class ExternalChannelWorkRepository:
             operations.append(
                 (
                     ExternalChannelDeliveryOperation.REPLY,
-                    _provider_payload(resource.labels, text=message),
+                    _provider_payload(resource.labels, text=message, files=files),
                 )
             )
         if mode is ExternalChannelActionMode.CONTINUE:
@@ -567,6 +576,27 @@ class ExternalChannelWorkRepository:
             )
         await session.flush()
         return await self._build_commit(session, action)
+
+    async def find_action_by_client_tool_call(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        client_tool_call_id: str,
+    ) -> tuple[ChannelActionCommit, dict[str, object]] | None:
+        """Return one already committed action before any Runtime preflight."""
+        action = await session.scalar(
+            sa.select(RDBExternalChannelAction).where(
+                RDBExternalChannelAction.agent_session_id == session_id,
+                RDBExternalChannelAction.client_tool_call_id == client_tool_call_id,
+            )
+        )
+        if action is None:
+            return None
+        return (
+            await self._build_commit(session, action),
+            dict(action.request_payload),
+        )
 
     async def get_delivery_target(
         self,
@@ -1303,6 +1333,7 @@ def _provider_payload(
     blocks: list[dict[str, object]] | None = None,
     provider_message_key: str | None = None,
     desired_progress_revision: int | None = None,
+    files: Sequence[ExternalChannelOutboundFileManifest] = (),
 ) -> dict[str, object]:
     """Build one persisted provider request intent without credentials."""
     labels = labels or {}
@@ -1318,6 +1349,8 @@ def _provider_payload(
     }
     if text is not None:
         payload["text"] = text
+    if files:
+        payload["files"] = [item.model_dump(mode="json") for item in files]
     if blocks is not None:
         payload["blocks"] = blocks
     if provider_message_key is not None:

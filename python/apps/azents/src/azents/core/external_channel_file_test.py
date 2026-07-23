@@ -8,9 +8,34 @@ from azents.core.external_channel_file import (
     ExternalChannelFileLocator,
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
+    ExternalChannelOutboundFileManifest,
     add_external_channel_file_locators,
     external_channel_file_metadata_items,
 )
+
+
+def test_outbound_manifest_is_bounded_and_requires_positive_size() -> None:
+    """Persist only bounded Runtime source metadata for outbound publication."""
+    manifest = ExternalChannelOutboundFileManifest(
+        path="/workspace/agent/report.csv",
+        filename="report.csv",
+        media_type="text/csv",
+        expected_size=42,
+    )
+
+    assert manifest.model_dump(mode="json") == {
+        "path": "/workspace/agent/report.csv",
+        "filename": "report.csv",
+        "media_type": "text/csv",
+        "expected_size": 42,
+    }
+    with pytest.raises(ValidationError):
+        ExternalChannelOutboundFileManifest(
+            path="/workspace/agent/empty.csv",
+            filename="empty.csv",
+            media_type="text/csv",
+            expected_size=0,
+        )
 
 
 def test_file_metadata_requires_consistent_supported_state() -> None:

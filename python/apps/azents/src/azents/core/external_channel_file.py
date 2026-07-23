@@ -18,6 +18,7 @@ MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES = 100 * 1024 * 1024
 MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES = (
     MAX_EXTERNAL_CHANNEL_FILES * MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES
 )
+EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES = 1024 * 1024
 EXTERNAL_CHANNEL_FILE_LOCATOR_PREFIX = "external-file:v1"
 
 
@@ -65,6 +66,23 @@ class ExternalChannelFileMetadata(BaseModel):
         elif self.unsupported_reason is None:
             raise ValueError("Unsupported External Channel file requires a reason.")
         return self
+
+
+class ExternalChannelOutboundFileManifest(BaseModel):
+    """Bounded Runtime source metadata persisted for one outbound file."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: str = Field(min_length=1, max_length=4_096)
+    filename: str = Field(
+        min_length=1,
+        max_length=MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
+    )
+    media_type: str = Field(
+        min_length=1,
+        max_length=MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
+    )
+    expected_size: int = Field(gt=0)
 
 
 @dataclass(frozen=True)

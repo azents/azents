@@ -1,6 +1,6 @@
 """Explicit provider-to-Runtime External Channel file transfer."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Annotated, assert_never
@@ -11,7 +11,12 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider
-from azents.core.external_channel_file import ExternalChannelFileLocator
+from azents.core.external_channel_file import (
+    EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
+    MAX_EXTERNAL_CHANNEL_FILES,
+    ExternalChannelFileLocator,
+    ExternalChannelOutboundFileManifest,
+)
 from azents.core.external_channel_file_system_setting import ExternalChannelFilesConfig
 from azents.core.system_setting import SystemSettingSection
 from azents.rdb.deps import get_session_manager
@@ -32,8 +37,9 @@ from azents.services.external_channel.slack_events import (
     SlackProviderRequestRejected,
     SlackProviderTemporaryError,
 )
-from azents.services.file_storage import FileStorage
+from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_storage import guess_media_type
 from azents.services.system_setting.service import SystemSettingsService
 
 
@@ -270,6 +276,82 @@ class ExternalChannelFileTransferService:
             bytes_written=len(body),
         )
 
+    async def prepare_outbound(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        binding_id: str,
+        paths: Sequence[str],
+        file_storage: FileStorage,
+    ) -> tuple[ExternalChannelOutboundFileManifest, ...]:
+        """Validate one file-bearing reply before its durable action commit."""
+        if not paths or len(paths) > MAX_EXTERNAL_CHANNEL_FILES:
+            raise ExternalChannelFileTransferError(
+                f"Outbound publication requires 1-{MAX_EXTERNAL_CHANNEL_FILES} files."
+            )
+        async with self.session_manager() as session:
+            target = await self.repository.get_active_file_access_target(
+                session,
+                session_id=session_id,
+                agent_id=agent_id,
+                binding_id=binding_id,
+            )
+        if target is None:
+            raise ExternalChannelFileTransferError(
+                "External Channel binding is not active for this AgentSession."
+            )
+        capabilities = self._capabilities(target.capabilities)
+        if not capabilities.upload_files:
+            raise ExternalChannelFileTransferError(
+                "The active External Channel connection cannot upload files."
+            )
+        resolved = await self.system_settings.resolve(
+            SystemSettingSection.EXTERNAL_CHANNEL_FILES
+        )
+        if not isinstance(resolved.config, ExternalChannelFilesConfig):
+            raise RuntimeError("Unexpected External Channel files settings model.")
+        manifests: list[ExternalChannelOutboundFileManifest] = []
+        total_size = 0
+        for path in paths:
+            if not PurePosixPath(path).is_absolute():
+                raise ExternalChannelFileTransferError(
+                    "Every outbound Runtime file path must be absolute."
+                )
+            metadata = await self._stat_outbound(
+                file_storage,
+                path=path,
+                agent_id=agent_id,
+            )
+            if metadata.get("is_file") is not True:
+                raise ExternalChannelFileTransferError(
+                    f"Outbound Runtime path is not a regular file: {path}."
+                )
+            size = metadata.get("size")
+            if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+                raise ExternalChannelFileTransferError(
+                    f"Outbound Runtime file has an invalid size: {path}."
+                )
+            if size > resolved.config.outbound_max_file_bytes:
+                raise ExternalChannelFileTransferError(
+                    "Outbound Runtime file exceeds the configured per-file limit."
+                )
+            total_size += size
+            if total_size > resolved.config.outbound_max_action_bytes:
+                raise ExternalChannelFileTransferError(
+                    "Outbound Runtime files exceed the configured action limit."
+                )
+            filename = PurePosixPath(path).name
+            manifests.append(
+                ExternalChannelOutboundFileManifest(
+                    path=path,
+                    filename=filename,
+                    media_type=guess_media_type(filename),
+                    expected_size=size,
+                )
+            )
+        return tuple(manifests)
+
     @staticmethod
     def _parse_locator(file: str) -> ExternalChannelFileLocator:
         try:
@@ -318,3 +400,111 @@ class ExternalChannelFileTransferService:
             raise ExternalChannelFileTransferError(
                 f"Failed to check the Runtime destination: {path}."
             ) from None
+
+    @staticmethod
+    async def _stat_outbound(
+        file_storage: FileStorage,
+        *,
+        path: str,
+        agent_id: str,
+    ) -> dict[str, object]:
+        try:
+            return await file_storage.stat(path, agent_id=agent_id)
+        except FileNotFoundError:
+            raise ExternalChannelFileTransferError(
+                f"Outbound Runtime file does not exist: {path}."
+            ) from None
+        except PermissionError:
+            raise ExternalChannelFileTransferError(
+                f"Outbound Runtime file is not readable: {path}."
+            ) from None
+        except RuntimeStorageError as error:
+            raise ExternalChannelFileTransferError(
+                f"Failed to inspect the outbound Runtime file: {error.detail}"
+            ) from None
+        except ValueError as error:
+            raise ExternalChannelFileTransferError(str(error)) from None
+        except OSError:
+            raise ExternalChannelFileTransferError(
+                f"Failed to inspect the outbound Runtime file: {path}."
+            ) from None
+
+
+async def iter_external_channel_outbound_file_chunks(
+    *,
+    file_storage: RangedFileStorage,
+    manifest: ExternalChannelOutboundFileManifest,
+    agent_id: str,
+) -> AsyncIterator[bytes]:
+    """Yield exactly one manifest's expected Runtime bytes in bounded chunks."""
+    offset = 0
+    while offset < manifest.expected_size:
+        requested = min(
+            EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
+            manifest.expected_size - offset,
+        )
+        chunk = await _read_outbound_range(
+            file_storage,
+            manifest=manifest,
+            agent_id=agent_id,
+            offset=offset,
+            max_bytes=requested,
+        )
+        if not chunk:
+            raise ExternalChannelFileTransferError(
+                "Runtime file ended before its expected size."
+            )
+        if len(chunk) > requested:
+            raise ExternalChannelFileTransferError(
+                "Runtime file range exceeded the requested chunk size."
+            )
+        offset += len(chunk)
+        yield chunk
+    trailing = await _read_outbound_range(
+        file_storage,
+        manifest=manifest,
+        agent_id=agent_id,
+        offset=manifest.expected_size,
+        max_bytes=1,
+    )
+    if trailing:
+        raise ExternalChannelFileTransferError(
+            "Runtime file grew after outbound preflight."
+        )
+
+
+async def _read_outbound_range(
+    file_storage: RangedFileStorage,
+    *,
+    manifest: ExternalChannelOutboundFileManifest,
+    agent_id: str,
+    offset: int,
+    max_bytes: int,
+) -> bytes:
+    try:
+        return await file_storage.read_range(
+            manifest.path,
+            agent_id=agent_id,
+            offset=offset,
+            max_bytes=max_bytes,
+        )
+    except ExternalChannelFileTransferError:
+        raise
+    except FileNotFoundError:
+        raise ExternalChannelFileTransferError(
+            "Runtime file disappeared during outbound upload."
+        ) from None
+    except PermissionError:
+        raise ExternalChannelFileTransferError(
+            "Runtime file became unreadable during outbound upload."
+        ) from None
+    except RuntimeStorageError as error:
+        raise ExternalChannelFileTransferError(
+            f"Failed to read the outbound Runtime file: {error.detail}"
+        ) from None
+    except ValueError as error:
+        raise ExternalChannelFileTransferError(str(error)) from None
+    except OSError:
+        raise ExternalChannelFileTransferError(
+            "Failed to read the outbound Runtime file."
+        ) from None

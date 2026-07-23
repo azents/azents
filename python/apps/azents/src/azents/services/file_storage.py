@@ -1,7 +1,7 @@
 """File storage protocol."""
 
 import dataclasses
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from azents.engine.io.attachments import RuntimeAttachment
 
@@ -94,3 +94,19 @@ class FileStorage(Protocol):
         max_searched_files: int | None = None,
         max_scanned_bytes: int | None = None,
     ) -> GrepResult: ...
+
+
+@runtime_checkable
+class RangedFileStorage(FileStorage, Protocol):
+    """File storage that supports bounded ranged reads."""
+
+    async def read_range(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        offset: int,
+        max_bytes: int,
+    ) -> bytes:
+        """Read one bounded file range."""
+        ...

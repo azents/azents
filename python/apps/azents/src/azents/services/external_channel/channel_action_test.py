@@ -15,6 +15,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import (
@@ -30,7 +31,9 @@ from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
     SlackConversationClient,
+    SlackOutboundFile,
 )
+from azents.services.file_storage import FileStorage
 
 
 def _at(second: int) -> datetime.datetime:
@@ -203,6 +206,7 @@ class _SlackClient:
         self.events = events
         self.results = result if isinstance(result, list) else [result]
         self.bot_tokens: list[str] = []
+        self.uploaded: list[tuple[str, bytes]] = []
 
     def _result(self) -> SlackControlMessageResult:
         if len(self.results) == 1:
@@ -215,6 +219,19 @@ class _SlackClient:
         assert kwargs["channel_id"] == "C1"
         assert kwargs["thread_ts"] == "1.000001"
         assert kwargs["markdown_text"] == "Reply"
+        return self._result()
+
+    async def post_file_message(self, **kwargs: object) -> SlackControlMessageResult:
+        self.events.append("provider")
+        self.bot_tokens.append(cast(str, kwargs["bot_token"]))
+        assert kwargs["channel_id"] == "C1"
+        assert kwargs["thread_ts"] == "1.000001"
+        assert kwargs["markdown_text"] == "Reply"
+        files = cast(list[SlackOutboundFile], kwargs["files"])
+        for file in files:
+            body = b"".join([chunk async for chunk in file.content()])
+            assert len(body) == file.length
+            self.uploaded.append((file.filename, body))
         return self._result()
 
     async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
@@ -239,6 +256,23 @@ class _SlackClient:
         assert kwargs["channel_id"] == "C1"
         assert kwargs["message_ts"] == "2.000001"
         return self._result()
+
+
+class _RangedStorage:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+        self.calls: list[tuple[str, str, int, int]] = []
+
+    async def read_range(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        offset: int,
+        max_bytes: int,
+    ) -> bytes:
+        self.calls.append((path, agent_id, offset, max_bytes))
+        return self.body[offset : offset + max_bytes]
 
 
 @asynccontextmanager
@@ -352,6 +386,100 @@ async def test_failed_delivery_is_terminal_and_not_reported_as_success() -> None
         (ExternalChannelDeliveryStatus.FAILED, None, "resource_unavailable")
     ]
     assert events.count("provider") == 1
+
+
+@pytest.mark.asyncio
+async def test_file_delivery_streams_only_from_the_immediate_run_source() -> None:
+    """The post-commit attempt consumes the current run-scoped Runtime source."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        path="/workspace/agent/report.txt",
+                        filename="report.txt",
+                        media_type="text/plain",
+                        expected_size=6,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    slack_client = _SlackClient(
+        events,
+        SlackControlMessageResult(
+            status="delivered",
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
+        ),
+    )
+    storage = _RangedStorage(b"report")
+    service = _service(events, repository, slack_client)
+
+    await service.attempt_delivery(
+        "delivery-1",
+        file_storage=cast(FileStorage, storage),
+        agent_id="agent-1",
+    )
+
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+    assert slack_client.uploaded == [("report.txt", b"report")]
+    assert storage.calls == [
+        ("/workspace/agent/report.txt", "agent-1", 0, 6),
+        ("/workspace/agent/report.txt", "agent-1", 6, 1),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recovered_file_delivery_without_run_source_fails_before_provider() -> (
+    None
+):
+    """A durable file-bearing intent is not replayed without its original source."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        path="/workspace/agent/report.txt",
+                        filename="report.txt",
+                        media_type="text/plain",
+                        expected_size=6,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.FAILED,
+            None,
+            "runtime_file_source_unavailable",
+        )
+    ]
+    assert "provider" not in events
 
 
 @pytest.mark.asyncio
@@ -514,6 +642,8 @@ async def test_recovered_failed_final_reply_skips_tracker_deletion() -> None:
         message="Final answer",
         title=None,
         tasks=None,
+        files=(),
+        file_storage=None,
     )
 
     assert result is committed

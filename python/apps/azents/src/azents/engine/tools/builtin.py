@@ -1255,6 +1255,38 @@ class RuntimeRunnerFileStorage:
         except RuntimeRunnerOperationFailedError as exc:
             _raise_storage_error(exc)
 
+    async def read_range(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        offset: int,
+        max_bytes: int,
+    ) -> bytes:
+        """Read one bounded file range through the Runtime Runner."""
+        if offset < 0 or max_bytes <= 0:
+            raise ValueError("Runtime file range must be positive and non-negative.")
+        runtime = await self._ready_runtime(agent_id)
+        try:
+            self._count_runtime_operation()
+            result = await self.runner_operations.read_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=self.owner_session_id,
+                path=path,
+                offset=offset,
+                max_bytes=max_bytes,
+                deadline_at=_runtime_file_operation_deadline(),
+            )
+            return result.data
+        except RuntimeRunnerOperationFailedError as exc:
+            _raise_storage_error(exc)
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ) as exc:
+            raise RuntimeStorageError(str(exc)) from exc
+
     async def stat(self, path: str, *, agent_id: str) -> dict[str, object]:
         """Fetch Runtime path metadata with file.stat."""
         runtime = await self._ready_runtime(agent_id)
