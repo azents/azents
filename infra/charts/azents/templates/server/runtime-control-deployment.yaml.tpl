@@ -29,7 +29,7 @@ spec:
         - name: runtime-control
           image: {{ include "azents.serverImage" . | quote }}
           imagePullPolicy: {{ .Values.server.image.pullPolicy | quote }}
-          command: ["python", "src/cli/runtime_control_server.py"]
+          command: ["./bin/runtime-control.sh"]
           ports:
             - name: grpc
               containerPort: 8030
@@ -51,6 +51,8 @@ spec:
               value: {{ .Values.server.runtimeControl.startTimeoutSeconds | quote }}
             - name: AZ_RUNTIME_CONTROL_ALLOW_INSECURE
               value: "false"
+            - name: AZ_RUNTIME_CONTROL_KUBERNETES_TOKEN_REVIEW_ENABLED
+              value: {{ .Values.runtimeProviderKubernetes.enabled | quote }}
             - name: AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE
               value: "/var/run/secrets/azents/runtime-control-tls/tls.crt"
             - name: AZ_RUNTIME_CONTROL_TLS_PRIVATE_KEY_FILE

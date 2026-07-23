@@ -69,10 +69,11 @@ def test_runtime_control_enabled_render_contract() -> None:
         "secrets.existingSecrets.auth=azents-auth",
     )
 
-    assert "src/cli/runtime_control_server.py" in rendered
+    assert 'command: ["./bin/runtime-control.sh"]' in rendered
     assert "initialDelaySeconds: 5" in rendered
     assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
     assert "AZ_RUNTIME_CONTROL_ALLOW_INSECURE" in rendered
+    assert "AZ_RUNTIME_CONTROL_KUBERNETES_TOKEN_REVIEW_ENABLED" in rendered
     assert "AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE" in rendered
     assert "azents-runtime-control-tls" in rendered
     assert "AZ_RUNTIME_RUNNER_IMAGE" in rendered
@@ -88,6 +89,26 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert 'name: "azents-server"' in tokenreview_binding
     assert 'namespace: "default"' in tokenreview_binding
     assert "azents-runtime-provider-kubernetes" not in tokenreview_binding
+
+
+def test_runtime_control_enables_token_review_for_kubernetes_provider() -> None:
+    """Kubernetes Provider enables TokenReview on Runtime Control."""
+    rendered = _helm_template(
+        "server.runtimeControl.enabled=true",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "server.runtimeControl.runnerImage.tag=sha",
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+    )
+
+    runtime_control = rendered[rendered.index("name: runtime-control") :]
+    assert (
+        "name: AZ_RUNTIME_CONTROL_KUBERNETES_TOKEN_REVIEW_ENABLED\n"
+        '              value: "true"'
+    ) in runtime_control
 
 
 def test_runtime_control_allows_single_replica_configuration() -> None:

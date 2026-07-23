@@ -9,7 +9,7 @@ from logging.config import fileConfig
 import alembic_postgresql_enum  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import boto3
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -44,6 +44,8 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 target_metadata = RDBModel.metadata
+
+_MIGRATION_LOCK_KEY = (0x415A454E, 0x54534442)
 
 # Model imports
 import_db_models("azents.rdb.models")
@@ -115,6 +117,14 @@ async def run_async_migrations() -> None:
     )
 
     async with connectable.connect() as connection:
+        await connection.execute(
+            text("SELECT pg_advisory_lock(:namespace, :operation)"),
+            {
+                "namespace": _MIGRATION_LOCK_KEY[0],
+                "operation": _MIGRATION_LOCK_KEY[1],
+            },
+        )
+        await connection.commit()
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()
