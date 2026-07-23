@@ -1,5 +1,6 @@
 """Runtime control protocol service tests."""
 
+import dataclasses
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -22,6 +23,7 @@ from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
 from azents.runtime.coordination.data import (
+    RuntimeConnectionKind,
     RuntimeCoordinationTarget,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
@@ -82,6 +84,27 @@ async def test_register_provider_and_runner_issue_independent_generations() -> N
         )
         is True
     )
+
+
+@pytest.mark.asyncio
+async def test_register_provider_preserves_absent_method_credential_reference() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+
+    await service.register_provider(
+        dataclasses.replace(
+            _provider_registration(),
+            auth_credential_id=None,
+        ),
+        registered_at=_now(),
+    )
+
+    connection = await store.get_connection(
+        kind=RuntimeConnectionKind.PROVIDER,
+        subject_id="provider-1",
+    )
+    assert connection is not None
+    assert connection.metadata["auth_credential_id"] is None
 
 
 @pytest.mark.asyncio

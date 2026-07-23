@@ -55,6 +55,11 @@ class RuntimeProviderControlStreamClosed(RuntimeError):
     """Provider Control gRPC stream closed before the requested operation finished."""
 
 
+PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN = "azents_issued_token"
+PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT = "kubernetes_service_account"
+_PROVIDER_AUTH_METHOD_HEADER = "x-azents-runtime-provider-auth-method"
+
+
 class GrpcProviderControlClient(ProviderControlClient):
     """ProviderControlClient implementation backed by a bidirectional gRPC stream."""
 
@@ -65,12 +70,16 @@ class GrpcProviderControlClient(ProviderControlClient):
         channel: grpc.aio.Channel | None = None,
         heartbeat_ack_timeout_seconds: float = 10.0,
         provider_credential: str,
+        provider_auth_method: str,
     ) -> None:
         """Initialize the gRPC client with a stream callable."""
         self._stream = stream
         self._channel = channel
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
-        self._metadata = _provider_credential_metadata(provider_credential)
+        self._metadata = _provider_credential_metadata(
+            provider_credential,
+            provider_auth_method,
+        )
         self._outbound: asyncio.Queue[runtime_provider_control_pb2.ProviderMessage] = (
             asyncio.Queue()
         )
@@ -89,6 +98,7 @@ class GrpcProviderControlClient(ProviderControlClient):
         *,
         heartbeat_ack_timeout_seconds: float = 10.0,
         provider_credential: str,
+        provider_auth_method: str,
         tls: GrpcClientTlsConfig | None,
         allow_insecure: bool,
     ) -> "GrpcProviderControlClient":
@@ -104,6 +114,7 @@ class GrpcProviderControlClient(ProviderControlClient):
             channel=channel,
             heartbeat_ack_timeout_seconds=heartbeat_ack_timeout_seconds,
             provider_credential=provider_credential,
+            provider_auth_method=provider_auth_method,
         )
 
     async def register_provider(
@@ -309,12 +320,19 @@ class GrpcProviderControlClient(ProviderControlClient):
 
 def _provider_credential_metadata(
     provider_credential: str,
+    provider_auth_method: str,
 ) -> tuple[tuple[str, str], ...]:
     """Create required Provider credential metadata for Control."""
     credential = provider_credential.strip()
     if not credential:
         raise ValueError("provider_credential must not be empty")
-    return (("authorization", f"Bearer {credential}"),)
+    method = provider_auth_method.strip()
+    if not method:
+        raise ValueError("provider_auth_method must not be empty")
+    return (
+        ("authorization", f"Bearer {credential}"),
+        (_PROVIDER_AUTH_METHOD_HEADER, method),
+    )
 
 
 def _register_message(

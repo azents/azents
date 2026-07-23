@@ -1,8 +1,12 @@
 """Docker Runtime Provider process settings tests."""
 
 import pytest
+from azents_runtime_control.grpc_provider_client import GrpcProviderControlClient
 
-from azents_runtime_provider_docker.main import ProviderSettings
+from azents_runtime_provider_docker.main import (
+    ProviderSettings,
+    create_provider_control_client,
+)
 from azents_runtime_provider_docker.provider import RUNNER_LIMIT_ENV_NAMES
 
 _REQUIRED_ENV = {
@@ -42,3 +46,23 @@ def test_runner_limit_environment_preserves_configured_raw_values(
         monkeypatch.setenv(name, value)
 
     assert ProviderSettings().runner_env == expected
+
+
+def test_control_client_uses_explicit_issued_token_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_required_env(monkeypatch)
+    expected = object()
+    observed: dict[str, object] = {}
+
+    def from_endpoint(endpoint: str, **kwargs: object) -> object:
+        observed["endpoint"] = endpoint
+        observed.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(GrpcProviderControlClient, "from_endpoint", from_endpoint)
+
+    result = create_provider_control_client(ProviderSettings())
+
+    assert result is expected
+    assert observed["provider_auth_method"] == "azents_issued_token"

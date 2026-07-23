@@ -42,7 +42,7 @@ class RuntimeProviderRegistration:
     capabilities: RuntimeProtocolCapabilities
     config_schema_version: str
     metadata: dict[str, JsonValue]
-    auth_credential_id: str
+    auth_credential_id: str | None
     connection_id: str
     owner_replica_id: str
 

@@ -4,7 +4,9 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from azents_runtime_control.grpc_provider_client import GrpcProviderControlClient
 
+import azents_runtime_provider_kubernetes.main as provider_main
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ContainerResourceClaim,
     ContainerResources,
@@ -12,6 +14,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
 )
 from azents_runtime_provider_kubernetes.main import (
     ProviderSettings,
+    create_provider_control_client,
     read_provider_credential,
     wait_for_provider_credential_change,
 )
@@ -41,14 +44,14 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_ANNOTATIONS", "{}")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_NODE_SELECTOR", "{}")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_TOLERATIONS", "[]")
-    credential_file = tmp_path / "provider-credential"
-    credential_file.write_text("test-provider-credential\n")
+    token_file = tmp_path / "service-account-token"
+    token_file.write_text("test-provider-credential\n")
     monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE",
-        str(credential_file),
+        "AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE",
+        str(token_file),
     )
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_LEASE_DURATION_SECONDS", "30")
-    return credential_file
+    return token_file
 
 
 def test_provider_settings_defaults_runner_resources_to_none(
@@ -59,23 +62,19 @@ def test_provider_settings_defaults_runner_resources_to_none(
     assert settings.runner_resources is None
     assert settings.runner_env == {}
     assert settings.image_pull_secrets == ()
-    assert settings.provider_credential_file == provider_env
-    assert (
-        read_provider_credential(settings.provider_credential_file)
-        == "test-provider-credential"
-    )
+    assert settings.service_account_token_file == provider_env
+    assert read_provider_credential(provider_env) == "test-provider-credential"
 
 
 @pytest.mark.asyncio
 async def test_provider_detects_projected_credential_rotation(
     provider_env: Path,
 ) -> None:
-    settings = ProviderSettings()
     provider_env.write_text("rotated-provider-credential\n")
 
     await asyncio.wait_for(
         wait_for_provider_credential_change(
-            settings.provider_credential_file,
+            provider_env,
             current="test-provider-credential",
             stop=asyncio.Event(),
         ),
@@ -83,11 +82,55 @@ async def test_provider_detects_projected_credential_rotation(
     )
 
 
+@pytest.mark.asyncio
+async def test_provider_tolerates_transient_empty_projected_token(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.setattr(provider_main, "_CREDENTIAL_POLL_INTERVAL_SECONDS", 0.01)
+    provider_env.write_text("\n")
+    watcher = asyncio.create_task(
+        wait_for_provider_credential_change(
+            provider_env,
+            current="test-provider-credential",
+            stop=asyncio.Event(),
+        )
+    )
+
+    await asyncio.sleep(0.02)
+    assert not watcher.done()
+    provider_env.write_text("rotated-provider-credential\n")
+    await asyncio.wait_for(watcher, timeout=1)
+
+
 def test_provider_rejects_empty_credential_file(provider_env: Path) -> None:
     provider_env.write_text("\n")
 
     with pytest.raises(RuntimeError, match="credential file is empty"):
         read_provider_credential(provider_env)
+
+
+def test_control_client_uses_explicit_service_account_method(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    expected = object()
+    observed: dict[str, object] = {}
+
+    def from_endpoint(endpoint: str, **kwargs: object) -> object:
+        observed["endpoint"] = endpoint
+        observed.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(GrpcProviderControlClient, "from_endpoint", from_endpoint)
+
+    result = create_provider_control_client(
+        ProviderSettings(),
+        provider_credential="service-account-token",
+    )
+
+    assert result is expected
+    assert observed["provider_auth_method"] == "kubernetes_service_account"
 
 
 def test_provider_settings_collects_runner_limit_environment(

@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 import pytest
 
 from azents_runtime_control.grpc_provider_client import (
+    PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
+    PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT,
     GrpcProviderControlClient,
     RuntimeProviderControlStreamClosed,
 )
@@ -69,7 +71,11 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
         completion = await anext(requests)
         sent.append(completion)
 
-    client = GrpcProviderControlClient(stream, provider_credential="provider-secret")
+    client = GrpcProviderControlClient(
+        stream,
+        provider_credential="provider-secret",
+        provider_auth_method=PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
+    )
     accepted = await client.register_provider(
         _registration(),
         connection_id="connection-1",
@@ -139,7 +145,11 @@ async def test_grpc_client_close_suppresses_completed_stream_failure() -> None:
         closed.set()
         raise RuntimeProviderControlStreamClosed("stream closed")
 
-    client = GrpcProviderControlClient(stream, provider_credential="provider-secret")
+    client = GrpcProviderControlClient(
+        stream,
+        provider_credential="provider-secret",
+        provider_auth_method=PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
+    )
     await client.register_provider(
         _registration(),
         connection_id="connection-1",
@@ -152,8 +162,8 @@ async def test_grpc_client_close_suppresses_completed_stream_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_grpc_client_sends_control_token_metadata() -> None:
-    """The client sends the shared Runtime Control token as bearer metadata."""
+async def test_grpc_client_sends_explicit_provider_auth_metadata() -> None:
+    """The client sends bearer evidence with one explicit Provider auth method."""
     observed_metadata: list[tuple[str, str]] = []
 
     async def stream(
@@ -173,7 +183,11 @@ async def test_grpc_client_sends_control_token_metadata() -> None:
             ),
         )
 
-    client = GrpcProviderControlClient(stream, provider_credential="provider-secret")
+    client = GrpcProviderControlClient(
+        stream,
+        provider_credential="provider-secret",
+        provider_auth_method=PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT,
+    )
     await client.register_provider(
         _registration(),
         connection_id="connection-1",
@@ -181,7 +195,13 @@ async def test_grpc_client_sends_control_token_metadata() -> None:
     )
     await client.close()
 
-    assert ("authorization", "Bearer provider-secret") in observed_metadata
+    assert observed_metadata == [
+        ("authorization", "Bearer provider-secret"),
+        (
+            "x-azents-runtime-provider-auth-method",
+            "kubernetes_service_account",
+        ),
+    ]
 
 
 def _registration() -> ProviderRegistration:

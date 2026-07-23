@@ -9,6 +9,7 @@ from pathlib import Path
 
 import grpc
 from azents_runtime_control.grpc_provider_client import (
+    PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
     GrpcProviderControlClient,
     RuntimeProviderControlStreamClosed,
 )
@@ -103,12 +104,7 @@ async def _run_control_loop(
         },
     )
     while not stop.is_set():
-        control_client = GrpcProviderControlClient.from_endpoint(
-            settings.control_endpoint,
-            provider_credential=settings.provider_credential,
-            tls=settings.control_tls,
-            allow_insecure=settings.allow_insecure_control,
-        )
+        control_client = create_provider_control_client(settings)
         connection_id = _control_connection_id(settings.connection_id)
         _LOGGER.info(
             "Runtime Provider connecting to Control",
@@ -148,6 +144,19 @@ async def _run_control_loop(
             await _wait_for_reconnect(stop)
         finally:
             await control_client.close()
+
+
+def create_provider_control_client(
+    settings: "ProviderSettings",
+) -> GrpcProviderControlClient:
+    """Create the Docker Provider's explicit issued-token Control client."""
+    return GrpcProviderControlClient.from_endpoint(
+        settings.control_endpoint,
+        provider_credential=settings.provider_credential,
+        provider_auth_method=PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
+        tls=settings.control_tls,
+        allow_insecure=settings.allow_insecure_control,
+    )
 
 
 class ProviderSettings:

@@ -5,6 +5,7 @@ import hashlib
 import json
 from typing import Annotated
 
+from azcommon.datetime import tznow
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -314,6 +315,7 @@ class RuntimeProviderSelectionService:
         if not await self.control_repository.has_connected_connection(
             session,
             provider_id=provider.id,
+            now=tznow(),
         ):
             raise RuntimeProviderSelectionUnavailable(
                 code="provider_disconnected",

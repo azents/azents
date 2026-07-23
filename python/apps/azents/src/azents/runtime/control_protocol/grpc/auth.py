@@ -6,12 +6,14 @@ from typing import Protocol
 
 import grpc
 
+from azents.core.enums import RuntimeProviderAuthMethod
 from azents.services.runtime_provider_control.data import (
     RuntimeProviderCredentialAuthentication,
     RuntimeProviderCredentialUnavailable,
 )
 
 _AUTHORIZATION_HEADER = "authorization"
+_AUTH_METHOD_HEADER = "x-azents-runtime-provider-auth-method"
 _BEARER_PREFIX = "bearer "
 _TOKEN_HEADER = "x-azents-runtime-control-token"
 
@@ -27,6 +29,15 @@ class RuntimeProviderCredentialAuthenticator(Protocol):
         secret: str,
     ) -> RuntimeProviderCredentialAuthentication:
         """Resolve a Provider credential to its durable identity."""
+        ...
+
+    async def authenticate_provider(
+        self,
+        *,
+        method: RuntimeProviderAuthMethod,
+        secret: str,
+    ) -> RuntimeProviderCredentialAuthentication:
+        """Resolve one explicitly selected Provider auth method."""
         ...
 
 
@@ -67,20 +78,24 @@ class RuntimeProviderCredentialGrpcAuth:
         self,
         context: grpc.aio.ServicerContext[object, object],
     ) -> RuntimeProviderCredentialAuthentication:
-        """Resolve metadata bearer credentials or abort the Provider stream."""
+        """Resolve one explicitly selected Provider authentication method."""
+        method = _provider_auth_method(context.invocation_metadata())
         secret = _provider_metadata_credential(context.invocation_metadata())
-        if secret is None:
+        if method is None or secret is None:
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,
-                "Provider credential is missing",
+                "Provider authentication method or credential is missing",
             )
             raise AssertionError("unreachable")
         try:
-            return await self._authenticator.authenticate_credential(secret=secret)
+            return await self._authenticator.authenticate_provider(
+                method=method,
+                secret=secret,
+            )
         except RuntimeProviderCredentialUnavailable:
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,
-                "Provider credential is invalid or unavailable",
+                "Provider authentication is invalid or unavailable",
             )
             raise AssertionError("unreachable") from None
 
@@ -95,10 +110,7 @@ def _normalized_token(value: str | None) -> str | None:
 def _metadata_token(metadata: GrpcMetadata) -> str | None:
     if metadata is None:
         return None
-    if isinstance(metadata, grpc.aio.Metadata):
-        entries = metadata.items()
-    else:
-        entries = metadata
+    entries = metadata
     for raw_key, raw_value in entries:
         key = raw_key.lower()
         value = _metadata_value(raw_value)
@@ -115,11 +127,33 @@ def _provider_metadata_credential(metadata: GrpcMetadata) -> str | None:
     """Read a Provider credential from standard bearer metadata only."""
     if metadata is None:
         return None
-    entries = metadata.items() if isinstance(metadata, grpc.aio.Metadata) else metadata
-    for raw_key, raw_value in entries:
-        if raw_key.lower() == _AUTHORIZATION_HEADER:
-            return _bearer_token(_metadata_value(raw_value))
-    return None
+    entries = metadata
+    values = [
+        _bearer_token(_metadata_value(raw_value))
+        for raw_key, raw_value in entries
+        if raw_key.lower() == _AUTHORIZATION_HEADER
+    ]
+    if len(values) != 1:
+        return None
+    return values[0]
+
+
+def _provider_auth_method(metadata: GrpcMetadata) -> RuntimeProviderAuthMethod | None:
+    """Read the required explicit Provider authentication method."""
+    if metadata is None:
+        return None
+    entries = metadata
+    values = [
+        _normalized_token(_metadata_value(raw_value))
+        for raw_key, raw_value in entries
+        if raw_key.lower() == _AUTH_METHOD_HEADER
+    ]
+    if len(values) != 1 or values[0] is None:
+        return None
+    try:
+        return RuntimeProviderAuthMethod(values[0])
+    except ValueError:
+        return None
 
 
 def _metadata_value(value: str | bytes) -> str:

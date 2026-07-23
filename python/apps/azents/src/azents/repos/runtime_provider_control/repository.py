@@ -7,9 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
+    RuntimeProviderBindingState,
     RuntimeProviderConnectionStatus,
     RuntimeProviderCredentialState,
     RuntimeProviderEnrollmentGrantState,
+    RuntimeProviderLifecycleState,
+)
+from azents.rdb.models.runtime_provider import RDBRuntimeProvider
+from azents.rdb.models.runtime_provider_binding import (
+    RDBRuntimeProviderAuthBinding,
 )
 from azents.rdb.models.runtime_provider_control import (
     RDBRuntimeProviderConnection,
@@ -25,6 +31,39 @@ from .data import (
     RuntimeProviderEnrollmentGrant,
     RuntimeProviderEnrollmentGrantCreate,
 )
+
+_TERMINAL_PROVIDER_STATES = frozenset(
+    {
+        RuntimeProviderLifecycleState.DECOMMISSIONED,
+        RuntimeProviderLifecycleState.FORCE_RETIRED,
+    }
+)
+
+
+def _active_connection_binding() -> sa.ColumnElement[bool]:
+    """Require the connection's exact binding snapshot to remain active."""
+    return sa.exists(
+        sa.select(RDBRuntimeProviderAuthBinding.id).where(
+            RDBRuntimeProviderAuthBinding.id == RDBRuntimeProviderConnection.binding_id,
+            RDBRuntimeProviderAuthBinding.provider_id
+            == RDBRuntimeProviderConnection.provider_id,
+            RDBRuntimeProviderAuthBinding.auth_method
+            == RDBRuntimeProviderConnection.auth_method,
+            RDBRuntimeProviderAuthBinding.subject
+            == RDBRuntimeProviderConnection.auth_subject,
+            RDBRuntimeProviderAuthBinding.state == RuntimeProviderBindingState.ACTIVE,
+        )
+    )
+
+
+def _active_connection_provider() -> sa.ColumnElement[bool]:
+    """Require the bound Provider to remain non-terminal."""
+    return sa.exists(
+        sa.select(RDBRuntimeProvider.id).where(
+            RDBRuntimeProvider.id == RDBRuntimeProviderConnection.provider_id,
+            RDBRuntimeProvider.lifecycle_state.not_in(_TERMINAL_PROVIDER_STATES),
+        )
+    )
 
 
 class RuntimeProviderControlRepository:
@@ -324,6 +363,8 @@ class RuntimeProviderControlRepository:
                 RDBRuntimeProviderConnection.generation == generation,
                 RDBRuntimeProviderConnection.status
                 == RuntimeProviderConnectionStatus.CONNECTED,
+                _active_connection_binding(),
+                _active_connection_provider(),
                 sa.or_(
                     RDBRuntimeProviderConnection.evidence_expires_at.is_(None),
                     RDBRuntimeProviderConnection.evidence_expires_at > heartbeat_at,
@@ -373,6 +414,8 @@ class RuntimeProviderControlRepository:
                 RDBRuntimeProviderConnection.generation == generation,
                 RDBRuntimeProviderConnection.status
                 == RuntimeProviderConnectionStatus.CONNECTED,
+                _active_connection_binding(),
+                _active_connection_provider(),
             )
             .values(
                 status=RuntimeProviderConnectionStatus.DISCONNECTED,
@@ -405,6 +448,8 @@ class RuntimeProviderControlRepository:
                 RDBRuntimeProviderConnection.generation == generation,
                 RDBRuntimeProviderConnection.status
                 == RuntimeProviderConnectionStatus.CONNECTED,
+                _active_connection_binding(),
+                _active_connection_provider(),
                 sa.or_(
                     RDBRuntimeProviderConnection.evidence_expires_at.is_(None),
                     RDBRuntimeProviderConnection.evidence_expires_at > now,
@@ -432,13 +477,35 @@ class RuntimeProviderControlRepository:
         session: AsyncSession,
         *,
         provider_id: str,
+        now: datetime.datetime,
     ) -> bool:
-        """Return whether one Provider has a current authenticated connection."""
+        """Return whether one Provider retains current connection authority."""
         result = await session.execute(
             sa.select(RDBRuntimeProviderConnection.id).where(
                 RDBRuntimeProviderConnection.provider_id == provider_id,
                 RDBRuntimeProviderConnection.status
                 == RuntimeProviderConnectionStatus.CONNECTED,
+                _active_connection_binding(),
+                _active_connection_provider(),
+                sa.or_(
+                    RDBRuntimeProviderConnection.evidence_expires_at.is_(None),
+                    RDBRuntimeProviderConnection.evidence_expires_at > now,
+                ),
+                sa.or_(
+                    RDBRuntimeProviderConnection.credential_id.is_(None),
+                    sa.exists(
+                        sa.select(RDBRuntimeProviderCredential.id).where(
+                            RDBRuntimeProviderCredential.id
+                            == RDBRuntimeProviderConnection.credential_id,
+                            RDBRuntimeProviderCredential.state
+                            == RuntimeProviderCredentialState.ACTIVE,
+                            sa.or_(
+                                RDBRuntimeProviderCredential.expires_at.is_(None),
+                                RDBRuntimeProviderCredential.expires_at > now,
+                            ),
+                        )
+                    ),
+                ),
             )
         )
         return result.scalar_one_or_none() is not None

@@ -12,6 +12,9 @@ from pathlib import Path
 import boto3
 import grpc
 from azcommon.logging import RuntimeEnvironment, configure_logging_for_runtime
+from kubernetes_asyncio.client.api.authentication_v1_api import AuthenticationV1Api
+from kubernetes_asyncio.client.api_client import ApiClient
+from kubernetes_asyncio.config import load_incluster_config
 from mypy_boto3_rds import RDSClient
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import event
@@ -49,6 +52,9 @@ from azents.runtime.control_protocol.service import (
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
 )
+from azents.services.runtime_provider_control.provider_auth import (
+    KubernetesApiTokenReviewer,
+)
 from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,
 )
@@ -84,6 +90,7 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_start_timeout_seconds: float = _DEFAULT_START_TIMEOUT_SECONDS
     runtime_control_auth_enabled: bool = False
     runtime_control_auth_token: str | None = None
+    runtime_control_kubernetes_token_review_enabled: bool = False
     runtime_control_allow_insecure: bool
     runtime_control_tls_certificate_file: str | None = None
     runtime_control_tls_private_key_file: str | None = None
@@ -124,12 +131,22 @@ async def runtime_control_server_lifespan(
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
     runtime_repository = AgentRuntimeRepository()
+    kubernetes_api_client: ApiClient | None = None
+    kubernetes_token_reviewer = None
+    if settings.runtime_control_kubernetes_token_review_enabled:
+        load_incluster_config()
+        kubernetes_api_client = ApiClient()
+        kubernetes_token_reviewer = KubernetesApiTokenReviewer(
+            AuthenticationV1Api(kubernetes_api_client)
+        )
     enrollment_service = RuntimeProviderEnrollmentService(
         session_manager=session_manager,
         repository=RuntimeProviderControlRepository(),
         provider_repository=RuntimeProviderRepository(),
         binding_repository=RuntimeProviderAuthBindingRepository(),
         verifier=RuntimeProviderCredentialVerifier(settings.credential_encryption_key),
+        kubernetes_token_reviewer=kubernetes_token_reviewer,
+        auth_registry=None,
     )
     provider_sink = RuntimeProviderReportRepositorySink(
         runtime_repository=runtime_repository,
@@ -218,6 +235,8 @@ async def runtime_control_server_lifespan(
         except asyncio.CancelledError:
             pass
         await server.stop(grace=5)
+        if kubernetes_api_client is not None:
+            await kubernetes_api_client.close()
         await redis.aclose()
         await engine.dispose()
 
