@@ -859,13 +859,16 @@ def _approval_message_payload(
         "text": (f"Approval is required before {participant} can invoke the Agent."),
         "blocks": [
             {
+                "type": "header",
+                "text": {"type": "plain_text", "text": "Approval required"},
+            },
+            {
                 "type": "section",
                 "text": {
-                    "type": "mrkdwn",
+                    "type": "plain_text",
                     "text": (
-                        "*Approval required*\n"
-                        f"Participant: *{participant_label}* "
-                        f"(`{participant_provider_user_id}`)\n"
+                        f"Participant: {participant_label} "
+                        f"({participant_provider_user_id})\n"
                         "Approve this participant before the Agent can respond."
                     ),
                 },

@@ -685,11 +685,54 @@ async def test_approval_control_message_uses_block_kit_button() -> None:
     assert payload["text"] == (
         "Approval is required before Alice (U1) can invoke the Agent."
     )
-    assert "Alice" in payload["blocks"][0]["text"]["text"]
-    assert "U1" in payload["blocks"][0]["text"]["text"]
-    button = payload["blocks"][1]["elements"][0]
+    assert payload["blocks"][0] == {
+        "type": "header",
+        "text": {"type": "plain_text", "text": "Approval required"},
+    }
+    assert payload["blocks"][1]["text"] == {
+        "type": "plain_text",
+        "text": (
+            "Participant: Alice (U1)\n"
+            "Approve this participant before the Agent can respond."
+        ),
+    }
+    button = payload["blocks"][2]["elements"][0]
     assert button["type"] == "button"
     assert button["url"] == "https://azents.example/access/request-1"
+
+
+async def test_approval_participant_identity_is_not_interpreted_as_mrkdwn() -> None:
+    """Provider labels remain literal even when they contain Slack markup."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True, "ts": "1721600001.000100"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_approval_control_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            approval_url="https://azents.example/access/request-1",
+            participant_label="<@U999> *Admin* & _owner_",
+            participant_provider_user_id="U1",
+        )
+
+    assert result.status == "delivered"
+    payload = json.loads(requests[0].content)
+    participant_text = payload["blocks"][1]["text"]
+    assert participant_text["type"] == "plain_text"
+    assert participant_text["text"] == (
+        "Participant: <@U999> *Admin* & _owner_ (U1)\n"
+        "Approve this participant before the Agent can respond."
+    )
+    assert all(
+        block.get("text", {}).get("type") != "mrkdwn"
+        for block in payload["blocks"]
+        if isinstance(block, dict)
+    )
 
 
 async def test_channel_action_rate_limit_is_terminal_failed_without_retry() -> None:
