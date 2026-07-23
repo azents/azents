@@ -420,9 +420,19 @@ def _worker_log_evidence(
     return "\n".join(relevant[-120:])[-12_000:]
 
 
+def _proxy_log_evidence(container: DockerContainer) -> str:
+    """Return bounded deterministic proxy access and handler logs."""
+    stdout, stderr = container.get_logs()
+    logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
+    for secret in (_BOT_TOKEN, _SIGNING_SECRET):
+        logs = logs.replace(secret, "<redacted>")
+    return logs[-12_000:]
+
+
 def _wait_for_progress_request(
     *,
     openai_proxy_url: str,
+    openai_proxy_container: DockerContainer,
     public_server_url: str,
     slack_provider_fake_url: str,
     worker_container: DockerContainer,
@@ -445,6 +455,8 @@ def _wait_for_progress_request(
     }
     deadline = time.monotonic() + timeout
     last_request_evidence: list[dict[str, object]] = []
+    last_session_evidence: dict[str, object] = {}
+    next_session_check = 0.0
     while time.monotonic() < deadline:
         last_request_evidence = _progress_request_evidence(openai_proxy_url)
         if any(
@@ -452,16 +464,29 @@ def _wait_for_progress_request(
             for item in last_request_evidence
         ):
             return last_request_evidence
+        now = time.monotonic()
+        if now >= next_session_check:
+            last_session_evidence = _session_execution_evidence(
+                public_server_url,
+                token,
+                session_id,
+            )
+            history = last_session_evidence.get("history")
+            if isinstance(history, list) and any(
+                isinstance(item, dict)
+                and cast(dict[str, object], item).get("kind") == "run_marker"
+                and cast(dict[str, object], item).get("status") == "failed"
+                for item in cast(list[object], history)
+            ):
+                break
+            next_session_check = now + 1
         time.sleep(0.2)
     diagnostics = {
         "expected_request": expected,
         "observed_requests": last_request_evidence,
-        "session": _session_execution_evidence(
-            public_server_url,
-            token,
-            session_id,
-        ),
+        "session": last_session_evidence,
         "provider": _provider_delivery_evidence(slack_provider_fake_url),
+        "proxy_logs": _proxy_log_evidence(openai_proxy_container),
         "worker_logs": _worker_log_evidence(
             worker_container,
             identifiers=[agent_id, session_id, binding_id],
@@ -831,6 +856,7 @@ def test_provider_native_channel_work_progress_journey(
     azents_engine_worker_container: DockerContainer,
     slack_provider_fake_url: str,
     openai_proxy_url: str,
+    openai_proxy_container: DockerContainer,
 ) -> None:
     """Render one rich canonical work snapshot through Slack's native Plan."""
     requests.post(
@@ -973,6 +999,7 @@ def test_provider_native_channel_work_progress_journey(
 
     _wait_for_progress_request(
         openai_proxy_url=openai_proxy_url,
+        openai_proxy_container=openai_proxy_container,
         public_server_url=azents_public_server_url,
         slack_provider_fake_url=slack_provider_fake_url,
         worker_container=azents_engine_worker_container,
