@@ -148,16 +148,20 @@ class RuntimeProviderControlRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def list_active_bootstrap_credentials(
+    async def revoke_older_bootstrap_credentials(
         self,
         session: AsyncSession,
         *,
         provider_id: str,
-        source_id: str,
+        current_credential_id: str,
+        revoked_at: datetime.datetime,
     ) -> tuple[RuntimeProviderCredential, ...]:
-        """List active credentials issued by one owning bootstrap source."""
-        result = await session.execute(
-            sa.select(RDBRuntimeProviderCredential)
+        """Revoke older credentials from the current credential's bootstrap source."""
+        current_result = await session.execute(
+            sa.select(
+                RDBRuntimeProviderCredential.created_at,
+                RDBRuntimeProviderEnrollmentGrant.issued_by_source_id,
+            )
             .join(
                 RDBRuntimeProviderEnrollmentGrant,
                 RDBRuntimeProviderEnrollmentGrant.id
@@ -165,12 +169,56 @@ class RuntimeProviderControlRepository:
             )
             .where(
                 RDBRuntimeProviderCredential.provider_id == provider_id,
-                RDBRuntimeProviderCredential.state
-                == RuntimeProviderCredentialState.ACTIVE,
-                RDBRuntimeProviderEnrollmentGrant.issued_by_source_id == source_id,
+                RDBRuntimeProviderCredential.id == current_credential_id,
             )
         )
-        return tuple(self._build_credential(row) for row in result.scalars())
+        current = current_result.one_or_none()
+        if current is None or current.issued_by_source_id is None:
+            return ()
+        bootstrap_grant_ids = sa.select(RDBRuntimeProviderEnrollmentGrant.id).where(
+            RDBRuntimeProviderEnrollmentGrant.issued_by_source_id
+            == current.issued_by_source_id
+        )
+        revoked_result = await session.execute(
+            sa.update(RDBRuntimeProviderCredential)
+            .where(
+                RDBRuntimeProviderCredential.provider_id == provider_id,
+                RDBRuntimeProviderCredential.id != current_credential_id,
+                RDBRuntimeProviderCredential.state
+                == RuntimeProviderCredentialState.ACTIVE,
+                sa.or_(
+                    RDBRuntimeProviderCredential.created_at < current.created_at,
+                    sa.and_(
+                        RDBRuntimeProviderCredential.created_at == current.created_at,
+                        RDBRuntimeProviderCredential.id < current_credential_id,
+                    ),
+                ),
+                RDBRuntimeProviderCredential.issued_grant_id.in_(bootstrap_grant_ids),
+            )
+            .values(
+                state=RuntimeProviderCredentialState.REVOKED,
+                revoked_at=revoked_at,
+                revoked_by_user_id=None,
+            )
+            .returning(RDBRuntimeProviderCredential)
+        )
+        revoked = tuple(revoked_result.scalars())
+        if revoked:
+            await session.execute(
+                sa.update(RDBRuntimeProviderConnection)
+                .where(
+                    RDBRuntimeProviderConnection.credential_id.in_(
+                        tuple(credential.id for credential in revoked)
+                    ),
+                    RDBRuntimeProviderConnection.status
+                    == RuntimeProviderConnectionStatus.CONNECTED,
+                )
+                .values(
+                    status=RuntimeProviderConnectionStatus.DISCONNECTED,
+                    disconnected_at=revoked_at,
+                )
+            )
+        return tuple(self._build_credential(credential) for credential in revoked)
 
     async def revoke_credential(
         self,

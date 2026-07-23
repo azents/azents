@@ -228,21 +228,6 @@ class RuntimeProviderEnrollmentService:
             provider_workspace_id=provider.workspace_id,
         )
 
-    async def list_active_bootstrap_credential_ids(
-        self,
-        *,
-        provider_id: str,
-        source_id: str,
-    ) -> tuple[str, ...]:
-        """List active credentials owned by one Provider bootstrap source."""
-        async with self.session_manager() as session:
-            credentials = await self.repository.list_active_bootstrap_credentials(
-                session,
-                provider_id=provider_id,
-                source_id=source_id,
-            )
-        return tuple(credential.id for credential in credentials)
-
     async def revoke_credential(
         self,
         *,
@@ -271,19 +256,6 @@ class RuntimeProviderEnrollmentService:
                 ),
             )
             return True
-
-    async def revoke_credentials(
-        self,
-        *,
-        credential_ids: tuple[str, ...],
-        revoked_by_user_id: str | None,
-    ) -> None:
-        """Revoke a known set of superseded credentials."""
-        for credential_id in credential_ids:
-            await self.revoke_credential(
-                credential_id=credential_id,
-                revoked_by_user_id=revoked_by_user_id,
-            )
 
     async def create_connection(
         self,
@@ -322,6 +294,14 @@ class RuntimeProviderEnrollmentService:
                     connected_at=connected_at,
                 ),
             )
+            revoked_credentials = (
+                await self.repository.revoke_older_bootstrap_credentials(
+                    session,
+                    provider_id=authentication.provider_id,
+                    current_credential_id=authentication.credential_id,
+                    revoked_at=connected_at,
+                )
+            )
             await self.provider_repository.append_audit_event(
                 session,
                 create=RuntimeProviderAuditEventCreate(
@@ -336,6 +316,17 @@ class RuntimeProviderEnrollmentService:
                     created_at=connected_at,
                 ),
             )
+            for credential in revoked_credentials:
+                await self.provider_repository.append_audit_event(
+                    session,
+                    create=RuntimeProviderAuditEventCreate(
+                        provider_id=credential.provider_id,
+                        event_type=RuntimeProviderAuditEventType.CREDENTIAL_REVOKED,
+                        actor_user_id=None,
+                        metadata={"credential_id": credential.id},
+                        created_at=connected_at,
+                    ),
+                )
             return connection
 
     async def heartbeat_connection(
