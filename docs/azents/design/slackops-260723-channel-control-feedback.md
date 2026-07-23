@@ -2,6 +2,7 @@
 title: "Slack Channel Control Feedback Design"
 created: 2026-07-23
 updated: 2026-07-23
+implemented: 2026-07-23
 tags: [slack, external-channel, frontend, backend, testenv]
 document_role: primary
 document_type: design
