@@ -48,6 +48,7 @@ fake, and the deterministic file-transfer E2E journey.
 | Slack fake and model proxy | `uv run pytest -q src/tests/test_slack_provider_fake.py src/tests/test_external_channel_file_proxy.py src/tests/test_external_channel_progress_proxy.py` | 20 passed |
 | E2E static quality | E2E Ruff, format, Pyright, and External Channel collection | Passed; 0 Pyright errors; 6 External Channel tests collected |
 | Focused Runtime E2E | `uv run pytest -vv -s src/tests/azents/public/test_external_channels.py::test_external_channel_file_transfer_journey` | Environment-blocked before setup: Docker socket absent |
+| Required CI implementation lanes | GitHub Actions on implementation PR #819 | Passed, including deterministic E2E, Python E2E, Runtime-provider tool-search E2E, web-surface E2E, Python, TypeScript, Docker builds, Helm, and pre-commit |
 | TypeScript | `pnpm run format`, `pnpm run lint`, `pnpm run typecheck`, `pnpm run build --filter=@azents/admin-web` | Passed sequentially |
 | Repository hooks | `uv run pre-commit run` and commit hooks | Passed |
 | Diff hygiene | `git diff --check` and phase scope comparison | Passed |
@@ -83,19 +84,20 @@ following supported-path journey:
    36 aggregate bytes, and a non-empty initial comment; and
 9. verify provider and Tool history evidence remains sanitized.
 
-CI execution of this collected Runtime-provider test is the remaining final environment
-gate.
+The required GitHub Actions Runtime-provider lane executed this collected journey
+successfully on implementation PR #819. All other required implementation lanes also
+completed successfully.
 
 ## Requirement Evidence
 
 | Requirement | Implementation evidence | Validation status |
 | --- | --- | --- |
 | `files-260723/REQ-1` Discoverable inbound attachments | HTTP, Socket, hydration, renderer, replay, compaction, token-accounting, and bounded metadata/locator tests | Satisfied |
-| `files-260723/REQ-2` Explicit single-file materialization | `download_external_file`, provider metadata/download adapter, Runtime destination/overwrite handling, selected-file E2E sequence | Satisfied; CI runs primary Runtime journey |
+| `files-260723/REQ-2` Explicit single-file materialization | `download_external_file`, provider metadata/download adapter, Runtime destination/overwrite handling, selected-file E2E sequence | Satisfied; primary Runtime journey passed in CI |
 | `files-260723/REQ-3` Binding-scoped attachment access | Versioned binding locator, Agent/Session/binding/connection ownership checks, lifecycle and authorization tests | Satisfied |
 | `files-260723/REQ-4` Fail-closed Slack file scope | Direct-upload classification, unsupported-mode reasons, directional scope capabilities, provider-authoritative failure mapping | Satisfied |
 | `files-260723/REQ-5` Configurable transfer limits | Typed direct System Setting, 25/25/100 MiB defaults, hard bounds, aggregate invariant, declared/actual/stat/stream enforcement, Admin optimistic API/UI | Satisfied |
-| `files-260723/REQ-6` File attachments in explicit Channel replies | Existing `channel_action`, required text, preflight manifests, ordered sequential streaming, one completion, original-thread evidence, one delivery outcome | Satisfied; CI runs primary Runtime journey |
+| `files-260723/REQ-6` File attachments in explicit Channel replies | Existing `channel_action`, required text, preflight manifests, ordered sequential streaming, one completion, original-thread evidence, one delivery outcome | Satisfied; primary Runtime journey passed in CI |
 | `files-260723/REQ-7` Provider-neutral Agent contract | Opaque inbound locator, Runtime paths on existing action, provider credentials/URLs outside Tool contracts, Slack isolated behind provider adapter | Satisfied |
 
 ## ADR and Design Conformance
@@ -159,13 +161,12 @@ owned by the spec-promotion PR.
   test origin. URLs never enter Agent-visible or durable transfer state.
 - Inbound Runtime writes remain whole-buffered by the existing Runner write contract but
   are bounded by the configured hard limit. Outbound reads are chunked.
-- The local validation environment cannot supply Docker; therefore the CI
-  Runtime-provider lane is a required final gate rather than an optional signal.
+- The local validation environment could not supply Docker. The required CI
+  Runtime-provider lane supplied that environment and passed the primary journey.
 
 ## Readiness
 
 The implementation, generated contracts, Admin surface, provider fake, unit/service
-coverage, and complete backend suite are ready for living-spec promotion. The stacked
-spec and cleanup PRs may be prepared before CI monitoring as required by the delivery
-workflow. Final implementation verification and the implemented snapshot date remain
-gated on a passing CI Runtime-provider E2E result across the complete stack.
+coverage, complete backend suite, and required CI implementation lanes have passed
+validation. The feature is ready for living-spec promotion, the implemented snapshot,
+and cleanup in the following stacked PRs.
