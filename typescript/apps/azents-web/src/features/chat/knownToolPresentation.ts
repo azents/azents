@@ -378,6 +378,18 @@ function detailPath(path: string): string {
     .trim();
 }
 
+function patchSubject(paths: readonly string[]): string | null {
+  const firstPath = paths[0];
+  if (typeof firstPath !== "string") {
+    return null;
+  }
+  const remainingCount = paths.length - 1;
+  const firstFileName = displayPath(firstPath);
+  return remainingCount > 0
+    ? `${firstFileName} +${remainingCount}`
+    : firstFileName;
+}
+
 function sourceKind(uri: string): string {
   const separator = uri.indexOf("://");
   return separator > 0 ? uri.slice(0, separator) : "file";
@@ -490,29 +502,24 @@ function patchPresentation(
   if (patch === null) {
     return generic("invalid-arguments");
   }
+  const subject = patchSubject(patch.files.map((file) => file.path));
   if (!terminal(toolCall)) {
-    return presentation("patch", displayPath(input.base_path), null, null);
+    return presentation("patch", subject, null, null);
   }
   const metadata = toolCall.resultMetadata;
   const success = applyPatchResultSchema.safeParse(metadata);
   if (success.success) {
-    return presentation(
-      "patch",
-      displayPath(input.base_path),
-      success.data.changes.length > 0
-        ? String(success.data.changes.length)
-        : null,
-      { type: "patch", files: patch.files },
-    );
+    return presentation("patch", subject, null, {
+      type: "patch",
+      files: patch.files,
+    });
   }
   const failure = applyPatchFailureSchema.safeParse(metadata);
   if (failure.success) {
     return presentation(
       "patch",
-      displayPath(input.base_path),
-      failure.data.applied.length > 0
-        ? String(failure.data.applied.length)
-        : null,
+      subject,
+      null,
       failure.data.applied.length > 0
         ? { type: "patch", files: patch.files }
         : outputDetail(toolCall),
