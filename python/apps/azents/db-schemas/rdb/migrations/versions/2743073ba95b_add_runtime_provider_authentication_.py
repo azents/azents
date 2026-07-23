@@ -218,16 +218,16 @@ def upgrade() -> None:
             md5(
                 grant.provider_id
                 || CASE
-                    WHEN grant.issued_by_source_id IS NULL THEN ':admin'
-                    ELSE ':bootstrap:' || grant.issued_by_source_id
+                    WHEN grant.issued_by_source_id IS NULL THEN ':' || 'admin'
+                    ELSE ':' || 'bootstrap' || ':' || grant.issued_by_source_id
                 END
             ),
             grant.provider_id,
             'azents_issued_token',
             'provider:' || grant.provider_id
                 || CASE
-                    WHEN grant.issued_by_source_id IS NULL THEN ':admin'
-                    ELSE ':bootstrap:' || grant.issued_by_source_id
+                    WHEN grant.issued_by_source_id IS NULL THEN ':' || 'admin'
+                    ELSE ':' || 'bootstrap' || ':' || grant.issued_by_source_id
                 END,
             'active',
             CASE
@@ -258,8 +258,8 @@ def upgrade() -> None:
           AND binding.subject = (
               'provider:' || grant.provider_id
               || CASE
-                  WHEN grant.issued_by_source_id IS NULL THEN ':admin'
-                  ELSE ':bootstrap:' || grant.issued_by_source_id
+                  WHEN grant.issued_by_source_id IS NULL THEN ':' || 'admin'
+                  ELSE ':' || 'bootstrap' || ':' || grant.issued_by_source_id
               END
           )
     """)
@@ -296,7 +296,7 @@ def upgrade() -> None:
             metadata
         )
         SELECT
-            md5(binding.id || ':created'),
+            md5(binding.id || ':' || 'created'),
             binding.id,
             'created',
             NULL,
