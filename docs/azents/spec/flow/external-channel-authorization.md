@@ -20,7 +20,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-07-23
-spec_version: 3
+spec_version: 4
 ---
 
 # External Channel Authorization
@@ -37,7 +37,7 @@ When the participant invokes the Agent:
 
 1. The event processor creates one idempotent access request for the route and source message.
 2. The request snapshots truncation counters, expires after seven days, and contains an opaque ID.
-3. One Slack Block Kit control-message intent is persisted and attempted once with an authenticated Azents approval URL rendered as a button plus accessible fallback text.
+3. One Slack Block Kit control-message intent is persisted and attempted once with the participant display label, complete provider user ID, and an authenticated Azents approval URL rendered as a button plus accessible fallback text.
 4. The approval page requires an authenticated user who is an administrator of the routed Agent. Unauthorized, cross-Agent, missing, and expired requests do not disclose the request and appear not found or unavailable.
 
 ## Decisions
@@ -51,6 +51,12 @@ Supported decisions are `allow_session`, `allow_agent`, `deny`, and `block`.
 
 The decision transaction locks the route connection, active binding, resource, and request in that order, verifies an `active` or `degraded` connection plus the route relationship, active resource, and Agent lifecycle state, creates the External Channel AgentSession only when no active binding exists, and writes the binding, grant, and decision atomically. Repeating the same compatible Allow decision returns the existing binding and grant. Conflicting or stale decisions return a conflict instead of creating parallel state.
 
+When the original approval control message has a delivered provider identity, every
+compatible final decision also creates one idempotent access-request-origin delete
+intent in the decision transaction. The provider delete is attempted only after the
+decision commits. Failed or ambiguous deletion remains a durable delivery outcome
+and never rolls back the authorization result.
+
 ## Activation and Context Release
 
 A new binding starts in `waiting_hydration`. It becomes active only after provider-history reconciliation and correlated-event completion. Authorized release selects unexpired pending revisions from the same binding route/resource through the trigger provider position, records immutable batch membership, and deletes only the released pending rows.
@@ -61,10 +67,14 @@ Later authorized original messages on an active binding create another immutable
 
 ## Revocation
 
-Agent administrators can revoke active grants or remove blocks. Grant revocation prevents future invocations but does not delete canonical messages, projected Session history, or unrelated grants. Binding and connection disconnect remain separate lifecycle operations.
+Agent administrators can revoke active grants or remove blocks. Grant revocation
+locks and deletes the selected grant row, preventing future invocation without
+deleting canonical messages, projected Session history, or unrelated grants.
+Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 4) — Added complete participant identity in approval controls, atomic post-decision control-message deletion intents, and hard removal of revoked grants.
 - **2026-07-23** (spec_version 3) — Rendered Slack approval control messages as accessible Block Kit button actions.
 - **2026-07-23** (spec_version 2) — Removed route lifecycle state from authorization admission; route identity remains while Agent lifecycle and resource state determine eligibility.
 - **2026-07-22** (spec_version 1) — Promoted external-principal isolation, opaque approval, idempotent decisions, scoped grants/blocks, hydration-fenced activation, and same-binding pending-context release.

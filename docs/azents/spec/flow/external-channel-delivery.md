@@ -12,12 +12,14 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
+  - python/apps/azents/src/azents/repos/external_channel/management.py
+  - python/apps/azents/src/azents/repos/external_channel/management_data.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 2
+spec_version: 3
 ---
 
 # External Channel Delivery and Channel Work
@@ -55,7 +57,26 @@ Provider mutations are never automatically retried. Stale `attempting` recovery 
 
 Authorization control messages use Block Kit with a URL button and accessible fallback text; they do not expose an approval URL as ordinary body text.
 
-The progress message identity and drift/error state are durable management data. A failed or unknown projection never replaces canonical Channel Work state.
+Every compatible final approval decision creates a delete intent for a successfully
+delivered control message in the same transaction as the decision, then attempts
+that provider delete after commit. Deny and block use the access request's route and
+do not require a Session binding. Cleanup failure or ambiguity remains visible
+without changing the final decision.
+
+The progress message identity and delivery state are durable management data.
+Session Channels renders the canonical ordered task snapshot and one derived
+projection state:
+
+- `synchronized`: desired progress has a retained provider message and no unresolved latest operation;
+- `missing`: progress is desired but no provider message identity exists;
+- `stale`: the latest create/update is unresolved or failed, or a provider message remains when no progress is desired;
+- `delete_failed`: the latest delete failed or was not attempted;
+- `unknown`: the latest provider mutation has an ambiguous result;
+- `none`: no progress is desired and no provider message identity remains.
+
+State and desired-progress revision counters remain diagnostic metadata and are not
+compared as one sequence. A failed or unknown projection never replaces canonical
+Channel Work state.
 
 ## Continuation
 
@@ -67,5 +88,6 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-23** (spec_version 3) — Added post-decision approval-control deletion and delivery-derived Activity Tracker projection states with canonical task presentation.
 - **2026-07-23** (spec_version 2) — Added Slack Markdown reply payloads, provider-bound length validation, and Block Kit operational/approval delivery with accessible fallback text.
 - **2026-07-22** (spec_version 1) — Promoted direct `channel_action`, binding-scoped Channel Work, commit-before-call delivery, terminal outcomes, one-attempt Slack operations, continuation, and cleanup delivery.

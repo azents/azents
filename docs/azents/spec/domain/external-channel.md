@@ -20,6 +20,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-approval/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
+  - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.module.css
   - typescript/apps/azents-web/src/features/chat/components/ExternalChannelMessage.tsx
   - typescript/apps/azents-web/src/features/chat/externalChannelMessage.ts
   - typescript/apps/azents-web/src/trpc/routers/externalChannel.ts
@@ -32,7 +34,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-23
-spec_version: 4
+spec_version: 6
 ---
 
 # External Channel
@@ -61,12 +63,12 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 | Resource | One Slack thread with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. |
 | Event | Durable provider envelope admission keyed by connection and provider event identity. Processing is at-least-once and domain writes are idempotent. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Message and revision | Canonical provider message plus immutable original/edit/delete revisions. Revisions retain optional bounded Slack user/channel ID-to-display-name mappings for model and UI presentation. `original_url` is nullable and is set only from a successful provider permalink lookup. |
+| Message and revision | Canonical provider message plus immutable original/edit/delete revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Revisions retain optional bounded Slack user/channel ID-to-display-name mappings for model and UI presentation. `original_url` is nullable and is set only from a successful provider permalink lookup. |
 | Pending context | Unprojected same-route/resource revisions retained for at most 7 days, 100 messages, and 256 KiB. Oldest content is expired or trimmed first. |
 | Binding | Active or disconnected link from one route/resource to one AgentSession. Initial activation waits for hydration reconciliation. |
 | Invocation batch | Immutable ordered revision membership released through one authorized trigger and referenced by a batch InputBuffer. |
-| Access request/grant/block | Opaque approval request, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. |
-| Channel Work/action/delivery | Binding-scoped durable tasks, one atomic explicit action, and persisted provider intents/outcomes. |
+| Access request/grant/block | Opaque approval request, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
+| Channel Work/action/delivery | Binding-scoped durable tasks, one atomic explicit action, and persisted provider intents/outcomes. Management derives the provider progress projection state from the latest durable delivery outcome rather than comparing unrelated revision counters. |
 
 ## State Invariants
 
@@ -101,15 +103,22 @@ connection before attempting provider cleanup. Repeating disconnect is safe.
 Disconnected rows remain as retained history roots but are omitted from the active
 Agent connection list.
 
-Session Channels shows bindings, work state, truncation, delivery outcomes, grants,
-and terminal disconnect state. Approval links contain only an opaque access-request
-ID and require an authenticated Agent administrator; unauthorized and missing
-requests are returned as not found.
+Session Channels shows bindings, ordered work tasks, provider progress projection
+state, truncation, delivery outcomes, grants, and terminal disconnect state.
+Approval and management detail surfaces show complete provider user identities with
+copy controls, while regular timeline summaries remain name-first. Destructive
+connection, binding, grant, and block actions require in-product confirmation.
+Approval headers may wrap on narrow screens, and Session tabs remain horizontally
+scrollable while hiding browser scrollbar chrome.
+
+Approval links contain only an opaque access-request ID and require an authenticated
+Agent administrator; unauthorized and missing requests are returned as not found.
 
 Connection responses expose provider identity, capabilities, health, route relationship, and redacted credential state. They never return ciphertext or decrypted secret values.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 6) — Added bounded Block Kit fallback normalization, durable approval-control deletion, hard grant removal, delivery-derived Activity Tracker state, complete provider identities, in-product confirmations, and narrow-screen presentation behavior.
 - **2026-07-23** (spec_version 5) — Added immutable bounded Slack reference mappings, readable external-message presentation, and connected-app self-message exclusion while retaining canonical provider IDs and bodies.
 - **2026-07-23** (spec_version 4) — Removed route lifecycle state from persistence, routing, management responses, and UI. Connection health, Agent lifecycle, and binding/work/resource state now own their respective admission and termination decisions.
 - **2026-07-22** (spec_version 3) — Separated provider health from Agent route lifecycle, fenced stale validation results, and required Slack conversation metadata scopes.
