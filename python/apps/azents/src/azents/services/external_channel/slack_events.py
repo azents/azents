@@ -1,0 +1,768 @@
+"""Slack event normalization and bounded conversation API operations."""
+
+import datetime
+import hashlib
+import json
+from dataclasses import dataclass
+from typing import Literal
+
+import httpx
+
+from azents.core.enums import (
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+)
+from azents.services.external_channel.slack_endpoint import slack_api_base_url
+
+_MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
+_MAX_ATTACHMENT_TYPES = 32
+
+
+class SlackEventNormalizationError(ValueError):
+    """An admitted Slack envelope is malformed for asynchronous processing."""
+
+
+class SlackEventExcluded(SlackEventNormalizationError):
+    """An admitted event is intentionally outside the External Channel scope."""
+
+
+class SlackProviderError(RuntimeError):
+    """Base class for controlled Slack Web API failures."""
+
+
+class SlackProviderRateLimited(SlackProviderError):
+    """Slack asked the inbound hydrator to retry after a bounded delay."""
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        super().__init__("Slack thread hydration is rate limited.")
+        self.retry_after_seconds = max(1, retry_after_seconds)
+
+
+class SlackProviderTemporaryError(SlackProviderError):
+    """Slack or the network is temporarily unavailable."""
+
+
+class SlackProviderCredentialsInvalid(SlackProviderError):
+    """Slack rejected the configured connection credential."""
+
+
+class SlackProviderPermissionDenied(SlackProviderError):
+    """Slack rejected an operation because required scopes are missing."""
+
+
+class SlackProviderResourceUnavailable(SlackProviderError):
+    """Slack cannot expose the requested channel or thread to the App."""
+
+
+@dataclass(frozen=True)
+class SlackConnectionRevocation:
+    """Provider event that makes a Slack connection unavailable."""
+
+    kind: Literal["app_uninstalled", "tokens_revoked"]
+
+
+@dataclass(frozen=True)
+class SlackNormalizedMessage:
+    """One provider message lifecycle mutation normalized from Slack."""
+
+    tenant_id: str
+    channel_id: str
+    root_thread_ts: str
+    message_ts: str
+    correlation_key: str
+    provider_resource_key: str
+    provider_message_key: str
+    provider_position: str
+    revision_key: str
+    revision_kind: ExternalChannelMessageRevisionKind
+    lifecycle: ExternalChannelMessageLifecycle
+    author_type: ExternalChannelPrincipalAuthorType
+    provider_user_id: str | None
+    normalized_body: str | None
+    attachment_metadata: dict[str, object] | None
+    normalized_size: int
+    provider_created_at: datetime.datetime | None
+    provider_updated_at: datetime.datetime | None
+    invocation: bool
+    source_event_type: str
+
+
+@dataclass(frozen=True)
+class SlackThreadPage:
+    """One bounded Slack thread-history page."""
+
+    messages: tuple[SlackNormalizedMessage, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class SlackConversationAccess:
+    """Slack conversation eligibility required for first-mention tracking."""
+
+    app_member: bool
+    external_shared: bool
+    public_or_private_channel: bool
+
+
+@dataclass(frozen=True)
+class SlackControlMessageResult:
+    """Sanitized result of one Slack control-message provider attempt."""
+
+    status: Literal["delivered", "failed", "unknown"]
+    provider_message_key: str | None
+    error_kind: str | None
+    error_summary: str | None
+
+
+def normalize_slack_event(
+    *,
+    event_type: str,
+    tenant_id: str,
+    envelope: dict[str, object],
+) -> SlackConnectionRevocation | SlackNormalizedMessage:
+    """Normalize one admitted Slack event or reject it as out of scope."""
+    if event_type == "app_uninstalled":
+        return SlackConnectionRevocation(kind="app_uninstalled")
+    if event_type == "tokens_revoked":
+        return SlackConnectionRevocation(kind="tokens_revoked")
+    if event_type not in {"app_mention", "message"}:
+        raise SlackEventExcluded("Slack event type is outside the configured scope.")
+
+    event = envelope.get("event")
+    if not isinstance(event, dict):
+        raise SlackEventNormalizationError("Slack event object is missing.")
+    if event.get("is_ext_shared_channel") is True:
+        raise SlackEventExcluded("Slack Connect conversations are not supported.")
+    channel_id = _required_string(event, "channel")
+    channel_type = event.get("channel_type")
+    if not _eligible_channel(channel_id, channel_type):
+        raise SlackEventExcluded("Slack direct and group messages are not supported.")
+
+    subtype = _optional_string(event, "subtype")
+    if event_type == "app_mention":
+        if subtype not in {None, "bot_message"}:
+            raise SlackEventExcluded("Slack mention subtype is not supported.")
+        message = event
+        revision_kind = ExternalChannelMessageRevisionKind.ORIGINAL
+        lifecycle = ExternalChannelMessageLifecycle.CURRENT
+        message_ts = _required_string(message, "ts")
+        provider_updated_at = None
+    elif subtype in {None, "bot_message"}:
+        message = event
+        revision_kind = ExternalChannelMessageRevisionKind.ORIGINAL
+        lifecycle = ExternalChannelMessageLifecycle.CURRENT
+        message_ts = _required_string(message, "ts")
+        provider_updated_at = None
+    elif subtype == "message_changed":
+        raw_message = event.get("message")
+        if not isinstance(raw_message, dict):
+            raise SlackEventNormalizationError("Slack edited message is missing.")
+        message = raw_message
+        message_ts = _required_string(message, "ts")
+        revision_kind = ExternalChannelMessageRevisionKind.EDIT
+        lifecycle = ExternalChannelMessageLifecycle.EDITED
+        provider_updated_at = _slack_timestamp(
+            _edited_timestamp(message) or _optional_string(event, "event_ts")
+        )
+    elif subtype == "message_deleted":
+        raw_previous = event.get("previous_message")
+        previous = raw_previous if isinstance(raw_previous, dict) else {}
+        message_ts = _required_string(event, "deleted_ts")
+        message = previous
+        revision_kind = ExternalChannelMessageRevisionKind.DELETE
+        lifecycle = ExternalChannelMessageLifecycle.DELETED
+        provider_updated_at = _slack_timestamp(
+            _optional_string(event, "event_ts") or message_ts
+        )
+    else:
+        raise SlackEventExcluded(
+            "Slack message subtype is outside the configured scope."
+        )
+
+    root_thread_ts = _optional_string(message, "thread_ts") or message_ts
+    author_type, provider_user_id = _author(message)
+    normalized_body = (
+        None
+        if revision_kind is ExternalChannelMessageRevisionKind.DELETE
+        else _bounded_text(message.get("text"))
+    )
+    attachment_metadata = _attachment_metadata(message.get("blocks"))
+    normalized_size = _normalized_size(normalized_body, attachment_metadata)
+    provider_created_at = _slack_timestamp(message_ts)
+    provider_position = slack_provider_position(message_ts)
+    revision_key = _revision_key(
+        revision_kind=revision_kind,
+        message_ts=message_ts,
+        event=event,
+        message=message,
+        normalized_body=normalized_body,
+    )
+    invocation = (
+        event_type == "app_mention"
+        and author_type is ExternalChannelPrincipalAuthorType.HUMAN
+    )
+    return SlackNormalizedMessage(
+        tenant_id=tenant_id,
+        channel_id=channel_id,
+        root_thread_ts=root_thread_ts,
+        message_ts=message_ts,
+        correlation_key=f"{channel_id}:{root_thread_ts}",
+        provider_resource_key=(f"slack:{tenant_id}:{channel_id}:{root_thread_ts}"),
+        provider_message_key=f"slack:{tenant_id}:{channel_id}:{message_ts}",
+        provider_position=provider_position,
+        revision_key=revision_key,
+        revision_kind=revision_kind,
+        lifecycle=lifecycle,
+        author_type=author_type,
+        provider_user_id=provider_user_id,
+        normalized_body=normalized_body,
+        attachment_metadata=attachment_metadata,
+        normalized_size=normalized_size,
+        provider_created_at=provider_created_at,
+        provider_updated_at=provider_updated_at,
+        invocation=invocation,
+        source_event_type=event_type,
+    )
+
+
+def normalize_slack_history_message(
+    *,
+    tenant_id: str,
+    channel_id: str,
+    root_thread_ts: str,
+    message: dict[str, object],
+) -> SlackNormalizedMessage:
+    """Normalize one message returned by ``conversations.replies``."""
+    envelope: dict[str, object] = {
+        "event": {
+            **message,
+            "type": "message",
+            "channel": channel_id,
+            "channel_type": "channel" if channel_id.startswith("C") else "group",
+            "thread_ts": message.get("thread_ts") or root_thread_ts,
+        }
+    }
+    normalized = normalize_slack_event(
+        event_type="message",
+        tenant_id=tenant_id,
+        envelope=envelope,
+    )
+    if isinstance(normalized, SlackConnectionRevocation):
+        raise AssertionError("History message cannot normalize as revocation.")
+    return normalized
+
+
+def slack_provider_position(timestamp: str) -> str:
+    """Return a lexically sortable canonical Slack timestamp position."""
+    seconds, separator, fraction = timestamp.partition(".")
+    if not seconds.isdigit() or (separator and not fraction.isdigit()):
+        raise SlackEventNormalizationError("Slack message timestamp is invalid.")
+    fraction = (fraction + "000000")[:6]
+    return f"{int(seconds):020d}.{fraction}"
+
+
+class SlackConversationClient:
+    """Bounded Slack Web API adapter for inbound hydration and access control."""
+
+    def __init__(self, http_client: httpx.AsyncClient) -> None:
+        self.http_client = http_client
+
+    async def fetch_conversation_access(
+        self,
+        *,
+        bot_token: str,
+        channel_id: str,
+    ) -> SlackConversationAccess:
+        """Validate App membership and unsupported Slack Connect state."""
+        response = await self._request(
+            "GET",
+            "/conversations.info",
+            bot_token=bot_token,
+            params={"channel": channel_id, "include_num_members": "false"},
+        )
+        payload = self._success_payload(response)
+        channel = payload.get("channel")
+        if not isinstance(channel, dict):
+            raise SlackProviderTemporaryError(
+                "Slack conversation response is malformed."
+            )
+        return SlackConversationAccess(
+            app_member=channel.get("is_member") is True,
+            external_shared=(
+                channel.get("is_ext_shared") is True
+                or channel.get("is_org_shared") is True
+            ),
+            public_or_private_channel=(
+                channel.get("is_channel") is True or channel.get("is_group") is True
+            )
+            and channel.get("is_im") is not True
+            and channel.get("is_mpim") is not True,
+        )
+
+    async def fetch_thread_page(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        root_thread_ts: str,
+        cursor: str | None,
+        limit: int,
+    ) -> SlackThreadPage:
+        """Fetch one cursor page of accessible thread history."""
+        params: dict[str, str | int] = {
+            "channel": channel_id,
+            "ts": root_thread_ts,
+            "limit": limit,
+            "inclusive": "true",
+        }
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = await self._request(
+            "GET",
+            "/conversations.replies",
+            bot_token=bot_token,
+            params=params,
+        )
+        payload = self._success_payload(response)
+        raw_messages = payload.get("messages")
+        if not isinstance(raw_messages, list):
+            raise SlackProviderTemporaryError(
+                "Slack thread history response is malformed."
+            )
+        messages: list[SlackNormalizedMessage] = []
+        for item in raw_messages:
+            if isinstance(item, dict):
+                try:
+                    normalized = normalize_slack_history_message(
+                        tenant_id=tenant_id,
+                        channel_id=channel_id,
+                        root_thread_ts=root_thread_ts,
+                        message=item,
+                    )
+                except SlackEventExcluded:
+                    continue
+                messages.append(normalized)
+        metadata = payload.get("response_metadata")
+        next_cursor = None
+        if isinstance(metadata, dict):
+            raw_cursor = metadata.get("next_cursor")
+            if isinstance(raw_cursor, str) and raw_cursor:
+                next_cursor = raw_cursor
+        return SlackThreadPage(messages=tuple(messages), next_cursor=next_cursor)
+
+    async def get_permalink(
+        self,
+        *,
+        bot_token: str,
+        channel_id: str,
+        message_ts: str,
+    ) -> str | None:
+        """Resolve a provider-validated permalink for one Slack message."""
+        response = await self._request(
+            "GET",
+            "/chat.getPermalink",
+            bot_token=bot_token,
+            params={"channel": channel_id, "message_ts": message_ts},
+        )
+        payload = self._success_payload(response)
+        permalink = payload.get("permalink")
+        if not isinstance(permalink, str) or not permalink.startswith("https://"):
+            return None
+        return permalink
+
+    async def post_approval_control_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
+        approval_url: str,
+    ) -> SlackControlMessageResult:
+        """Attempt one ordinary thread reply containing an approval link."""
+        try:
+            response = await self._request(
+                "POST",
+                "/chat.postMessage",
+                bot_token=bot_token,
+                json_body={
+                    "channel": channel_id,
+                    "thread_ts": thread_ts,
+                    "text": (
+                        "Approval is required before this participant can invoke "
+                        f"the Agent: {approval_url}"
+                    ),
+                    "unfurl_links": False,
+                    "unfurl_media": False,
+                },
+            )
+            payload = self._success_payload(response)
+        except SlackProviderPermissionDenied:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="missing_scope",
+                error_summary="Slack App permissions are incomplete.",
+            )
+        except SlackProviderCredentialsInvalid:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="credentials_invalid",
+                error_summary="Slack rejected the configured credential.",
+            )
+        except SlackProviderResourceUnavailable:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="resource_unavailable",
+                error_summary="Slack cannot post to the linked conversation.",
+            )
+        except SlackProviderRateLimited:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="rate_limited",
+                error_summary="Slack rate limited the control message attempt.",
+            )
+        except SlackProviderTemporaryError:
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary="Slack delivery outcome is unknown.",
+            )
+        ts = payload.get("ts")
+        if not isinstance(ts, str) or not ts:
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_response_invalid",
+                error_summary="Slack did not return a message identity.",
+            )
+        return SlackControlMessageResult(
+            status="delivered",
+            provider_message_key=f"slack:{tenant_id}:{channel_id}:{ts}",
+            error_kind=None,
+            error_summary=None,
+        )
+
+    async def post_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+    ) -> SlackControlMessageResult:
+        """Attempt one ordinary thread message without retry."""
+        return await self._attempt_message_operation(
+            bot_token=bot_token,
+            tenant_id=tenant_id,
+            channel_id=channel_id,
+            path="/chat.postMessage",
+            json_body={
+                "channel": channel_id,
+                "thread_ts": thread_ts,
+                "text": text,
+                "unfurl_links": False,
+                "unfurl_media": False,
+            },
+            expected_message_ts=None,
+        )
+
+    async def update_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        message_ts: str,
+        text: str,
+    ) -> SlackControlMessageResult:
+        """Attempt one message update without retry."""
+        return await self._attempt_message_operation(
+            bot_token=bot_token,
+            tenant_id=tenant_id,
+            channel_id=channel_id,
+            path="/chat.update",
+            json_body={"channel": channel_id, "ts": message_ts, "text": text},
+            expected_message_ts=message_ts,
+        )
+
+    async def delete_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        message_ts: str,
+    ) -> SlackControlMessageResult:
+        """Attempt one message delete without retry."""
+        return await self._attempt_message_operation(
+            bot_token=bot_token,
+            tenant_id=tenant_id,
+            channel_id=channel_id,
+            path="/chat.delete",
+            json_body={"channel": channel_id, "ts": message_ts},
+            expected_message_ts=message_ts,
+        )
+
+    async def _attempt_message_operation(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        path: str,
+        json_body: dict[str, object],
+        expected_message_ts: str | None,
+    ) -> SlackControlMessageResult:
+        """Map one Slack mutation into a sanitized at-most-once outcome."""
+        try:
+            response = await self._request(
+                "POST",
+                path,
+                bot_token=bot_token,
+                json_body=json_body,
+            )
+            payload = self._success_payload(response)
+        except SlackProviderPermissionDenied:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="missing_scope",
+                error_summary="Slack App permissions are incomplete.",
+            )
+        except SlackProviderCredentialsInvalid:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="credentials_invalid",
+                error_summary="Slack rejected the configured credential.",
+            )
+        except SlackProviderResourceUnavailable:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="resource_unavailable",
+                error_summary="Slack cannot mutate the linked conversation.",
+            )
+        except SlackProviderRateLimited:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="rate_limited",
+                error_summary="Slack rate limited the provider operation.",
+            )
+        except SlackProviderTemporaryError:
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary="Slack delivery outcome is unknown.",
+            )
+        message_ts = payload.get("ts")
+        if not isinstance(message_ts, str) or not message_ts:
+            message_ts = expected_message_ts
+        if message_ts is None:
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_response_invalid",
+                error_summary="Slack did not return a message identity.",
+            )
+        return SlackControlMessageResult(
+            status="delivered",
+            provider_message_key=(f"slack:{tenant_id}:{channel_id}:{message_ts}"),
+            error_kind=None,
+            error_summary=None,
+        )
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        bot_token: str,
+        params: dict[str, str | int] | None = None,
+        json_body: dict[str, object] | None = None,
+    ) -> httpx.Response:
+        try:
+            response = await self.http_client.request(
+                method,
+                f"{slack_api_base_url()}{path}",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                params=params,
+                json=json_body,
+            )
+        except httpx.RequestError as error:
+            raise SlackProviderTemporaryError(
+                "Slack request did not produce a response."
+            ) from error
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After", "1")
+            try:
+                retry_after_seconds = int(retry_after)
+            except ValueError:
+                retry_after_seconds = 1
+            raise SlackProviderRateLimited(retry_after_seconds)
+        if response.status_code >= 500:
+            raise SlackProviderTemporaryError("Slack is temporarily unavailable.")
+        return response
+
+    @staticmethod
+    def _success_payload(response: httpx.Response) -> dict[str, object]:
+        try:
+            payload: object = response.json()
+        except ValueError as error:
+            raise SlackProviderTemporaryError(
+                "Slack response body is not valid JSON."
+            ) from error
+        if not isinstance(payload, dict):
+            raise SlackProviderTemporaryError("Slack response body is malformed.")
+        if response.status_code < 400 and payload.get("ok") is True:
+            return payload
+        error_code = payload.get("error")
+        if error_code == "missing_scope":
+            raise SlackProviderPermissionDenied("Slack App permissions are incomplete.")
+        if error_code in {
+            "account_inactive",
+            "invalid_auth",
+            "not_authed",
+            "not_allowed_token_type",
+            "token_revoked",
+        }:
+            raise SlackProviderCredentialsInvalid(
+                "Slack rejected the configured credential."
+            )
+        if error_code in {
+            "channel_not_found",
+            "is_archived",
+            "not_in_channel",
+            "thread_not_found",
+        }:
+            raise SlackProviderResourceUnavailable(
+                "Slack conversation is unavailable to the App."
+            )
+        raise SlackProviderTemporaryError("Slack request failed.")
+
+
+def _required_string(payload: dict[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise SlackEventNormalizationError(f"Slack field '{key}' is missing.")
+    return value
+
+
+def _optional_string(payload: dict[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _eligible_channel(channel_id: str, channel_type: object) -> bool:
+    if channel_type in {"im", "mpim"} or channel_id.startswith("D"):
+        return False
+    if channel_type in {"channel", "group"}:
+        return True
+    return channel_id.startswith(("C", "G"))
+
+
+def _author(
+    message: dict[str, object],
+) -> tuple[ExternalChannelPrincipalAuthorType, str | None]:
+    user_id = _optional_string(message, "user")
+    bot_id = _optional_string(message, "bot_id")
+    app_id = _optional_string(message, "app_id")
+    if bot_id is not None:
+        return ExternalChannelPrincipalAuthorType.BOT, f"bot:{bot_id}"
+    if app_id is not None and user_id is None:
+        return ExternalChannelPrincipalAuthorType.APP, f"app:{app_id}"
+    if user_id is not None:
+        return ExternalChannelPrincipalAuthorType.HUMAN, user_id
+    return ExternalChannelPrincipalAuthorType.SYSTEM, None
+
+
+def _bounded_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    encoded = value.encode()
+    if len(encoded) <= _MAX_NORMALIZED_TEXT_BYTES:
+        return value
+    clipped = encoded[:_MAX_NORMALIZED_TEXT_BYTES].decode(errors="ignore")
+    return f"{clipped}\n[Slack message truncated by Azents]"
+
+
+def _attachment_metadata(value: object) -> dict[str, object] | None:
+    if not isinstance(value, list) or not value:
+        return None
+    block_types = [
+        block.get("type")
+        for block in value[:_MAX_ATTACHMENT_TYPES]
+        if isinstance(block, dict) and isinstance(block.get("type"), str)
+    ]
+    return {
+        "block_count": len(value),
+        "block_types": block_types,
+        "truncated": len(value) > _MAX_ATTACHMENT_TYPES,
+    }
+
+
+def _normalized_size(
+    body: str | None,
+    attachment_metadata: dict[str, object] | None,
+) -> int:
+    return len((body or "").encode()) + len(
+        json.dumps(
+            attachment_metadata,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        if attachment_metadata is not None
+        else b""
+    )
+
+
+def _slack_timestamp(value: str | None) -> datetime.datetime | None:
+    if value is None:
+        return None
+    seconds, separator, fraction = value.partition(".")
+    if not seconds.isdigit() or (separator and not fraction.isdigit()):
+        return None
+    microseconds = int((fraction + "000000")[:6]) if separator else 0
+    try:
+        return datetime.datetime.fromtimestamp(
+            int(seconds),
+            datetime.UTC,
+        ).replace(microsecond=microseconds)
+    except OverflowError, OSError, ValueError:
+        return None
+
+
+def _edited_timestamp(message: dict[str, object]) -> str | None:
+    edited = message.get("edited")
+    if not isinstance(edited, dict):
+        return None
+    return _optional_string(edited, "ts")
+
+
+def _revision_key(
+    *,
+    revision_kind: ExternalChannelMessageRevisionKind,
+    message_ts: str,
+    event: dict[str, object],
+    message: dict[str, object],
+    normalized_body: str | None,
+) -> str:
+    if revision_kind is ExternalChannelMessageRevisionKind.ORIGINAL:
+        return f"original:{message_ts}"
+    if revision_kind is ExternalChannelMessageRevisionKind.DELETE:
+        return f"delete:{message_ts}"
+    lifecycle_ts = (
+        _edited_timestamp(message) or _optional_string(event, "event_ts") or message_ts
+    )
+    body_digest = hashlib.sha256((normalized_body or "").encode()).hexdigest()[:16]
+    return f"edit:{lifecycle_ts}:{body_digest}"

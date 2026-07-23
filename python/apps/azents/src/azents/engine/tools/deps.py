@@ -12,6 +12,7 @@ from azents.core.deps import get_appctx, get_config, get_credential_cipher
 from azents.core.tools import ToolkitProvider
 from azents.engine.tools.aws import AwsToolkitProvider
 from azents.engine.tools.envvar import EnvVarToolkitProvider
+from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.gcp import GcpToolkitProvider
 from azents.engine.tools.github import GitHubToolkitProvider
 from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
@@ -29,6 +30,9 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.artifact import ArtifactService
+from azents.services.external_channel.channel_action import (
+    ExternalChannelActionService,
+)
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
@@ -140,6 +144,13 @@ def get_goal_toolkit_provider(
 ) -> GoalToolkitProvider:
     """GoalToolkitProvider dependency."""
     return GoalToolkitProvider(store=GoalStateStore(session_manager=session_manager))
+
+
+def get_external_channel_toolkit_provider(
+    service: Annotated[ExternalChannelActionService, Depends()],
+) -> ExternalChannelToolkitProvider:
+    """External Channel root Toolkit dependency."""
+    return ExternalChannelToolkitProvider(service=service)
 
 
 def get_skill_state_store(

@@ -694,8 +694,9 @@ async def _finalize_message_write_response(
     input_buffer: InputBuffer,
 ) -> ChatWriteResponse:
     """Publish live state, wake the worker, and return a snapshot."""
-    live_event_upserted = chat_live_event_upserted_dump(
-        input_buffer_to_live_event(input_buffer)
+    live_event = input_buffer_to_live_event(input_buffer)
+    live_event_upserted = (
+        chat_live_event_upserted_dump(live_event) if live_event is not None else None
     )
     broker_message = SessionWakeUp(
         agent_id=agent_id,
@@ -707,11 +708,12 @@ async def _finalize_message_write_response(
         workspace_handle=None,
     )
     await broker.send_message(broker_message)
-    await _publish_chat_event_best_effort(
-        broadcast,
-        session_id=session_id,
-        event=live_event_upserted,
-    )
+    if live_event_upserted is not None:
+        await _publish_chat_event_best_effort(
+            broadcast,
+            session_id=session_id,
+            event=live_event_upserted,
+        )
     snapshot = await _build_chat_write_snapshot(
         chat_service,
         live_event_store,

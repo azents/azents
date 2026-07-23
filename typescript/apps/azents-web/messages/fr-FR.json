@@ -684,6 +684,10 @@
         "subagents": {
           "label": "Sous-agents",
           "description": "Limites de concurrence et d’imbrication des agents délégués"
+        },
+        "channels": {
+          "label": "Canaux externes",
+          "description": "Connexions Slack, routes et accès des participants"
         }
       },
       "settingsLayout": {
@@ -695,7 +699,8 @@
           "chat": "Discussion",
           "settings": "Paramètres",
           "projects": "Projets",
-          "context": "Contexte"
+          "context": "Contexte",
+          "channels": "Canaux"
         },
         "status": {
           "enabled": "Actif",
@@ -901,6 +906,158 @@
         "subagentGuidanceDescription": "Conseils facultatifs sur les types de tâches appropriés ou les contraintes de coût et de qualité. {max} caractères maximum.",
         "subagentGuidancePlaceholder": "Par exemple : privilégier ce modèle pour l'exploration du dépôt et les recherches bien délimitées.",
         "settingsDone": "Terminer"
+      },
+      "externalChannels": {
+        "title": "Canaux externes",
+        "description": "Gérez les connexions Slack dédiées et les participants autorisés à appeler cet agent.",
+        "addConnection": "Ajouter une connexion",
+        "connectionsTitle": "Connexions",
+        "emptyConnectionsTitle": "Aucune connexion de canal externe",
+        "emptyConnectionsDescription": "Connectez une Slack App dédiée pour acheminer les conversations compatibles vers cet agent.",
+        "slack": "Slack",
+        "identityUnavailable": "Identité du fournisseur non vérifiée",
+        "credentialsConfigured": "Identifiants configurés",
+        "credentialsMissing": "Identifiants manquants",
+        "lastVerified": "Dernière vérification",
+        "lastHealth": "Dernier contrôle",
+        "botIdentity": "Identité du bot",
+        "socketGapTitle": "Interruption de livraison Socket détectée",
+        "socketGapDescription": "Vérifiez la connexion et l’historique du canal avant de continuer.",
+        "capabilitiesUnavailable": "Les capacités seront disponibles après validation.",
+        "validate": "Valider",
+        "edit": "Modifier",
+        "disconnect": "Déconnecter",
+        "disconnectConfirm": "Déconnecter définitivement cette connexion ? L’historique existant sera conservé.",
+        "accessTitle": "Accès des participants",
+        "accessDescription": "Consultez les autorisations actives et les participants externes bloqués.",
+        "emptyAccess": "Aucune autorisation ni aucun blocage actif.",
+        "blockNoReason": "Bloqué par un administrateur de l’agent",
+        "revoke": "Révoquer",
+        "unblock": "Débloquer",
+        "editTitle": "Modifier la connexion Slack",
+        "setupTitle": "Connecter une Slack App",
+        "appId": "ID de la Slack App",
+        "guideTitle": "Créer et configurer votre Slack App",
+        "guideDescription": "Choisissez l’une des deux méthodes. Elles produisent les mêmes paramètres pour une Slack App dédiée.",
+        "manifestMethod": "Créer avec un Manifest",
+        "manualMethod": "Créer dans l’interface Slack",
+        "manifestIntro": "Méthode recommandée : Slack configure le bot, les permissions, les événements et le callback à partir de ce Manifest.",
+        "manifestStep1": "Ouvrez Slack API → Your Apps → Create New App → From an app manifest.",
+        "manifestStep2": "Choisissez le workspace dans lequel cet agent sera utilisé.",
+        "manifestStep3": "Copiez le JSON ci-dessous, collez-le dans Slack, vérifiez le résumé puis créez l’App.",
+        "manifestStep4": "Ouvrez OAuth & Permissions puis sélectionnez Install to Workspace.",
+        "manifestJson": "JSON complet de l’App Manifest",
+        "copyManifest": "Copier le Manifest",
+        "copied": "Copié",
+        "manualIntro": "Suivez ces étapes si vous préférez configurer chaque option directement dans Slack.",
+        "manualStep1": "Ouvrez Slack API → Your Apps → Create New App → From scratch, puis choisissez le workspace.",
+        "manualStep2": "Dans OAuth & Permissions → Scopes → Bot Token Scopes, ajoutez tous les scopes ci-dessous.",
+        "manualHttpStep": "Activez Event Subscriptions, collez la Request URL ci-dessous, puis ajoutez tous les Bot Events indiqués.",
+        "manualSocketEventsStep": "Activez Event Subscriptions, puis ajoutez tous les Bot Events indiqués ci-dessous.",
+        "manualSocketStep": "Activez Socket Mode. Dans Basic Information → App-Level Tokens, créez un token avec connections:write et conservez le token xapp- pour le champ App-Level Token.",
+        "copyCallback": "Copier l’URL de callback",
+        "manualInstallStep": "Dans OAuth & Permissions, sélectionnez Install to Workspace. Après une modification des scopes, sélectionnez Reinstall to Workspace.",
+        "manualInviteStep": "Dans chaque canal Slack cible, invitez le bot avec /invite @nom-du-bot.",
+        "reinstallNotice": "Les nouveaux scopes ne sont appliqués qu’après réinstallation de l’App dans le workspace.",
+        "credentialLocationsTitle": "Copiez ces valeurs depuis Slack",
+        "credentialLocationsDescription": "Ces champs correspondent à des valeurs distinctes. Copiez chacune depuis l’écran Slack indiqué.",
+        "appIdLocation": "App ID — Basic Information → App Credentials → App ID.",
+        "signingSecretLocation": "Signing Secret — Basic Information → App Credentials → Signing Secret.",
+        "botTokenLocation": "Bot User OAuth Token — OAuth & Permissions → OAuth Tokens for Your Workspace. Il commence par xoxb- après installation.",
+        "appTokenLocation": "App-Level Token — Basic Information → App-Level Tokens. Créez-le avec connections:write ; il commence par xapp-.",
+        "tokenPrefixes": "Ne saisissez jamais un User OAuth Token. Les tokens Bot commencent par xoxb- et les App-Level Tokens Socket Mode par xapp-.",
+        "botToken": "Token OAuth du bot",
+        "signingSecret": "Secret de signature",
+        "appToken": "Token applicatif",
+        "appTokenRequired": "Requis pour Socket Mode.",
+        "appTokenOptional": "Facultatif avec le transport HTTP.",
+        "credentialSafety": "Les identifiants sont chiffrés par le serveur et ne seront plus affichés.",
+        "cancel": "Annuler",
+        "connect": "Connecter",
+        "saveChanges": "Enregistrer et valider",
+        "status": {
+          "configuring": "Configuration",
+          "active": "Active",
+          "degraded": "Dégradée",
+          "reconnect_required": "Reconnexion requise",
+          "disconnecting": "Déconnexion",
+          "disconnected": "Déconnectée"
+        },
+        "transport": {
+          "http": "HTTP",
+          "socket": "Socket Mode"
+        },
+        "route": {
+          "active": "Route active",
+          "inactive": "Route inactive"
+        },
+        "grantScope": {
+          "session": "Accès à la session",
+          "agent": "Accès à l’agent"
+        },
+        "revokeConfirm": "Révoquer l’autorisation d’accès de ce participant ?",
+        "unblockConfirm": "Débloquer ce participant ?"
+      },
+      "sessionChannels": {
+        "title": "Canaux",
+        "description": "Inspectez les liaisons externes, la projection du travail, les livraisons et les accès conservés.",
+        "archivedTitle": "Session archivée",
+        "archivedDescription": "Les canaux externes ont été définitivement déconnectés lors de l’archivage. Cette vue est en lecture seule.",
+        "retentionUnlimited": "Conservation : illimitée",
+        "retentionDays": "Conservation : {count} jours",
+        "purgeAfter": "Suppression après le {value}",
+        "emptyTitle": "Aucune liaison de canal externe",
+        "emptyDescription": "Cette session n’a pas été appelée depuis un canal externe compatible.",
+        "disconnect": "Déconnecter",
+        "disconnectConfirm": "Déconnecter définitivement ce canal de session ? Son historique sera conservé.",
+        "connectedAt": "Connexion",
+        "latestActivity": "Dernière activité",
+        "retainedContext": "Troncature du contexte en attente",
+        "truncationSummary": "{messages} messages · {bytes} octets supprimés",
+        "disconnectReason": "Motif de déconnexion",
+        "channelWork": "Channel Work",
+        "noWork": "Aucun Channel Work n’est associé à cette liaison.",
+        "taskCount": "{count, plural, =1 {1 tâche} other {# tâches}}",
+        "progressDrift": "Dérive de progression",
+        "progressProjected": "Progression projetée",
+        "revisionProgress": "Projection de la révision Channel Work",
+        "revisionDetail": "Révision d’état {current} · révision souhaitée {desired}",
+        "deliveries": "Résultats de livraison",
+        "noDeliveries": "Aucune livraison au fournisseur n’a été tentée.",
+        "grantsTitle": "Accès à la session",
+        "grantsDescription": "Participants autorisés uniquement pour cette session.",
+        "noGrants": "Aucune autorisation active limitée à la session.",
+        "bindingStatus": {
+          "active": "Active",
+          "disconnected": "Déconnectée"
+        },
+        "activationStatus": {
+          "waiting_hydration": "En attente de l’historique",
+          "active": "Invocation active"
+        },
+        "workStatus": {
+          "active": "Travail actif",
+          "finished": "Travail terminé"
+        },
+        "deliveryStatus": {
+          "pending": "En attente",
+          "attempting": "Tentative",
+          "delivered": "Livrée",
+          "failed": "Échec",
+          "unknown": "Résultat inconnu",
+          "not_attempted": "Non tentée"
+        },
+        "operation": {
+          "reply": "Réponse",
+          "progress_create": "Créer la progression",
+          "progress_update": "Mettre à jour la progression",
+          "progress_delete": "Supprimer la progression",
+          "control_message": "Message de contrôle"
+        },
+        "grantScope": {
+          "session": "Accès à la session",
+          "agent": "Accès à l’agent"
+        }
       }
     },
     "toolkits": {
@@ -1791,6 +1948,28 @@
       "statusFailed": "Échec",
       "statusInterrupted": "Interrompu",
       "statusCancelled": "Annulé"
+    },
+    "externalMessage": {
+      "expand": "Développer le message externe de {source}",
+      "collapse": "Réduire le message externe de {source}",
+      "provider": "Fournisseur",
+      "resource": "Canal / ressource",
+      "sender": "Expéditeur",
+      "authorType": "Type d’auteur",
+      "authorization": "Autorisation",
+      "lifecycle": "État du message",
+      "timestamp": "Heure du fournisseur",
+      "revision": "Type de modification",
+      "corrects": "Révision corrigée",
+      "openOriginal": "Ouvrir le message original",
+      "openOriginalAccessible": "Ouvrir le message original dans {resource}",
+      "originalUnavailable": "Le message original n’est pas disponible.",
+      "status": {
+        "invoked": "Invocation",
+        "context": "Contexte",
+        "edited": "Modifié",
+        "deleted": "Supprimé"
+      }
     }
   },
   "oauth": {
@@ -1817,5 +1996,55 @@
     "goToWorkspaces": "Liste des espaces",
     "redirectingToSetup": "Redirection vers l'autorisation du service...",
     "toolkitRedirectError": "La redirection vers la configuration du service a échoué. Veuillez réessayer depuis les paramètres de l'espace."
+  },
+  "externalChannelApproval": {
+    "title": "Demande d’accès depuis un canal externe",
+    "subtitle": "Vérifiez qui peut invoquer cet Agent depuis Slack.",
+    "loading": "Chargement de la demande d’accès…",
+    "notFoundTitle": "Demande d’accès introuvable",
+    "notFoundDescription": "Ce lien est invalide, inaccessible à votre compte ou la demande n’existe plus.",
+    "unauthorizedTitle": "Connexion requise",
+    "unauthorizedDescription": "Connectez-vous avec un compte Azents autorisé pour examiner cette demande.",
+    "errorTitle": "Impossible de charger la demande",
+    "errorDescription": "La demande d’accès n’a pas pu être chargée. Réessayez.",
+    "retry": "Réessayer",
+    "pendingDescription": "Ce participant attend une décision d’accès explicite. Aucune Session de l’Agent n’a encore été invoquée.",
+    "participant": "Participant",
+    "source": "Source Slack",
+    "provider": "Fournisseur",
+    "expiresAt": "Expiration",
+    "decidedAt": "Décision",
+    "message": "Message de la demande",
+    "openOriginal": "Ouvrir le message Slack original",
+    "originalUnavailable": "Le message Slack original n’est pas disponible.",
+    "chooseAccess": "Choisissez la portée d’accès",
+    "decisionSummary": "Note de décision : {summary}",
+    "status": {
+      "pending": "En attente",
+      "allowed": "Autorisé",
+      "denied": "Refusé",
+      "blocked": "Bloqué",
+      "expired": "Expiré"
+    },
+    "completed": {
+      "allowed": "Cette demande a été approuvée. Le participant peut invoquer l’Agent dans la portée accordée.",
+      "denied": "Cette demande a été refusée. Aucun accès ni invocation de l’Agent n’a été créé.",
+      "blocked": "Ce participant ne peut plus créer de demandes d’accès pour cet Agent.",
+      "expired": "Cette demande a expiré avant qu’une décision soit prise. Elle ne peut plus être approuvée."
+    },
+    "actions": {
+      "allowSession": "Autoriser pour cette Session",
+      "allowSessionDescription": "Accorder l’accès uniquement à la Session créée pour cette conversation Slack.",
+      "allowAgent": "Autoriser pour cet Agent",
+      "allowAgentDescription": "Accorder l’accès à ce participant dans les conversations Slack éligibles de cet Agent.",
+      "deny": "Refuser la demande",
+      "denyDescription": "Clore cette demande sans accorder d’accès.",
+      "block": "Bloquer le participant",
+      "blockDescription": "Refuser cette demande et empêcher les futures demandes pour cet Agent."
+    },
+    "errors": {
+      "conflict": "Cette demande ne peut plus être traitée. Elle a peut-être expiré, été décidée ailleurs ou appartient à un canal déconnecté.",
+      "action": "La décision n’a pas pu être enregistrée. Réessayez."
+    }
   }
 }

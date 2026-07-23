@@ -23,6 +23,7 @@ __all__ = [
     "AuthV1Api",
     "ChatGPTOAuthV1Api",
     "ChatV1Api",
+    "ExternalChannelV1Api",
     "HealthV1Api",
     "InvitationV1Api",
     "JoinRequestV1Api",
@@ -152,6 +153,22 @@ __all__ = [
     "ElevateWithPasswordRequest",
     "EventKind",
     "ExistingProjectWorkspaceItemResponse",
+    "ExternalChannelAccessGrantScope",
+    "ExternalChannelAccessRequestStatus",
+    "ExternalChannelBindingActivationStatus",
+    "ExternalChannelBindingStatus",
+    "ExternalChannelCapabilitySnapshot",
+    "ExternalChannelConnectionStatus",
+    "ExternalChannelConnectionStatusSnapshot",
+    "ExternalChannelCredentialSnapshot",
+    "ExternalChannelDecisionInput",
+    "ExternalChannelDeliveryOperation",
+    "ExternalChannelDeliveryStatus",
+    "ExternalChannelProvider",
+    "ExternalChannelProviderIdentity",
+    "ExternalChannelRouteStatus",
+    "ExternalChannelTransport",
+    "ExternalChannelWorkStatus",
     "GcpConfig",
     "GcpSecrets",
     "GetAuthMethodsResponse",
@@ -202,6 +219,17 @@ __all__ = [
     "LoginMethodsResponse",
     "MCPOAuthConnectionStatus",
     "MCPOAuthConnectionSummaryResponse",
+    "ManagedAccessResponse",
+    "ManagedApprovalRequest",
+    "ManagedBinding",
+    "ManagedBindingListResponse",
+    "ManagedBlock",
+    "ManagedConnection",
+    "ManagedConnectionListResponse",
+    "ManagedConnectionSetup",
+    "ManagedDelivery",
+    "ManagedGrant",
+    "ManagedWork",
     "MeResponse",
     "MemoryCreateRequest",
     "MemoryListResponse",
@@ -286,6 +314,9 @@ __all__ = [
     "SetPasswordRequest",
     "SignupStatusResponse",
     "SkillAction",
+    "SlackConnectionCredentials",
+    "SlackConnectionSetupRequest",
+    "SlackManifestGuidance",
     "SubagentSettings",
     "SubagentTreeNodeResponse",
     "SubagentTreeResponse",
@@ -341,6 +372,7 @@ from azentspublicclient.api.agent_v1_api import AgentV1Api as AgentV1Api
 from azentspublicclient.api.auth_v1_api import AuthV1Api as AuthV1Api
 from azentspublicclient.api.chat_gpto_auth_v1_api import ChatGPTOAuthV1Api as ChatGPTOAuthV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api as ChatV1Api
+from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api as ExternalChannelV1Api
 from azentspublicclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api as JoinRequestV1Api
@@ -474,6 +506,22 @@ from azentspublicclient.models.elevate_with_email_request import ElevateWithEmai
 from azentspublicclient.models.elevate_with_password_request import ElevateWithPasswordRequest as ElevateWithPasswordRequest
 from azentspublicclient.models.event_kind import EventKind as EventKind
 from azentspublicclient.models.existing_project_workspace_item_response import ExistingProjectWorkspaceItemResponse as ExistingProjectWorkspaceItemResponse
+from azentspublicclient.models.external_channel_access_grant_scope import ExternalChannelAccessGrantScope as ExternalChannelAccessGrantScope
+from azentspublicclient.models.external_channel_access_request_status import ExternalChannelAccessRequestStatus as ExternalChannelAccessRequestStatus
+from azentspublicclient.models.external_channel_binding_activation_status import ExternalChannelBindingActivationStatus as ExternalChannelBindingActivationStatus
+from azentspublicclient.models.external_channel_binding_status import ExternalChannelBindingStatus as ExternalChannelBindingStatus
+from azentspublicclient.models.external_channel_capability_snapshot import ExternalChannelCapabilitySnapshot as ExternalChannelCapabilitySnapshot
+from azentspublicclient.models.external_channel_connection_status import ExternalChannelConnectionStatus as ExternalChannelConnectionStatus
+from azentspublicclient.models.external_channel_connection_status_snapshot import ExternalChannelConnectionStatusSnapshot as ExternalChannelConnectionStatusSnapshot
+from azentspublicclient.models.external_channel_credential_snapshot import ExternalChannelCredentialSnapshot as ExternalChannelCredentialSnapshot
+from azentspublicclient.models.external_channel_decision_input import ExternalChannelDecisionInput as ExternalChannelDecisionInput
+from azentspublicclient.models.external_channel_delivery_operation import ExternalChannelDeliveryOperation as ExternalChannelDeliveryOperation
+from azentspublicclient.models.external_channel_delivery_status import ExternalChannelDeliveryStatus as ExternalChannelDeliveryStatus
+from azentspublicclient.models.external_channel_provider import ExternalChannelProvider as ExternalChannelProvider
+from azentspublicclient.models.external_channel_provider_identity import ExternalChannelProviderIdentity as ExternalChannelProviderIdentity
+from azentspublicclient.models.external_channel_route_status import ExternalChannelRouteStatus as ExternalChannelRouteStatus
+from azentspublicclient.models.external_channel_transport import ExternalChannelTransport as ExternalChannelTransport
+from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus as ExternalChannelWorkStatus
 from azentspublicclient.models.gcp_config import GcpConfig as GcpConfig
 from azentspublicclient.models.gcp_secrets import GcpSecrets as GcpSecrets
 from azentspublicclient.models.get_auth_methods_response import GetAuthMethodsResponse as GetAuthMethodsResponse
@@ -524,6 +572,17 @@ from azentspublicclient.models.live_event_list_response import LiveEventListResp
 from azentspublicclient.models.login_methods_response import LoginMethodsResponse as LoginMethodsResponse
 from azentspublicclient.models.mcpo_auth_connection_status import MCPOAuthConnectionStatus as MCPOAuthConnectionStatus
 from azentspublicclient.models.mcpo_auth_connection_summary_response import MCPOAuthConnectionSummaryResponse as MCPOAuthConnectionSummaryResponse
+from azentspublicclient.models.managed_access_response import ManagedAccessResponse as ManagedAccessResponse
+from azentspublicclient.models.managed_approval_request import ManagedApprovalRequest as ManagedApprovalRequest
+from azentspublicclient.models.managed_binding import ManagedBinding as ManagedBinding
+from azentspublicclient.models.managed_binding_list_response import ManagedBindingListResponse as ManagedBindingListResponse
+from azentspublicclient.models.managed_block import ManagedBlock as ManagedBlock
+from azentspublicclient.models.managed_connection import ManagedConnection as ManagedConnection
+from azentspublicclient.models.managed_connection_list_response import ManagedConnectionListResponse as ManagedConnectionListResponse
+from azentspublicclient.models.managed_connection_setup import ManagedConnectionSetup as ManagedConnectionSetup
+from azentspublicclient.models.managed_delivery import ManagedDelivery as ManagedDelivery
+from azentspublicclient.models.managed_grant import ManagedGrant as ManagedGrant
+from azentspublicclient.models.managed_work import ManagedWork as ManagedWork
 from azentspublicclient.models.me_response import MeResponse as MeResponse
 from azentspublicclient.models.memory_create_request import MemoryCreateRequest as MemoryCreateRequest
 from azentspublicclient.models.memory_list_response import MemoryListResponse as MemoryListResponse
@@ -608,6 +667,9 @@ from azentspublicclient.models.session_workspace_project_response import Session
 from azentspublicclient.models.set_password_request import SetPasswordRequest as SetPasswordRequest
 from azentspublicclient.models.signup_status_response import SignupStatusResponse as SignupStatusResponse
 from azentspublicclient.models.skill_action import SkillAction as SkillAction
+from azentspublicclient.models.slack_connection_credentials import SlackConnectionCredentials as SlackConnectionCredentials
+from azentspublicclient.models.slack_connection_setup_request import SlackConnectionSetupRequest as SlackConnectionSetupRequest
+from azentspublicclient.models.slack_manifest_guidance import SlackManifestGuidance as SlackManifestGuidance
 from azentspublicclient.models.subagent_settings import SubagentSettings as SubagentSettings
 from azentspublicclient.models.subagent_tree_node_response import SubagentTreeNodeResponse as SubagentTreeNodeResponse
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse as SubagentTreeResponse

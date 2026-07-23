@@ -39,6 +39,7 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBufferCreate
 from azents.repos.message import MessageRepository
@@ -51,6 +52,7 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
@@ -181,6 +183,7 @@ def _service(
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
+        external_channel_repository=ExternalChannelRepository(),
     )
     return ChatSessionService(
         message_repository=MessageRepository(),
@@ -199,6 +202,10 @@ def _service(
         input_buffer_service=input_buffer_service,
         session_git_worktree_service=cast(SessionGitWorktreeService, object()),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
+        external_channel_lifecycle_service=cast(
+            ExternalChannelLifecycleService,
+            object(),
+        ),
         session_manager=rdb_session_manager,
     )
 
@@ -503,6 +510,7 @@ class TestChatSessionInputBuffer:
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
+            external_channel_repository=ExternalChannelRepository(),
         )
         promoted = await input_buffer_service.flush_session_input_buffers(
             session_id=session_id,

@@ -4576,6 +4576,837 @@
         }
       }
     },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Get Manifest Guidance",
+        "description": "Return copy-ready Slack App configuration after Agent access validation.",
+        "operationId": "external_channel_v1_get_manifest_guidance",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "transport",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExternalChannelTransport"
+            }
+          },
+          {
+            "name": "app_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "default": "Azents Agent",
+              "title": "App Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackManifestGuidance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "List Connections",
+        "description": "List provider-neutral connections and routes for one Agent.",
+        "operationId": "external_channel_v1_list_connections",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnectionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Setup Slack Connection",
+        "description": "Create a dedicated Slack App connection and active Agent route.",
+        "operationId": "external_channel_v1_setup_slack_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackConnectionSetupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnectionSetup"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/validate": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Validate Connection",
+        "description": "Validate credentials and activate or update sanitized connection health.",
+        "operationId": "external_channel_v1_validate_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelConnectionStatusSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Update Slack Connection",
+        "description": "Replace the complete Slack setup and immediately validate it.",
+        "operationId": "external_channel_v1_update_slack_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackConnectionSetupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelConnectionStatusSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}": {
+      "delete": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Disconnect Connection",
+        "description": "Terminally disconnect a connection after one-attempt progress cleanup.",
+        "operationId": "external_channel_v1_disconnect_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnection"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "List Agent Access",
+        "description": "List Agent grants and blocks without provider-native secret data.",
+        "operationId": "external_channel_v1_list_agent_access",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedAccessResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/grants/{grant_id}": {
+      "delete": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Revoke Access Grant",
+        "description": "Revoke one Agent- or Session-scoped external participant grant.",
+        "operationId": "external_channel_v1_revoke_access_grant",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Grant Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/blocks/{block_id}": {
+      "delete": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Remove Access Block",
+        "description": "Remove one Agent-level external participant block.",
+        "operationId": "external_channel_v1_remove_access_block",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "block_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Block Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "List Session Channels",
+        "description": "List bindings, Channel Work, delivery outcomes, and Session grants.",
+        "operationId": "external_channel_v1_list_session_channels",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedBindingListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}": {
+      "delete": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Disconnect Session Channel",
+        "description": "Terminally disconnect one binding and retain its history.",
+        "operationId": "external_channel_v1_disconnect_session_channel",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Binding Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedBindingListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/approval-requests/{access_request_id}": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Get Approval Request",
+        "description": "Load one opaque authenticated approval request.",
+        "operationId": "external_channel_v1_get_approval_request",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "access_request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Access Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedApprovalRequest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/approval-requests/{access_request_id}/decision": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Decide Approval Request",
+        "description": "Apply one idempotent Allow Session, Allow Agent, Deny, or Block decision.",
+        "operationId": "external_channel_v1_decide_approval_request",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "access_request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Access Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalChannelDecisionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedApprovalRequest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/v1/readiness": {
       "get": {
         "tags": [
@@ -12486,6 +13317,7 @@
           "goal_updated",
           "action_message",
           "agent_message",
+          "external_channel_message",
           "action_execution_result",
           "skill_loaded",
           "goal_briefing",
@@ -12527,6 +13359,352 @@
         ],
         "title": "ExistingProjectWorkspaceItemResponse",
         "description": "Existing Project default workspace item response."
+      },
+      "ExternalChannelAccessGrantScope": {
+        "type": "string",
+        "enum": [
+          "session",
+          "agent"
+        ],
+        "title": "ExternalChannelAccessGrantScope",
+        "description": "Scope of an external principal invocation grant."
+      },
+      "ExternalChannelAccessRequestStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "allowed",
+          "denied",
+          "blocked",
+          "expired"
+        ],
+        "title": "ExternalChannelAccessRequestStatus",
+        "description": "External invocation access-request state."
+      },
+      "ExternalChannelBindingActivationStatus": {
+        "type": "string",
+        "enum": [
+          "waiting_hydration",
+          "active"
+        ],
+        "title": "ExternalChannelBindingActivationStatus",
+        "description": "Initial invocation activation state for one active binding."
+      },
+      "ExternalChannelBindingStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "disconnected"
+        ],
+        "title": "ExternalChannelBindingStatus",
+        "description": "Session binding lifecycle status."
+      },
+      "ExternalChannelCapabilitySnapshot": {
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider",
+            "description": "Provider"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalChannelTransport",
+            "description": "Configured transport"
+          },
+          "inbound_events": {
+            "type": "boolean",
+            "title": "Inbound Events",
+            "description": "Whether inbound events are supported"
+          },
+          "thread_history": {
+            "type": "boolean",
+            "title": "Thread History",
+            "description": "Whether thread history can be collected"
+          },
+          "post_messages": {
+            "type": "boolean",
+            "title": "Post Messages",
+            "description": "Whether messages can be posted"
+          },
+          "update_messages": {
+            "type": "boolean",
+            "title": "Update Messages",
+            "description": "Whether owned messages can be updated"
+          },
+          "delete_messages": {
+            "type": "boolean",
+            "title": "Delete Messages",
+            "description": "Whether owned messages can be deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "transport",
+          "inbound_events",
+          "thread_history",
+          "post_messages",
+          "update_messages",
+          "delete_messages"
+        ],
+        "title": "ExternalChannelCapabilitySnapshot",
+        "description": "Redacted provider capabilities resolved for one connection."
+      },
+      "ExternalChannelConnectionStatus": {
+        "type": "string",
+        "enum": [
+          "configuring",
+          "active",
+          "degraded",
+          "reconnect_required",
+          "disconnecting",
+          "disconnected"
+        ],
+        "title": "ExternalChannelConnectionStatus",
+        "description": "External connection lifecycle status."
+      },
+      "ExternalChannelConnectionStatusSnapshot": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ExternalChannelConnectionStatus",
+            "description": "Current operational status"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code",
+            "description": "Stable machine-readable status code"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Operator-safe status explanation"
+          },
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint",
+            "description": "Operator-safe remediation hint"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At",
+            "description": "Most recent status observation time"
+          },
+          "identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalChannelProviderIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Validated non-secret provider identity"
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/ExternalChannelCredentialSnapshot",
+            "description": "Redacted credential configuration state"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalChannelCapabilitySnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resolved provider capabilities when available"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "code",
+          "message",
+          "action_hint",
+          "checked_at",
+          "identity",
+          "credentials",
+          "capabilities"
+        ],
+        "title": "ExternalChannelConnectionStatusSnapshot",
+        "description": "Redacted current connection status for service and future API projection."
+      },
+      "ExternalChannelCredentialSnapshot": {
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider",
+            "description": "Credential provider"
+          },
+          "configured_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Configured Fields",
+            "description": "Configured secret field names without secret values"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "configured_fields"
+        ],
+        "title": "ExternalChannelCredentialSnapshot",
+        "description": "Redacted indication of which encrypted credential fields are present."
+      },
+      "ExternalChannelDecisionInput": {
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow_session",
+              "allow_agent",
+              "deny",
+              "block"
+            ],
+            "title": "Decision"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "ExternalChannelDecisionInput"
+      },
+      "ExternalChannelDeliveryOperation": {
+        "type": "string",
+        "enum": [
+          "reply",
+          "progress_create",
+          "progress_update",
+          "progress_delete",
+          "control_message"
+        ],
+        "title": "ExternalChannelDeliveryOperation",
+        "description": "External provider side effect requested by a delivery intent."
+      },
+      "ExternalChannelDeliveryStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "attempting",
+          "delivered",
+          "failed",
+          "unknown",
+          "not_attempted"
+        ],
+        "title": "ExternalChannelDeliveryStatus",
+        "description": "Outcome state of one external provider delivery attempt."
+      },
+      "ExternalChannelProvider": {
+        "type": "string",
+        "enum": [
+          "slack"
+        ],
+        "title": "ExternalChannelProvider",
+        "description": "External collaboration provider."
+      },
+      "ExternalChannelProviderIdentity": {
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "bot_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "app_id",
+          "tenant_id",
+          "bot_user_id"
+        ],
+        "title": "ExternalChannelProviderIdentity",
+        "description": "Validated non-secret identity for one installed provider application."
+      },
+      "ExternalChannelRouteStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "inactive"
+        ],
+        "title": "ExternalChannelRouteStatus",
+        "description": "External connection to Agent route lifecycle status."
+      },
+      "ExternalChannelTransport": {
+        "type": "string",
+        "enum": [
+          "http",
+          "socket"
+        ],
+        "title": "ExternalChannelTransport",
+        "description": "Inbound transport selected for one external connection."
+      },
+      "ExternalChannelWorkStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "finished"
+        ],
+        "title": "ExternalChannelWorkStatus",
+        "description": "Binding-scoped Channel Work lifecycle status."
       },
       "GcpConfig": {
         "properties": {
@@ -14133,6 +15311,718 @@
         ],
         "title": "MCPOAuthConnectionSummaryResponse",
         "description": "MCP OAuth connection summary response model."
+      },
+      "ManagedAccessResponse": {
+        "properties": {
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedGrant"
+            },
+            "type": "array",
+            "title": "Grants"
+          },
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedBlock"
+            },
+            "type": "array",
+            "title": "Blocks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "grants",
+          "blocks"
+        ],
+        "title": "ManagedAccessResponse"
+      },
+      "ManagedApprovalRequest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "agent_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Session Id"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalChannelAccessRequestStatus"
+          },
+          "principal_id": {
+            "type": "string",
+            "title": "Principal Id"
+          },
+          "principal_label": {
+            "type": "string",
+            "title": "Principal Label"
+          },
+          "resource_label": {
+            "type": "string",
+            "title": "Resource Label"
+          },
+          "source_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Text"
+          },
+          "original_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Url"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decision_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "workspace_id",
+          "agent_session_id",
+          "provider",
+          "status",
+          "principal_id",
+          "principal_label",
+          "resource_label",
+          "source_text",
+          "original_url",
+          "expires_at",
+          "decided_at",
+          "decision_summary"
+        ],
+        "title": "ManagedApprovalRequest"
+      },
+      "ManagedBinding": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_session_id": {
+            "type": "string",
+            "title": "Agent Session Id"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_label": {
+            "type": "string",
+            "title": "Resource Label"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalChannelBindingStatus"
+          },
+          "activation_status": {
+            "$ref": "#/components/schemas/ExternalChannelBindingActivationStatus"
+          },
+          "truncated_message_count": {
+            "type": "integer",
+            "title": "Truncated Message Count"
+          },
+          "truncated_size": {
+            "type": "integer",
+            "title": "Truncated Size"
+          },
+          "connected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Connected At"
+          },
+          "disconnected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disconnected At"
+          },
+          "disconnect_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disconnect Reason"
+          },
+          "latest_activity_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Activity At"
+          },
+          "work": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManagedWork"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deliveries": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedDelivery"
+            },
+            "type": "array",
+            "title": "Deliveries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_session_id",
+          "provider",
+          "resource_type",
+          "resource_label",
+          "status",
+          "activation_status",
+          "truncated_message_count",
+          "truncated_size",
+          "connected_at",
+          "disconnected_at",
+          "disconnect_reason",
+          "latest_activity_at",
+          "work",
+          "deliveries"
+        ],
+        "title": "ManagedBinding"
+      },
+      "ManagedBindingListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedBinding"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedGrant"
+            },
+            "type": "array",
+            "title": "Grants"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "grants"
+        ],
+        "title": "ManagedBindingListResponse"
+      },
+      "ManagedBlock": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "principal_id": {
+            "type": "string",
+            "title": "Principal Id"
+          },
+          "principal_label": {
+            "type": "string",
+            "title": "Principal Label"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "removed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "principal_id",
+          "principal_label",
+          "reason",
+          "created_at",
+          "removed_at"
+        ],
+        "title": "ManagedBlock"
+      },
+      "ManagedConnection": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "route_id": {
+            "type": "string",
+            "title": "Route Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalChannelTransport"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalChannelConnectionStatus"
+          },
+          "route_status": {
+            "$ref": "#/components/schemas/ExternalChannelRouteStatus"
+          },
+          "provider_app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider App Id"
+          },
+          "provider_tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Tenant Id"
+          },
+          "provider_bot_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Bot User Id"
+          },
+          "credentials_configured": {
+            "type": "boolean",
+            "title": "Credentials Configured"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capabilities"
+          },
+          "last_verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Verified At"
+          },
+          "last_health_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Health At"
+          },
+          "socket_gap_detected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Socket Gap Detected At"
+          },
+          "socket_gap_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Socket Gap Reason"
+          },
+          "disconnected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disconnected At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "route_id",
+          "agent_id",
+          "provider",
+          "transport",
+          "status",
+          "route_status",
+          "provider_app_id",
+          "provider_tenant_id",
+          "provider_bot_user_id",
+          "credentials_configured",
+          "capabilities",
+          "last_verified_at",
+          "last_health_at",
+          "socket_gap_detected_at",
+          "socket_gap_reason",
+          "disconnected_at"
+        ],
+        "title": "ManagedConnection"
+      },
+      "ManagedConnectionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedConnection"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ManagedConnectionListResponse"
+      },
+      "ManagedConnectionSetup": {
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/ManagedConnection"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connection"
+        ],
+        "title": "ManagedConnectionSetup"
+      },
+      "ManagedDelivery": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ExternalChannelDeliveryOperation"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalChannelDeliveryStatus"
+          },
+          "error_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Kind"
+          },
+          "error_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Summary"
+          },
+          "attempted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempted At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "operation",
+          "status",
+          "error_kind",
+          "error_summary",
+          "attempted_at",
+          "completed_at",
+          "created_at"
+        ],
+        "title": "ManagedDelivery"
+      },
+      "ManagedGrant": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "principal_id": {
+            "type": "string",
+            "title": "Principal Id"
+          },
+          "principal_label": {
+            "type": "string",
+            "title": "Principal Label"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ExternalChannelAccessGrantScope"
+          },
+          "agent_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Session Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "principal_id",
+          "principal_label",
+          "scope",
+          "agent_session_id",
+          "created_at",
+          "revoked_at"
+        ],
+        "title": "ManagedGrant"
+      },
+      "ManagedWork": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalChannelWorkStatus"
+          },
+          "tasks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "state_revision": {
+            "type": "integer",
+            "title": "State Revision"
+          },
+          "desired_progress_revision": {
+            "type": "integer",
+            "title": "Desired Progress Revision"
+          },
+          "progress_projected": {
+            "type": "boolean",
+            "title": "Progress Projected"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "tasks",
+          "state_revision",
+          "desired_progress_revision",
+          "progress_projected",
+          "finished_at"
+        ],
+        "title": "ManagedWork"
       },
       "MeResponse": {
         "properties": {
@@ -16846,6 +18736,143 @@
         "title": "SkillAction",
         "description": "Skill invocation turn action."
       },
+      "SlackConnectionCredentials": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "const": "slack",
+            "title": "Provider",
+            "default": "slack"
+          },
+          "bot_token": {
+            "type": "string",
+            "title": "Bot Token",
+            "description": "Slack bot user OAuth token"
+          },
+          "signing_secret": {
+            "type": "string",
+            "title": "Signing Secret",
+            "description": "Slack request signing secret"
+          },
+          "app_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Token",
+            "description": "Slack Socket Mode app-level token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bot_token",
+          "signing_secret",
+          "app_token"
+        ],
+        "title": "SlackConnectionCredentials",
+        "description": "Validated secret payload for one Slack App connection."
+      },
+      "SlackConnectionSetupRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "App Id"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalChannelTransport"
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/SlackConnectionCredentials"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "transport",
+          "credentials"
+        ],
+        "title": "SlackConnectionSetupRequest"
+      },
+      "SlackManifestGuidance": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "const": "slack",
+            "title": "Provider",
+            "default": "slack"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalChannelTransport"
+          },
+          "bot_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Bot Scopes"
+          },
+          "event_subscriptions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Event Subscriptions"
+          },
+          "socket_mode_enabled": {
+            "type": "boolean",
+            "title": "Socket Mode Enabled"
+          },
+          "app_token_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Token Scope"
+          },
+          "callback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callback Url"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Manifest"
+          },
+          "manifest_json": {
+            "type": "string",
+            "title": "Manifest Json"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transport",
+          "bot_scopes",
+          "event_subscriptions",
+          "socket_mode_enabled",
+          "app_token_scope",
+          "callback_url",
+          "manifest",
+          "manifest_json"
+        ],
+        "title": "SlackManifestGuidance"
+      },
       "SubagentSettings": {
         "properties": {
           "max_subagents": {
@@ -18717,6 +20744,10 @@
     {
       "name": "Chat v1",
       "description": "\nChat API (Public)\n\nWebSocket chat and REST message lookup endpoints.\n"
+    },
+    {
+      "name": "External Channel v1",
+      "description": "\nExternal Channel provider callbacks and authenticated management APIs.\n\nRaw provider callbacks remain excluded from the generated public-client\ncontract.\n"
     },
     {
       "name": "Health v1",

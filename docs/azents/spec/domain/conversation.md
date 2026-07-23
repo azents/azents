@@ -102,7 +102,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-23
-spec_version: 127
+spec_version: 128
 ---
 
 # Conversation & Events
@@ -297,6 +297,11 @@ path whose branch differs from the allocation, or another ambiguous ownership st
 The worktree participant records a bounded durable classification, retains allocation ownership and
 retry state on failure, and resumes only its incomplete checkpoint through the ordinary retry
 workflow. Final Session deletion still requires every allocation to be cleaned.
+Irreversible purge fencing also snapshots the required participant keys and policy versions. A fenced
+job executes only that immutable snapshot across retries and deployments; later registry additions
+apply only to newly fenced jobs. Persisted keys, policy versions, and dependencies must remain
+supported, and an unsupported snapshot remains retryable rather than silently changing its required
+work.
 
 Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
 projections, broker wake-up, and the REST response use that same session id. Runtime current/active
@@ -955,9 +960,32 @@ Current verification:
 - `cd testenv/azents/e2e && uv run pytest -vv src/tests/azents/public/test_session_git_worktree_lifecycle.py` in deterministic E2E CI
 - REST chat write verification evidence is recorded in `docs/azents/design/rest-chat-write-boundary.md`; preemptive stop audit and E2E coverage evidence is recorded in `docs/azents/design/preemptive-user-stop-phase6-audit.md` and `docs/azents/design/preemptive-user-stop-phase7-verification.md`. Docker/testcontainers blocker #4468 and browser-runner blocker #4469 track scenarios that could not run in the current agent runtime.
 
-## 11. Changelog
+## 11. External Channel Conversation Projection
 
-- **2026-07-23** — v127. Raw data dialogs show the canonical technical Tool name before retained arguments and result for both client and provider calls.
+An authorized External Channel invocation enters a Session through a batch
+InputBuffer that stores only the invocation-batch reference. Promotion resolves
+the immutable ordered batch items and appends contiguous
+`external_channel_message` events; provider text is not duplicated in the
+InputBuffer payload.
+
+Each event retains provider, resource/binding, canonical message and revision,
+sender, author type, provider timestamp, authorization state, lifecycle, and
+nullable validated original URL. It is distinct from `user_message`: the
+external participant is not the current Azents Web user. Live and durable
+projections use the same semantic identity so durable history replaces live
+state without duplicate timeline rows.
+
+Edits and deletes do not rewrite a revision already projected into Session
+history. A later authorized release may append a source-attributed correction.
+Canonical provider messages remain outside AgentSession purge; batch membership
+and other Session-owned projection state follow the External Channel lifecycle
+participant.
+
+## 12. Changelog
+
+- **2026-07-22** — v126. Added External Channel batch InputBuffer promotion, source-attributed transcript events, stable live/durable identity, and revision/lifecycle ownership.
+
+- **2026-07-23** — v128. Raw data dialogs show the canonical technical Tool name before retained arguments and result for both client and provider calls.
 - **2026-07-22** — v126. Added archive-time worktree integrity inspection, dirty-worktree preservation, purge-only forced cleanup, terminal absence classification, ambiguous-target safety, and ordinary retry convergence.
 - **2026-07-21** — v125. Added closed client-tool wire dialect persistence, same-dialect replay and pairing, and bounded non-executable custom history projection.
 - **2026-07-21** — v123. Completed validated specialized presentation coverage for source-less client builtins, added rich provider `web_search`, standardized Activity event rows and fixed Raw data action placement, removed Generic filler copy, and kept sensitive payloads out of collapsed summaries.

@@ -58,6 +58,56 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                 purge_policy=SessionLifecyclePurgePolicy.REQUIRED,
             ),
             SessionLifecycleParticipantDefinition(
+                key="session.external-channel",
+                policy_version=1,
+                dependencies=("session.execution",),
+                owned_resources=(
+                    _database_resource(
+                        "external_channel_bindings",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                    _database_resource(
+                        "external_channel_invocation_batches",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                    _database_resource(
+                        "external_channel_invocation_batch_items",
+                        SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                    _database_resource(
+                        "external_channel_access_requests",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                    _database_resource(
+                        "external_channel_access_grants",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                    _database_resource(
+                        "external_channel_works",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                    _database_resource(
+                        "external_channel_actions",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                    _database_resource(
+                        "external_channel_delivery_attempts",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                ),
+                archive_policy=SessionLifecycleTransitionPolicy.TERMINATE,
+                restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,
+                purge_policy=SessionLifecyclePurgePolicy.REQUIRED,
+            ),
+            SessionLifecycleParticipantDefinition(
                 key="session.broker-state",
                 policy_version=1,
                 dependencies=("session.execution",),

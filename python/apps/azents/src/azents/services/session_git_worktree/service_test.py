@@ -46,6 +46,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
@@ -67,6 +68,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeGitRefsResult,
     RuntimeGitRemoveWorktreeResult,
     RuntimeOperationTextCallback,
+    RuntimeRunnerOperationCanceledError,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
 )
@@ -190,10 +192,12 @@ class _RunnerOperations:
         failures: list[str] | None = None,
         cleanup_failures: list[str] | None = None,
         cleanup_failure_code: str | None = None,
+        parent_delete_canceled: bool = False,
     ) -> None:
         self.failures = list(failures or [])
         self.cleanup_failures = list(cleanup_failures or [])
         self.cleanup_failure_code = cleanup_failure_code
+        self.parent_delete_canceled = parent_delete_canceled
         self.calls: list[dict[str, object]] = []
         self.inspect_result: RuntimeGitInspectWorktreeResult | None = None
         self.remove_outcome: Literal["removed", "already_absent"] = "removed"
@@ -413,6 +417,8 @@ class _RunnerOperations:
                 "recursive": recursive,
             }
         )
+        if self.parent_delete_canceled:
+            raise RuntimeRunnerOperationCanceledError("parent cleanup canceled")
         return RuntimeFileDeleteResult(path=path, final_cursor="cursor-delete")
 
 
@@ -572,6 +578,7 @@ def _input_service(
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
+            external_channel_repository=ExternalChannelRepository(),
         ),
         session_manager=session_manager,
     )
@@ -601,6 +608,7 @@ async def _execute_first_setup_action(
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
+        external_channel_repository=ExternalChannelRepository(),
     ).flush_session_input_buffers(
         session_id=session_id,
         model=None,
@@ -1674,6 +1682,49 @@ class TestSessionGitWorktreeService:
         assert allocation.cleanup_summary == (
             "Git worktree cleanup completed: confirmed_absent."
         )
+
+    async def test_root_tree_cleanup_ignores_canceled_empty_parent_cleanup(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Canceled best-effort parent cleanup does not block durable convergence."""
+        runner = _RunnerOperations(parent_delete_canceled=True)
+        runner.remove_outcome = "already_absent"
+        (
+            worktree_service,
+            _,
+            agent_id,
+            session_id,
+        ) = await _create_ready_worktree_session(
+            rdb_session_manager,
+            slug="cleanup-parent-canceled",
+            runner=runner,
+        )
+
+        count = await worktree_service.run_cleanup_for_root_tree(
+            agent_id=agent_id,
+            root_session_id=session_id,
+            subtree_session_ids=[session_id],
+        )
+
+        async with rdb_session_manager() as session:
+            allocation = await SessionGitWorktreeRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        assert count == 1
+        assert allocation is not None
+        assert allocation.status is SessionGitWorktreeStatus.CLEANED
+        assert allocation.cleanup_summary == (
+            "Git worktree cleanup completed: confirmed_absent."
+        )
+        assert [call["operation"] for call in runner.calls] == [
+            "create_git_worktree",
+            "remove_git_worktree",
+            "delete_git_branch",
+            "list_files",
+            "delete_file",
+        ]
 
     async def test_manual_cleanup_rejects_ordinary_project_target(
         self,

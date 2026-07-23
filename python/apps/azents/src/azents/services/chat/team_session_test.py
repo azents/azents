@@ -31,6 +31,8 @@ from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
@@ -47,6 +49,10 @@ from azents.services.chat.data import (
     InvalidSessionTitle,
 )
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.external_channel.channel_action import (
+    ExternalChannelActionService,
+)
+from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferService
 from azents.services.session_git_worktree import (
     GitWorktreeArchiveIntegrityFailure,
@@ -162,12 +168,17 @@ def _service(
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
+            external_channel_repository=ExternalChannelRepository(),
         ),
         session_git_worktree_service=cast(
             SessionGitWorktreeService,
             _ArchiveIntegrityService(archive_integrity_failure),
         ),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
+        external_channel_lifecycle_service=ExternalChannelLifecycleService(
+            repository=ExternalChannelLifecycleRepository(),
+            action_service=cast(ExternalChannelActionService, _ChannelActionService()),
+        ),
         session_manager=rdb_session_manager,
     )
 
@@ -177,6 +188,15 @@ class _ExchangeFileService(ExchangeFileService):
 
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
+
+
+class _ChannelActionService:
+    """Return an empty archive delivery sweep for Session tests."""
+
+    async def drain_archive_cleanup(self, delivery_ids: object) -> int:
+        """Report that no provider cleanup intent was pending."""
+        del delivery_ids
+        return 0
 
 
 class _OwnedWorktreeRepository(SessionGitWorktreeRepository):

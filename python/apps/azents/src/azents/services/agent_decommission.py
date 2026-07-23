@@ -21,7 +21,10 @@ from azents.core.enums import (
     AgentSessionStatus,
 )
 from azents.core.s3.deps import get_s3_service
-from azents.core.session_lifecycle import SessionLifecycleTransitionContext
+from azents.core.session_lifecycle import (
+    SessionLifecycleParticipantDefinition,
+    SessionLifecycleTransitionContext,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -35,6 +38,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
+from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
 )
@@ -95,6 +99,10 @@ class AgentDecommissionService:
     lifecycle_orchestrator: Annotated[
         SessionLifecycleOrchestrator,
         Depends(get_session_lifecycle_orchestrator),
+    ]
+    external_channel_lifecycle_service: Annotated[
+        ExternalChannelLifecycleService,
+        Depends(ExternalChannelLifecycleService),
     ]
     broker: Annotated[SessionBroker, Depends(get_broker)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
@@ -238,6 +246,7 @@ class AgentDecommissionService:
         """Stop and archive one root tree through the shared lifecycle registry."""
         stop_session_ids: list[str] = []
         active = False
+        archive_cleanup_ids: tuple[str, ...] = ()
         async with self.session_manager() as session:
             tree = await self.agent_session_repository.lock_root_tree_sessions(
                 session,
@@ -287,12 +296,28 @@ class AgentDecommissionService:
                         retention_days=settings.archived_session_retention_days,
                     )
 
+                async def archive_participant(
+                    definition: SessionLifecycleParticipantDefinition,
+                    context: SessionLifecycleTransitionContext,
+                ) -> None:
+                    """Apply lifecycle-owned state before archiving the root tree."""
+                    nonlocal archive_cleanup_ids
+                    lifecycle = self.external_channel_lifecycle_service
+                    result = await lifecycle.archive_participant(
+                        session,
+                        definition,
+                        context,
+                    )
+                    if result is not None:
+                        archive_cleanup_ids = result.progress_delete_intent_ids
+
                 await self.lifecycle_orchestrator.archive(
                     context=SessionLifecycleTransitionContext(
                         transition_id=f"{job.id}:{root_session_id}:decommission",
                         root_session_id=root_session_id,
                         subtree_session_ids=tuple(session_ids),
                     ),
+                    participant_operation=archive_participant,
                     transition=archive_tree,
                 )
                 await self.retention_repository.schedule_purge_job(
@@ -313,6 +338,10 @@ class AgentDecommissionService:
                     raise RuntimeError("Agent decommission lease was lost")
                 await session.commit()
 
+        if not active:
+            await self.external_channel_lifecycle_service.consume_archive_cleanup(
+                archive_cleanup_ids
+            )
         for session_id in stop_session_ids:
             await self.broker.send_message(SessionStopSignal(session_id=session_id))
         return not active
@@ -329,6 +358,11 @@ class AgentDecommissionService:
             if agent is None:
                 raise RuntimeError("Decommissioning Agent is missing")
             now = datetime.datetime.now(datetime.UTC)
+            await self.external_channel_lifecycle_service.cleanup_decommissioned_agent(
+                session,
+                agent_id=job.agent_id,
+                now=now,
+            )
             await self.exchange_file_repository.expire_unbound_by_agent_id(
                 session,
                 agent_id=job.agent_id,

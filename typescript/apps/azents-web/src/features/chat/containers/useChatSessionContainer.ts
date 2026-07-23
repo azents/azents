@@ -787,6 +787,45 @@ function eventMetadata(event: ChatEventResponse): Record<string, string> {
   };
 }
 
+function optionalEventMetadata(
+  payload: Record<string, unknown>,
+  key: string,
+): Record<string, string> {
+  const value = stringField(payload, key);
+  return value === null ? {} : { [key]: value };
+}
+
+function externalChannelEventMetadata(
+  event: ChatEventResponse,
+): Record<string, string> {
+  const payload = event.payload;
+  return {
+    ...eventMetadata(event),
+    source: "external_channel",
+    provider: stringField(payload, "provider") ?? "external",
+    resource_id: stringField(payload, "resource_id") ?? "",
+    resource_label: stringField(payload, "resource_label") ?? "",
+    resource_type: stringField(payload, "resource_type") ?? "",
+    binding_id: stringField(payload, "binding_id") ?? "",
+    invocation_batch_id: stringField(payload, "invocation_batch_id") ?? "",
+    external_message_id: stringField(payload, "external_message_id") ?? "",
+    revision_id: stringField(payload, "revision_id") ?? "",
+    revision_kind: stringField(payload, "revision_kind") ?? "original",
+    projection_root_id: stringField(payload, "projection_root_id") ?? "",
+    provider_position: stringField(payload, "provider_position") ?? "",
+    author_type: stringField(payload, "author_type") ?? "unknown",
+    authorization: stringField(payload, "authorization") ?? "context_only",
+    lifecycle: stringField(payload, "lifecycle") ?? "active",
+    provider_created_at:
+      stringField(payload, "provider_created_at") ?? event.created_at,
+    ...optionalEventMetadata(payload, "provider_updated_at"),
+    ...optionalEventMetadata(payload, "provider_user_id"),
+    ...optionalEventMetadata(payload, "sender_display_name"),
+    ...optionalEventMetadata(payload, "original_url"),
+    ...optionalEventMetadata(payload, "correction_of_revision_id"),
+  };
+}
+
 function failedRunMetadataRecord(
   failure: FailedRunFailureMetadata | null,
 ): Record<string, string> | null {
@@ -956,6 +995,19 @@ function mapEvents(
               source_path: stringField(payload, "source_path") ?? "",
               target_path: stringField(payload, "target_path") ?? "",
             },
+          },
+        ];
+      }
+      case "external_channel_message": {
+        return [
+          ...messages,
+          {
+            id: event.id,
+            role: "user",
+            content: stringField(payload, "body"),
+            createdAt: event.created_at,
+            status: "complete",
+            metadata: externalChannelEventMetadata(event),
           },
         ];
       }

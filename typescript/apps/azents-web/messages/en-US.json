@@ -684,6 +684,10 @@
         "subagents": {
           "label": "Subagents",
           "description": "Concurrency and nesting limits for delegated agents"
+        },
+        "channels": {
+          "label": "External channels",
+          "description": "Slack connections, routes, and participant access"
         }
       },
       "settingsLayout": {
@@ -695,7 +699,8 @@
           "chat": "Chat",
           "settings": "Settings",
           "projects": "Projects",
-          "context": "Context"
+          "context": "Context",
+          "channels": "Channels"
         },
         "status": {
           "enabled": "Active",
@@ -901,6 +906,158 @@
         "subagentGuidanceDescription": "Optional guidance for appropriate task types or cost and quality constraints. Maximum {max} characters.",
         "subagentGuidancePlaceholder": "For example: Prefer for repository exploration and bounded investigation.",
         "settingsDone": "Done"
+      },
+      "externalChannels": {
+        "title": "External channels",
+        "description": "Operate dedicated Slack connections and control who can invoke this agent.",
+        "addConnection": "Add connection",
+        "connectionsTitle": "Connections",
+        "emptyConnectionsTitle": "No external channel connection",
+        "emptyConnectionsDescription": "Connect a dedicated Slack App to route supported channel conversations to this agent.",
+        "slack": "Slack",
+        "identityUnavailable": "Provider identity not validated",
+        "credentialsConfigured": "Credentials configured",
+        "credentialsMissing": "Credentials missing",
+        "lastVerified": "Last verified",
+        "lastHealth": "Last health check",
+        "botIdentity": "Bot identity",
+        "socketGapTitle": "Socket delivery gap detected",
+        "socketGapDescription": "Validate the connection and review channel history before continuing.",
+        "capabilitiesUnavailable": "Capabilities are available after validation.",
+        "validate": "Validate",
+        "edit": "Edit",
+        "disconnect": "Disconnect",
+        "disconnectConfirm": "Disconnect this connection permanently? Existing channel history remains available.",
+        "accessTitle": "Participant access",
+        "accessDescription": "Review active invocation grants and blocked external participants.",
+        "emptyAccess": "No active grants or blocks.",
+        "blockNoReason": "Blocked by an agent administrator",
+        "revoke": "Revoke",
+        "unblock": "Unblock",
+        "editTitle": "Edit Slack connection",
+        "setupTitle": "Connect a Slack App",
+        "appId": "Slack App ID",
+        "guideTitle": "Create and configure your Slack App",
+        "guideDescription": "Choose either method below. Both produce the same dedicated Slack App settings.",
+        "manifestMethod": "Create with Manifest",
+        "manualMethod": "Create in Slack UI",
+        "manifestIntro": "Recommended: let Slack configure the bot, permissions, events, and callback from this generated manifest.",
+        "manifestStep1": "Open Slack API → Your Apps → Create New App → From an app manifest.",
+        "manifestStep2": "Choose the workspace where this Agent will be used.",
+        "manifestStep3": "Copy the JSON below, paste it into Slack, review the summary, and create the App.",
+        "manifestStep4": "Open OAuth & Permissions and select Install to Workspace.",
+        "manifestJson": "Complete App Manifest JSON",
+        "copyManifest": "Copy manifest",
+        "copied": "Copied",
+        "manualIntro": "Use these steps if you prefer to configure every setting directly in Slack.",
+        "manualStep1": "Open Slack API → Your Apps → Create New App → From scratch, then choose the workspace.",
+        "manualStep2": "Open OAuth & Permissions → Scopes → Bot Token Scopes and add every scope below.",
+        "manualHttpStep": "Open Event Subscriptions, enable events, paste the Request URL below, then add every Bot Event listed below.",
+        "manualSocketEventsStep": "Open Event Subscriptions, enable events, then add every Bot Event listed below.",
+        "manualSocketStep": "Open Socket Mode and enable it. Then open Basic Information → App-Level Tokens, generate a token with connections:write, and keep the xapp- token for the App-Level Token field below.",
+        "copyCallback": "Copy callback URL",
+        "manualInstallStep": "Open OAuth & Permissions and select Install to Workspace. If scopes change later, select Reinstall to Workspace.",
+        "manualInviteStep": "In each target Slack channel, invite the bot with /invite @your-bot-name.",
+        "reinstallNotice": "Slack does not apply changed scopes until the App is reinstalled to the workspace.",
+        "credentialLocationsTitle": "Copy these values from Slack",
+        "credentialLocationsDescription": "The fields below are different values. Copy each one from its exact Slack screen.",
+        "appIdLocation": "App ID — Basic Information → App Credentials → App ID.",
+        "signingSecretLocation": "Signing Secret — Basic Information → App Credentials → Signing Secret.",
+        "botTokenLocation": "Bot User OAuth Token — OAuth & Permissions → OAuth Tokens for Your Workspace. It starts with xoxb- after installation.",
+        "appTokenLocation": "App-Level Token — Basic Information → App-Level Tokens. Generate it with connections:write; it starts with xapp-.",
+        "tokenPrefixes": "Never paste a User OAuth Token. Bot tokens start with xoxb-; Socket Mode App-Level Tokens start with xapp-.",
+        "botToken": "Bot user OAuth token",
+        "signingSecret": "Signing secret",
+        "appToken": "App-level token",
+        "appTokenRequired": "Required for Socket Mode.",
+        "appTokenOptional": "Optional for HTTP transport.",
+        "credentialSafety": "Credential values are encrypted by the server and are never shown again.",
+        "cancel": "Cancel",
+        "connect": "Connect",
+        "saveChanges": "Save and validate",
+        "status": {
+          "configuring": "Configuring",
+          "active": "Active",
+          "degraded": "Degraded",
+          "reconnect_required": "Reconnect required",
+          "disconnecting": "Disconnecting",
+          "disconnected": "Disconnected"
+        },
+        "transport": {
+          "http": "HTTP",
+          "socket": "Socket Mode"
+        },
+        "route": {
+          "active": "Route active",
+          "inactive": "Route inactive"
+        },
+        "grantScope": {
+          "session": "Session access",
+          "agent": "Agent access"
+        },
+        "revokeConfirm": "Revoke this participant access grant?",
+        "unblockConfirm": "Remove this participant block?"
+      },
+      "sessionChannels": {
+        "title": "Channels",
+        "description": "Inspect external channel bindings, work projection, delivery outcomes, and retained access.",
+        "archivedTitle": "Archived session",
+        "archivedDescription": "External channels were terminally disconnected at archive time. This projection is read-only.",
+        "retentionUnlimited": "Retention: unlimited",
+        "retentionDays": "Retention: {count} days",
+        "purgeAfter": "Purge after {value}",
+        "emptyTitle": "No external channel bindings",
+        "emptyDescription": "This session has not been invoked from a supported external channel.",
+        "disconnect": "Disconnect",
+        "disconnectConfirm": "Disconnect this session channel permanently? Its history remains available.",
+        "connectedAt": "Connected",
+        "latestActivity": "Latest activity",
+        "retainedContext": "Pending-context truncation",
+        "truncationSummary": "{messages} messages · {bytes} bytes removed",
+        "disconnectReason": "Disconnect reason",
+        "channelWork": "Channel Work",
+        "noWork": "No Channel Work is associated with this binding.",
+        "taskCount": "{count, plural, =1 {1 task} other {# tasks}}",
+        "progressDrift": "Progress drift",
+        "progressProjected": "Progress projected",
+        "revisionProgress": "Channel Work revision projection",
+        "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "deliveries": "Delivery outcomes",
+        "noDeliveries": "No provider delivery has been attempted.",
+        "grantsTitle": "Session access",
+        "grantsDescription": "Participants authorized specifically for this session.",
+        "noGrants": "No active session-scoped grants.",
+        "bindingStatus": {
+          "active": "Active",
+          "disconnected": "Disconnected"
+        },
+        "activationStatus": {
+          "waiting_hydration": "Waiting for history",
+          "active": "Invocation active"
+        },
+        "workStatus": {
+          "active": "Work active",
+          "finished": "Work finished"
+        },
+        "deliveryStatus": {
+          "pending": "Pending",
+          "attempting": "Attempting",
+          "delivered": "Delivered",
+          "failed": "Failed",
+          "unknown": "Unknown outcome",
+          "not_attempted": "Not attempted"
+        },
+        "operation": {
+          "reply": "Reply",
+          "progress_create": "Create progress",
+          "progress_update": "Update progress",
+          "progress_delete": "Delete progress",
+          "control_message": "Control message"
+        },
+        "grantScope": {
+          "session": "Session access",
+          "agent": "Agent access"
+        }
       }
     },
     "toolkits": {
@@ -1791,6 +1948,28 @@
       "statusFailed": "Failed",
       "statusInterrupted": "Interrupted",
       "statusCancelled": "Cancelled"
+    },
+    "externalMessage": {
+      "expand": "Expand external message from {source}",
+      "collapse": "Collapse external message from {source}",
+      "provider": "Provider",
+      "resource": "Resource",
+      "sender": "Sender",
+      "authorType": "Author type",
+      "authorization": "Authorization",
+      "lifecycle": "Lifecycle",
+      "timestamp": "Provider time",
+      "revision": "Revision",
+      "corrects": "Corrects revision",
+      "openOriginal": "Open original message",
+      "openOriginalAccessible": "Open original message in {resource}",
+      "originalUnavailable": "The original message is unavailable.",
+      "status": {
+        "invoked": "Invoked",
+        "context": "Context",
+        "edited": "Edited",
+        "deleted": "Deleted"
+      }
     }
   },
   "oauth": {
@@ -1817,5 +1996,55 @@
     "goToWorkspaces": "Go to workspaces",
     "redirectingToSetup": "Redirecting to service authorization...",
     "toolkitRedirectError": "Failed to redirect to service setup. Please try again from your workspace settings."
+  },
+  "externalChannelApproval": {
+    "title": "External channel access request",
+    "subtitle": "Review who may invoke this Agent from Slack.",
+    "loading": "Loading access request…",
+    "notFoundTitle": "Access request not found",
+    "notFoundDescription": "This link is invalid, unavailable to your account, or no longer exists.",
+    "unauthorizedTitle": "Sign in required",
+    "unauthorizedDescription": "Sign in with an authorized Azents account to review this request.",
+    "errorTitle": "Could not load the request",
+    "errorDescription": "The request could not be loaded. Try again.",
+    "retry": "Try again",
+    "pendingDescription": "This participant is waiting for an explicit access decision. No Agent session has been invoked yet.",
+    "participant": "Participant",
+    "source": "Slack source",
+    "provider": "Provider",
+    "expiresAt": "Expires",
+    "decidedAt": "Decided",
+    "message": "Request message",
+    "openOriginal": "Open original Slack message",
+    "originalUnavailable": "The original Slack message is unavailable.",
+    "chooseAccess": "Choose the access scope",
+    "decisionSummary": "Decision note: {summary}",
+    "status": {
+      "pending": "Pending",
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "blocked": "Blocked",
+      "expired": "Expired"
+    },
+    "completed": {
+      "allowed": "This request was approved. The participant can invoke the Agent within the granted scope.",
+      "denied": "This request was denied. It did not create access or invoke the Agent.",
+      "blocked": "This participant was blocked from creating future access requests for this Agent.",
+      "expired": "This request expired before a decision was made. It can no longer be approved."
+    },
+    "actions": {
+      "allowSession": "Allow for this Session",
+      "allowSessionDescription": "Grant access only to the Session created for this Slack conversation.",
+      "allowAgent": "Allow for this Agent",
+      "allowAgentDescription": "Grant this participant access across this Agent’s eligible Slack conversations.",
+      "deny": "Deny request",
+      "denyDescription": "Resolve this request without granting access.",
+      "block": "Block participant",
+      "blockDescription": "Deny this request and suppress future approval requests for this Agent."
+    },
+    "errors": {
+      "conflict": "This request can no longer be completed. It may have expired, been decided elsewhere, or belong to a disconnected channel.",
+      "action": "The decision could not be saved. Try again."
+    }
   }
 }

@@ -4,7 +4,7 @@ created: 2026-04-20
 tags: [backend, engine]
 spec_type: flow
 owner: "@Hardtack"
-touches_domains: [agent, conversation, toolkit]
+touches_domains: [agent, conversation, toolkit, external-channel]
 code_paths:
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/engine/client_tools.py
@@ -18,6 +18,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/io/user_input.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/tools/**
+  - python/apps/azents/src/azents/services/external_channel/channel_action.py
+  - python/apps/azents/src/azents/repos/external_channel/work.py
+  - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/model_stream.py
@@ -65,8 +68,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-21
-spec_version: 125
+last_verified_at: 2026-07-22
+spec_version: 126
 ---
 
 # Agent Execution Loop
@@ -1092,7 +1095,28 @@ durable `goal_updated` control event with the updated Goal snapshot and wakes th
 way. `goal_updated` lowers to a user-role compatible prompt that tells the model the active Goal was
 updated by the user.
 
+## External Channel Inputs, Tools, and Continuation
+
+An External Channel wake-up references one immutable invocation batch. FIFO
+preparation resolves that batch into contiguous source-attributed
+`external_channel_message` events and associates them with the run before
+model dispatch. Lowering uses an explicit external-source envelope; it never
+presents the content as undifferentiated input from the current Web user.
+
+When an active binding exists, runtime adds the direct `channel_action` tool and
+the current binding/work snapshot. Normal assistant text is retained only in
+Azents history and is never implicitly published to the provider. A
+`channel_action` call commits canonical work and delivery intents before its
+provider operations execute outside the transaction.
+
+After a successful run, unfinished Channel Work is an idle-continuation source.
+Continuation remains eligible until every relevant binding finishes or clears
+its tasks. One completed binding does not cancel continuation required by
+another binding in the same root Session.
+
 ## Changelog
+
+- **2026-07-22** (spec_version 126) — Added External Channel batch preparation, explicit source lowering, conditional `channel_action`, and binding-aware idle continuation.
 
 - **2026-07-21** (spec_version 125) — Made completed-run idle continuation a durable Session boundary that recovery conditionally consumes after true idle.
 - **2026-07-21** (spec_version 124) — Moved the live non-empty Activity indicator into the summary header's completed-check slot and suppressed it for empty groups.

@@ -58,6 +58,10 @@ from azents.engine.tools.claude_rules import (
     ClaudeRulesToolkit,
     ClaudeRulesToolkitProvider,
 )
+from azents.engine.tools.external_channel import (
+    ExternalChannelToolkit,
+    ExternalChannelToolkitProvider,
+)
 from azents.engine.tools.goal import GoalToolkit, GoalToolkitProvider
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
@@ -1014,6 +1018,7 @@ async def resolve_agent_tools(
     claude_rules_toolkit_provider: ClaudeRulesToolkitProvider | None = None,
     todo_toolkit_provider: TodoToolkitProvider | None = None,
     goal_toolkit_provider: GoalToolkitProvider | None = None,
+    external_channel_toolkit_provider: ExternalChannelToolkitProvider | None = None,
     skill_toolkit_provider: SkillToolkitProvider | None = None,
     subagent_toolkit_provider: ToolkitProvider[Any] | None = None,
     memory_enabled: bool = True,
@@ -1038,6 +1043,7 @@ async def resolve_agent_tools(
     :param claude_rules_toolkit_provider: Claude rules provider (None disables it)
     :param todo_toolkit_provider: Todo toolkit provider (None disables todo)
     :param goal_toolkit_provider: Goal toolkit provider (None disables goal)
+    :param external_channel_toolkit_provider: External Channel root provider
     :param skill_toolkit_provider: Skill toolkit provider (None disables Skill)
     :param runtime_tools_enabled: Expose builtin shell/file tools only to
         Agents connected to Runtime settings.
@@ -1437,6 +1443,53 @@ async def resolve_agent_tools(
                 False,
                 None,
                 goal_modes,
+            )
+        )
+
+    # Auto-bound Toolkit: root-owned External Channel publication
+    external_channel_modes = _ROOT_EXECUTION_MODES
+    if external_channel_toolkit_provider is not None and _allows_execution_mode(
+        external_channel_modes,
+        execution_mode,
+    ):
+        external_channel_config = ExternalChannelToolkitProvider.validate_config({})
+        external_channel_context = ResolveContext(
+            toolkit_id="",
+            toolkit_name="external_channel",
+            credentials_json=None,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            user_id=context.user_id,
+            session=None,
+            web_url=web_url,
+            oauth_secret_key=oauth_secret_key,
+            workspace_id=context.workspace_id,
+            workspace_handle=workspace_handle,
+        )
+        external_channel_resolved = await _resolve_toolkit_with_logging(
+            agent_id=agent_id,
+            context=context,
+            source="auto",
+            slug="external_channel",
+            provider=external_channel_toolkit_provider,
+            toolkit_name="external_channel",
+            resolve=external_channel_toolkit_provider.resolve(
+                external_channel_config,
+                external_channel_context,
+            ),
+        )
+        if isinstance(external_channel_resolved, ExternalChannelToolkit):
+            external_channel_resolved.run_id = context.run_id
+        pending.append(
+            (
+                external_channel_toolkit_provider,
+                external_channel_resolved,
+                external_channel_config,
+                "external_channel",
+                None,
+                False,
+                None,
+                external_channel_modes,
             )
         )
 

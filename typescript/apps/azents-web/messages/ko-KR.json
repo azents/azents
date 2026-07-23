@@ -684,6 +684,10 @@
         "subagents": {
           "label": "서브에이전트",
           "description": "위임된 에이전트의 동시 실행 및 중첩 제한"
+        },
+        "channels": {
+          "label": "외부 채널",
+          "description": "Slack 연결, 라우트, 참여자 접근 권한"
         }
       },
       "settingsLayout": {
@@ -695,7 +699,8 @@
           "chat": "채팅",
           "settings": "설정",
           "projects": "프로젝트",
-          "context": "컨텍스트"
+          "context": "컨텍스트",
+          "channels": "채널"
         },
         "status": {
           "enabled": "활성",
@@ -901,6 +906,158 @@
         "subagentGuidanceDescription": "적합한 작업 유형이나 비용·품질 제약을 선택적으로 안내합니다. 최대 {max}자입니다.",
         "subagentGuidancePlaceholder": "예: 저장소 탐색과 범위가 명확한 조사 작업에 우선 사용하세요.",
         "settingsDone": "완료"
+      },
+      "externalChannels": {
+        "title": "외부 채널",
+        "description": "전용 Slack 연결을 운영하고 이 에이전트를 호출할 수 있는 참여자를 관리합니다.",
+        "addConnection": "연결 추가",
+        "connectionsTitle": "연결",
+        "emptyConnectionsTitle": "외부 채널 연결이 없습니다",
+        "emptyConnectionsDescription": "전용 Slack App을 연결하여 지원되는 채널 대화를 이 에이전트로 라우팅하세요.",
+        "slack": "Slack",
+        "identityUnavailable": "Provider identity를 아직 검증하지 않았습니다",
+        "credentialsConfigured": "Credential 설정됨",
+        "credentialsMissing": "Credential 없음",
+        "lastVerified": "마지막 검증",
+        "lastHealth": "마지막 상태 확인",
+        "botIdentity": "Bot identity",
+        "socketGapTitle": "Socket delivery gap 감지됨",
+        "socketGapDescription": "계속하기 전에 연결을 검증하고 채널 기록을 확인하세요.",
+        "capabilitiesUnavailable": "검증 후 capability를 확인할 수 있습니다.",
+        "validate": "검증",
+        "edit": "수정",
+        "disconnect": "연결 해제",
+        "disconnectConfirm": "이 연결을 영구적으로 해제하시겠습니까? 기존 채널 기록은 유지됩니다.",
+        "accessTitle": "참여자 접근 권한",
+        "accessDescription": "활성 호출 권한과 차단된 외부 참여자를 확인합니다.",
+        "emptyAccess": "활성 grant 또는 block이 없습니다.",
+        "blockNoReason": "에이전트 관리자가 차단함",
+        "revoke": "권한 회수",
+        "unblock": "차단 해제",
+        "editTitle": "Slack 연결 수정",
+        "setupTitle": "Slack App 연결",
+        "appId": "Slack App ID",
+        "guideTitle": "Slack App 만들기 및 설정",
+        "guideDescription": "아래 두 방법 중 하나를 선택하세요. 어느 방법이든 동일한 전용 Slack App 설정이 만들어집니다.",
+        "manifestMethod": "Manifest로 만들기",
+        "manualMethod": "Slack UI에서 직접 만들기",
+        "manifestIntro": "권장 방법입니다. 생성된 Manifest를 사용하면 Slack이 Bot, 권한, 이벤트, callback을 한 번에 설정합니다.",
+        "manifestStep1": "Slack API → Your Apps → Create New App → From an app manifest를 엽니다.",
+        "manifestStep2": "이 에이전트를 사용할 Slack Workspace를 선택합니다.",
+        "manifestStep3": "아래 JSON을 복사해 Slack에 붙여넣고 설정 요약을 확인한 뒤 App을 만듭니다.",
+        "manifestStep4": "OAuth & Permissions에서 Install to Workspace를 선택합니다.",
+        "manifestJson": "완성된 App Manifest JSON",
+        "copyManifest": "Manifest 복사",
+        "copied": "복사됨",
+        "manualIntro": "모든 항목을 Slack에서 직접 설정하려면 다음 순서대로 진행하세요.",
+        "manualStep1": "Slack API → Your Apps → Create New App → From scratch를 열고 Workspace를 선택합니다.",
+        "manualStep2": "OAuth & Permissions → Scopes → Bot Token Scopes에서 아래 scope를 모두 추가합니다.",
+        "manualHttpStep": "Event Subscriptions를 켜고 아래 Request URL을 붙여넣은 다음, 아래 Bot Event를 모두 추가합니다.",
+        "manualSocketEventsStep": "Event Subscriptions를 켠 다음, 아래 Bot Event를 모두 추가합니다.",
+        "manualSocketStep": "Socket Mode를 켭니다. Basic Information → App-Level Tokens에서 connections:write scope로 token을 만들고, xapp- token을 아래 App-Level Token 칸에 입력합니다.",
+        "copyCallback": "Callback URL 복사",
+        "manualInstallStep": "OAuth & Permissions에서 Install to Workspace를 선택합니다. 이후 scope를 바꾸면 Reinstall to Workspace를 선택해야 합니다.",
+        "manualInviteStep": "사용할 각 Slack 채널에서 /invite @bot이름 명령으로 Bot을 초대합니다.",
+        "reinstallNotice": "변경한 scope는 App을 Workspace에 다시 설치해야 적용됩니다.",
+        "credentialLocationsTitle": "Slack에서 다음 값을 복사하세요",
+        "credentialLocationsDescription": "아래 항목은 서로 다른 값입니다. 안내된 Slack 화면에서 각각 복사하세요.",
+        "appIdLocation": "App ID — Basic Information → App Credentials → App ID.",
+        "signingSecretLocation": "Signing Secret — Basic Information → App Credentials → Signing Secret.",
+        "botTokenLocation": "Bot User OAuth Token — OAuth & Permissions → OAuth Tokens for Your Workspace. 설치 후 발급되며 xoxb-로 시작합니다.",
+        "appTokenLocation": "App-Level Token — Basic Information → App-Level Tokens. connections:write scope로 만들며 xapp-로 시작합니다.",
+        "tokenPrefixes": "User OAuth Token을 입력하지 마세요. Bot token은 xoxb-, Socket Mode App-Level Token은 xapp-로 시작합니다.",
+        "botToken": "Bot user OAuth token",
+        "signingSecret": "Signing secret",
+        "appToken": "App-level token",
+        "appTokenRequired": "Socket Mode에 필요합니다.",
+        "appTokenOptional": "HTTP transport에서는 선택 사항입니다.",
+        "credentialSafety": "Credential 값은 서버에서 암호화되며 다시 표시되지 않습니다.",
+        "cancel": "취소",
+        "connect": "연결",
+        "saveChanges": "저장 후 검증",
+        "status": {
+          "configuring": "설정 중",
+          "active": "활성",
+          "degraded": "성능 저하",
+          "reconnect_required": "재연결 필요",
+          "disconnecting": "연결 해제 중",
+          "disconnected": "연결 해제됨"
+        },
+        "transport": {
+          "http": "HTTP",
+          "socket": "Socket Mode"
+        },
+        "route": {
+          "active": "Route 활성",
+          "inactive": "Route 비활성"
+        },
+        "grantScope": {
+          "session": "세션 접근",
+          "agent": "에이전트 접근"
+        },
+        "revokeConfirm": "이 참여자의 접근 권한을 회수하시겠습니까?",
+        "unblockConfirm": "이 참여자의 차단을 해제하시겠습니까?"
+      },
+      "sessionChannels": {
+        "title": "채널",
+        "description": "외부 채널 binding, work projection, delivery 결과, 유지된 접근 권한을 확인합니다.",
+        "archivedTitle": "보관된 세션",
+        "archivedDescription": "보관 시점에 외부 채널 연결이 영구적으로 해제되었습니다. 이 화면은 읽기 전용입니다.",
+        "retentionUnlimited": "보존 기간: 제한 없음",
+        "retentionDays": "보존 기간: {count}일",
+        "purgeAfter": "{value} 이후 삭제",
+        "emptyTitle": "외부 채널 binding이 없습니다",
+        "emptyDescription": "지원되는 외부 채널에서 이 세션을 호출한 적이 없습니다.",
+        "disconnect": "연결 해제",
+        "disconnectConfirm": "이 세션 채널을 영구적으로 해제하시겠습니까? 기록은 유지됩니다.",
+        "connectedAt": "연결 시각",
+        "latestActivity": "최근 활동",
+        "retainedContext": "Pending context 잘림",
+        "truncationSummary": "메시지 {messages}개 · {bytes}바이트 제거",
+        "disconnectReason": "연결 해제 사유",
+        "channelWork": "Channel Work",
+        "noWork": "이 binding에 연결된 Channel Work가 없습니다.",
+        "taskCount": "작업 {count}개",
+        "progressDrift": "Progress drift",
+        "progressProjected": "Progress 반영됨",
+        "revisionProgress": "Channel Work revision 반영",
+        "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "deliveries": "Delivery 결과",
+        "noDeliveries": "Provider delivery를 시도한 적이 없습니다.",
+        "grantsTitle": "세션 접근 권한",
+        "grantsDescription": "이 세션에 한해 허용된 참여자입니다.",
+        "noGrants": "활성 session-scoped grant가 없습니다.",
+        "bindingStatus": {
+          "active": "활성",
+          "disconnected": "연결 해제됨"
+        },
+        "activationStatus": {
+          "waiting_hydration": "기록 수집 대기",
+          "active": "호출 활성"
+        },
+        "workStatus": {
+          "active": "Work 활성",
+          "finished": "Work 완료"
+        },
+        "deliveryStatus": {
+          "pending": "대기",
+          "attempting": "시도 중",
+          "delivered": "전달됨",
+          "failed": "실패",
+          "unknown": "결과 불명",
+          "not_attempted": "시도하지 않음"
+        },
+        "operation": {
+          "reply": "답글",
+          "progress_create": "Progress 생성",
+          "progress_update": "Progress 수정",
+          "progress_delete": "Progress 삭제",
+          "control_message": "Control message"
+        },
+        "grantScope": {
+          "session": "세션 접근",
+          "agent": "에이전트 접근"
+        }
       }
     },
     "toolkits": {
@@ -1791,6 +1948,28 @@
       "statusFailed": "실패",
       "statusInterrupted": "중단됨",
       "statusCancelled": "취소됨"
+    },
+    "externalMessage": {
+      "expand": "{source}의 외부 메시지 펼치기",
+      "collapse": "{source}의 외부 메시지 접기",
+      "provider": "제공자",
+      "resource": "채널/리소스",
+      "sender": "보낸 사람",
+      "authorType": "작성자 유형",
+      "authorization": "권한 상태",
+      "lifecycle": "메시지 상태",
+      "timestamp": "제공자 시간",
+      "revision": "수정 유형",
+      "corrects": "수정 대상 리비전",
+      "openOriginal": "원본 메시지 열기",
+      "openOriginalAccessible": "{resource}의 원본 메시지 열기",
+      "originalUnavailable": "원본 메시지를 열 수 없습니다.",
+      "status": {
+        "invoked": "호출",
+        "context": "컨텍스트",
+        "edited": "수정됨",
+        "deleted": "삭제됨"
+      }
     }
   },
   "oauth": {
@@ -1817,5 +1996,55 @@
     "goToWorkspaces": "워크스페이스 목록으로 이동",
     "redirectingToSetup": "서비스 인증 페이지로 이동 중...",
     "toolkitRedirectError": "서비스 설정 페이지로 이동하지 못했습니다. 워크스페이스 설정에서 다시 시도해 주세요."
+  },
+  "externalChannelApproval": {
+    "title": "외부 채널 접근 요청",
+    "subtitle": "Slack에서 이 Agent를 호출할 사용자를 검토합니다.",
+    "loading": "접근 요청을 불러오는 중…",
+    "notFoundTitle": "접근 요청을 찾을 수 없습니다",
+    "notFoundDescription": "링크가 올바르지 않거나, 현재 계정에 권한이 없거나, 요청이 더 이상 존재하지 않습니다.",
+    "unauthorizedTitle": "로그인이 필요합니다",
+    "unauthorizedDescription": "이 요청을 검토할 권한이 있는 Azents 계정으로 로그인하세요.",
+    "errorTitle": "요청을 불러오지 못했습니다",
+    "errorDescription": "접근 요청을 불러올 수 없습니다. 다시 시도하세요.",
+    "retry": "다시 시도",
+    "pendingDescription": "이 참여자는 명시적인 접근 결정이 필요합니다. 아직 Agent Session은 호출되지 않았습니다.",
+    "participant": "참여자",
+    "source": "Slack 출처",
+    "provider": "제공자",
+    "expiresAt": "만료",
+    "decidedAt": "결정 시각",
+    "message": "요청 메시지",
+    "openOriginal": "Slack 원본 메시지 열기",
+    "originalUnavailable": "Slack 원본 메시지를 열 수 없습니다.",
+    "chooseAccess": "접근 범위를 선택하세요",
+    "decisionSummary": "결정 메모: {summary}",
+    "status": {
+      "pending": "대기 중",
+      "allowed": "허용됨",
+      "denied": "거부됨",
+      "blocked": "차단됨",
+      "expired": "만료됨"
+    },
+    "completed": {
+      "allowed": "이 요청이 승인되었습니다. 참여자는 허용된 범위에서 Agent를 호출할 수 있습니다.",
+      "denied": "이 요청은 거부되었습니다. 접근 권한이나 Agent 호출은 생성되지 않았습니다.",
+      "blocked": "이 참여자가 이 Agent에 새 접근 요청을 만들지 못하도록 차단했습니다.",
+      "expired": "결정 전에 요청이 만료되었습니다. 더 이상 승인할 수 없습니다."
+    },
+    "actions": {
+      "allowSession": "이 Session에서 허용",
+      "allowSessionDescription": "이 Slack 대화를 위해 생성된 Session에만 접근을 허용합니다.",
+      "allowAgent": "이 Agent에서 허용",
+      "allowAgentDescription": "이 Agent의 허용 대상 Slack 대화 전반에서 참여자의 접근을 허용합니다.",
+      "deny": "요청 거부",
+      "denyDescription": "접근 권한을 부여하지 않고 요청을 종료합니다.",
+      "block": "참여자 차단",
+      "blockDescription": "요청을 거부하고 이 Agent에 대한 향후 승인 요청도 차단합니다."
+    },
+    "errors": {
+      "conflict": "이 요청은 더 이상 처리할 수 없습니다. 만료되었거나 다른 곳에서 결정되었거나 연결이 해제된 채널의 요청일 수 있습니다.",
+      "action": "결정을 저장하지 못했습니다. 다시 시도하세요."
+    }
   }
 }

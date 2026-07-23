@@ -684,6 +684,10 @@
         "subagents": {
           "label": "Subagents",
           "description": "Delegated agents の同時実行数とネスト制限"
+        },
+        "channels": {
+          "label": "外部チャンネル",
+          "description": "Slack 接続、ルート、参加者アクセス"
         }
       },
       "settingsLayout": {
@@ -695,7 +699,8 @@
           "chat": "チャット",
           "settings": "設定",
           "projects": "プロジェクト",
-          "context": "コンテキスト"
+          "context": "コンテキスト",
+          "channels": "チャンネル"
         },
         "status": {
           "enabled": "有効",
@@ -901,6 +906,158 @@
         "subagentGuidanceDescription": "適切なタスク種別やコスト・品質の制約を任意で案内します。最大 {max} 文字です。",
         "subagentGuidancePlaceholder": "例：リポジトリ探索や範囲が明確な調査に優先して使用します。",
         "settingsDone": "完了"
+      },
+      "externalChannels": {
+        "title": "外部チャンネル",
+        "description": "専用 Slack 接続を運用し、このエージェントを呼び出せる参加者を管理します。",
+        "addConnection": "接続を追加",
+        "connectionsTitle": "接続",
+        "emptyConnectionsTitle": "外部チャンネル接続がありません",
+        "emptyConnectionsDescription": "専用 Slack App を接続し、対応チャンネルの会話をこのエージェントへルーティングします。",
+        "slack": "Slack",
+        "identityUnavailable": "Provider identity は未検証です",
+        "credentialsConfigured": "Credential 設定済み",
+        "credentialsMissing": "Credential 未設定",
+        "lastVerified": "最終検証",
+        "lastHealth": "最終ヘルスチェック",
+        "botIdentity": "Bot identity",
+        "socketGapTitle": "Socket delivery gap を検出しました",
+        "socketGapDescription": "続行する前に接続を検証し、チャンネル履歴を確認してください。",
+        "capabilitiesUnavailable": "Capability は検証後に表示されます。",
+        "validate": "検証",
+        "edit": "編集",
+        "disconnect": "切断",
+        "disconnectConfirm": "この接続を完全に切断しますか？既存のチャンネル履歴は保持されます。",
+        "accessTitle": "参加者アクセス",
+        "accessDescription": "有効な呼び出し権限とブロック済みの外部参加者を確認します。",
+        "emptyAccess": "有効な grant または block はありません。",
+        "blockNoReason": "エージェント管理者がブロック",
+        "revoke": "権限を取り消す",
+        "unblock": "ブロック解除",
+        "editTitle": "Slack 接続を編集",
+        "setupTitle": "Slack App を接続",
+        "appId": "Slack App ID",
+        "guideTitle": "Slack App の作成と設定",
+        "guideDescription": "次のどちらかの方法を選択してください。どちらも同じ専用 Slack App 設定になります。",
+        "manifestMethod": "Manifest で作成",
+        "manualMethod": "Slack UI で作成",
+        "manifestIntro": "推奨方法です。この Manifest から Bot、権限、イベント、callback を Slack がまとめて設定します。",
+        "manifestStep1": "Slack API → Your Apps → Create New App → From an app manifest を開きます。",
+        "manifestStep2": "このエージェントを使用する workspace を選択します。",
+        "manifestStep3": "下の JSON をコピーして Slack に貼り付け、内容を確認して App を作成します。",
+        "manifestStep4": "OAuth & Permissions を開き、Install to Workspace を選択します。",
+        "manifestJson": "完成済み App Manifest JSON",
+        "copyManifest": "Manifest をコピー",
+        "copied": "コピーしました",
+        "manualIntro": "すべての設定を Slack で直接行う場合は、次の手順に従ってください。",
+        "manualStep1": "Slack API → Your Apps → Create New App → From scratch を開き、workspace を選択します。",
+        "manualStep2": "OAuth & Permissions → Scopes → Bot Token Scopes で、以下の scope をすべて追加します。",
+        "manualHttpStep": "Event Subscriptions を有効にし、下の Request URL を貼り付けて、記載された Bot Event をすべて追加します。",
+        "manualSocketEventsStep": "Event Subscriptions を有効にし、以下の Bot Event をすべて追加します。",
+        "manualSocketStep": "Socket Mode を有効にします。Basic Information → App-Level Tokens で connections:write を持つ token を作成し、xapp- token を下の App-Level Token 欄に入力します。",
+        "copyCallback": "Callback URL をコピー",
+        "manualInstallStep": "OAuth & Permissions で Install to Workspace を選択します。scope を変更した場合は Reinstall to Workspace を実行します。",
+        "manualInviteStep": "使用する各 Slack チャンネルで /invite @bot名 を実行して Bot を招待します。",
+        "reinstallNotice": "変更した scope は App を workspace に再インストールするまで適用されません。",
+        "credentialLocationsTitle": "Slack から次の値をコピー",
+        "credentialLocationsDescription": "以下はそれぞれ異なる値です。指定された Slack 画面から個別にコピーしてください。",
+        "appIdLocation": "App ID — Basic Information → App Credentials → App ID.",
+        "signingSecretLocation": "Signing Secret — Basic Information → App Credentials → Signing Secret.",
+        "botTokenLocation": "Bot User OAuth Token — OAuth & Permissions → OAuth Tokens for Your Workspace. インストール後に発行され、xoxb- で始まります。",
+        "appTokenLocation": "App-Level Token — Basic Information → App-Level Tokens. connections:write で作成し、xapp- で始まります。",
+        "tokenPrefixes": "User OAuth Token は入力しないでください。Bot token は xoxb-、Socket Mode App-Level Token は xapp- で始まります。",
+        "botToken": "Bot user OAuth token",
+        "signingSecret": "Signing secret",
+        "appToken": "App-level token",
+        "appTokenRequired": "Socket Mode では必須です。",
+        "appTokenOptional": "HTTP transport では任意です。",
+        "credentialSafety": "Credential 値はサーバーで暗号化され、再表示されません。",
+        "cancel": "キャンセル",
+        "connect": "接続",
+        "saveChanges": "保存して検証",
+        "status": {
+          "configuring": "設定中",
+          "active": "有効",
+          "degraded": "低下",
+          "reconnect_required": "再接続が必要",
+          "disconnecting": "切断中",
+          "disconnected": "切断済み"
+        },
+        "transport": {
+          "http": "HTTP",
+          "socket": "Socket Mode"
+        },
+        "route": {
+          "active": "Route 有効",
+          "inactive": "Route 無効"
+        },
+        "grantScope": {
+          "session": "セッションアクセス",
+          "agent": "エージェントアクセス"
+        },
+        "revokeConfirm": "この参加者のアクセス権限を取り消しますか？",
+        "unblockConfirm": "この参加者のブロックを解除しますか？"
+      },
+      "sessionChannels": {
+        "title": "チャンネル",
+        "description": "外部チャンネル binding、work projection、delivery 結果、保持されたアクセスを確認します。",
+        "archivedTitle": "アーカイブ済みセッション",
+        "archivedDescription": "アーカイブ時に外部チャンネルは完全に切断されました。この画面は読み取り専用です。",
+        "retentionUnlimited": "保持期間：無期限",
+        "retentionDays": "保持期間：{count}日",
+        "purgeAfter": "{value} 以降に削除",
+        "emptyTitle": "外部チャンネル binding がありません",
+        "emptyDescription": "対応する外部チャンネルからこのセッションが呼び出されたことはありません。",
+        "disconnect": "切断",
+        "disconnectConfirm": "このセッションチャンネルを完全に切断しますか？履歴は保持されます。",
+        "connectedAt": "接続日時",
+        "latestActivity": "最新アクティビティ",
+        "retainedContext": "Pending context の切り詰め",
+        "truncationSummary": "{messages}件 · {bytes}バイトを削除",
+        "disconnectReason": "切断理由",
+        "channelWork": "Channel Work",
+        "noWork": "この binding に関連する Channel Work はありません。",
+        "taskCount": "タスク {count}件",
+        "progressDrift": "Progress drift",
+        "progressProjected": "Progress 反映済み",
+        "revisionProgress": "Channel Work revision の反映",
+        "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "deliveries": "Delivery 結果",
+        "noDeliveries": "Provider delivery はまだ試行されていません。",
+        "grantsTitle": "セッションアクセス",
+        "grantsDescription": "このセッションに限定して許可された参加者です。",
+        "noGrants": "有効な session-scoped grant はありません。",
+        "bindingStatus": {
+          "active": "有効",
+          "disconnected": "切断済み"
+        },
+        "activationStatus": {
+          "waiting_hydration": "履歴の取得待ち",
+          "active": "呼び出し有効"
+        },
+        "workStatus": {
+          "active": "Work 実行中",
+          "finished": "Work 完了"
+        },
+        "deliveryStatus": {
+          "pending": "待機中",
+          "attempting": "試行中",
+          "delivered": "配信済み",
+          "failed": "失敗",
+          "unknown": "結果不明",
+          "not_attempted": "未試行"
+        },
+        "operation": {
+          "reply": "返信",
+          "progress_create": "Progress を作成",
+          "progress_update": "Progress を更新",
+          "progress_delete": "Progress を削除",
+          "control_message": "Control message"
+        },
+        "grantScope": {
+          "session": "セッションアクセス",
+          "agent": "エージェントアクセス"
+        }
       }
     },
     "toolkits": {
@@ -1791,6 +1948,28 @@
       "statusFailed": "失敗",
       "statusInterrupted": "中断",
       "statusCancelled": "キャンセル"
+    },
+    "externalMessage": {
+      "expand": "{source} の外部メッセージを展開",
+      "collapse": "{source} の外部メッセージを折りたたむ",
+      "provider": "プロバイダー",
+      "resource": "チャンネル／リソース",
+      "sender": "送信者",
+      "authorType": "投稿者タイプ",
+      "authorization": "認可状態",
+      "lifecycle": "メッセージ状態",
+      "timestamp": "プロバイダー時刻",
+      "revision": "変更タイプ",
+      "corrects": "修正対象リビジョン",
+      "openOriginal": "元のメッセージを開く",
+      "openOriginalAccessible": "{resource} の元のメッセージを開く",
+      "originalUnavailable": "元のメッセージは利用できません。",
+      "status": {
+        "invoked": "呼び出し",
+        "context": "コンテキスト",
+        "edited": "編集済み",
+        "deleted": "削除済み"
+      }
     }
   },
   "oauth": {
@@ -1817,5 +1996,55 @@
     "goToWorkspaces": "ワークスペース一覧へ",
     "redirectingToSetup": "サービス認証ページへ移動中...",
     "toolkitRedirectError": "サービス設定ページへの移動に失敗しました。ワークスペース設定から再度お試しください。"
+  },
+  "externalChannelApproval": {
+    "title": "外部チャンネルのアクセス要求",
+    "subtitle": "Slack からこの Agent を呼び出せるユーザーを確認します。",
+    "loading": "アクセス要求を読み込んでいます…",
+    "notFoundTitle": "アクセス要求が見つかりません",
+    "notFoundDescription": "リンクが無効か、このアカウントでは利用できないか、要求がすでに存在しません。",
+    "unauthorizedTitle": "サインインが必要です",
+    "unauthorizedDescription": "この要求を確認できる Azents アカウントでサインインしてください。",
+    "errorTitle": "要求を読み込めませんでした",
+    "errorDescription": "アクセス要求を読み込めません。もう一度お試しください。",
+    "retry": "再試行",
+    "pendingDescription": "この参加者には明示的なアクセス判断が必要です。Agent Session はまだ呼び出されていません。",
+    "participant": "参加者",
+    "source": "Slack の送信元",
+    "provider": "プロバイダー",
+    "expiresAt": "有効期限",
+    "decidedAt": "決定日時",
+    "message": "要求メッセージ",
+    "openOriginal": "Slack の元メッセージを開く",
+    "originalUnavailable": "Slack の元メッセージは利用できません。",
+    "chooseAccess": "アクセス範囲を選択",
+    "decisionSummary": "決定メモ: {summary}",
+    "status": {
+      "pending": "保留中",
+      "allowed": "許可済み",
+      "denied": "拒否済み",
+      "blocked": "ブロック済み",
+      "expired": "期限切れ"
+    },
+    "completed": {
+      "allowed": "この要求は承認されました。参加者は許可された範囲で Agent を呼び出せます。",
+      "denied": "この要求は拒否されました。アクセス権や Agent の呼び出しは作成されていません。",
+      "blocked": "この参加者が今後この Agent へのアクセス要求を作成できないようにしました。",
+      "expired": "判断前に要求の期限が切れました。承認することはできません。"
+    },
+    "actions": {
+      "allowSession": "この Session で許可",
+      "allowSessionDescription": "この Slack 会話用に作成された Session のみにアクセスを許可します。",
+      "allowAgent": "この Agent で許可",
+      "allowAgentDescription": "この Agent の対象となる Slack 会話全体で参加者のアクセスを許可します。",
+      "deny": "要求を拒否",
+      "denyDescription": "アクセスを付与せずに要求を終了します。",
+      "block": "参加者をブロック",
+      "blockDescription": "要求を拒否し、この Agent への今後の承認要求も抑止します。"
+    },
+    "errors": {
+      "conflict": "この要求は処理できません。期限切れ、別の場所で決定済み、または切断されたチャンネルの要求である可能性があります。",
+      "action": "決定を保存できませんでした。もう一度お試しください。"
+    }
   }
 }

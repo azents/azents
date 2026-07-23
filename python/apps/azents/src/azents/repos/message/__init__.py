@@ -18,6 +18,7 @@ from azents.engine.events.types import (
     CompactionSummaryPayload,
     Event,
     EventPayload,
+    ExternalChannelMessagePayload,
     GoalBriefingPayload,
     InputTextPart,
     InterruptedPayload,
@@ -87,6 +88,8 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return ActionMessagePayload.model_validate(row.payload)
         case EventKind.AGENT_MESSAGE:
             return AgentMessagePayload.model_validate(row.payload)
+        case EventKind.EXTERNAL_CHANNEL_MESSAGE:
+            return ExternalChannelMessagePayload.model_validate(row.payload)
         case EventKind.ACTION_EXECUTION_RESULT:
             return ActionExecutionResultPayload.model_validate(row.payload)
         case EventKind.GOAL_BRIEFING:
@@ -151,6 +154,86 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                     "message_kind": payload.message_kind,
                     "source_path": payload.source_path,
                     "target_path": payload.target_path,
+                },
+                created_at=row.created_at,
+            )
+        case ExternalChannelMessagePayload():
+            return ChatMessage(
+                id=row.id,
+                session_id=row.session_id,
+                role=MessageRole.USER,
+                content=payload.body,
+                tool_calls=None,
+                tool_call_id=None,
+                attachments=[],
+                reasoning_summary=None,
+                usage=None,
+                metadata={
+                    "source": "external_channel",
+                    "provider": payload.provider.value,
+                    "provider_tenant_id": payload.provider_tenant_id,
+                    "resource_id": payload.resource_id,
+                    "resource_label": payload.resource_label,
+                    "resource_type": payload.resource_type.value,
+                    "binding_id": payload.binding_id,
+                    "invocation_batch_id": payload.invocation_batch_id,
+                    "external_message_id": payload.external_message_id,
+                    "revision_id": payload.revision_id,
+                    "revision_kind": payload.revision_kind.value,
+                    "projection_root_id": payload.projection_root_id,
+                    "provider_message_key": payload.provider_message_key,
+                    "provider_position": payload.provider_position,
+                    "author_type": payload.author_type.value,
+                    "authorization": payload.authorization,
+                    "lifecycle": payload.lifecycle.value,
+                    "event_render_key": f"event:{row.external_id or row.id}",
+                    **(
+                        {"principal_id": payload.principal_id}
+                        if payload.principal_id is not None
+                        else {}
+                    ),
+                    **(
+                        {"provider_user_id": payload.provider_user_id}
+                        if payload.provider_user_id is not None
+                        else {}
+                    ),
+                    **(
+                        {
+                            "provider_created_at": (
+                                payload.provider_created_at.isoformat()
+                            )
+                        }
+                        if payload.provider_created_at is not None
+                        else {}
+                    ),
+                    **(
+                        {
+                            "provider_updated_at": (
+                                payload.provider_updated_at.isoformat()
+                            )
+                        }
+                        if payload.provider_updated_at is not None
+                        else {}
+                    ),
+                    **(
+                        {"sender_display_name": payload.sender_display_name}
+                        if payload.sender_display_name is not None
+                        else {}
+                    ),
+                    **(
+                        {"original_url": payload.original_url}
+                        if payload.original_url is not None
+                        else {}
+                    ),
+                    **(
+                        {
+                            "correction_of_revision_id": (
+                                payload.correction_of_revision_id
+                            )
+                        }
+                        if payload.correction_of_revision_id is not None
+                        else {}
+                    ),
                 },
                 created_at=row.created_at,
             )

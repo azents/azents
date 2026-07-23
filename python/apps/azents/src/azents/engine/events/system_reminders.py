@@ -4,6 +4,7 @@ from typing import Literal, NamedTuple
 from xml.sax.saxutils import escape, quoteattr
 
 SystemReminderType = Literal[
+    "external_channel_continuation",
     "goal_continuation",
     "goal_updated",
     "goal_resumed",
@@ -91,6 +92,28 @@ def format_goal_updated_reminder(goal_objective: str | None) -> str:
     return format_system_reminder(
         reminder_type="goal_updated",
         instruction="\n".join(parts),
+        data=data,
+    )
+
+
+def format_idle_continuation_reminder(metadata: dict[str, str]) -> str:
+    """Render a provider-specific idle continuation reminder."""
+    if metadata.get("source") != "external_channel":
+        return format_goal_continuation_reminder(metadata.get("goal_objective"))
+    handles = metadata.get("active_bindings")
+    data = (
+        ()
+        if not handles
+        else (SystemReminderDataItem(name="active_bindings", value=handles),)
+    )
+    return format_system_reminder(
+        reminder_type="external_channel_continuation",
+        instruction=(
+            "Continue the active External Channel work. Reload the canonical "
+            "Channel Work Snapshot, choose the binding to advance, and use "
+            "`channel_action` for any external publication. If the snapshot is "
+            "empty, this continuation is stale and requires no external action."
+        ),
         data=data,
     )
 

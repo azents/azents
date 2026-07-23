@@ -37,6 +37,7 @@ from azents.engine.run.types import (
     FunctionToolWireVariant,
     PlaintextCustomToolHandler,
 )
+from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.engine.tooling.tool_search import (
     CatalogTool,
     ToolCatalogSource,
@@ -555,15 +556,19 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
                 expected_wire_dialect=expected_wire_dialect,
             )
         try:
-            if call.wire_dialect == "plaintext_custom":
-                if not isinstance(tool.handler, PlaintextCustomToolHandler):
-                    return _dialect_mismatch_result(
-                        call,
-                        expected_wire_dialect=expected_wire_dialect,
-                    )
-                result = await tool.handler.execute_plaintext_custom(call.arguments)
-            else:
-                result = await tool.handler(call.arguments)
+            with client_tool_execution_context(
+                call_id=call.call_id,
+                name=call.name,
+            ):
+                if call.wire_dialect == "plaintext_custom":
+                    if not isinstance(tool.handler, PlaintextCustomToolHandler):
+                        return _dialect_mismatch_result(
+                            call,
+                            expected_wire_dialect=expected_wire_dialect,
+                        )
+                    result = await tool.handler.execute_plaintext_custom(call.arguments)
+                else:
+                    result = await tool.handler(call.arguments)
         except FunctionToolError as exc:
             return ClientToolResultPayload(
                 call_id=call.call_id,

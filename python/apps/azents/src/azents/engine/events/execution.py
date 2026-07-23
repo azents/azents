@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import itertools
+import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -61,6 +62,8 @@ from azents.repos.agent_execution import (
     EventTranscriptRepository,
 )
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.work_data import ChannelActionCommit
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +87,36 @@ class TerminalResult:
 
     event_id: str | None
     message: str | None
+
+
+def _recovered_channel_action_output(
+    result: ChannelActionCommit,
+) -> dict[str, object]:
+    """Build a model-visible conservative recovery result."""
+    return {
+        "action_id": result.action_id,
+        "binding": result.binding_id,
+        "state": result.work_status.value,
+        "state_revision": result.state_revision,
+        "recovered": True,
+        "deliveries": [
+            {
+                "operation": delivery.operation.value,
+                "status": delivery.status.value,
+                **(
+                    {"reason": delivery.error_kind}
+                    if delivery.error_kind is not None
+                    else {}
+                ),
+                **(
+                    {"detail": delivery.error_summary}
+                    if delivery.error_summary is not None
+                    else {}
+                ),
+            }
+            for delivery in result.deliveries
+        ],
+    }
 
 
 InputPoller = Callable[[str], Awaitable[InputPollResult]]
@@ -1149,19 +1182,13 @@ class AgentRunExecution[
         """Idempotently cancel calls and remove their active ownership entries."""
         appended: list[Event] = []
         for call in tool_calls:
-            payload = ClientToolResultPayload(
-                call_id=call.call_id,
-                name=call.name,
-                wire_dialect=call.wire_dialect,
-                status="cancelled",
-                output=[
-                    OutputTextPart(
-                        text=(
-                            "Tool execution was cancelled before a result was recorded."
-                        ),
-                    )
-                ],
-            )
+            async with self.session_manager() as session:
+                payload = await self._cancelled_tool_result_payload(
+                    session,
+                    session_id=session_id,
+                    call=call,
+                )
+                await session.commit()
             appended.append(
                 await self._finalize_tool_result(
                     run_id=run_id,
@@ -1183,18 +1210,10 @@ class AgentRunExecution[
         """Cancel calls atomically inside the caller's DB transaction."""
         appended: list[Event] = []
         for call in tool_calls:
-            payload = ClientToolResultPayload(
-                call_id=call.call_id,
-                name=call.name,
-                wire_dialect=call.wire_dialect,
-                status="cancelled",
-                output=[
-                    OutputTextPart(
-                        text=(
-                            "Tool execution was cancelled before a result was recorded."
-                        ),
-                    )
-                ],
+            payload = await self._cancelled_tool_result_payload(
+                session,
+                session_id=session_id,
+                call=call,
             )
             appended.append(
                 await self._finalize_tool_result_in_session(
@@ -1206,6 +1225,54 @@ class AgentRunExecution[
                 )
             )
         return appended
+
+    async def _cancelled_tool_result_payload(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        call: ClientToolCallPayload,
+    ) -> ClientToolResultPayload:
+        """Recover durable Channel Action state before generic cancellation."""
+        if call.name == "channel_action":
+            repository = ExternalChannelWorkRepository()
+            recovered = await repository.recover_action_by_client_tool_call(
+                session,
+                session_id=session_id,
+                client_tool_call_id=call.call_id,
+                now=datetime.datetime.now(datetime.UTC),
+            )
+            if recovered is not None:
+                return ClientToolResultPayload(
+                    call_id=call.call_id,
+                    name=call.name,
+                    wire_dialect=call.wire_dialect,
+                    status="cancelled",
+                    output=[
+                        OutputTextPart(
+                            text=json.dumps(
+                                _recovered_channel_action_output(recovered),
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            )
+                        )
+                    ],
+                    metadata={
+                        "kind": "external_channel_action_recovered",
+                        "action_id": recovered.action_id,
+                    },
+                )
+        return ClientToolResultPayload(
+            call_id=call.call_id,
+            name=call.name,
+            wire_dialect=call.wire_dialect,
+            status="cancelled",
+            output=[
+                OutputTextPart(
+                    text="Tool execution was cancelled before a result was recorded."
+                )
+            ],
+        )
 
     async def _model_input_head_event_id(
         self,

@@ -4,7 +4,7 @@ created: 2026-05-10
 tags: [backend, engine]
 spec_type: flow
 owner: "@Hardtack"
-touches_domains: [agent, conversation]
+touches_domains: [agent, conversation, external-channel]
 code_paths:
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
@@ -18,8 +18,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-21
-spec_version: 30
+last_verified_at: 2026-07-22
+spec_version: 31
 ---
 
 # Context Compaction
@@ -226,7 +226,22 @@ the immediate shape of the recent interaction.
 - UI/audit history continues to include pre-compaction events. ModelFile GC may later delete unpinned ModelFile blobs whose single FilePart event is behind the head cursor, but it does not delete events or history metadata.
 - Legacy SDK compaction packages are not part of production compaction.
 
+## External Channel Continuity
+
+External Channel messages participate in model-visible token estimation,
+summary input, and bounded Recent Transcript continuity through their explicit
+source rendering. Continuity retains provider, resource, sender, message kind,
+authorization state, and safe body instead of converting the item to a direct
+Web-user message. Provider credentials, raw envelopes, and arbitrary permalink
+Markdown are never included.
+
+The immutable revision projected into a run remains the compaction input even
+when provider-current state later changes. Corrections appear only when a later
+authorized batch appends the corresponding revision event.
+
 ## Changelog
+
+- **2026-07-22** (spec_version 31) — Added source-attributed External Channel compaction input, token estimation, continuity rendering, and immutable revision semantics.
 
 - **2026-07-21** (spec_version 30) — Omitted plaintext-custom client-tool input from compaction accounting and continuity while retaining bounded result continuity.
 - **2026-07-20** (spec_version 29) — Reset the Session Tool Search working set in the successful compaction transaction while preserving it on skipped or unsuccessful attempts.
