@@ -241,6 +241,23 @@ def test_external_channel_participant_declares_session_owned_foundation_state() 
     }
 
 
+def test_git_worktree_participant_is_database_only_compatibility_tombstone() -> None:
+    """Purge retains the stable key without owning physical Runtime resources."""
+    participant = get_session_lifecycle_registry().get("session.git-worktrees")
+
+    assert participant.policy_version == 1
+    assert participant.dependencies == ("session.exchange-files",)
+    assert participant.purge_policy is SessionLifecyclePurgePolicy.DECLARED_CASCADE
+    assert participant.owned_resources == (
+        SessionLifecycleResource(
+            kind=SessionLifecycleResourceKind.DATABASE_TABLE,
+            name="session_agent_context_git_worktrees",
+            classification=(SessionLifecycleResourceClassification.PURE_DATABASE_CHILD),
+            test_node_id="test_session_lifecycle_git_worktrees",
+        ),
+    )
+
+
 def test_registry_rejects_unavailable_persisted_policy_version() -> None:
     """A fenced job cannot silently switch to a new participant contract."""
     registry = get_session_lifecycle_registry()

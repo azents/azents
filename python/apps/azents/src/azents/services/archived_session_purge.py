@@ -43,7 +43,6 @@ from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
 )
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
     SessionLifecyclePurgeParticipantFailure,
@@ -126,9 +125,6 @@ class ArchivedSessionPurgeService:
     lifecycle_finalizer_repository: Annotated[
         SessionLifecycleFinalizerRepository,
         Depends(SessionLifecycleFinalizerRepository),
-    ]
-    session_git_worktree_service: Annotated[
-        SessionGitWorktreeService, Depends(SessionGitWorktreeService)
     ]
     broker: Annotated[SessionBroker, Depends(get_broker)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
@@ -467,7 +463,6 @@ class ArchivedSessionPurgeService:
         async def cleanup_participant(
             participant: SessionLifecycleParticipantDefinition,
         ) -> dict[str, object] | None:
-            nonlocal worktree_count
             match participant.key:
                 case "session.external-channel":
                     async with self.session_manager() as session:
@@ -504,15 +499,7 @@ class ArchivedSessionPurgeService:
                     )
                     return {"exchange_file_count": cleanup_state.exchange_file_count}
                 case "session.git-worktrees":
-                    run_worktree_cleanup = (
-                        self.session_git_worktree_service.run_cleanup_for_root_tree
-                    )
-                    worktree_count = await run_worktree_cleanup(
-                        agent_id=root_session.agent_id,
-                        root_session_id=job.root_session_id,
-                        subtree_session_ids=session_ids,
-                    )
-                    return {"worktree_count": worktree_count}
+                    return {"cleanup_owner": "archive_best_effort"}
                 case _:
                     return None
 

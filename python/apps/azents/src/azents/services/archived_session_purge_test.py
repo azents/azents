@@ -45,7 +45,6 @@ from azents.repos.session_lifecycle_finalizer import (
 )
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
     get_session_lifecycle_registry,
@@ -240,6 +239,9 @@ class _RetentionRepository:
                 update={
                     "phase": phase,
                     "operational_summary": operational_summary,
+                    "blocked_by_participant_key": None,
+                    "last_error_kind": None,
+                    "last_error_summary": None,
                 }
             )
             if execution.participant_key == participant_key
@@ -606,7 +608,7 @@ class _WorktreeService:
         self.failure_count = failure_count
         self.calls = 0
 
-    async def run_cleanup_for_root_tree(
+    async def run_archive_cleanup_for_root_tree(
         self,
         *,
         agent_id: str,
@@ -905,10 +907,6 @@ def _build_service(
             SessionLifecycleFinalizerRepository,
             _LifecycleFinalizerRepository(agent_session_repository),
         ),
-        session_git_worktree_service=cast(
-            SessionGitWorktreeService,
-            worktree_service,
-        ),
         broker=cast(SessionBroker, broker),
         s3_service=cast(S3Service, s3_service),
         config=cast(
@@ -1113,16 +1111,16 @@ async def test_purge_deletes_external_resources_before_session_tree() -> None:
     assert summary.model_file_count == 1
     assert summary.artifact_count == 1
     assert summary.exchange_file_count == 1
-    assert summary.worktree_count == 2
+    assert summary.worktree_count == 0
     assert retention_repository.completed is True
     assert agent_session_repository.deleted is True
     assert all(item.owner_generation == 2 for item in agent_session_repository.sessions)
-    assert worktree_service.calls == 1
+    assert worktree_service.calls == 0
     assert broker.purged_session_ids == ["root-session", "child-session"]
     assert s3_service.deleted_keys == ["model-key", "artifact-key", "exchange-key"]
     session_delete_index = events.index("delete_session")
     assert events.index("fence_generations") < events.index("signal:root-session")
-    assert events.index("cleanup_worktrees") < session_delete_index
+    assert "cleanup_worktrees" not in events
     assert events.index("delete_blob:model-key") < session_delete_index
     assert events.index("delete_blob:artifact-key") < session_delete_index
     assert events.index("delete_blob:exchange-key") < session_delete_index
@@ -1158,7 +1156,7 @@ async def test_archived_root_purges_tree_with_active_status_child() -> None:
     assert retention_repository.completed is True
     assert agent_session_repository.deleted is True
     assert all(item.owner_generation == 2 for item in agent_session_repository.sessions)
-    assert worktree_service.calls == 1
+    assert worktree_service.calls == 0
     assert broker.purged_session_ids == ["root-session", "child-session"]
 
 
@@ -1292,8 +1290,8 @@ async def test_object_delete_failure_preserves_tree_for_retry() -> None:
     assert "delete_session" not in events
 
 
-async def test_worktree_cleanup_retry_preserves_checkpoints_and_converges() -> None:
-    """An incomplete worktree participant resumes through the ordinary retry job."""
+async def test_existing_worktree_failure_converges_without_runtime_cleanup() -> None:
+    """A legacy worktree failure checkpoints the tombstone on ordinary retry."""
     events: list[str] = []
     (
         service,
@@ -1305,46 +1303,57 @@ async def test_worktree_cleanup_retry_preserves_checkpoints_and_converges() -> N
         s3_service,
     ) = _build_service(
         events=events,
-        active_checks=[False, False, False],
-        worktree_failure_count=1,
+        active_checks=[False, False],
     )
+    now = datetime.datetime.now(datetime.UTC)
+    retention_repository.participant_executions = [
+        _participant_execution(
+            participant_key=participant.key,
+            policy_version=participant.policy_version,
+            now=now,
+        ).model_copy(
+            update=(
+                {
+                    "phase": ArchivedSessionPurgeParticipantPhase.PREPARED,
+                    "attempt_count": 61,
+                    "last_error_kind": "RuntimeError",
+                    "last_error_summary": ("Git worktree purge cleanup is incomplete"),
+                }
+                if participant.key == "session.git-worktrees"
+                else {}
+            )
+        )
+        for participant in get_session_lifecycle_registry().participants
+    ]
     retention_repository.preserve_participant_executions = True
 
-    first = await service.purge_once(
+    summary = await service.purge_once(
         lease_owner="worker-1",
         deadline=_deadline(),
     )
 
-    assert first.completed_count == 0
-    assert first.retry_scheduled_count == 1
-    assert first.failed_count == 1
-    assert retention_repository.retry is not None
-    assert (
-        retention_repository.retry["error_participant_key"] == "session.git-worktrees"
-    )
-    assert (
-        retention_repository.retry["error_phase"]
-        is ArchivedSessionPurgeParticipantPhase.CLEANUP_COMPLETED
-    )
-    assert agent_session_repository.deleted is False
-    assert worktree_service.calls == 1
-
-    retry_job = _job(datetime.datetime.now(datetime.UTC)).model_copy(
-        update={"attempt_count": 2}
-    )
-    retention_repository.job = retry_job
-
-    second = await service.purge_once(
-        lease_owner="worker-1",
-        deadline=_deadline(),
-    )
-
-    assert second.completed_count == 1
-    assert second.retry_scheduled_count == 0
-    assert second.failed_count == 0
+    assert summary.completed_count == 1
+    assert summary.retry_scheduled_count == 0
+    assert summary.failed_count == 0
     assert retention_repository.completed is True
     assert agent_session_repository.deleted is True
-    assert worktree_service.calls == 2
+    assert worktree_service.calls == 0
+    assert "cleanup_worktrees" not in events
+    worktree_execution = next(
+        execution
+        for execution in retention_repository.participant_executions
+        if execution.participant_key == "session.git-worktrees"
+    )
+    assert worktree_execution.phase is ArchivedSessionPurgeParticipantPhase.VERIFIED
+    assert worktree_execution.last_error_kind is None
+    assert worktree_execution.last_error_summary is None
+    context_execution = next(
+        execution
+        for execution in retention_repository.participant_executions
+        if execution.participant_key == "session.context"
+    )
+    assert context_execution.phase is ArchivedSessionPurgeParticipantPhase.VERIFIED
+    assert context_execution.blocked_by_participant_key is None
     assert s3_service.deleted_keys == [
         "model-key",
         "artifact-key",

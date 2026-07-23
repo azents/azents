@@ -185,17 +185,13 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                 owned_resources=(
                     _database_resource(
                         "session_agent_context_git_worktrees",
-                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
-                        "test_session_lifecycle_git_worktrees",
-                    ),
-                    _external_resource(
-                        "session-git-worktrees",
+                        SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
                         "test_session_lifecycle_git_worktrees",
                     ),
                 ),
                 archive_policy=SessionLifecycleTransitionPolicy.PRESERVE,
                 restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,
-                purge_policy=SessionLifecyclePurgePolicy.REQUIRED,
+                purge_policy=SessionLifecyclePurgePolicy.DECLARED_CASCADE,
             ),
             SessionLifecycleParticipantDefinition(
                 key="session.context",

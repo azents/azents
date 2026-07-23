@@ -45,7 +45,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-23
-spec_version: 25
+spec_version: 26
 ---
 
 # File Exchange Storage
@@ -125,10 +125,11 @@ tree. After purge fencing and run shutdown, the purge workflow:
 3. verifies that every selected resource reached its terminal metadata and blob state; and
 4. deletes file metadata before the root Session cascade.
 
-Any worktree or blob cleanup failure aborts database subtree deletion and leaves ownership, terminal
-metadata, durable purge progress, and retry information available for a later pass. Purge never relies
-on an Exchange URI to infer the owner and never lets a database cascade erase the last cleanup
-reference before external deletion succeeds.
+Any required blob cleanup failure aborts database subtree deletion and leaves ownership, terminal
+metadata, durable purge progress, and retry information available for a later pass. Git worktree
+state is not a file-storage purge prerequisite: the database-only compatibility participant advances
+without Runtime access. Purge never relies on an Exchange URI to infer the owner and never lets a
+database cascade erase the last cleanup reference before external deletion succeeds.
 
 ### Agent presents sandbox file
 
@@ -174,6 +175,7 @@ reference before external deletion succeeds.
 
 ## Changelog
 
+- **2026-07-23** — v26. Clarified that only required file/blob cleanup can block Session purge; Git worktree state is outside the file-storage purge boundary.
 - **2026-07-20** — v23. Unified attachment-bearing client and provider tool output as standalone deliveries that close ordered Activity without nested duplication.
 - **2026-07-20** — v22. Promoted validated generated-image attachments to standalone Agent deliverables, preserved raw diagnostic ownership, and suppressed only duplicate nested image URIs.
 - **2026-07-20** — v21. Extended attachment text previews to Markdown, common textual application media types, and safe UTF-8 files with unknown media types while excluding invalid UTF-8 and binary-control content.

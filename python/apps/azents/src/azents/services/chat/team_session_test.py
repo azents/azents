@@ -1,8 +1,10 @@
 """ChatSessionService team session tests."""
 
 import datetime
+import logging
 from typing import cast
 
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +16,6 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
     LLMProvider,
-    SessionGitWorktreeBranchCreatedBy,
-    SessionGitWorktreeStatus,
     WorkspaceUserRole,
 )
 from azents.rdb.models.agent import RDBAgent
@@ -36,7 +36,6 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
-from azents.repos.session_git_worktree.data import SessionGitWorktree
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -45,7 +44,6 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.chat.data import (
-    ArchiveWorktreeIntegrityBlocked,
     InvalidSessionTitle,
 )
 from azents.services.exchange_file import ExchangeFileService
@@ -55,10 +53,7 @@ from azents.services.external_channel.channel_action import (
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
-from azents.services.session_git_worktree import (
-    GitWorktreeArchiveIntegrityFailure,
-    SessionGitWorktreeService,
-)
+from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
@@ -141,7 +136,7 @@ def _service(
     rdb_session_manager: SessionManager[AsyncSession],
     *,
     session_git_worktree_repository: SessionGitWorktreeRepository | None = None,
-    archive_integrity_failure: GitWorktreeArchiveIntegrityFailure | None = None,
+    session_git_worktree_service: SessionGitWorktreeService | None = None,
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     return ChatSessionService(
@@ -172,9 +167,12 @@ def _service(
             vfs_projection_service=None,
             external_channel_repository=ExternalChannelRepository(),
         ),
-        session_git_worktree_service=cast(
-            SessionGitWorktreeService,
-            _ArchiveIntegrityService(archive_integrity_failure),
+        session_git_worktree_service=(
+            session_git_worktree_service
+            or cast(
+                SessionGitWorktreeService,
+                _ArchiveCleanupService(rdb_session_manager),
+            )
         ),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
         external_channel_lifecycle_service=ExternalChannelLifecycleService(
@@ -219,66 +217,39 @@ class _OwnedWorktreeRepository(SessionGitWorktreeRepository):
         return worktree_path in self.paths
 
 
-class _ArchiveAllocationRepository(SessionGitWorktreeRepository):
-    """Return one ready allocation owned by the requested root Session."""
-
-    async def lock_by_session_id(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-    ) -> list[SessionGitWorktree]:
-        """Return a deterministic allocation without database mutation."""
-        del session
-        now = datetime.datetime.now(datetime.UTC)
-        return [
-            SessionGitWorktree(
-                id="01900000000070008000000000000009",
-                session_id=session_id,
-                session_agent_context_id="context-1",
-                created_by_session_agent_id="session-agent-1",
-                created_by_agent_session_id=session_id,
-                action_execution_id=None,
-                session_workspace_project_id=None,
-                source_project_path="/workspace/agent/repo",
-                starting_ref="main",
-                base_commit="abc123",
-                worktree_path="/workspace/agent/.azents/worktrees/session/repo",
-                branch_name="azents/session",
-                branch_created_by=SessionGitWorktreeBranchCreatedBy.AZENTS,
-                status=SessionGitWorktreeStatus.READY,
-                failure_summary=None,
-                cleanup_summary=None,
-                ready_at=now,
-                failed_at=None,
-                cleaned_at=None,
-                created_at=now,
-                updated_at=now,
-            )
-        ]
-
-
-class _ArchiveIntegrityService:
-    """Return the configured archive integrity observation."""
+class _ArchiveCleanupService:
+    """Observe post-commit archive cleanup and optionally fail."""
 
     def __init__(
         self,
-        failure: GitWorktreeArchiveIntegrityFailure | None,
+        session_manager: SessionManager[AsyncSession],
+        *,
+        failure: Exception | None = None,
     ) -> None:
+        self.session_manager = session_manager
         self.failure = failure
+        self.calls: list[tuple[str, str, tuple[str, ...]]] = []
+        self.observed_statuses: list[AgentSessionStatus] = []
 
-    async def validate_archive_integrity(
+    async def run_archive_cleanup_for_root_tree(
         self,
         *,
         agent_id: str,
         root_session_id: str,
         subtree_session_ids: list[str],
-        allocations: list[SessionGitWorktree],
-    ) -> GitWorktreeArchiveIntegrityFailure | None:
-        """Return the configured failure after observing the locked allocation."""
-        del agent_id, root_session_id, subtree_session_ids
-        assert allocations
-        return self.failure
+    ) -> int:
+        """Record that cleanup starts only after the root is archived."""
+        self.calls.append((agent_id, root_session_id, tuple(subtree_session_ids)))
+        async with self.session_manager() as session:
+            root = await AgentSessionRepository().get_by_id(
+                session,
+                root_session_id,
+            )
+        assert root is not None
+        self.observed_statuses.append(root.status)
+        if self.failure is not None:
+            raise self.failure
+        return 1
 
 
 class TestChatSessionTeamSessions:
@@ -1008,12 +979,13 @@ class TestChatSessionTeamSessions:
         assert restore_result.value.archived_at is None
         assert restore_result.value.purge_after is None
 
-    async def test_archive_worktree_integrity_failure_keeps_session_active(
+    async def test_archive_worktree_cleanup_failure_keeps_archive_successful(
         self,
         rdb_session: AsyncSession,
         rdb_session_manager: SessionManager[AsyncSession],
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Archive preflight failure leaves the complete transition unapplied."""
+        """Post-commit worktree cleanup failure cannot roll back archive."""
         workspace_id = await _create_workspace(
             rdb_session,
             "team-session-worktree-integrity",
@@ -1045,35 +1017,48 @@ class TestChatSessionTeamSessions:
             setup_actions=[],
         )
         assert isinstance(create_result, Success)
-        failure = GitWorktreeArchiveIntegrityFailure(
-            allocation_id="01900000000070008000000000000009",
-            reason_code="target_missing",
-            summary="Git worktree contents are no longer available.",
-        )
-
-        archive_result = await _service(
+        cleanup_service = _ArchiveCleanupService(
             rdb_session_manager,
-            session_git_worktree_repository=_ArchiveAllocationRepository(),
-            archive_integrity_failure=failure,
-        ).archive_agent_session(
-            agent_id=agent_id,
-            session_id=create_result.value.id,
-            user_id=user_id,
+            failure=RuntimeError("Runtime runner is unavailable."),
         )
 
-        assert isinstance(archive_result, Failure)
-        assert isinstance(archive_result.error, ArchiveWorktreeIntegrityBlocked)
-        assert archive_result.error.allocation_id == failure.allocation_id
-        assert archive_result.error.reason_code == "target_missing"
+        with caplog.at_level(
+            logging.ERROR,
+            logger="azents.services.chat",
+        ):
+            archive_result = await _service(
+                rdb_session_manager,
+                session_git_worktree_service=cast(
+                    SessionGitWorktreeService,
+                    cleanup_service,
+                ),
+            ).archive_agent_session(
+                agent_id=agent_id,
+                session_id=create_result.value.id,
+                user_id=user_id,
+            )
+
+        assert isinstance(archive_result, Success)
+        assert cleanup_service.calls == [
+            (
+                agent_id,
+                create_result.value.id,
+                (create_result.value.id,),
+            )
+        ]
+        assert cleanup_service.observed_statuses == [AgentSessionStatus.ARCHIVED]
+        assert any(
+            record.message == "Archived Session Git worktree cleanup failed"
+            for record in caplog.records
+        )
         async with rdb_session_manager() as verify_session:
-            active = await AgentSessionRepository().get_by_id(
+            archived = await AgentSessionRepository().get_by_id(
                 verify_session,
                 create_result.value.id,
             )
-        assert active is not None
-        assert active.status is AgentSessionStatus.ACTIVE
-        assert active.archived_at is None
-        assert active.purge_after is None
+        assert archived is not None
+        assert archived.status is AgentSessionStatus.ARCHIVED
+        assert archived.archived_at is not None
 
     async def test_archive_team_primary_session_is_blocked(
         self,

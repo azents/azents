@@ -25,8 +25,8 @@ code_paths:
   - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-07-22
-spec_version: 8
+last_verified_at: 2026-07-23
+spec_version: 9
 ---
 
 # Periodic Execution Flow Spec
@@ -222,14 +222,18 @@ validation failure commits the job lease, records a durable per-job retry, and
 preserves later-job isolation. The retry records the affected participant when
 known and the pre-execution participant stage. Database transaction or commit
 failures remain batch-level infrastructure failures.
+The persisted `session.git-worktrees@1` key is a database-only compatibility
+participant. Existing jobs retry and checkpoint it through the same durable phase
+workflow without contacting a Runtime or checking physical Git state.
 
 The handler locks the complete root tree, increments owner generations, records stop intent, emits
 broker stop signals, and waits for active runs through durable retry rather than deleting around them.
-After no active run remains, it removes broker state, deletes every Azents-owned subtree worktree and
-branch, marks subtree file resources terminal, deletes their external blobs, revalidates the tree and
-cleanup state, deletes file metadata, and finally deletes the root database subtree. Only then does the
-content-free purge job tombstone become completed. External cleanup failure or lost ownership keeps
-metadata and durable retry state instead of allowing a cascade to hide unfinished work.
+After no active run remains, it removes broker state, marks subtree file resources terminal, deletes
+their external blobs, revalidates required cleanup state, deletes file metadata, and finally deletes
+worktree allocation rows and the root database subtree. It never inspects or mutates physical Git
+state. Only then does the content-free purge job tombstone become completed. Required external
+cleanup failure or lost ownership keeps metadata and durable retry state instead of allowing a
+cascade to hide unfinished work.
 
 ## Agent decommission task
 
@@ -267,6 +271,7 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-07-23** — v9. Made existing Git worktree participant retries database-only so they converge without Runtime availability.
 - **2026-07-19** — v4. Added the durable archived-session retention recalculation and purge tasks, including intervals, leases, bounded batching, stale-job reconciliation, fencing, retry, and cleanup ordering.
 - **2026-07-21** — v5. Isolated ordinary scheduler task lifecycle failures so one task cannot terminate the scheduler process; cancellation remains a scheduler shutdown signal.
 - **2026-07-21** — v6. Isolated per-root purge failures so a bounded scheduler pass logs and retries the failed root before continuing with later due roots.

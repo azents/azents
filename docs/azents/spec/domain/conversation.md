@@ -102,7 +102,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-23
-spec_version: 129
+spec_version: 130
 ---
 
 # Conversation & Events
@@ -260,14 +260,14 @@ Archive snapshots the current instance retention revision, whole-day value, `arc
 Every linked descendant `AgentSession` is marked archived so direct worker, command, input, wake-up,
 and recovery boundaries can reject it without resolving the tree again. Zero-day retention completes
 the archive transaction and only makes the root eligible for the next asynchronous purge pass.
-Archive preserves durable transcript data, run rows, file metadata, project registry rows, and all
-Azents-owned worktree allocations. Before mutating the root tree, archive locks the shared-context
-worktree allocations and asks the current-generation Runner to inspect every non-cleaned target.
-Archive accepts an exactly registered directory whose Git branch matches the allocation even when the
-worktree contains modified or untracked files. Missing targets, unregistered existing directories,
-branch mismatches, invalid target kinds, invalid ownership metadata, and unavailable inspection block
-the complete archive with a bounded `409 Conflict` containing the allocation ID and stable reason.
-The response excludes worktree paths, branch names, Git output, and repository contents.
+Archive preserves durable transcript data, run rows, and file metadata. After the complete archive
+transaction commits, it makes one best-effort forced cleanup attempt for every non-cleaned
+Azents-owned worktree allocation in the root tree. The attempt may remove modified or untracked
+contents, the Azents-created branch, linked Project and catalog rows, and an empty session-scoped
+worktree parent directory. Runtime unavailability, Git failure, ownership mismatch, or any other
+cleanup failure is logged and may remain in allocation state, but it does not roll back archive,
+change the successful response, or create retention retry work. A crash or cancellation after commit
+may skip the attempt. Restore does not recreate a worktree removed during archive.
 
 `GET /chat/v1/agents/{agent_id}/sessions/archived` returns archived roots separately from the active
 session list. Each item includes `archived_at`, `purge_after`, and the immutable retention snapshot;
@@ -287,16 +287,15 @@ root tree. If the selected session is archived, Main Web navigates to
 archive time, immutable retention snapshot, scheduled deletion or Unlimited state, and Restore. It
 exposes no permanent-delete action.
 
-The public `DELETE /chat/v1/sessions/{session_id}` route is absent. Permanent deletion is owned only
-by durable purge after fencing. Purge deletes subtree ModelFile, Artifact, bound ExchangeFile and
-preview blobs, broker state, and every owned worktree path/branch before the database subtree is
-removed. Retention purge force-removes an exactly registered owned worktree so archive-preserved local
-changes cross the irreversible retention boundary. A missing target and an already-absent owned
-branch are terminal idempotent outcomes. An existing path without exact Git registration, a registered
-path whose branch differs from the allocation, or another ambiguous ownership state is never deleted.
-The worktree participant records a bounded durable classification, retains allocation ownership and
-retry state on failure, and resumes only its incomplete checkpoint through the ordinary retry
-workflow. Final Session deletion still requires every allocation to be cleaned.
+The public `DELETE /chat/v1/sessions/{session_id}` route is absent. Permanent database deletion is
+owned only by durable purge after fencing. Purge deletes subtree ModelFile, Artifact, bound
+ExchangeFile and preview blobs, broker state, lifecycle context rows, worktree allocation rows, and
+the database Session subtree. It never asks a Runtime Runner or Runtime provider to inspect or mutate
+a Git repository, branch, path, or worktree, and physical Git state cannot block deletion.
+`session.git-worktrees@1` remains in durable participant snapshots as a database-only compatibility
+tombstone: incomplete legacy checkpoints advance normally without Runtime access and unblock
+`session.context`. Its allocation table is a pure database child deleted explicitly by the finalizer
+before restrictive context rows, regardless of recorded cleanup status.
 Irreversible purge fencing also snapshots the required participant keys and policy versions. A fenced
 job executes only that immutable snapshot across retries and deployments; later registry additions
 apply only to newly fenced jobs. Persisted keys, policy versions, and dependencies must remain
@@ -985,6 +984,7 @@ participant.
 
 ## 12. Changelog
 
+- **2026-07-23** — v130. Made archive the only best-effort Runtime/Git worktree cleanup point and made retention purge database-only with ordinary convergence for existing worktree participant failures.
 - **2026-07-23** — v129. Added external-message ID-to-display-name mapping projection while preserving canonical provider text and action identifiers.
 - **2026-07-22** — v126. Added External Channel batch InputBuffer promotion, source-attributed transcript events, stable live/durable identity, and revision/lifecycle ownership.
 
