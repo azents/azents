@@ -67,6 +67,10 @@ jobs:
             tool-search-runtime-provider-e2e:
               - '.github/workflows/ci.yaml'
               - 'testenv/azents/e2e/src/support/aimock_fixtures/agents_md_loader.json'
+              - 'testenv/azents/e2e/src/support/image_generation_openai_proxy.py'
+              - 'testenv/azents/e2e/src/support/slack_provider_fake.py'
+              - 'testenv/azents/e2e/src/tests/conftest.py'
+              - 'testenv/azents/e2e/src/tests/azents/public/test_external_channels.py'
               - 'testenv/azents/e2e/src/tests/azents/public/test_runtime_hooks.py'
             web-surface-e2e:
               - '.dockerignore'
@@ -266,12 +270,13 @@ jobs:
         run: |
           cd testenv/azents/e2e
           uv sync
-      - name: Run Tool Search runtime-provider E2E
+      - name: Run focused runtime-provider E2E
         run: |
           cd testenv/azents/e2e
           uv run pytest -vv -s \
             src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_runtime_hooks_execute_through_public_chat_path \
-            src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_tool_search_persists_deferred_probe_across_runs
+            src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_tool_search_persists_deferred_probe_across_runs \
+            src/tests/azents/public/test_external_channels.py::test_provider_native_channel_work_progress_journey
 
   ci_web_surface_e2e_run:
     name: ci-web-surface-e2e-run

@@ -636,17 +636,19 @@ def test_connection_update_and_repeated_disconnect(
     assert repeated.credentials_configured is False
 
 
+@pytest.mark.runtime_provider
 def test_provider_native_channel_work_progress_journey(
     request: pytest.FixtureRequest,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
+    azents_runtime_provider_docker_container: Container,
     slack_provider_fake_url: str,
     openai_proxy_url: str,
 ) -> None:
     """Render one rich canonical work snapshot through Slack's native Plan."""
-    del azents_engine_worker_container
+    del azents_engine_worker_container, azents_runtime_provider_docker_container
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
         timeout=5,
@@ -943,6 +945,14 @@ def test_provider_native_channel_work_progress_journey(
     assert request_counts["conversations.info"] >= 3
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
+
+    disconnected = external_api.external_channel_v1_disconnect_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert disconnected.status is ExternalChannelConnectionStatus.DISCONNECTED
 
 
 def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
