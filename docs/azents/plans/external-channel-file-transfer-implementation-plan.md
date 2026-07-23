@@ -25,17 +25,17 @@ merged without explicit requester approval.
 
 ## Stack Shape
 
-```text
-main
-← design/channel-file-transfer
-← plan/channel-file-transfer
-← feature/channel-file-transfer-foundation
-← feature/channel-file-transfer-inbound
-← feature/channel-file-transfer-outbound
-← feature/channel-file-transfer-admin-e2e
-← validate/channel-file-transfer
-← docs/channel-file-transfer-spec
-← cleanup/channel-file-transfer-plans
+```mermaid
+flowchart LR
+    Main[main] --> Design[design/channel-file-transfer]
+    Design --> Plan[plan/channel-file-transfer]
+    Plan --> Foundation[feature/channel-file-transfer-foundation]
+    Foundation --> Inbound[feature/channel-file-transfer-inbound]
+    Inbound --> Outbound[feature/channel-file-transfer-outbound]
+    Outbound --> AdminE2E[feature/channel-file-transfer-admin-e2e]
+    AdminE2E --> Validation[validate/channel-file-transfer]
+    Validation --> Specs[docs/channel-file-transfer-spec]
+    Specs --> Cleanup[cleanup/channel-file-transfer-plans]
 ```
 
 | PR | Branch | Base | Boundary |
@@ -52,13 +52,17 @@ main
 
 ## Dependency and Parallelization Map
 
-```text
-Design baseline
-  → implementation plan
-    → foundation contracts
-      → inbound download ─┐
-      → outbound delivery ├→ Admin/E2E → validation → spec promotion → cleanup
-                           ┘
+```mermaid
+flowchart LR
+    Design[Design baseline] --> Plan[Implementation plan]
+    Plan --> Foundation[Foundation contracts]
+    Foundation --> Inbound[Inbound download]
+    Foundation --> Outbound[Outbound delivery]
+    Inbound --> AdminE2E[Admin and E2E]
+    Outbound --> AdminE2E
+    AdminE2E --> Validation
+    Validation --> Promotion[Spec promotion]
+    Promotion --> Cleanup
 ```
 
 The stacked Git history remains sequential even where implementation work can be split.
