@@ -27,7 +27,7 @@ This work uses stacked PRs because schema, runtime protocol, Admin surfaces, dep
 2. **Implementation plan** — this stack plan and validation matrix.
 3. **Phase 1: Authentication binding foundation** — durable binding aggregate, ownership/lifecycle/audit model, migrations, repositories, services, and bootstrap declaration contract.
 4. **Phase 2: Provider authentication and control** — explicit method dispatch, TokenReview, issued-token binding, connection authority/expiry, Provider clients, and Kubernetes Provider integration.
-5. **Phase 3: Runtime Runner authentication** — Runtime-bound credentials, durable Runtime/generation validation, expiry/refresh, Provider injection, and Runner stream fencing.
+5. **Phase 3: Runtime Runner authentication** — Runtime-bound credentials, durable Runtime/generation validation, Provider injection, Runner stream fencing, and existing storage preservation.
 6. **Phase 4: Admin product surface** — Admin APIs, schemas, generated clients, Admin Web inventory/detail/actions, and audit/health presentation.
 7. **Phase 5: Helm integration** — projected ServiceAccount token, TokenReview RBAC, bootstrap binding declaration, obsolete Secret/bootstrap removal, and chart tests.
 8. **Validation** — E2E, migration, fixture, security invariant, chart, and regression validation with recorded evidence.
@@ -107,19 +107,21 @@ flowchart LR
 ### Scope
 
 - Derive a domain-separated Runner credential key from the existing credential-encryption root.
-- Bind credentials to Runtime ID, desired generation, validity window, and non-secret credential identifier.
-- Validate durable Runtime existence, current desired generation, and credential expiry before registration.
+- Bind credentials to Runtime ID, desired generation, and non-secret credential identifier.
+- Validate durable Runtime existence and current desired generation before registration and retained authority.
 - Remove the shared Runtime Control token path.
-- Refresh credentials before expiry through the Provider lifecycle/observe channel without changing logical Runtime identity.
+- Keep credentials valid only for the current durable desired generation so the rollout does not require mutating or replacing active Runtime Pods to refresh authentication.
 - Keep Runner connection generation fencing independent from credential generation.
 - Update Kubernetes and Docker Provider Runtime environments and Runner clients.
+- Preserve existing Runtime storage identity and require every Pod replacement to reuse the same PersistentVolumeClaim.
 
 ### Validation
 
-- Signing, tamper, root mismatch, expiry, Runtime mismatch, and stale desired-generation tests.
-- Stream expiry/refresh and reconnect tests.
+- Signing, tamper, root mismatch, Runtime mismatch, and stale desired-generation tests.
+- Stale-generation revocation and reconnect tests.
 - Provider environment contract tests proving the shared token is absent.
 - Runner operation regression tests across reconnect and generation replacement.
+- Kubernetes Provider regression tests proving authentication changes never invoke Runtime reset/delete and reuse the existing PVC.
 
 ## Phase 4: Admin Product Surface
 
@@ -167,20 +169,22 @@ flowchart LR
 | Binding rotation | New evidence connects before old binding/credential loses authority |
 | Binding revocation | Existing and new connection authority ends |
 | Runner start | Runner connects through Runtime/generation-bound credential |
-| Runner stale/expired/mismatched credential | Registration or retained authority fails closed |
+| Runner stale or mismatched credential | Registration or retained authority fails closed |
 | Admin actions | Inventory, health, audit, rotate, and revoke remain consistent and secret-safe |
 | Secret-free chart | No Provider/shared Runner auth Secret is required or rendered |
+| Existing Runtime during compatible rollout | Same PVC name, UID, bound PV, and stored data remain after Provider/Runner reconnect |
 
 ### Fixture and Prerequisite Support
 
 - PostgreSQL fixture must include the new binding schema and migration coverage.
 - E2E requires a Kubernetes API with TokenReview and ServiceAccount projected-token support.
 - Deterministic TokenReview service tests use injected clients; live TokenReview tests run only where the Kubernetes prerequisite exists.
+- Non-destructive rollout validation requires an existing Runtime PVC with a known data sentinel captured before deployment.
 - No real credential values enter fixtures, snapshots, logs, or evidence.
 
 ### Evidence
 
-Record commands, environment, pass/fail/skip counts, migration head, rendered resource assertions, E2E binding IDs/methods without secret values, and strict Requirements/ADR/Design comparison.
+Record commands, environment, pass/fail/skip counts, migration head, rendered resource assertions, E2E binding IDs/methods without secret values, Runtime PVC name/UID/bound-PV and data-sentinel verification, and strict Requirements/ADR/Design comparison.
 
 ### CI Policy
 
@@ -204,7 +208,8 @@ Run `/spec-review` in the spec-promotion phase.
 5. Produce one immutable compatible Azents snapshot from the final stack result.
 6. Update Home chart revision and all image tags/digests atomically.
 7. Use ArgoCD prune-last ordering so new workloads become healthy before obsolete Secret resources are pruned.
-8. Perform live-cluster writes only after explicit requester approval.
+8. Verify existing Runtime PVC names, UIDs, bound PersistentVolumes, and stored data before and after rollout.
+9. Perform live-cluster writes only after explicit requester approval.
 
 ## Known Blockers and External Actions
 
