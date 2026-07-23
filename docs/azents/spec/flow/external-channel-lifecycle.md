@@ -19,7 +19,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 5
+spec_version: 6
 ---
 
 # External Channel Lifecycle
@@ -39,6 +39,10 @@ complete submitted credential set in one operation. It clears stale provider
 identity, capability, health, lease, and gap projections and immediately validates
 the replacement configuration. No lifecycle status prevents editing a visible
 connection, and no transport fallback occurs.
+
+Revoking a participant grant deletes the selected grant policy row after an ownership
+check. It does not delete canonical provider content, invocation history, projected
+Session events, or unrelated grants.
 
 Provider credential and permission failures move only connection health to
 `reconnect_required`; they preserve route relationships, bindings, and work. Slack
@@ -82,14 +86,20 @@ Agent deletion is asynchronous and irreversible. Its lifecycle status fences new
 
 ## Operational Projection
 
-Agent Settings shows active connection health, reconnect requirement,
-revocation, transport, complete connection editing, and unconditional disconnect.
-Disconnected connections disappear from this active list. Session Channels remains
-readable after archive and displays disconnected bindings, ended work, truncation,
-and delivery outcomes. Restore controls do not imply provider reactivation.
+Agent Settings shows active connection health, reconnect requirement, revocation,
+transport, complete connection editing, unconditional disconnect, and complete
+provider user IDs for grants and blocks. Connection disconnect, grant revocation,
+and block removal use in-product confirmation dialogs. Disconnected connections
+disappear from this active list.
+
+Session Channels remains readable after archive and displays disconnected bindings,
+ended work, ordered task state, the provider progress projection state, truncation,
+and delivery outcomes. Binding disconnect also uses an in-product confirmation
+dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 6) — Added hard grant removal, complete access identities, in-product destructive confirmations, and task/progress lifecycle presentation.
 - **2026-07-23** (spec_version 5) — Removed route lifecycle transitions. Connection status owns disconnect and provider health, while Agent lifecycle owns new-execution eligibility.
 - **2026-07-22** (spec_version 4) — Kept provider health failures and App uninstall independent from Agent route lifecycle and fenced stale validation results.
 - **2026-07-22** (spec_version 3) — Made connection disconnect unconditional and idempotent, committed terminal state before provider cleanup, omitted disconnected rows from active management, and replaced reconnect/transport actions with complete Slack configuration editing.
