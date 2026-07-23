@@ -34,7 +34,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-23
-spec_version: 6
+spec_version: 7
 ---
 
 # External Channel
@@ -68,7 +68,7 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 | Binding | Active or disconnected link from one route/resource to one AgentSession. Initial activation waits for hydration reconciliation. |
 | Invocation batch | Immutable ordered revision membership released through one authorized trigger and referenced by a batch InputBuffer. |
 | Access request/grant/block | Opaque approval request, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
-| Channel Work/action/delivery | Binding-scoped durable tasks, one atomic explicit action, and persisted provider intents/outcomes. Management derives the provider progress projection state from the latest durable delivery outcome rather than comparing unrelated revision counters. |
+| Channel Work/action/delivery | Binding-scoped durable tasks, one work-cycle-owned Activity Tracker desired state and provider identity, one atomic explicit action, and persisted provider intents/outcomes. Management derives projection state from the latest progress operation belonging to the current work cycle. |
 
 ## State Invariants
 
@@ -76,6 +76,8 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 - A route has no lifecycle state. A dedicated connection has exactly one route; platform routing may later permit multiple routes. New execution requires a locked `active` or `degraded` connection and active Agent lifecycle, so disconnect cannot commit between admission and related writes. Provider health, reconnect, disconnect, and Agent decommission never write route state.
 - A resource is `active`, `unavailable`, or `deleted`; hydration is `pending`, `running`, `complete`, `bounded`, or `incomplete`.
 - A binding is either active or disconnected. Activation moves from `waiting_hydration` to `active` only after the admitted-event reconciliation boundary is clear.
+- Releasing a new invocation batch creates the current work cycle's Activity Tracker before Session wake-up. Checking, task progress, and delivered-answer completion update one retained provider message; separate work cycles never share that identity.
+- Confirmed deletion clears only the matching Tracker identity and creates one replacement from durable desired state. A replacement that captured an older desired revision is updated once to the latest state after creation.
 - Message revisions never rewrite an already projected revision. Later edits or deletes remain distinct corrections.
 - A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, route relationship, and active resource. Blocks take precedence.
 - Restore never reactivates a disconnected binding, ended work item, removed pending context, or connection.
@@ -103,7 +105,7 @@ connection before attempting provider cleanup. Repeating disconnect is safe.
 Disconnected rows remain as retained history roots but are omitted from the active
 Agent connection list.
 
-Session Channels shows bindings, ordered work tasks, provider progress projection
+Session Channels shows bindings, ordered work tasks, Activity Tracker projection
 state, truncation, delivery outcomes, grants, and terminal disconnect state.
 Approval and management detail surfaces show complete provider user identities with
 copy controls, while regular timeline summaries remain name-first. Destructive
@@ -118,6 +120,7 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-23** (spec_version 7) — Added work-cycle-owned Activity Tracker identity, pre-execution creation, retained delivered-answer completion, confirmed-deletion replacement, and current-work projection scoping.
 - **2026-07-23** (spec_version 6) — Added bounded Block Kit fallback normalization, durable approval-control deletion, hard grant removal, delivery-derived Activity Tracker state, complete provider identities, in-product confirmations, and narrow-screen presentation behavior.
 - **2026-07-23** (spec_version 5) — Added immutable bounded Slack reference mappings, readable external-message presentation, and connected-app self-message exclusion while retaining canonical provider IDs and bodies.
 - **2026-07-23** (spec_version 4) — Removed route lifecycle state from persistence, routing, management responses, and UI. Connection health, Agent lifecycle, and binding/work/resource state now own their respective admission and termination decisions.

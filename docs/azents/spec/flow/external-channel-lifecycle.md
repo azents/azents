@@ -19,14 +19,14 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 6
+spec_version: 7
 ---
 
 # External Channel Lifecycle
 
 ## Direct Management Transitions
 
-Disconnecting a binding terminally marks it disconnected, ends active Channel Work, removes never-projected pending context for that binding route/resource, and commits progress cleanup delivery when needed. Canonical provider messages and already projected AgentSession history remain.
+Disconnecting a binding terminally marks it disconnected, ends active Channel Work, removes never-projected pending context for that binding route/resource, and commits Activity Tracker cleanup delivery when needed. Canonical provider messages and already projected AgentSession history remain.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, clears
@@ -60,7 +60,7 @@ Archive uses the explicit terminal transition policy inside the caller-owned arc
 2. mark bindings disconnected and preserve their history;
 3. end Channel Work;
 4. remove never-projected pending context; and
-5. create one cleanup delivery intent for each projected progress message.
+5. create one cleanup delivery intent for each retained Activity Tracker.
 
 Provider cleanup runs after commit. Failure or an unknown result does not roll back Session archive.
 
@@ -93,12 +93,13 @@ and block removal use in-product confirmation dialogs. Disconnected connections
 disappear from this active list.
 
 Session Channels remains readable after archive and displays disconnected bindings,
-ended work, ordered task state, the provider progress projection state, truncation,
+ended work, ordered task state, the Activity Tracker projection state, truncation,
 and delivery outcomes. Binding disconnect also uses an in-product confirmation
 dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 7) — Clarified that normal completion retains Activity Trackers while binding, connection, Session, and Agent lifecycle transitions own terminal provider deletion.
 - **2026-07-23** (spec_version 6) — Added hard grant removal, complete access identities, in-product destructive confirmations, and task/progress lifecycle presentation.
 - **2026-07-23** (spec_version 5) — Removed route lifecycle transitions. Connection status owns disconnect and provider health, while Agent lifecycle owns new-execution eligibility.
 - **2026-07-22** (spec_version 4) — Kept provider health failures and App uninstall independent from Agent route lifecycle and fenced stale validation results.

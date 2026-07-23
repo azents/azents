@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ExternalChannelActionMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
@@ -47,6 +48,7 @@ class _SessionDouble:
 class _RepositoryDouble:
     def __init__(self, events: list[str]) -> None:
         self.events = events
+        self.recovery_delivery_ids: list[str | None] = []
         self.finished: list[
             tuple[ExternalChannelDeliveryStatus, str | None, str | None]
         ] = []
@@ -73,8 +75,19 @@ class _RepositoryDouble:
         delivery_attempt_id: str,
     ) -> ChannelDeliveryTarget | None:
         del session
-        assert delivery_attempt_id == "delivery-1"
-        return self.target
+        if delivery_attempt_id == "delivery-1":
+            return self.target
+        if delivery_attempt_id == "delivery-2":
+            payload = dict(self.target.request_payload)
+            payload.pop("provider_message_key", None)
+            return self.target.model_copy(
+                update={
+                    "delivery_attempt_id": "delivery-2",
+                    "operation": ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                    "request_payload": payload,
+                }
+            )
+        raise AssertionError("Unexpected delivery identity")
 
     async def start_delivery(
         self,
@@ -97,10 +110,11 @@ class _RepositoryDouble:
         error_kind: str | None,
         error_summary: str | None,
         now: datetime.datetime,
-    ) -> None:
+    ) -> str | None:
         del session, delivery_attempt_id, error_summary, now
         self.events.append("finish")
         self.finished.append((status, provider_message_key, error_kind))
+        return self.recovery_delivery_ids.pop(0) if self.recovery_delivery_ids else None
 
     async def recover_archive_cleanup(
         self,
@@ -124,6 +138,52 @@ class _RepositoryDouble:
         return list(delivery_ids)
 
 
+class _ExecutionRepositoryDouble(_RepositoryDouble):
+    def __init__(
+        self,
+        events: list[str],
+        committed: ChannelActionCommit,
+    ) -> None:
+        super().__init__(events)
+        self.committed = committed
+        self.skipped: list[tuple[str, str]] = []
+
+    async def commit_action(
+        self,
+        session: AsyncSession,
+        **_: object,
+    ) -> ChannelActionCommit:
+        del session
+        self.events.append("commit-action")
+        return self.committed
+
+    async def skip_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        error_kind: str,
+        error_summary: str,
+        now: datetime.datetime,
+    ) -> bool:
+        del session, error_summary, now
+        self.events.append("skip")
+        self.skipped.append((delivery_attempt_id, error_kind))
+        return True
+
+    async def complete_action(
+        self,
+        session: AsyncSession,
+        *,
+        action_id: str,
+        now: datetime.datetime,
+    ) -> ChannelActionCommit:
+        del session, now
+        assert action_id == self.committed.action_id
+        self.events.append("complete-action")
+        return self.committed
+
+
 class _CredentialsCodec:
     def decrypt(self, encrypted: str) -> SlackConnectionCredentials:
         assert encrypted == "ciphertext"
@@ -135,10 +195,19 @@ class _CredentialsCodec:
 
 
 class _SlackClient:
-    def __init__(self, events: list[str], result: SlackControlMessageResult) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        result: SlackControlMessageResult | list[SlackControlMessageResult],
+    ) -> None:
         self.events = events
-        self.result = result
+        self.results = result if isinstance(result, list) else [result]
         self.bot_tokens: list[str] = []
+
+    def _result(self) -> SlackControlMessageResult:
+        if len(self.results) == 1:
+            return self.results[0]
+        return self.results.pop(0)
 
     async def post_message(self, **kwargs: str) -> SlackControlMessageResult:
         self.events.append("provider")
@@ -146,14 +215,30 @@ class _SlackClient:
         assert kwargs["channel_id"] == "C1"
         assert kwargs["thread_ts"] == "1.000001"
         assert kwargs["markdown_text"] == "Reply"
-        return self.result
+        return self._result()
+
+    async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
+        self.events.append("provider")
+        self.bot_tokens.append(cast(str, kwargs["bot_token"]))
+        assert kwargs["channel_id"] == "C1"
+        assert kwargs["thread_ts"] == "1.000001"
+        assert kwargs["text"] == "Agent is working"
+        return self._result()
+
+    async def update_message(self, **kwargs: object) -> SlackControlMessageResult:
+        self.events.append("provider")
+        self.bot_tokens.append(cast(str, kwargs["bot_token"]))
+        assert kwargs["channel_id"] == "C1"
+        assert kwargs["message_ts"] == "2.000001"
+        assert kwargs["text"] == "Agent is working"
+        return self._result()
 
     async def delete_message(self, **kwargs: str) -> SlackControlMessageResult:
         self.events.append("provider")
         self.bot_tokens.append(kwargs["bot_token"])
         assert kwargs["channel_id"] == "C1"
         assert kwargs["message_ts"] == "2.000001"
-        return self.result
+        return self._result()
 
 
 @asynccontextmanager
@@ -305,6 +390,136 @@ async def test_failed_control_message_delete_remains_a_terminal_outcome() -> Non
         (ExternalChannelDeliveryStatus.FAILED, None, "message_not_found")
     ]
     assert events == ["start", "commit", "provider", "finish", "commit"]
+
+
+@pytest.mark.asyncio
+async def test_missing_activity_tracker_is_recreated_once() -> None:
+    """A confirmed missing update target consumes one durable recreate intent."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.recovery_delivery_ids = ["delivery-2", None]
+    repository.target = repository.target.model_copy(
+        update={
+            "operation": ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+            "request_payload": {
+                "channel_id": "C1",
+                "thread_ts": "1.000001",
+                "provider_message_key": "slack:T1:C1:2.000001",
+                "text": "Agent is working",
+                "blocks": [],
+            },
+        }
+    )
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            [
+                SlackControlMessageResult(
+                    status="failed",
+                    provider_message_key=None,
+                    error_kind="message_not_found",
+                    error_summary="Slack no longer contains the Activity Tracker.",
+                ),
+                SlackControlMessageResult(
+                    status="delivered",
+                    provider_message_key="slack:T1:C1:3.000001",
+                    error_kind=None,
+                    error_summary=None,
+                ),
+            ],
+        ),
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert repository.finished == [
+        (ExternalChannelDeliveryStatus.FAILED, None, "message_not_found"),
+        (
+            ExternalChannelDeliveryStatus.DELIVERED,
+            "slack:T1:C1:3.000001",
+            None,
+        ),
+    ]
+    assert events == [
+        "start",
+        "commit",
+        "provider",
+        "finish",
+        "commit",
+        "start",
+        "commit",
+        "provider",
+        "finish",
+        "commit",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recovered_failed_final_reply_skips_completion_update() -> None:
+    """A resumed finish action cannot project completion after reply failure."""
+    events: list[str] = []
+    committed = ChannelActionCommit(
+        action_id="action-finish",
+        binding_id="binding-1",
+        work_id="work-1",
+        work_status=ExternalChannelWorkStatus.FINISHED,
+        state_revision=3,
+        deliveries=[
+            ChannelWorkDelivery(
+                id="reply",
+                operation=ExternalChannelDeliveryOperation.REPLY,
+                status=ExternalChannelDeliveryStatus.FAILED,
+                provider_message_key=None,
+                error_kind="resource_unavailable",
+                error_summary="Slack rejected the final reply.",
+                created_at=_at(1),
+                completed_at=_at(2),
+            ),
+            ChannelWorkDelivery(
+                id="completion",
+                operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+                created_at=_at(1),
+                completed_at=None,
+            ),
+        ],
+    )
+    repository = _ExecutionRepositoryDouble(events, committed)
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.execute(
+        session_id="session-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        client_tool_call_id="call-finish",
+        binding_id="binding-1",
+        mode=ExternalChannelActionMode.FINISH,
+        message="Final answer",
+        tasks=None,
+    )
+
+    assert result is committed
+    assert repository.skipped == [
+        ("completion", "final_reply_not_delivered"),
+    ]
+    assert "provider" not in events
 
 
 @pytest.mark.asyncio

@@ -63,6 +63,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelResourceCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -246,6 +247,7 @@ def _service(
     return _TestEventProcessorService(
         session_manager=session_manager,
         repository=repository,
+        work_repository=ExternalChannelWorkRepository(),
         credentials_codec=cast(
             ExternalChannelCredentialsCodec,
             MagicMock(spec=ExternalChannelCredentialsCodec),
@@ -256,6 +258,7 @@ def _service(
         ),
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
+        workspace_repository=WorkspaceRepository(),
         config=Config.model_construct(web_url="https://azents.example"),
         input_buffer_service=InputBufferService(
             session_manager=session_manager,

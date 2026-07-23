@@ -20,6 +20,12 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
+from azents.core.external_channel_activity import (
+    ActivityTrackerTask,
+    activity_tracker_payload,
+    render_activity_tracker,
+    render_persisted_activity_tracker,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -238,6 +244,8 @@ class ExternalChannelWorkRepository:
             **({"message": message} if message is not None else {}),
             **({"todo_update": requested_tasks} if requested_tasks is not None else {}),
         }
+        if mode is ExternalChannelActionMode.FINISH and message is None:
+            raise ValueError("Finish requires a final External Channel reply.")
         existing = await session.scalar(
             sa.select(RDBExternalChannelAction).where(
                 RDBExternalChannelAction.agent_session_id == session_id,
@@ -358,40 +366,67 @@ class ExternalChannelWorkRepository:
                 )
             work.tasks = next_tasks
             work.state_revision += 1
-            if tasks is not None:
-                work.desired_progress_revision += 1
-                work.desired_progress_payload = {"tasks": next_tasks}
-                operations.append(
-                    (
-                        ExternalChannelDeliveryOperation.PROGRESS_CREATE
-                        if work.progress_provider_message_key is None
-                        else ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                        _provider_payload(
-                            resource.labels,
-                            text=_render_progress(tasks),
-                            blocks=_render_progress_blocks(tasks),
-                            provider_message_key=work.progress_provider_message_key,
-                            desired_progress_revision=work.desired_progress_revision,
-                        ),
-                    )
+            session_url = _activity_session_url(work)
+            if session_url is not None:
+                activity_tasks = _activity_tasks(validated_tasks)
+                presentation = render_activity_tracker(
+                    state="working",
+                    tasks=activity_tasks,
+                    session_url=session_url,
                 )
+                work.desired_progress_revision += 1
+                work.desired_progress_payload = activity_tracker_payload(
+                    state="working",
+                    tasks=activity_tasks,
+                    session_url=session_url,
+                )
+                if work.progress_provider_message_key is not None:
+                    operations.append(
+                        (
+                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                            _provider_payload(
+                                resource.labels,
+                                text=presentation.text,
+                                blocks=presentation.blocks,
+                                provider_message_key=work.progress_provider_message_key,
+                                desired_progress_revision=(
+                                    work.desired_progress_revision
+                                ),
+                            ),
+                        )
+                    )
         else:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.state_revision += 1
             work.finished_at = now
-            work.desired_progress_revision += 1
-            work.desired_progress_payload = None
-            if work.progress_provider_message_key is not None:
-                operations.append(
-                    (
-                        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                        _provider_payload(
-                            resource.labels,
-                            provider_message_key=work.progress_provider_message_key,
-                            desired_progress_revision=work.desired_progress_revision,
-                        ),
-                    )
+            session_url = _activity_session_url(work)
+            if session_url is not None:
+                presentation = render_activity_tracker(
+                    state="completed",
+                    tasks=(),
+                    session_url=session_url,
                 )
+                work.desired_progress_revision += 1
+                work.desired_progress_payload = activity_tracker_payload(
+                    state="completed",
+                    tasks=(),
+                    session_url=session_url,
+                )
+                if work.progress_provider_message_key is not None:
+                    operations.append(
+                        (
+                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                            _provider_payload(
+                                resource.labels,
+                                text=presentation.text,
+                                blocks=presentation.blocks,
+                                provider_message_key=work.progress_provider_message_key,
+                                desired_progress_revision=(
+                                    work.desired_progress_revision
+                                ),
+                            ),
+                        )
+                    )
 
         action = RDBExternalChannelAction(
             agent_session_id=session_id,
@@ -418,7 +453,11 @@ class ExternalChannelWorkRepository:
                     binding_id=binding.id,
                     provider_message_key=(
                         work.progress_provider_message_key
-                        if operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE
+                        if operation
+                        in {
+                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                        }
                         else None
                     ),
                     error_kind=None,
@@ -545,6 +584,33 @@ class ExternalChannelWorkRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def skip_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        error_kind: str,
+        error_summary: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Terminalize one provider intent whose prerequisite did not complete."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelDeliveryAttempt)
+            .where(
+                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
+                RDBExternalChannelDeliveryAttempt.status
+                == ExternalChannelDeliveryStatus.PENDING,
+            )
+            .values(
+                status=ExternalChannelDeliveryStatus.NOT_ATTEMPTED,
+                error_kind=error_kind,
+                error_summary=error_summary,
+                completed_at=now,
+            )
+            .returning(RDBExternalChannelDeliveryAttempt.id)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def finish_delivery(
         self,
         session: AsyncSession,
@@ -555,8 +621,8 @@ class ExternalChannelWorkRepository:
         error_kind: str | None,
         error_summary: str | None,
         now: datetime.datetime,
-    ) -> None:
-        """Persist a terminal delivery outcome and progress identity."""
+    ) -> str | None:
+        """Persist an outcome and return a missing-Tracker recovery intent."""
         attempt = await session.scalar(
             sa.select(RDBExternalChannelDeliveryAttempt)
             .where(
@@ -567,36 +633,153 @@ class ExternalChannelWorkRepository:
             .with_for_update()
         )
         if attempt is None:
-            return
+            return None
         attempt.status = status
         if provider_message_key is not None:
             attempt.provider_message_key = provider_message_key
         attempt.error_kind = error_kind
         attempt.error_summary = error_summary
         attempt.completed_at = now
+        work = await self._work_for_delivery_attempt(session, attempt=attempt)
+        if work is not None and status is ExternalChannelDeliveryStatus.DELIVERED:
+            if attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
+                work.progress_provider_message_key = provider_message_key
+            elif attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
+                work.progress_provider_message_key = None
+        recovery_id = None
         if (
-            attempt.binding_id is not None
+            work is not None
+            and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE
             and status is ExternalChannelDeliveryStatus.DELIVERED
+            and provider_message_key is not None
         ):
-            work = await session.scalar(
-                sa.select(RDBExternalChannelWork)
-                .where(RDBExternalChannelWork.binding_id == attempt.binding_id)
-                .order_by(RDBExternalChannelWork.created_at.desc())
-                .limit(1)
-                .with_for_update()
+            attempted_revision = attempt.request_payload.get(
+                "desired_progress_revision"
             )
-            if work is not None:
-                if (
-                    attempt.operation
-                    is ExternalChannelDeliveryOperation.PROGRESS_CREATE
-                ):
-                    work.progress_provider_message_key = provider_message_key
-                elif (
-                    attempt.operation
-                    is ExternalChannelDeliveryOperation.PROGRESS_DELETE
-                ):
-                    work.progress_provider_message_key = None
+            if (
+                isinstance(attempted_revision, int)
+                and work.desired_progress_revision > attempted_revision
+            ):
+                presentation = render_persisted_activity_tracker(
+                    work.desired_progress_payload
+                )
+                existing_catchup = await session.scalar(
+                    sa.select(RDBExternalChannelDeliveryAttempt).where(
+                        RDBExternalChannelDeliveryAttempt.origin_type
+                        == ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                        RDBExternalChannelDeliveryAttempt.origin_id == attempt.id,
+                        RDBExternalChannelDeliveryAttempt.binding_id
+                        == attempt.binding_id,
+                        RDBExternalChannelDeliveryAttempt.operation
+                        == ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                    )
+                )
+                if existing_catchup is None:
+                    catchup_payload = dict(attempt.request_payload)
+                    catchup_payload.update(
+                        {
+                            "work_id": work.id,
+                            "text": presentation.text,
+                            "blocks": presentation.blocks,
+                            "provider_message_key": provider_message_key,
+                            "desired_progress_revision": (
+                                work.desired_progress_revision
+                            ),
+                        }
+                    )
+                    existing_catchup = RDBExternalChannelDeliveryAttempt(
+                        origin_type=(
+                            ExternalChannelDeliveryOriginType.MANAGER_OPERATION
+                        ),
+                        origin_id=attempt.id,
+                        operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                        request_payload=catchup_payload,
+                        status=ExternalChannelDeliveryStatus.PENDING,
+                        channel_action_id=attempt.channel_action_id,
+                        binding_id=attempt.binding_id,
+                        provider_message_key=provider_message_key,
+                        error_kind=None,
+                        error_summary=None,
+                        attempted_at=None,
+                        completed_at=None,
+                    )
+                    session.add(existing_catchup)
+                await session.flush()
+                if existing_catchup.status is ExternalChannelDeliveryStatus.PENDING:
+                    recovery_id = existing_catchup.id
+        if (
+            work is not None
+            and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+            and status is ExternalChannelDeliveryStatus.FAILED
+            and error_kind == "message_not_found"
+        ):
+            target_key = attempt.request_payload.get("provider_message_key")
+            if (
+                isinstance(target_key, str)
+                and work.progress_provider_message_key == target_key
+            ):
+                work.progress_provider_message_key = None
+                existing_recovery = await session.scalar(
+                    sa.select(RDBExternalChannelDeliveryAttempt).where(
+                        RDBExternalChannelDeliveryAttempt.origin_type
+                        == attempt.origin_type,
+                        RDBExternalChannelDeliveryAttempt.origin_id
+                        == attempt.origin_id,
+                        RDBExternalChannelDeliveryAttempt.binding_id
+                        == attempt.binding_id,
+                        RDBExternalChannelDeliveryAttempt.operation
+                        == ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                    )
+                )
+                if existing_recovery is None:
+                    recovery_payload = dict(attempt.request_payload)
+                    recovery_payload.pop("provider_message_key", None)
+                    recovery_payload["work_id"] = work.id
+                    recovery_payload["replaces_provider_message_key"] = target_key
+                    existing_recovery = RDBExternalChannelDeliveryAttempt(
+                        origin_type=attempt.origin_type,
+                        origin_id=attempt.origin_id,
+                        operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                        request_payload=recovery_payload,
+                        status=ExternalChannelDeliveryStatus.PENDING,
+                        channel_action_id=attempt.channel_action_id,
+                        binding_id=attempt.binding_id,
+                        provider_message_key=None,
+                        error_kind=None,
+                        error_summary=None,
+                        attempted_at=None,
+                        completed_at=None,
+                    )
+                    session.add(existing_recovery)
+                await session.flush()
+                if existing_recovery.status is ExternalChannelDeliveryStatus.PENDING:
+                    recovery_id = existing_recovery.id
         await session.flush()
+        return recovery_id
+
+    async def _work_for_delivery_attempt(
+        self,
+        session: AsyncSession,
+        *,
+        attempt: RDBExternalChannelDeliveryAttempt,
+    ) -> RDBExternalChannelWork | None:
+        """Lock the work cycle explicitly owned by one delivery attempt."""
+        if attempt.channel_action_id is not None:
+            work_id = await session.scalar(
+                sa.select(RDBExternalChannelAction.work_id).where(
+                    RDBExternalChannelAction.id == attempt.channel_action_id
+                )
+            )
+        else:
+            raw_work_id = attempt.request_payload.get("work_id")
+            work_id = raw_work_id if isinstance(raw_work_id, str) else None
+        if work_id is None:
+            return None
+        return await session.scalar(
+            sa.select(RDBExternalChannelWork)
+            .where(RDBExternalChannelWork.id == work_id)
+            .with_for_update()
+        )
 
     async def complete_action(
         self,
@@ -842,13 +1025,19 @@ class ExternalChannelWorkRepository:
     ) -> ChannelWorkDelivery | None:
         row = await session.scalar(
             sa.select(RDBExternalChannelDeliveryAttempt)
-            .join(
+            .outerjoin(
                 RDBExternalChannelAction,
                 RDBExternalChannelAction.id
                 == RDBExternalChannelDeliveryAttempt.channel_action_id,
             )
             .where(
-                RDBExternalChannelAction.work_id == work_id,
+                sa.or_(
+                    RDBExternalChannelAction.work_id == work_id,
+                    sa.and_(
+                        RDBExternalChannelDeliveryAttempt.channel_action_id.is_(None),
+                        RDBExternalChannelDeliveryAttempt.origin_id == work_id,
+                    ),
+                ),
                 RDBExternalChannelDeliveryAttempt.operation.in_(
                     (
                         ExternalChannelDeliveryOperation.PROGRESS_CREATE,
@@ -920,43 +1109,26 @@ def _provider_payload(
     return payload
 
 
-def _render_progress(tasks: Sequence[ChannelWorkTask]) -> str:
-    """Render a deterministic provider progress message."""
-    lines = ["Agent progress"]
-    for task in tasks:
-        marker = {
-            "pending": "○",
-            "in_progress": "◐",
-            "completed": "●",
-        }[task.status.value]
-        lines.append(f"{marker} {task.title}")
-    return "\n".join(lines)
+def _activity_session_url(work: RDBExternalChannelWork) -> str | None:
+    """Return the durable Session URL for one Activity Tracker."""
+    payload = work.desired_progress_payload
+    if not isinstance(payload, dict):
+        return None
+    session_url = payload.get("session_url")
+    if not isinstance(session_url, str) or not session_url:
+        return None
+    return session_url
 
 
-def _render_progress_blocks(
-    tasks: Sequence[ChannelWorkTask],
-) -> list[dict[str, object]]:
-    """Render deterministic accessible Slack Block Kit task progress."""
-    lines = [f"{_task_marker(task.status)} {task.title}" for task in tasks]
+def _activity_tasks(tasks: Sequence[ChannelWorkTask]) -> list[ActivityTrackerTask]:
+    """Convert canonical Channel Work tasks into presentation tasks."""
     return [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": "Agent progress"},
-        },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": "\n".join(lines)},
-        },
+        ActivityTrackerTask(
+            title=task.title,
+            status=task.status.value,
+        )
+        for task in tasks
     ]
-
-
-def _task_marker(status: ExternalChannelWorkTaskStatus) -> str:
-    """Return the Slack display marker for one Channel Work state."""
-    return {
-        ExternalChannelWorkTaskStatus.PENDING: "○",
-        ExternalChannelWorkTaskStatus.IN_PROGRESS: "◐",
-        ExternalChannelWorkTaskStatus.COMPLETED: "●",
-    }[status]
 
 
 def _validate_message_length(

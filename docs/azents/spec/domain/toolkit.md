@@ -49,8 +49,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-22
-spec_version: 69
+last_verified_at: 2026-07-23
+spec_version: 70
 ---
 
 # Toolkit
@@ -673,15 +673,17 @@ name only when the current root AgentSession has an active External Channel
 binding. Execution context includes the binding-scoped Channel Work snapshot,
 and every call must target a binding owned by the current Agent and Session.
 
-The tool atomically commits an optional conversational reply and the complete
-ordered task replacement before any provider call. `continue` preserves
-unfinished Channel Work; `finish` ends or clears it. Provider delivery is
-one-attempt persisted work with terminal `delivered`, `failed`, or `unknown`
-outcomes. Ordinary Session Todo state remains separate and never becomes the
-Channel Work source of truth.
+Ingress creates the current work cycle and its initial Slack Activity Tracker before
+Agent execution. The tool atomically commits an optional conversational reply and
+the complete ordered task replacement before any provider call. `continue`
+preserves unfinished Channel Work and updates the retained Tracker. `finish`
+requires a final reply, ends the work cycle, and updates the Tracker to completion
+only after the reply is durably delivered. Ordinary Session Todo state remains
+separate and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 70) — Added pre-execution Activity Tracker creation, same-message task updates, required final replies, and delivered-reply completion gating to the External Channel Action contract.
 - **2026-07-22** (spec_version 69) — Added the conditional direct `channel_action` tool, binding-scoped work snapshot, atomic action boundary, and separation from Session Todo state.
 
 - **2026-07-21** (spec_version 67) — Generalized client-tool wire selection into semantic model profiles, adapter profile preferences, and tool-declared variants without model-visible tool-name branches.

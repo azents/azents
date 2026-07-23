@@ -2316,6 +2316,7 @@ class ExternalChannelRepository:
         session: AsyncSession,
         *,
         binding_id: str,
+        desired_progress_payload: dict[str, object],
     ) -> ExternalChannelWork:
         """Create or return the active Channel Work for an invoked binding."""
         return await self.create_work_idempotent(
@@ -2326,12 +2327,70 @@ class ExternalChannelRepository:
                 schema_version=1,
                 tasks=[],
                 state_revision=1,
-                desired_progress_revision=0,
-                desired_progress_payload=None,
+                desired_progress_revision=1,
+                desired_progress_payload=desired_progress_payload,
                 progress_provider_message_key=None,
                 finished_at=None,
             ),
         )
+
+    async def set_work_progress_provider_message_key(
+        self,
+        session: AsyncSession,
+        *,
+        work_id: str,
+        binding_id: str,
+        provider_message_key: str,
+    ) -> bool:
+        """Retain the provider identity of a delivered Activity Tracker."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelWork)
+            .where(
+                RDBExternalChannelWork.id == work_id,
+                RDBExternalChannelWork.binding_id == binding_id,
+                RDBExternalChannelWork.progress_provider_message_key.is_(None),
+            )
+            .values(progress_provider_message_key=provider_message_key)
+            .returning(RDBExternalChannelWork.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def get_work_by_progress_provider_message_key(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+        provider_message_key: str,
+    ) -> ExternalChannelWork | None:
+        """Find the work cycle that owns one retained Tracker identity."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelWork).where(
+                RDBExternalChannelWork.binding_id == binding_id,
+                RDBExternalChannelWork.progress_provider_message_key
+                == provider_message_key,
+            )
+        )
+        return self._as(ExternalChannelWork, rdb)
+
+    async def clear_work_progress_provider_message_key(
+        self,
+        session: AsyncSession,
+        *,
+        work_id: str,
+        provider_message_key: str,
+    ) -> bool:
+        """Clear a Tracker identity only after provider deletion is confirmed."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelWork)
+            .where(
+                RDBExternalChannelWork.id == work_id,
+                RDBExternalChannelWork.progress_provider_message_key
+                == provider_message_key,
+            )
+            .values(progress_provider_message_key=None)
+            .returning(RDBExternalChannelWork.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def lock_work_by_binding_id(
         self,

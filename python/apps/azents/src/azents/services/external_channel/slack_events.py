@@ -63,6 +63,10 @@ class SlackProviderResourceUnavailable(SlackProviderError):
     """Slack cannot expose the requested channel or thread to the App."""
 
 
+class SlackProviderMessageNotFound(SlackProviderError):
+    """Slack no longer contains the requested message."""
+
+
 @dataclass(frozen=True)
 class SlackConnectionRevocation:
     """Provider event that makes a Slack connection unavailable."""
@@ -669,6 +673,13 @@ class SlackConversationClient:
                 error_kind="resource_unavailable",
                 error_summary="Slack cannot mutate the linked conversation.",
             )
+        except SlackProviderMessageNotFound:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="message_not_found",
+                error_summary="Slack no longer contains the Activity Tracker message.",
+            )
         except SlackProviderRateLimited:
             return SlackControlMessageResult(
                 status="failed",
@@ -765,6 +776,10 @@ class SlackConversationClient:
         }:
             raise SlackProviderResourceUnavailable(
                 "Slack conversation is unavailable to the App."
+            )
+        if error_code == "message_not_found":
+            raise SlackProviderMessageNotFound(
+                "Slack no longer contains the requested message."
             )
         raise SlackProviderTemporaryError("Slack request failed.")
 

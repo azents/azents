@@ -602,6 +602,26 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
         assert "blocks" not in payload
 
 
+async def test_missing_update_target_is_reported_as_confirmed_deletion() -> None:
+    """Slack message absence is recoverable rather than an ambiguous outcome."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": False, "error": "message_not_found"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).update_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            message_ts="1721600000.000100",
+            text="Agent is working",
+            blocks=[],
+        )
+
+    assert result.status == "failed"
+    assert result.error_kind == "message_not_found"
+
+
 async def test_operational_blocks_include_accessible_fallback_text() -> None:
     """Operational Slack messages use Block Kit without losing notification text."""
     requests: list[httpx.Request] = []

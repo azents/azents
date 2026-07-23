@@ -58,14 +58,13 @@ class ChannelActionTaskInput(BaseModel):
 
 
 class FinishChannelActionInput(BaseModel):
-    """Finish one binding's current work, optionally posting a reply."""
+    """Finish one binding's current work with its final provider reply."""
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
     mode: Literal["finish"]
     binding: str = Field(min_length=1, max_length=80)
-    message: str | None = Field(
-        default=None,
+    message: str = Field(
         min_length=1,
         max_length=SLACK_MARKDOWN_TEXT_MAX_LENGTH,
     )
