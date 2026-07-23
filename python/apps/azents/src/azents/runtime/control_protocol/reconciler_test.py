@@ -4,6 +4,7 @@ import datetime
 
 import sqlalchemy as sa
 from azcommon.result import Success
+from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -12,6 +13,7 @@ from azents.core.enums import (
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
 )
+from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifier
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -97,7 +99,7 @@ async def test_reconciler_dispatches_periodic_provider_observe(
         config=RuntimeLifecycleDispatchConfig(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
-            runner_control_auth_token="control-token",
+            runner_credential_identifier=_runner_credential_verifier(),
             runner_control_tls_ca_pem=None,
             allow_insecure_runner_control=True,
             observe_interval=datetime.timedelta(minutes=1),
@@ -118,6 +120,13 @@ async def test_reconciler_dispatches_periodic_provider_observe(
     assert claimed is not None
     assert claimed.operation_type == "provider.observe"
     assert claimed.payload["command_type"] == "observe"
+    payload = claimed.payload["payload"]
+    assert isinstance(payload, dict)
+    auth = payload["auth"]
+    assert isinstance(auth, dict)
+    assert isinstance(auth["runner_auth_credential_id"], str)
+    assert "runner_auth_token" not in auth
+    assert "control_token" not in auth
     assert updated is not None
     assert updated.provider_observe_requested_at is not None
 
@@ -165,7 +174,7 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
         config=RuntimeLifecycleDispatchConfig(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
-            runner_control_auth_token="control-token",
+            runner_credential_identifier=_runner_credential_verifier(),
             runner_control_tls_ca_pem=None,
             allow_insecure_runner_control=True,
         ),
@@ -200,6 +209,10 @@ def _provider_registration() -> RuntimeProviderRegistration:
         connection_id="provider-connection-1",
         owner_replica_id="control-a",
     )
+
+
+def _runner_credential_verifier() -> RuntimeRunnerCredentialVerifier:
+    return RuntimeRunnerCredentialVerifier(Fernet.generate_key().decode())
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:

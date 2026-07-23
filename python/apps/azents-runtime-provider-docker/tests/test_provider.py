@@ -143,6 +143,8 @@ def _command(
     final_desired_state: RuntimeDesiredState | None = None,
     desired_generation: int = 1,
     provider_generation: int = 7,
+    runner_auth_token: str = "runner-token-1",
+    runner_auth_credential_id: str = "runner-credential-1",
 ) -> RuntimeLifecycleCommand:
     return RuntimeLifecycleCommand(
         command_type=command_type,
@@ -156,8 +158,8 @@ def _command(
         runner_image="runner:latest",
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runtime-runner:runtime-1:1",
-            control_token="control-token",
+            runner_auth_token=runner_auth_token,
+            runner_auth_credential_id=runner_auth_credential_id,
             control_tls_ca_pem=None,
             allow_insecure_control=True,
         ),
@@ -180,8 +182,8 @@ def _control_command(
         runner_image="runner:latest",
         auth=ControlRuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runtime-runner:runtime-1:1",
-            control_token="control-token",
+            runner_auth_token="runner-token-1",
+            runner_auth_credential_id="runner-credential-1",
             control_tls_ca_pem=None,
             allow_insecure_control=True,
         ),
@@ -203,10 +205,10 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     assert any(
         bind.container_path == "/workspace/agent" for bind in container.spec.binds
     )
-    assert container.spec.env["AZ_RUNTIME_CONTROL_AUTH_TOKEN"] == "control-token"
+    assert container.spec.env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-1"
     assert (
         container.spec.env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"]
-        == "runtime-runner:runtime-1:1"
+        == "runner-credential-1"
     )
     workspace_path = tmp_path / "agent-runtimes" / "runtime-1" / "workspace"
     assert workspace_path.exists()
@@ -289,25 +291,37 @@ async def test_start_replaces_container_when_runner_limit_environment_changes(
 
 
 @pytest.mark.asyncio
-async def test_start_reuses_container_across_generation_changes(
+async def test_start_replaces_container_for_new_runner_credential(
     tmp_path: Path,
 ) -> None:
     docker = FakeDockerApi()
     provider = _provider(tmp_path, docker)
     await provider.start(_command(RuntimeLifecycleCommandType.START))
+    workspace_path = tmp_path / "agent-runtimes" / "runtime-1" / "workspace"
+    marker = workspace_path / "keep.txt"
+    marker.write_text("preserved")
+    original_binds = docker.containers["azents-runtime-runtime-1"].spec.binds
 
     await provider.start(
         _command(
             RuntimeLifecycleCommandType.START,
             desired_generation=2,
             provider_generation=8,
+            runner_auth_token="runner-token-2",
+            runner_auth_credential_id="runner-credential-2",
         )
     )
 
-    assert docker.removed == []
+    assert docker.removed == ["azents-runtime-runtime-1"]
     container = docker.containers["azents-runtime-runtime-1"]
-    assert container.spec.labels["azents/desired-generation"] == "1"
-    assert container.starts == 2
+    assert container.spec.labels["azents/desired-generation"] == "2"
+    assert container.spec.env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-2"
+    assert (
+        container.spec.env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"]
+        == "runner-credential-2"
+    )
+    assert container.spec.binds == original_binds
+    assert marker.read_text() == "preserved"
 
 
 @pytest.mark.asyncio

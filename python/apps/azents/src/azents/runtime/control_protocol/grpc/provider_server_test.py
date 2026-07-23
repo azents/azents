@@ -22,6 +22,7 @@ from azents.core.enums import (
     RuntimeProviderKind,
     RuntimeProviderScope,
 )
+from azents.core.runtime_runner_credential import RuntimeRunnerIssuedCredential
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProviderCommand,
@@ -108,6 +109,25 @@ class FakeProviderCredentialBridge:
     async def disconnect_connection(self, **_: object) -> bool:
         """Accept a test Provider stream closure."""
         return True
+
+
+@dataclasses.dataclass(frozen=True)
+class FakeRuntimeRunnerCredentialIssuer:
+    """Issue fixed Runner evidence for Provider relay tests."""
+
+    def issue(
+        self,
+        *,
+        runtime_id: str,
+        desired_generation: int,
+    ) -> RuntimeRunnerIssuedCredential:
+        """Return deterministic test evidence for the expected Runtime."""
+        assert runtime_id == "runtime-1"
+        assert desired_generation == 5
+        return RuntimeRunnerIssuedCredential(
+            token="runner-token",
+            credential_id="runner-credential-1",
+        )
 
 
 class QueueIterator:
@@ -310,7 +330,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
                 "runner_image": "runner:latest",
                 "auth": {
                     "control_endpoint": "runtime-control:8020",
-                    "runner_auth_token": "runner-token",
+                    "runner_auth_credential_id": "runner-credential-1",
                 },
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
@@ -322,6 +342,12 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
     assert isinstance(result, RuntimeDispatchResult)
     assert command.provider_command.runtime_id == "runtime-1"
     assert command.provider_command.runner_image == "runner:latest"
+    assert command.provider_command.runner_auth_token == "runner-token"
+    auth_fields = command.provider_command.payload.fields["auth"].struct_value.fields
+    assert "runner_auth_token" not in auth_fields
+    assert auth_fields["runner_auth_credential_id"].string_value == (
+        "runner-credential-1"
+    )
 
     await inbound.put(
         runtime_provider_control_pb2.ProviderMessage(
@@ -491,6 +517,7 @@ def _servicer(
         consumer_id="provider-consumer-a",
         credential_authenticator=bridge,
         connection_tracker=bridge,
+        runner_credential_issuer=FakeRuntimeRunnerCredentialIssuer(),
         command_block_ms=1,
     )
 

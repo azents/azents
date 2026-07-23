@@ -51,7 +51,7 @@ class RuntimeContainerAuth:
 
     control_endpoint: str
     runner_auth_token: str
-    control_token: str | None
+    runner_auth_credential_id: str
     control_tls_ca_pem: str | None
     allow_insecure_control: bool
 

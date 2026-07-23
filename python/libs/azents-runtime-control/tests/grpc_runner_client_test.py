@@ -90,7 +90,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
         event = await anext(requests)
         sent.append(event)
 
-    client = GrpcRunnerControlClient(stream)
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     client.set_operation_handler(handle_operation)
     accepted = await client.register_runner(
         _registration(),
@@ -202,7 +202,7 @@ async def test_grpc_client_maps_file_glob_payload_and_result() -> None:
         event = await anext(requests)
         sent.append(event)
 
-    client = GrpcRunnerControlClient(stream)
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     client.set_operation_handler(handle_operation)
     accepted = await client.register_runner(
         _registration(),
@@ -289,7 +289,7 @@ async def test_grpc_client_backpressures_operation_delivery() -> None:
         yield _operation_message("req-2")
         await release_stream.wait()
 
-    client = GrpcRunnerControlClient(stream)
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     client.set_operation_handler(handle_operation)
     accepted = await client.register_runner(
         _registration(),
@@ -347,7 +347,7 @@ async def test_grpc_client_delivers_operation_cancel_command() -> None:
         )
         await release_stream.wait()
 
-    client = GrpcRunnerControlClient(stream)
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     client.set_operation_cancel_handler(handle_cancel)
     await client.register_runner(
         _registration(),
@@ -391,7 +391,7 @@ async def test_grpc_client_close_suppresses_completed_stream_failure() -> None:
         closed.set()
         raise RuntimeRunnerControlStreamClosed("stream closed")
 
-    client = GrpcRunnerControlClient(stream)
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     await client.register_runner(
         _registration(),
         connection_id="connection-1",
@@ -404,8 +404,8 @@ async def test_grpc_client_close_suppresses_completed_stream_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_grpc_client_sends_control_token_metadata() -> None:
-    """The client sends the shared Runtime Control token as bearer metadata."""
+async def test_grpc_client_sends_runner_credential_metadata() -> None:
+    """The client sends its signed Runner credential as bearer metadata."""
     observed_metadata: list[tuple[str, str]] = []
 
     async def stream(
@@ -426,7 +426,7 @@ async def test_grpc_client_sends_control_token_metadata() -> None:
             ),
         )
 
-    client = GrpcRunnerControlClient(stream, control_auth_token="control-token")
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     await client.register_runner(
         _registration(),
         connection_id="connection-1",
@@ -434,7 +434,7 @@ async def test_grpc_client_sends_control_token_metadata() -> None:
     )
     await client.close()
 
-    assert ("authorization", "Bearer control-token") in observed_metadata
+    assert ("authorization", "Bearer runner-token") in observed_metadata
 
 
 @pytest.mark.asyncio
@@ -493,7 +493,7 @@ async def test_grpc_client_maps_file_apply_patch_request_and_success() -> None:
         event = await anext(requests)
         sent.append(event)
 
-    client = GrpcRunnerControlClient(stream)
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     client.set_operation_handler(handle_operation)
     accepted = await client.register_runner(
         _registration(),
@@ -657,7 +657,7 @@ async def test_grpc_client_maps_file_edit_request_and_success() -> None:
         )
         sent.append(await anext(requests))
 
-    client = GrpcRunnerControlClient(stream)
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     client.set_operation_handler(handle_operation)
     accepted = await client.register_runner(
         _registration(),
@@ -785,7 +785,7 @@ async def test_grpc_client_maps_git_operation_payloads_and_results() -> None:
         event = await anext(requests)
         sent.append(event)
 
-    client = GrpcRunnerControlClient(stream)
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     client.set_operation_handler(handle_operation)
     accepted = await client.register_runner(
         _registration(),
@@ -920,7 +920,7 @@ async def test_grpc_client_maps_git_worktree_integrity_operations() -> None:
         )
         sent.append(await anext(requests))
 
-    client = GrpcRunnerControlClient(stream)
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
     client.set_operation_handler(handle_operation)
     accepted = await client.register_runner(
         _registration(),

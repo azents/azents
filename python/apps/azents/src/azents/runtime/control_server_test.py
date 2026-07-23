@@ -3,56 +3,26 @@
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 
 from azents.runtime.control_server import (
     RuntimeControlSettings,
-    runtime_control_auth_token,
     runtime_control_transport,
 )
 
 
-def _settings(
-    *,
-    auth_enabled: bool,
-    auth_token: str | None,
-) -> RuntimeControlSettings:
+def _settings() -> RuntimeControlSettings:
     return RuntimeControlSettings(
-        runtime_control_auth_enabled=auth_enabled,
-        runtime_control_auth_token=auth_token,
         runtime_control_allow_insecure=True,
         runtime_runner_image="runner:test",
         runtime_runner_control_endpoint="runtime-control:8030",
-        credential_encryption_key="test-key",
+        credential_encryption_key=Fernet.generate_key().decode(),
     )
-
-
-def test_runtime_control_auth_disabled_ignores_missing_token() -> None:
-    """Local/test deployments can disable Runtime Control auth explicitly."""
-    settings = _settings(auth_enabled=False, auth_token=None)
-
-    assert runtime_control_auth_token(settings) is None
-
-
-def test_runtime_control_auth_enabled_requires_token() -> None:
-    """Enabled Runtime Control auth fails startup validation without a token."""
-    settings = _settings(auth_enabled=True, auth_token=None)
-
-    with pytest.raises(RuntimeError, match="AZ_RUNTIME_CONTROL_AUTH_TOKEN"):
-        runtime_control_auth_token(settings)
-
-
-def test_runtime_control_auth_enabled_normalizes_token() -> None:
-    """Runtime Control auth uses the unified AUTH_TOKEN setting name."""
-    settings = _settings(auth_enabled=True, auth_token="  control-token  ")
-
-    assert runtime_control_auth_token(settings) == "control-token"
 
 
 def test_runtime_control_transport_allows_explicit_insecure_mode() -> None:
     """Local/test settings may explicitly select insecure transport."""
-    transport = runtime_control_transport(
-        _settings(auth_enabled=False, auth_token=None)
-    )
+    transport = runtime_control_transport(_settings())
 
     assert transport.server_credentials is None
     assert transport.ca_pem is None
@@ -61,9 +31,7 @@ def test_runtime_control_transport_allows_explicit_insecure_mode() -> None:
 
 def test_runtime_control_transport_requires_tls_files() -> None:
     """Deployed secure transport fails closed without operator TLS material."""
-    settings = _settings(auth_enabled=False, auth_token=None).model_copy(
-        update={"runtime_control_allow_insecure": False}
-    )
+    settings = _settings().model_copy(update={"runtime_control_allow_insecure": False})
 
     with pytest.raises(RuntimeError, match="TLS_CERTIFICATE_FILE"):
         runtime_control_transport(settings)
@@ -79,7 +47,7 @@ def test_runtime_control_transport_loads_operator_tls(
     certificate.write_text("certificate")
     private_key.write_text("private-key")
     ca.write_text("ca-certificate")
-    settings = _settings(auth_enabled=False, auth_token=None).model_copy(
+    settings = _settings().model_copy(
         update={
             "runtime_control_allow_insecure": False,
             "runtime_control_tls_certificate_file": str(certificate),

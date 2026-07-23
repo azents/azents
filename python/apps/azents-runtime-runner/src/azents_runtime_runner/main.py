@@ -108,7 +108,7 @@ async def run_runtime_runner() -> None:
     workspace_path = _required_env("AZ_AGENT_WORKSPACE_PATH")
     runner_id = os.environ.get("AZ_RUNTIME_RUNNER_ID") or f"runner-{uuid.uuid4()}"
     credential_id = _required_env("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID")
-    control_auth_token = os.environ.get("AZ_RUNTIME_CONTROL_AUTH_TOKEN")
+    runner_auth_token = _required_env("AZ_RUNTIME_RUNNER_AUTH_TOKEN")
     control_tls = _control_tls_from_env()
     allow_insecure_control = _required_bool_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE")
     base_connection_id = (
@@ -152,7 +152,7 @@ async def run_runtime_runner() -> None:
     while True:
         client = GrpcRunnerControlClient.from_endpoint(
             endpoint,
-            control_auth_token=control_auth_token,
+            runner_auth_token=runner_auth_token,
             tls=control_tls,
             allow_insecure=allow_insecure_control,
         )

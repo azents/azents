@@ -3,6 +3,7 @@
 import dataclasses
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
@@ -36,13 +37,26 @@ _DEFAULT_START_TIMEOUT = timedelta(minutes=5)
 _LOGGER = logging.getLogger(__name__)
 
 
+class RuntimeRunnerCredentialIdentifier(Protocol):
+    """Derive the non-secret ID for Runtime Runner evidence."""
+
+    def credential_id(
+        self,
+        *,
+        runtime_id: str,
+        desired_generation: int,
+    ) -> str:
+        """Return the non-secret Runner credential identifier."""
+        ...
+
+
 @dataclasses.dataclass(frozen=True)
 class RuntimeLifecycleDispatchConfig:
     """Config required to dispatch lifecycle commands to Providers."""
 
     runner_image: str
     runner_control_endpoint: str
-    runner_control_auth_token: str | None
+    runner_credential_identifier: RuntimeRunnerCredentialIdentifier
     runner_control_tls_ca_pem: str | None
     allow_insecure_runner_control: bool
     start_timeout: timedelta = _DEFAULT_START_TIMEOUT
@@ -199,6 +213,10 @@ class RuntimeLifecycleReconciler:
             runtime = claimed
 
         created_at = datetime.now(UTC)
+        runner_credential_id = self._config.runner_credential_identifier.credential_id(
+            runtime_id=runtime.id,
+            desired_generation=runtime.desired_generation,
+        )
         result = await self._control_protocol.dispatch_provider_command(
             RuntimeProviderCommand(
                 provider_id=provider_id,
@@ -216,8 +234,7 @@ class RuntimeLifecycleReconciler:
                     "runner_image": self._config.runner_image,
                     "auth": {
                         "control_endpoint": self._config.runner_control_endpoint,
-                        "runner_auth_token": _runner_auth_credential_id(runtime),
-                        "control_token": self._config.runner_control_auth_token,
+                        "runner_auth_credential_id": runner_credential_id,
                         "control_tls_ca_pem": (self._config.runner_control_tls_ca_pem),
                         "allow_insecure_control": (
                             self._config.allow_insecure_runner_control
@@ -326,7 +343,3 @@ def _provider_command_type(
     if runtime.last_lifecycle_command is None:
         return None
     return RuntimeProviderCommandType(runtime.last_lifecycle_command.value)
-
-
-def _runner_auth_credential_id(runtime: AgentRuntime) -> str:
-    return f"runtime-runner:{runtime.id}:{runtime.desired_generation}"

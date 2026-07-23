@@ -385,7 +385,7 @@ def _command(
         auth=RuntimeContainerAuth(
             control_endpoint=message.control_endpoint,
             runner_auth_token=message.runner_auth_token,
-            control_token=_optional_control_token(payload),
+            runner_auth_credential_id=_required_runner_auth_credential_id(payload),
             control_tls_ca_pem=_optional_control_tls_ca_pem(payload),
             allow_insecure_control=_allow_insecure_control(payload),
         ),
@@ -401,15 +401,17 @@ def _optional_desired_state(value: str) -> RuntimeDesiredState | None:
     return RuntimeDesiredState(value)
 
 
-def _optional_control_token(payload: dict[str, JsonValue]) -> str | None:
+def _required_runner_auth_credential_id(payload: dict[str, JsonValue]) -> str:
     auth = payload.get("auth")
     if not isinstance(auth, dict):
-        return None
-    token = auth.get("control_token")
-    if not isinstance(token, str):
-        return None
-    normalized = token.strip()
-    return normalized or None
+        raise ValueError("runner_auth_credential_id is required")
+    credential_id = auth.get("runner_auth_credential_id")
+    if not isinstance(credential_id, str):
+        raise ValueError("runner_auth_credential_id is required")
+    normalized = credential_id.strip()
+    if not normalized:
+        raise ValueError("runner_auth_credential_id is required")
+    return normalized
 
 
 def _optional_control_tls_ca_pem(payload: dict[str, JsonValue]) -> str | None:

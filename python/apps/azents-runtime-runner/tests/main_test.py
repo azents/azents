@@ -29,6 +29,22 @@ async def test_runner_requires_auth_credential_id(
         await run_runtime_runner()
 
 
+@pytest.mark.asyncio
+async def test_runner_requires_auth_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runner startup requires the provider-injected signed credential."""
+    monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
+    monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
+    monkeypatch.setenv("AZ_RUNTIME_ID", "runtime-1")
+    monkeypatch.setenv("AZ_AGENT_WORKSPACE_PATH", "/workspace/agent")
+    monkeypatch.setenv("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID", "credential-1")
+    monkeypatch.delenv("AZ_RUNTIME_RUNNER_AUTH_TOKEN", raising=False)
+
+    with pytest.raises(SystemExit, match="AZ_RUNTIME_RUNNER_AUTH_TOKEN"):
+        await run_runtime_runner()
+
+
 _LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
