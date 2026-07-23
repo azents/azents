@@ -4,12 +4,21 @@ import datetime
 
 import pytest
 from cryptography.fernet import Fernet
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from pytest import MonkeyPatch
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.services.system_setting.service as service_module
 from azents.core.crypto import CredentialCipher
+from azents.core.external_channel_file import (
+    DEFAULT_EXTERNAL_CHANNEL_INBOUND_MAX_FILE_BYTES,
+    DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_ACTION_BYTES,
+    DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES,
+)
+from azents.core.external_channel_file_system_setting import (
+    ExternalChannelFilesConfig,
+    ExternalChannelFilesSecrets,
+)
 from azents.core.system_setting import (
     SystemDataMigrationOutcome,
     SystemSettingActivationMode,
@@ -48,6 +57,7 @@ from azents.services.system_setting.data import (
 from azents.services.system_setting.service import (
     SystemDataMigrationRunner,
     SystemSettingsService,
+    get_system_setting_registry,
 )
 
 
@@ -110,6 +120,20 @@ def _service(
     )
 
 
+def _registered_service(
+    session_manager: SessionManager[AsyncSession],
+) -> SystemSettingsService:
+    encryption_key = Fernet.generate_key().decode()
+    return SystemSettingsService(
+        session_manager=session_manager,
+        repository=SystemSettingRepository(),
+        registry=get_system_setting_registry(),
+        cipher=CredentialCipher(encryption_key),
+        environment=SystemSettingEnvironment(values={}),
+        generation_hasher=SystemSettingGenerationHasher(encryption_key),
+    )
+
+
 def _initial_mutation() -> SystemSettingMutation:
     return SystemSettingMutation(
         section=SystemSettingSection.PLATFORM_GITHUB_APP,
@@ -123,6 +147,84 @@ def _initial_mutation() -> SystemSettingMutation:
         },
         actor_user_id=None,
     )
+
+
+def test_compiled_registry_includes_external_channel_files() -> None:
+    """The process registry exposes the provider-neutral file policy Section."""
+    definition = get_system_setting_registry().get(
+        SystemSettingSection.EXTERNAL_CHANNEL_FILES
+    )
+
+    assert definition.activation_mode is SystemSettingActivationMode.DIRECT
+    assert definition.config_model is ExternalChannelFilesConfig
+    assert definition.secret_model is ExternalChannelFilesSecrets
+
+
+async def test_external_channel_file_limits_resolve_defaults_without_storage(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """The typed defaults are effective before an administrator writes a row."""
+    service = _registered_service(rdb_session_manager)
+
+    resolved = await service.resolve(SystemSettingSection.EXTERNAL_CHANNEL_FILES)
+
+    assert resolved.admin_version == 0
+    assert isinstance(resolved.config, ExternalChannelFilesConfig)
+    assert (
+        resolved.config.inbound_max_file_bytes
+        == DEFAULT_EXTERNAL_CHANNEL_INBOUND_MAX_FILE_BYTES
+    )
+    assert (
+        resolved.config.outbound_max_file_bytes
+        == DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES
+    )
+    assert (
+        resolved.config.outbound_max_action_bytes
+        == DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_ACTION_BYTES
+    )
+    assert isinstance(resolved.secrets, ExternalChannelFilesSecrets)
+
+
+async def test_external_channel_file_limits_activate_directly_and_validate_aggregate(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A valid local policy activates immediately and an invalid one never writes."""
+    service = _registered_service(rdb_session_manager)
+
+    with pytest.raises(ValidationError, match="must be at least"):
+        await service.mutate(
+            SystemSettingMutation(
+                section=SystemSettingSection.EXTERNAL_CHANNEL_FILES,
+                expected_version=0,
+                config_patch={
+                    "outbound_max_file_bytes": 2,
+                    "outbound_max_action_bytes": 1,
+                },
+                secret_actions={},
+                actor_user_id=None,
+            )
+        )
+
+    activated = await service.mutate(
+        SystemSettingMutation(
+            section=SystemSettingSection.EXTERNAL_CHANNEL_FILES,
+            expected_version=0,
+            config_patch={
+                "inbound_max_file_bytes": 10,
+                "outbound_max_file_bytes": 20,
+                "outbound_max_action_bytes": 40,
+            },
+            secret_actions={},
+            actor_user_id=None,
+        )
+    )
+
+    assert isinstance(activated, SystemSettingActivated)
+    assert activated.current.version == 1
+    assert isinstance(activated.resolved.config, ExternalChannelFilesConfig)
+    assert activated.resolved.config.inbound_max_file_bytes == 10
+    assert activated.resolved.config.outbound_max_file_bytes == 20
+    assert activated.resolved.config.outbound_max_action_bytes == 40
 
 
 async def test_direct_mutation_encrypts_secrets_and_writes_metadata_only_audit(

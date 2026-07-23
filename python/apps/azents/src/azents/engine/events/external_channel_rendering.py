@@ -3,6 +3,12 @@
 import re
 from collections.abc import Sequence
 
+from azents.core.external_channel_file import (
+    MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
+    MAX_EXTERNAL_CHANNEL_FILES,
+    ExternalChannelFileLocator,
+    external_channel_file_metadata_items,
+)
 from azents.engine.events.types import ExternalChannelMessagePayload
 
 _SLACK_VISIBLE_REFERENCE = re.compile(
@@ -45,8 +51,9 @@ def external_channel_message_visible_value(
         "timestamp": timestamp.isoformat() if timestamp is not None else None,
         "body": _body(payload),
     }
-    if payload.attachment_metadata:
-        value["attachments"] = payload.attachment_metadata
+    visible_attachments = _visible_attachment_metadata(payload.attachment_metadata)
+    if visible_attachments:
+        value["attachments"] = visible_attachments
     if payload.original_url is not None:
         value["original_url"] = payload.original_url
     if payload.correction_of_revision_id is not None:
@@ -87,6 +94,7 @@ def render_external_channel_message(
             f"{payload.truncated_context_size} bytes"
         )
     lines.extend(["Body:", _body(payload)])
+    lines.extend(_render_file_lines(payload.attachment_metadata))
     body = "\n".join(lines)
     return f"External Channel Message:\n{body}" if include_label else body
 
@@ -131,6 +139,7 @@ def render_external_channel_turn(
                 f"   Correction of revision: {payload.correction_of_revision_id}"
             )
         lines.append(f"   Body: {_body(payload)}")
+        lines.extend(_render_file_lines(payload.attachment_metadata, indent="   "))
     return "\n".join(lines)
 
 
@@ -167,3 +176,138 @@ def _display_body(
         return display_name if display_name.startswith("#") else f"#{display_name}"
 
     return _SLACK_VISIBLE_REFERENCE.sub(replace, body)
+
+
+def _visible_attachment_metadata(
+    attachment_metadata: dict[str, object],
+) -> dict[str, object]:
+    """Return only bounded decision-useful attachment fields."""
+    visible: dict[str, object] = {}
+    blocks = attachment_metadata.get("blocks")
+    if isinstance(blocks, dict):
+        visible_blocks = _visible_block_metadata(blocks)
+        if visible_blocks:
+            visible["blocks"] = visible_blocks
+    else:
+        visible_blocks = _visible_block_metadata(attachment_metadata)
+        if visible_blocks:
+            visible.update(visible_blocks)
+
+    files = [
+        _visible_file_metadata(item)
+        for item in external_channel_file_metadata_items(attachment_metadata)[
+            :MAX_EXTERNAL_CHANNEL_FILES
+        ]
+    ]
+    if files:
+        visible["files"] = files
+        visible["files_truncated"] = attachment_metadata.get("files_truncated") is True
+    return visible
+
+
+def _visible_block_metadata(metadata: dict[str, object]) -> dict[str, object]:
+    """Return the existing bounded Block Kit summary fields."""
+    visible: dict[str, object] = {}
+    block_count = metadata.get("block_count")
+    if isinstance(block_count, int) and not isinstance(block_count, bool):
+        visible["block_count"] = max(block_count, 0)
+    block_types = metadata.get("block_types")
+    if isinstance(block_types, list):
+        visible["block_types"] = [
+            _inline_text(value)
+            for value in block_types
+            if isinstance(value, str) and value
+        ][:32]
+    if isinstance(metadata.get("truncated"), bool):
+        visible["truncated"] = metadata["truncated"]
+    return visible
+
+
+def _visible_file_metadata(metadata: dict[str, object]) -> dict[str, object]:
+    """Return one provider-neutral file entry without provider-private fields."""
+    declared_size = metadata.get("declared_size")
+    supported = metadata.get("supported") is True
+    visible: dict[str, object] = {
+        "name": _optional_inline_text(metadata.get("name")),
+        "title": _optional_inline_text(metadata.get("title")),
+        "media_type": _optional_inline_text(metadata.get("media_type")),
+        "declared_size": (
+            declared_size
+            if isinstance(declared_size, int)
+            and not isinstance(declared_size, bool)
+            and declared_size >= 0
+            else None
+        ),
+        "supported": supported,
+        "unsupported_reason": (
+            None
+            if supported
+            else _optional_inline_text(metadata.get("unsupported_reason"))
+        ),
+    }
+    locator = metadata.get("file")
+    if isinstance(locator, str):
+        try:
+            parsed_locator = ExternalChannelFileLocator.parse(locator)
+        except ValueError:
+            pass
+        else:
+            if parsed_locator.encode() == locator:
+                visible["file"] = locator
+    return visible
+
+
+def _render_file_lines(
+    attachment_metadata: dict[str, object],
+    *,
+    indent: str = "",
+) -> list[str]:
+    """Render the same safe file semantics used by structured visibility."""
+    visible = _visible_attachment_metadata(attachment_metadata)
+    files = visible.get("files")
+    if not isinstance(files, list) or not files:
+        return []
+    lines = [f"{indent}Files:"]
+    for index, item in enumerate(files, start=1):
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or "[unnamed]"
+        title = item.get("title") or "[untitled]"
+        media_type = item.get("media_type") or "unknown"
+        declared_size = item.get("declared_size")
+        size = f"{declared_size} bytes" if isinstance(declared_size, int) else "unknown"
+        status = (
+            "supported"
+            if item.get("supported") is True
+            else f"unsupported ({item.get('unsupported_reason') or 'unknown_reason'})"
+        )
+        lines.extend(
+            [
+                f"{indent}{index}. Name: {name}",
+                f"{indent}   Title: {title}",
+                f"{indent}   Media type: {media_type}",
+                f"{indent}   Declared size: {size}",
+                f"{indent}   Status: {status}",
+            ]
+        )
+        locator = item.get("file")
+        if isinstance(locator, str):
+            lines.append(f"{indent}   File: {locator}")
+    if visible.get("files_truncated") is True:
+        lines.append(
+            f"{indent}[Additional files omitted by the provider metadata limit.]"
+        )
+    return lines
+
+
+def _optional_inline_text(value: object) -> str | None:
+    """Return one bounded single-line metadata value."""
+    if not isinstance(value, str) or not value:
+        return None
+    return _inline_text(value)
+
+
+def _inline_text(value: str) -> str:
+    """Normalize provider metadata for deterministic single-line rendering."""
+    normalized = " ".join(value.split())
+    return normalized[:MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH]

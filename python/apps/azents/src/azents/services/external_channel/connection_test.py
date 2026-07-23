@@ -25,6 +25,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
     ExternalChannelConnectionStateChanged,
+    external_channel_capabilities_from_storage,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import (
@@ -309,6 +310,8 @@ async def test_valid_connection_activation_persists_identity_and_redacts_secrets
         post_messages=True,
         update_messages=True,
         delete_messages=True,
+        download_files=True,
+        upload_files=False,
     )
     validation = SlackConnectionValidation(
         status="valid",
@@ -353,6 +356,50 @@ async def test_valid_connection_activation_persists_identity_and_redacts_secrets
     assert slack_client.bot_tokens == ["xoxb-secret"]
     assert "xoxb-secret" not in repr(snapshot)
     assert session.commits == 1
+
+
+def test_legacy_capability_snapshot_defaults_file_directions_to_unavailable() -> None:
+    """Existing stored capability JSON remains readable after file fields are added."""
+    connection = _connection_from_create(
+        ExternalChannelConnectionCreate(
+            workspace_id="workspace-1",
+            provider=ExternalChannelProvider.SLACK,
+            transport=ExternalChannelTransport.HTTP,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+            provider_app_id="A-1",
+            provider_tenant_id="T-1",
+            provider_bot_user_id="B-1",
+            http_callback_selector_hash=None,
+            encrypted_credentials="encrypted",
+            capabilities={
+                "provider": "slack",
+                "transport": "http",
+                "inbound_events": True,
+                "thread_history": True,
+                "post_messages": True,
+                "update_messages": True,
+                "delete_messages": True,
+            },
+            provider_config=None,
+            last_verified_at=_NOW,
+            last_health_at=_NOW,
+            disconnected_at=None,
+            socket_lease_owner=None,
+            socket_lease_until=None,
+            socket_heartbeat_at=None,
+            socket_gap_detected_at=None,
+            socket_gap_reason=None,
+        )
+    )
+
+    capabilities = external_channel_capabilities_from_storage(connection)
+
+    assert capabilities is not None
+    assert capabilities.download_files is False
+    assert capabilities.upload_files is False
+    assert connection.capabilities is not None
+    assert "download_files" not in connection.capabilities
+    assert "upload_files" not in connection.capabilities
 
 
 @pytest.mark.asyncio

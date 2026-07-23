@@ -21,6 +21,7 @@ from azents.core.enums import (
     InputBufferKind,
     InputBufferSchedulingMode,
 )
+from azents.core.external_channel_file import add_external_channel_file_locators
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
@@ -1249,7 +1250,10 @@ class ExternalChannelInvocationInputBufferProcessor:
                 ),
                 lifecycle=_external_message_lifecycle(item.revision_kind),
                 body=item.revision_body,
-                attachment_metadata=item.attachment_metadata or {},
+                attachment_metadata=add_external_channel_file_locators(
+                    item.attachment_metadata or {},
+                    binding_id=item.binding_id,
+                ),
                 reference_mappings=_external_reference_mappings(
                     item.reference_mappings
                 ),

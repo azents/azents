@@ -54,10 +54,100 @@ def test_normalizes_human_app_mention_as_authorized_invocation_candidate() -> No
     assert normalized.provider_message_key == "slack:T1:C1:1721600000.000200"
     assert normalized.correlation_key == "C1:1721600000.000200"
     assert normalized.attachment_metadata == {
-        "block_count": 1,
-        "block_types": ["section"],
-        "truncated": False,
+        "blocks": {
+            "block_count": 1,
+            "block_types": ["section"],
+            "truncated": False,
+        }
     }
+
+
+def test_normalizes_bounded_file_metadata_and_fail_closed_modes() -> None:
+    """Retain decision metadata while classifying unsupported Slack file modes."""
+    files: list[object] = [
+        {
+            "id": "F1",
+            "name": "report.csv",
+            "title": "Report",
+            "mimetype": "text/csv",
+            "size": 42,
+            "mode": "hosted",
+            "is_external": False,
+            "url_private": "https://files.slack.test/private/F1",
+            "body": "must not survive",
+        },
+        {
+            "id": "F2",
+            "name": "remote.pdf",
+            "size": 43,
+            "mode": "hosted",
+            "is_external": True,
+        },
+        {
+            "id": "F3",
+            "name": "connect.txt",
+            "size": 44,
+            "mode": "hosted",
+            "file_access": "check_file_info",
+        },
+        {
+            "id": "F4",
+            "name": "sparse.txt",
+            "mode": "hosted",
+        },
+        {
+            "id": "F5",
+            "name": "snippet.txt",
+            "size": 45,
+            "mode": "snippet",
+        },
+        {
+            "id": "F6",
+            "name": "invalid.txt",
+            "size": -1,
+            "mode": "hosted",
+        },
+        *[
+            {
+                "id": f"F{index}",
+                "name": f"file-{index}.txt",
+                "size": index,
+                "mode": "hosted",
+            }
+            for index in range(7, 22)
+        ],
+    ]
+    normalized = normalize_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        envelope=_envelope(
+            {
+                "type": "message",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U1",
+                "ts": "1721600000.000100",
+                "text": "Review files",
+                "files": files,
+            }
+        ),
+    )
+
+    assert isinstance(normalized, SlackNormalizedMessage)
+    assert normalized.attachment_metadata is not None
+    projected = normalized.attachment_metadata["files"]
+    assert isinstance(projected, list)
+    assert len(projected) == 20
+    assert normalized.attachment_metadata["files_truncated"] is True
+    assert projected[0]["supported"] is True
+    assert projected[0]["unsupported_reason"] is None
+    assert projected[1]["unsupported_reason"] == "external_file"
+    assert projected[2]["unsupported_reason"] == "slack_connect_file"
+    assert projected[3]["unsupported_reason"] == "sparse_file"
+    assert projected[4]["unsupported_reason"] == "unsupported_mode"
+    assert projected[5]["unsupported_reason"] == "invalid_size"
+    assert "url_private" not in repr(projected)
+    assert "must not survive" not in repr(projected)
 
 
 def test_bot_mention_is_context_only_and_never_invokes() -> None:
@@ -454,6 +544,16 @@ async def test_thread_page_uses_cursor_and_normalizes_messages() -> None:
                         "user": "U1",
                         "ts": "1721600000.000100",
                         "text": "root",
+                        "files": [
+                            {
+                                "id": "F1",
+                                "name": "report.csv",
+                                "mimetype": "text/csv",
+                                "size": 42,
+                                "mode": "hosted",
+                                "url_private": "https://files.slack.test/private/F1",
+                            }
+                        ],
                     }
                 ],
                 "response_metadata": {"next_cursor": "cursor-2"},
@@ -473,6 +573,12 @@ async def test_thread_page_uses_cursor_and_normalizes_messages() -> None:
     assert page.next_cursor == "cursor-2"
     assert len(page.messages) == 1
     assert page.messages[0].normalized_body == "root"
+    assert page.messages[0].attachment_metadata is not None
+    files = page.messages[0].attachment_metadata["files"]
+    assert isinstance(files, list)
+    assert files[0]["provider_file_id"] == "F1"
+    assert files[0]["supported"] is True
+    assert "url_private" not in repr(files)
     assert requests[0].url.params["cursor"] == "cursor-1"
     assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
 

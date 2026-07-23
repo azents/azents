@@ -115,6 +115,8 @@ class ExternalChannelCapabilitySnapshot(BaseModel):
     post_messages: bool = Field(description="Whether messages can be posted")
     update_messages: bool = Field(description="Whether owned messages can be updated")
     delete_messages: bool = Field(description="Whether owned messages can be deleted")
+    download_files: bool = Field(description="Whether provider files can be downloaded")
+    upload_files: bool = Field(description="Whether Runtime files can be uploaded")
 
 
 class ExternalChannelConnectionStatusSnapshot(BaseModel):

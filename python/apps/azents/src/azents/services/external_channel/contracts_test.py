@@ -97,6 +97,8 @@ def test_status_snapshot_contains_only_redacted_connection_state() -> None:
             post_messages=True,
             update_messages=True,
             delete_messages=True,
+            download_files=True,
+            upload_files=False,
         ),
     )
 

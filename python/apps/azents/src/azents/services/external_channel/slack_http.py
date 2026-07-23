@@ -15,6 +15,10 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_file import (
+    MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
+    MAX_EXTERNAL_CHANNEL_FILES,
+)
 from azents.repos.external_channel.data import ExternalChannelEventCreate
 from azents.services.external_channel.data import (
     ExternalChannelCapabilitySnapshot,
@@ -34,6 +38,10 @@ SLACK_REQUIRED_BOT_SCOPES = (
     "groups:read",
     "chat:write",
     "users:read",
+)
+SLACK_OPTIONAL_FILE_BOT_SCOPES = (
+    "files:read",
+    "files:write",
 )
 
 
@@ -258,6 +266,7 @@ class SlackWebAPIClient:
             return self._unavailable(code="slack_auth_test_unavailable")
 
         granted_scopes_header = response.headers.get("x-oauth-scopes")
+        granted_scopes: set[str] | None = None
         if granted_scopes_header:
             granted_scopes = {
                 scope.strip()
@@ -376,6 +385,12 @@ class SlackWebAPIClient:
                 post_messages=True,
                 update_messages=True,
                 delete_messages=True,
+                download_files=(
+                    granted_scopes is not None and "files:read" in granted_scopes
+                ),
+                upload_files=(
+                    granted_scopes is not None and "files:write" in granted_scopes
+                ),
             ),
         )
 
@@ -484,6 +499,12 @@ def _project_envelope(
     projected_event = {key: event[key] for key in event_keys if key in event}
     if "blocks" in event:
         projected_event["blocks"] = _project_slack_blocks(event["blocks"])
+    if "files" in event:
+        files = event["files"]
+        projected_event["files"] = _project_slack_files(files)
+        projected_event["files_truncated"] = (
+            isinstance(files, list) and len(files) > MAX_EXTERNAL_CHANNEL_FILES
+        )
     for key in ("message", "previous_message"):
         value = event.get(key)
         if isinstance(value, dict):
@@ -513,9 +534,46 @@ def _project_slack_message(message: dict[str, object]) -> dict[str, object]:
     projected = {key: message[key] for key in keys if key in message}
     if "blocks" in message:
         projected["blocks"] = _project_slack_blocks(message["blocks"])
+    if "files" in message:
+        files = message["files"]
+        projected["files"] = _project_slack_files(files)
+        projected["files_truncated"] = (
+            isinstance(files, list) and len(files) > MAX_EXTERNAL_CHANNEL_FILES
+        )
     return projected
 
 
 def _project_slack_blocks(value: object) -> list[dict[str, str]]:
     """Reduce Slack blocks to bounded readable projection data."""
     return projected_slack_blocks(value)
+
+
+def _project_slack_files(value: object) -> list[dict[str, object]]:
+    """Retain only bounded non-secret Slack file metadata."""
+    if not isinstance(value, list):
+        return []
+    projected: list[dict[str, object]] = []
+    string_keys = (
+        "id",
+        "name",
+        "title",
+        "mimetype",
+        "mode",
+        "external_type",
+        "file_access",
+    )
+    for item in value[:MAX_EXTERNAL_CHANNEL_FILES]:
+        if not isinstance(item, dict):
+            continue
+        file_projection: dict[str, object] = {}
+        for key in string_keys:
+            field = item.get(key)
+            if isinstance(field, str) and field:
+                file_projection[key] = field[:MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH]
+        size = item.get("size")
+        if isinstance(size, int) and not isinstance(size, bool):
+            file_projection["size"] = size
+        if isinstance(item.get("is_external"), bool):
+            file_projection["is_external"] = item["is_external"]
+        projected.append(file_projection)
+    return projected

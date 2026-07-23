@@ -17,6 +17,7 @@ from pydantic import BaseModel
 class SystemSettingSection(enum.StrEnum):
     """Compiled instance System Settings sections."""
 
+    EXTERNAL_CHANNEL_FILES = "external_channel_files"
     PLATFORM_GITHUB_APP = "platform_github_app"
     PLATFORM_RUNTIME = "platform_runtime"
 

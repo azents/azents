@@ -185,6 +185,7 @@ def _external_payload(
     revision_id: str,
     batch_id: str,
     body: str | None,
+    attachment_metadata: dict[str, object] | None = None,
 ) -> ExternalChannelMessagePayload:
     """Create one deterministic external message payload."""
     return ExternalChannelMessagePayload(
@@ -216,7 +217,7 @@ def _external_payload(
             else ExternalChannelMessageLifecycle.CURRENT
         ),
         body=body,
-        attachment_metadata={},
+        attachment_metadata=attachment_metadata or {},
         provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),
         provider_updated_at=None,
         original_url=None,
@@ -4316,7 +4317,23 @@ def test_litellm_lowerer_groups_contiguous_external_batch() -> None:
         _event(
             EventKind.EXTERNAL_CHANNEL_MESSAGE,
             _external_payload(
-                message_id="1", revision_id="r1", batch_id="batch-1", body="first"
+                message_id="1",
+                revision_id="r1",
+                batch_id="batch-1",
+                body="first",
+                attachment_metadata={
+                    "files": [
+                        {
+                            "name": "report.csv",
+                            "title": "Report",
+                            "media_type": "text/csv",
+                            "declared_size": 1024,
+                            "supported": True,
+                            "unsupported_reason": None,
+                            "file": "external-file:v1:slack:binding-1:F123",
+                        }
+                    ]
+                },
             ),
         ),
         _event(
@@ -4332,6 +4349,8 @@ def test_litellm_lowerer_groups_contiguous_external_batch() -> None:
     assert isinstance(content, str)
     assert content.startswith("Message Type: EXTERNAL_CHANNEL_TURN")
     assert content.index("Body: first") < content.index("Body: second")
+    assert "Files:" in content
+    assert "File: external-file:v1:slack:binding-1:F123" in content
 
 
 def test_litellm_lowerer_keeps_noncontiguous_batch_segments_in_order(

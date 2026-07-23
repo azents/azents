@@ -1781,7 +1781,20 @@ def _external_payload() -> ExternalChannelMessagePayload:
         authorization="context_only",
         lifecycle=ExternalChannelMessageLifecycle.CURRENT,
         body="context body",
-        attachment_metadata={},
+        attachment_metadata={
+            "files": [
+                {
+                    "name": "report.csv",
+                    "title": "Report",
+                    "media_type": "text/csv",
+                    "declared_size": 1024,
+                    "supported": True,
+                    "unsupported_reason": None,
+                    "file": "external-file:v1:slack:binding-1:F123",
+                    "url_private": "https://secret-download.example/F123",
+                }
+            ]
+        },
         provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),
         provider_updated_at=None,
         original_url=None,
@@ -1829,7 +1842,30 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
     assert value["message_type"] == "external_channel_message"
     assert value["authorization"] == "context_only"
     assert value["truncated_context"] == {"message_count": 3, "size": 256}
+    attachments = value["attachments"]
+    assert isinstance(attachments, dict)
+    files = attachments["files"]
+    assert isinstance(files, list)
+    assert isinstance(files[0], dict)
+    assert files[0]["file"] == "external-file:v1:slack:binding-1:F123"
+    assert "secret-download" not in str(value)
+    visible_bytes = filters._estimate_event_visible_bytes(  # pyright: ignore[reportPrivateUsage]
+        event
+    )
+    without_files = event.model_copy(
+        update={
+            "payload": event.payload.model_copy(
+                update={"attachment_metadata": {}},
+            )
+        }
+    )
+    assert visible_bytes > filters._estimate_event_visible_bytes(  # pyright: ignore[reportPrivateUsage]
+        without_files
+    )
     assert text is not None
     assert "Provider: slack" in text
     assert "Authorization: context_only" in text
     assert "context body" in text
+    assert "Files:" in text
+    assert "File: external-file:v1:slack:binding-1:F123" in text
+    assert "secret-download" not in text

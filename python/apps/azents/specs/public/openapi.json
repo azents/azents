@@ -13523,6 +13523,16 @@
             "type": "boolean",
             "title": "Delete Messages",
             "description": "Whether owned messages can be deleted"
+          },
+          "download_files": {
+            "type": "boolean",
+            "title": "Download Files",
+            "description": "Whether provider files can be downloaded"
+          },
+          "upload_files": {
+            "type": "boolean",
+            "title": "Upload Files",
+            "description": "Whether Runtime files can be uploaded"
           }
         },
         "type": "object",
@@ -13533,7 +13543,9 @@
           "thread_history",
           "post_messages",
           "update_messages",
-          "delete_messages"
+          "delete_messages",
+          "download_files",
+          "upload_files"
         ],
         "title": "ExternalChannelCapabilitySnapshot",
         "description": "Redacted provider capabilities resolved for one connection."

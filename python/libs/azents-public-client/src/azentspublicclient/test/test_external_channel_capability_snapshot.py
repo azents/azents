@@ -41,7 +41,9 @@ class TestExternalChannelCapabilitySnapshot(unittest.TestCase):
                 thread_history = True,
                 post_messages = True,
                 update_messages = True,
-                delete_messages = True
+                delete_messages = True,
+                download_files = True,
+                upload_files = True
             )
         else:
             return ExternalChannelCapabilitySnapshot(
@@ -52,6 +54,8 @@ class TestExternalChannelCapabilitySnapshot(unittest.TestCase):
                 post_messages = True,
                 update_messages = True,
                 delete_messages = True,
+                download_files = True,
+                upload_files = True,
         )
         """
 

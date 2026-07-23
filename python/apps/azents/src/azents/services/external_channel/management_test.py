@@ -70,6 +70,8 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     assert subscriptions["bot_events"] == list(guidance.event_subscriptions)
     assert "channels:read" in guidance.bot_scopes
     assert "groups:read" in guidance.bot_scopes
+    assert "files:read" in guidance.bot_scopes
+    assert "files:write" in guidance.bot_scopes
     assert "request_url" not in subscriptions
     assert guidance.callback_url is None
     assert "signing_secret" not in guidance.manifest_json
