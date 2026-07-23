@@ -33,6 +33,7 @@ import {
   IconMail,
   IconMoon,
   IconRefresh,
+  IconServer,
   IconSettings,
   IconSun,
   IconUser,
@@ -100,6 +101,12 @@ const RESOURCES: ResourceItem[] = [
     list: "/model-catalog",
     icon: <IconRefresh size={20} />,
     label: "Model Catalog",
+  },
+  {
+    name: "runtime-providers",
+    list: "/runtime-providers",
+    icon: <IconServer size={20} />,
+    label: "Runtime Providers",
   },
   {
     name: "system-settings",

@@ -7,6 +7,7 @@ from azentsadminclient.api.health_v1_api import HealthV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api
 from azentsadminclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api
+from azentsadminclient.api.runtime_provider_v1_api import RuntimeProviderV1Api
 from azentsadminclient.api.system_bootstrap_v1_api import SystemBootstrapV1Api
 from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api
 from azentsadminclient.api.system_v1_api import SystemV1Api

@@ -66,6 +66,7 @@ def test_runtime_control_enabled_render_contract() -> None:
         "server.runtimeControl.runnerImage.repository=repo/runner",
         "server.runtimeControl.runnerImage.tag=sha",
         "server.runtimeControl.runnerImage.digest=sha256:runnerdigest",
+        "secrets.existingSecrets.auth=azents-auth",
     )
 
     assert "src/cli/runtime_control_server.py" in rendered
@@ -76,6 +77,8 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE" in rendered
     assert "azents-runtime-control-tls" in rendered
     assert "AZ_RUNTIME_RUNNER_IMAGE" in rendered
+    assert "AZ_CREDENTIAL_ENCRYPTION_KEY" in rendered
+    assert "azents-auth" in rendered
     assert "repo/runner:sha@sha256:runnerdigest" in rendered
 
 

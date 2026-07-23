@@ -25,6 +25,7 @@ def _helm_template(*values: str) -> str:
         "secrets.existingSecrets.redis=azents-redis",
         "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
         "runtimeProviderKubernetes.credential.existingSecret=azents-provider-credential",
+        "runtimeProviderKubernetes.credential.key=provider-token",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])
@@ -81,7 +82,7 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE" in rendered
     assert "- name: AZ_RUNTIME_PROVIDER_CREDENTIAL\n" not in rendered
     assert "azents-provider-credential" in rendered
-    assert "provider-credential" in rendered
+    assert "provider-token" in rendered
     assert "mountPath: /var/run/secrets/azents/runtime-provider-credential" in rendered
     assert "path: credential" in rendered
     assert "AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE" in rendered
