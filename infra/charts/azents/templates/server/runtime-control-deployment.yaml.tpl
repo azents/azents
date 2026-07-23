@@ -49,8 +49,6 @@ spec:
               value: {{ .Values.server.runtimeControl.lifecycleRetryDelaySeconds | quote }}
             - name: AZ_RUNTIME_CONTROL_START_TIMEOUT_SECONDS
               value: {{ .Values.server.runtimeControl.startTimeoutSeconds | quote }}
-            - name: AZ_RUNTIME_CONTROL_AUTH_ENABLED
-              value: {{ .Values.server.runtimeControl.auth.enabled | quote }}
             - name: AZ_RUNTIME_CONTROL_ALLOW_INSECURE
               value: "false"
             - name: AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE
@@ -59,13 +57,6 @@ spec:
               value: "/var/run/secrets/azents/runtime-control-tls/tls.key"
             - name: AZ_RUNTIME_CONTROL_TLS_CA_FILE
               value: "/var/run/secrets/azents/runtime-control-tls/ca.crt"
-            {{- if .Values.server.runtimeControl.auth.enabled }}
-            - name: AZ_RUNTIME_CONTROL_AUTH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "server.runtimeControl.auth.existingSecret is required when Runtime Control auth is enabled" .Values.server.runtimeControl.auth.existingSecret | quote }}
-                  key: {{ required "server.runtimeControl.auth.tokenKey is required when Runtime Control auth is enabled" .Values.server.runtimeControl.auth.tokenKey | quote }}
-            {{- end }}
             - name: AZ_RUNTIME_RUNNER_IMAGE
               value: {{ include "azents.serverRuntimeRunnerImage" . | quote }}
             - name: AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT

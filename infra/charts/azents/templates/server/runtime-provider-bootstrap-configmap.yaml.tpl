@@ -1,6 +1,8 @@
 {{- if .Values.server.enabled }}
 {{- $providers := list }}
 {{- if .Values.runtimeProviderKubernetes.enabled }}
+{{- $providerNamespace := include "azents.runtimeProviderKubernetesNamespace" . }}
+{{- $providerServiceAccountName := include "azents.runtimeProviderKubernetesServiceAccountName" . }}
 {{- $providers = append $providers (dict
   "declarationKey" "runtime-provider-kubernetes"
   "providerId" .Values.runtimeProviderKubernetes.providerId
@@ -10,6 +12,13 @@
     "enabled" true
     "availabilityMode" "platform_wide"
     "setAsPlatformDefaultWhenUnset" true
+  )
+  "authentication" (dict
+    "method" "kubernetes_service_account"
+    "subject" (printf "system:serviceaccount:%s:%s" $providerNamespace $providerServiceAccountName)
+    "namespace" $providerNamespace
+    "serviceAccountName" $providerServiceAccountName
+    "audience" "azents-runtime-control"
   )
 ) }}
 {{- end }}
