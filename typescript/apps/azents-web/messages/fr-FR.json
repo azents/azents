@@ -1018,10 +1018,20 @@
         "channelWork": "Channel Work",
         "noWork": "Aucun Channel Work n’est associé à cette liaison.",
         "taskCount": "{count, plural, =1 {1 tâche} other {# tâches}}",
-        "progressDrift": "Dérive de progression",
-        "progressProjected": "Progression projetée",
-        "revisionProgress": "Projection de la révision Channel Work",
         "revisionDetail": "Révision d’état {current} · révision souhaitée {desired}",
+        "taskStatus": {
+          "pending": "En attente",
+          "in_progress": "En cours",
+          "completed": "Terminée"
+        },
+        "projectionState": {
+          "synchronized": "Synchronisée",
+          "missing": "Message de progression manquant",
+          "stale": "Message de progression obsolète",
+          "delete_failed": "Échec de suppression de la progression",
+          "unknown": "Résultat du fournisseur inconnu",
+          "none": "Aucune projection active"
+        },
         "deliveries": "Résultats de livraison",
         "noDeliveries": "Aucune livraison au fournisseur n’a été tentée.",
         "grantsTitle": "Accès à la session",

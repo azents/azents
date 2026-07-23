@@ -1,6 +1,7 @@
 """External Channel management queries and lifecycle mutations."""
 
 import datetime
+from typing import Literal
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -227,7 +228,7 @@ class ExternalChannelManagementRepository:
                     disconnected_at=binding.disconnected_at,
                     disconnect_reason=binding.disconnect_reason,
                     latest_activity_at=resource.latest_activity_at,
-                    work=None if work is None else _work(work),
+                    work=None if work is None else _work(work, deliveries),
                     deliveries=[_delivery(item) for item in deliveries],
                 )
             )
@@ -649,7 +650,10 @@ def _resource_label(labels: dict[str, object] | None, fallback: str) -> str:
     return fallback
 
 
-def _work(work: RDBExternalChannelWork) -> ManagedWork:
+def _work(
+    work: RDBExternalChannelWork,
+    deliveries: list[RDBExternalChannelDeliveryAttempt],
+) -> ManagedWork:
     return ManagedWork(
         id=work.id,
         status=work.status,
@@ -657,6 +661,7 @@ def _work(work: RDBExternalChannelWork) -> ManagedWork:
         state_revision=work.state_revision,
         desired_progress_revision=work.desired_progress_revision,
         progress_projected=work.progress_provider_message_key is not None,
+        projection_state=progress_projection_state(work, deliveries),
         finished_at=work.finished_at,
     )
 
@@ -719,3 +724,52 @@ def _provider_payload(
         "thread_ts": thread_ts,
         "provider_message_key": provider_message_key,
     }
+
+
+def progress_projection_state(
+    work: RDBExternalChannelWork,
+    deliveries: list[RDBExternalChannelDeliveryAttempt],
+) -> Literal[
+    "synchronized",
+    "missing",
+    "stale",
+    "delete_failed",
+    "unknown",
+    "none",
+]:
+    progress = next(
+        (
+            delivery
+            for delivery in deliveries
+            if delivery.operation
+            in {
+                ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+            }
+        ),
+        None,
+    )
+    if progress is not None:
+        if progress.status is ExternalChannelDeliveryStatus.UNKNOWN:
+            return "unknown"
+        if progress.status in {
+            ExternalChannelDeliveryStatus.FAILED,
+            ExternalChannelDeliveryStatus.NOT_ATTEMPTED,
+        }:
+            return (
+                "delete_failed"
+                if progress.operation
+                is ExternalChannelDeliveryOperation.PROGRESS_DELETE
+                else "stale"
+            )
+        if progress.status in {
+            ExternalChannelDeliveryStatus.PENDING,
+            ExternalChannelDeliveryStatus.ATTEMPTING,
+        }:
+            return "stale"
+    if work.desired_progress_payload is not None:
+        return (
+            "missing" if work.progress_provider_message_key is None else "synchronized"
+        )
+    return "none" if work.progress_provider_message_key is None else "stale"

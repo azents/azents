@@ -1,7 +1,7 @@
 """Safe External Channel management repository projections."""
 
 import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -60,6 +60,14 @@ class ManagedWork(_Projection):
     state_revision: int
     desired_progress_revision: int
     progress_projected: bool
+    projection_state: Literal[
+        "synchronized",
+        "missing",
+        "stale",
+        "delete_failed",
+        "unknown",
+        "none",
+    ]
     finished_at: datetime.datetime | None
 
 

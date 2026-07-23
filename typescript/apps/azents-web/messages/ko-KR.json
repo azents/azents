@@ -1018,10 +1018,20 @@
         "channelWork": "Channel Work",
         "noWork": "이 binding에 연결된 Channel Work가 없습니다.",
         "taskCount": "작업 {count}개",
-        "progressDrift": "Progress drift",
-        "progressProjected": "Progress 반영됨",
-        "revisionProgress": "Channel Work revision 반영",
         "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "taskStatus": {
+          "pending": "대기 중",
+          "in_progress": "진행 중",
+          "completed": "완료"
+        },
+        "projectionState": {
+          "synchronized": "동기화됨",
+          "missing": "Progress 메시지 없음",
+          "stale": "Progress 메시지가 오래됨",
+          "delete_failed": "Progress 삭제 실패",
+          "unknown": "Provider 결과 알 수 없음",
+          "none": "활성 projection 없음"
+        },
         "deliveries": "Delivery 결과",
         "noDeliveries": "Provider delivery를 시도한 적이 없습니다.",
         "grantsTitle": "세션 접근 권한",

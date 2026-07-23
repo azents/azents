@@ -59,6 +59,7 @@ class TestManagedBindingListResponse(unittest.TestCase):
                             state_revision = 56, 
                             desired_progress_revision = 56, 
                             progress_projected = True, 
+                            projection_state = 'synchronized', 
                             finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
                         deliveries = [
                             azentspublicclient.models.managed_delivery.ManagedDelivery(
@@ -110,6 +111,7 @@ class TestManagedBindingListResponse(unittest.TestCase):
                             state_revision = 56, 
                             desired_progress_revision = 56, 
                             progress_projected = True, 
+                            projection_state = 'synchronized', 
                             finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
                         deliveries = [
                             azentspublicclient.models.managed_delivery.ManagedDelivery(

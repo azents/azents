@@ -4,17 +4,26 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelConnectionStatus,
+    ExternalChannelDeliveryOperation,
+    ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.rdb.models.external_channel import (
+    RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelWork,
+)
 from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
+    progress_projection_state,
 )
 from azents.repos.external_channel.management_data import ManagedConnection
 from azents.services.external_channel.management import (
@@ -168,3 +177,63 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
         "commit",
         "delivery",
     ]
+
+
+@pytest.mark.parametrize(
+    ("desired_payload", "provider_key", "operation", "status", "expected"),
+    [
+        ({}, "slack:T1:C1:1.1", None, None, "synchronized"),
+        ({}, None, None, None, "missing"),
+        (
+            {},
+            "slack:T1:C1:1.1",
+            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+            ExternalChannelDeliveryStatus.FAILED,
+            "stale",
+        ),
+        (
+            None,
+            "slack:T1:C1:1.1",
+            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+            ExternalChannelDeliveryStatus.FAILED,
+            "delete_failed",
+        ),
+        (
+            {},
+            "slack:T1:C1:1.1",
+            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+            ExternalChannelDeliveryStatus.UNKNOWN,
+            "unknown",
+        ),
+        (None, None, None, None, "none"),
+    ],
+)
+def test_progress_projection_state_uses_delivery_lifecycle(
+    desired_payload: dict[str, object] | None,
+    provider_key: str | None,
+    operation: ExternalChannelDeliveryOperation | None,
+    status: ExternalChannelDeliveryStatus | None,
+    expected: str,
+) -> None:
+    """Projection state follows durable provider outcomes, not revision counters."""
+    work = cast(
+        RDBExternalChannelWork,
+        SimpleNamespace(
+            desired_progress_payload=desired_payload,
+            progress_provider_message_key=provider_key,
+            state_revision=100,
+            desired_progress_revision=1,
+        ),
+    )
+    deliveries = (
+        []
+        if operation is None or status is None
+        else [
+            cast(
+                RDBExternalChannelDeliveryAttempt,
+                SimpleNamespace(operation=operation, status=status),
+            )
+        ]
+    )
+
+    assert progress_projection_state(work, deliveries) == expected
