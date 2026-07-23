@@ -174,6 +174,7 @@ def test_event_callback_projects_bounded_rich_text_content() -> None:
         {
             "type": "rich_text",
             "block_id": "untrusted-provider-block-id",
+            "normalized_text": "Spoofed provider projection",
             "elements": [
                 {
                     "type": "rich_text_section",

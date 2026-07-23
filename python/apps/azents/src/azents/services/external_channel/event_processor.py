@@ -90,7 +90,7 @@ from azents.services.external_channel.slack_events import (
     SlackProviderRateLimited,
     SlackProviderResourceUnavailable,
     SlackProviderTemporaryError,
-    normalize_slack_event,
+    normalize_projected_slack_event,
     slack_message_reference_ids,
 )
 from azents.services.input_buffer import (
@@ -486,7 +486,7 @@ class ExternalChannelEventProcessorService:
         credentials = self.credentials_codec.decrypt(
             configuration.encrypted_credentials
         )
-        normalized = normalize_slack_event(
+        normalized = normalize_projected_slack_event(
             event_type=event.event_type,
             tenant_id=event.provider_tenant_id,
             envelope=event.envelope,

@@ -14,7 +14,10 @@ from azents.core.enums import (
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
 )
-from azents.services.external_channel.slack_blocks import slack_blocks_text
+from azents.services.external_channel.slack_blocks import (
+    projected_slack_blocks_text,
+    slack_blocks_text,
+)
 from azents.services.external_channel.slack_endpoint import slack_api_base_url
 
 _MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
@@ -134,7 +137,38 @@ def normalize_slack_event(
     tenant_id: str,
     envelope: dict[str, object],
 ) -> SlackConnectionRevocation | SlackNormalizedMessage:
-    """Normalize one admitted Slack event or reject it as out of scope."""
+    """Normalize one raw Slack event or reject it as out of scope."""
+    return _normalize_slack_event(
+        event_type=event_type,
+        tenant_id=tenant_id,
+        envelope=envelope,
+        trusted_block_projection=False,
+    )
+
+
+def normalize_projected_slack_event(
+    *,
+    event_type: str,
+    tenant_id: str,
+    envelope: dict[str, object],
+) -> SlackConnectionRevocation | SlackNormalizedMessage:
+    """Normalize one Azents-projected admitted Slack event."""
+    return _normalize_slack_event(
+        event_type=event_type,
+        tenant_id=tenant_id,
+        envelope=envelope,
+        trusted_block_projection=True,
+    )
+
+
+def _normalize_slack_event(
+    *,
+    event_type: str,
+    tenant_id: str,
+    envelope: dict[str, object],
+    trusted_block_projection: bool,
+) -> SlackConnectionRevocation | SlackNormalizedMessage:
+    """Normalize one Slack event with an explicit block trust boundary."""
     if event_type == "app_uninstalled":
         return SlackConnectionRevocation(kind="app_uninstalled")
     if event_type == "tokens_revoked":
@@ -198,7 +232,10 @@ def normalize_slack_event(
     normalized_body = (
         None
         if revision_kind is ExternalChannelMessageRevisionKind.DELETE
-        else _normalized_message_body(message)
+        else _normalized_message_body(
+            message,
+            trusted_block_projection=trusted_block_projection,
+        )
     )
     attachment_metadata = _attachment_metadata(message.get("blocks"))
     normalized_size = _normalized_size(normalized_body, attachment_metadata)
@@ -895,12 +932,21 @@ def _bounded_text(value: object) -> str:
     return f"{clipped}\n[Slack message truncated by Azents]"
 
 
-def _normalized_message_body(message: dict[str, object]) -> str:
+def _normalized_message_body(
+    message: dict[str, object],
+    *,
+    trusted_block_projection: bool,
+) -> str:
     """Prefer Slack fallback text and derive readable block-only content."""
     fallback = message.get("text")
     if isinstance(fallback, str) and fallback.strip():
         return _bounded_text(fallback)
-    return _bounded_text(slack_blocks_text(message.get("blocks")))
+    block_text = (
+        projected_slack_blocks_text(message.get("blocks"))
+        if trusted_block_projection
+        else slack_blocks_text(message.get("blocks"))
+    )
+    return _bounded_text(block_text)
 
 
 def _attachment_metadata(value: object) -> dict[str, object] | None:

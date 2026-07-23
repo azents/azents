@@ -18,6 +18,7 @@ from azents.services.external_channel.slack_events import (
     SlackProviderCredentialsInvalid,
     SlackProviderPermissionDenied,
     SlackProviderRateLimited,
+    normalize_projected_slack_event,
     normalize_slack_event,
     slack_message_reference_ids,
     slack_provider_position,
@@ -272,6 +273,55 @@ def test_long_blank_fallback_does_not_hide_block_only_content() -> None:
 
     assert isinstance(normalized, SlackNormalizedMessage)
     assert normalized.normalized_body == "Readable from blocks"
+
+
+def test_raw_provider_normalization_ignores_spoofed_normalized_text() -> None:
+    """Only the authenticated admission projection may supply normalized text."""
+    raw = normalize_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        envelope=_envelope(
+            {
+                "type": "message",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U1",
+                "ts": "1721600000.000100",
+                "text": "",
+                "blocks": [
+                    {
+                        "type": "unsupported_provider_block",
+                        "normalized_text": "Spoofed trusted content",
+                    }
+                ],
+            }
+        ),
+    )
+    projected = normalize_projected_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        envelope=_envelope(
+            {
+                "type": "message",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U1",
+                "ts": "1721600000.000100",
+                "text": "",
+                "blocks": [
+                    {
+                        "type": "rich_text",
+                        "normalized_text": "Admission-projected content",
+                    }
+                ],
+            }
+        ),
+    )
+
+    assert isinstance(raw, SlackNormalizedMessage)
+    assert raw.normalized_body == ""
+    assert isinstance(projected, SlackNormalizedMessage)
+    assert projected.normalized_body == "Admission-projected content"
 
 
 def test_rich_text_edit_revision_identity_uses_normalized_body() -> None:
