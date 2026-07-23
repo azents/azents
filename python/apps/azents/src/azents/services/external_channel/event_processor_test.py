@@ -1,6 +1,7 @@
 """External Channel event processing domain tests."""
 
 import datetime
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -76,6 +77,7 @@ from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
     ExternalChannelPersistedMessage,
     ExternalChannelPersistedRevision,
+    connection_authored,
 )
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,
@@ -90,6 +92,32 @@ from azents.worker.session.lifecycle import SessionLifecycleService
 
 def _at(second: int) -> datetime.datetime:
     return datetime.datetime(2026, 7, 22, 0, 0, second, tzinfo=datetime.UTC)
+
+
+def testconnection_authored_slack_messages_are_excluded_from_ingress() -> None:
+    """The connected bot cannot feed its own output back into Agent context."""
+    message = normalize_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        envelope={
+            "event": {
+                "type": "message",
+                "subtype": "bot_message",
+                "channel": "C1",
+                "channel_type": "channel",
+                "bot_id": "B1",
+                "ts": "1721600000.000100",
+                "text": "Agent output",
+            }
+        },
+    )
+    configuration = cast(
+        ExternalChannelConnectionConfiguration,
+        SimpleNamespace(provider_app_id="A1", provider_bot_user_id="B1"),
+    )
+
+    assert isinstance(message, SlackNormalizedMessage)
+    assert connection_authored(configuration, message) is True
 
 
 async def _setup_route(
@@ -183,6 +211,8 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             configuration=configuration,
             message=message,
             original_url=original_url,
+            channel_display_name=None,
+            reference_mappings={},
         )
 
     async def persist_normalized_message_for_test(
@@ -202,6 +232,7 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             source_event_id=None,
             now=now,
             original_url=None,
+            reference_mappings={},
         )
 
 

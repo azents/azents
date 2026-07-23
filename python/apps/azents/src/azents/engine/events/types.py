@@ -383,6 +383,7 @@ class ExternalChannelMessagePayload(BaseModel):
     lifecycle: ExternalChannelMessageLifecycle
     body: str | None
     attachment_metadata: dict[str, object]
+    reference_mappings: dict[str, dict[str, str]] = Field(default_factory=dict)
     provider_created_at: datetime.datetime | None
     provider_updated_at: datetime.datetime | None
     original_url: str | None
@@ -402,6 +403,7 @@ class ExternalChannelMessagePayload(BaseModel):
             provider_user_id=self.provider_user_id,
             sender_display_name=self.sender_display_name,
             body=self.body,
+            reference_mappings=self.reference_mappings,
             provider_created_at=self.provider_created_at,
             provider_updated_at=self.provider_updated_at,
             original_url=self.original_url,

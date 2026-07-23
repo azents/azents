@@ -2,6 +2,7 @@
 
 import datetime
 from collections.abc import Sequence
+from typing import assert_never
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
+    ExternalChannelProvider,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
@@ -35,6 +37,9 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkDelivery,
     ChannelWorkSnapshot,
     ChannelWorkTask,
+)
+from azents.services.external_channel.slack_events import (
+    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
 
 
@@ -298,6 +303,7 @@ class ExternalChannelWorkRepository:
         )
         if connection is None:
             raise ValueError("External Channel connection is not active.")
+        _validate_message_length(connection.provider, message)
         resource = await session.get(RDBExternalChannelResource, binding.resource_id)
         if resource is None:
             raise ValueError("External Channel resource is unavailable.")
@@ -362,6 +368,7 @@ class ExternalChannelWorkRepository:
                         _provider_payload(
                             resource.labels,
                             text=_render_progress(tasks),
+                            blocks=_render_progress_blocks(tasks),
                             provider_message_key=work.progress_provider_message_key,
                             desired_progress_revision=work.desired_progress_revision,
                         ),
@@ -842,6 +849,7 @@ def _provider_payload(
     labels: dict[str, object] | None,
     *,
     text: str | None = None,
+    blocks: list[dict[str, object]] | None = None,
     provider_message_key: str | None = None,
     desired_progress_revision: int | None = None,
 ) -> dict[str, object]:
@@ -859,6 +867,8 @@ def _provider_payload(
     }
     if text is not None:
         payload["text"] = text
+    if blocks is not None:
+        payload["blocks"] = blocks
     if provider_message_key is not None:
         payload["provider_message_key"] = provider_message_key
     if desired_progress_revision is not None:
@@ -877,6 +887,50 @@ def _render_progress(tasks: Sequence[ChannelWorkTask]) -> str:
         }[task.status.value]
         lines.append(f"{marker} {task.title}")
     return "\n".join(lines)
+
+
+def _render_progress_blocks(
+    tasks: Sequence[ChannelWorkTask],
+) -> list[dict[str, object]]:
+    """Render deterministic accessible Slack Block Kit task progress."""
+    lines = [f"{_task_marker(task.status)} {task.title}" for task in tasks]
+    return [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "Agent progress"},
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "\n".join(lines)},
+        },
+    ]
+
+
+def _task_marker(status: ExternalChannelWorkTaskStatus) -> str:
+    """Return the Slack display marker for one Channel Work state."""
+    return {
+        ExternalChannelWorkTaskStatus.PENDING: "○",
+        ExternalChannelWorkTaskStatus.IN_PROGRESS: "◐",
+        ExternalChannelWorkTaskStatus.COMPLETED: "●",
+    }[status]
+
+
+def _validate_message_length(
+    provider: ExternalChannelProvider,
+    message: str | None,
+) -> None:
+    """Validate one provider-bound conversational message before commit."""
+    if message is None:
+        return
+    match provider:
+        case ExternalChannelProvider.SLACK:
+            maximum = SLACK_MARKDOWN_TEXT_MAX_LENGTH
+        case _ as unreachable:
+            assert_never(unreachable)
+    if len(message) > maximum:
+        raise ValueError(
+            f"External Channel message exceeds the {maximum}-character provider limit."
+        )
 
 
 def _resource_label(labels: dict[str, object] | None, fallback: str) -> str:

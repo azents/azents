@@ -102,7 +102,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-23
-spec_version: 128
+spec_version: 129
 ---
 
 # Conversation & Events
@@ -970,7 +970,9 @@ InputBuffer payload.
 
 Each event retains provider, resource/binding, canonical message and revision,
 sender, author type, provider timestamp, authorization state, lifecycle, and
-nullable validated original URL. It is distinct from `user_message`: the
+nullable validated original URL. Revisions may additionally retain bounded
+provider ID-to-display-name mappings; model lowering preserves raw IDs and
+renders the batch mapping table after the source messages. It is distinct from `user_message`: the
 external participant is not the current Azents Web user. Live and durable
 projections use the same semantic identity so durable history replaces live
 state without duplicate timeline rows.
@@ -983,6 +985,7 @@ participant.
 
 ## 12. Changelog
 
+- **2026-07-23** — v129. Added external-message ID-to-display-name mapping projection while preserving canonical provider text and action identifiers.
 - **2026-07-22** — v126. Added External Channel batch InputBuffer promotion, source-attributed transcript events, stable live/durable identity, and revision/lifecycle ownership.
 
 - **2026-07-23** — v128. Raw data dialogs show the canonical technical Tool name before retained arguments and result for both client and provider calls.

@@ -145,7 +145,7 @@ class _SlackClient:
         self.bot_tokens.append(kwargs["bot_token"])
         assert kwargs["channel_id"] == "C1"
         assert kwargs["thread_ts"] == "1.000001"
-        assert kwargs["text"] == "Reply"
+        assert kwargs["markdown_text"] == "Reply"
         return self.result
 
 

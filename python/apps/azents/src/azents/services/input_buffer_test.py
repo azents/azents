@@ -2234,6 +2234,7 @@ async def test_external_invocation_projection() -> None:
                 revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
                 revision_body="Context",
                 attachment_metadata=None,
+                reference_mappings=None,
                 provider_occurred_at=at(1),
                 resource_id="resource-1",
                 provider_resource_key="C123:1.0",

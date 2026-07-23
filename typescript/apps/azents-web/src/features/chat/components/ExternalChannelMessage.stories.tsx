@@ -9,6 +9,7 @@ const baseSource = {
   resourceLabel: "#incident-response / deployment thread",
   resourceType: "thread",
   senderDisplayName: "Alice Chen",
+  providerUserId: "U01ALICE",
   authorType: "human",
   authorization: "authorized_invocation",
   lifecycle: "active",

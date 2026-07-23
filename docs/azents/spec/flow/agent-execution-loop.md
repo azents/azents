@@ -69,7 +69,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-23
-spec_version: 127
+spec_version: 128
 ---
 
 # Agent Execution Loop
@@ -1103,7 +1103,10 @@ An External Channel wake-up references one immutable invocation batch. FIFO
 preparation resolves that batch into contiguous source-attributed
 `external_channel_message` events and associates them with the run before
 model dispatch. Lowering uses an explicit external-source envelope; it never
-presents the content as undifferentiated input from the current Web user.
+presents the content as undifferentiated input from the current Web user. It
+preserves raw provider IDs in each message and appends one deterministic
+user/channel ID-to-display-name mapping table for the contiguous batch when
+the ingress adapter resolved mappings.
 
 When an active binding exists, runtime adds the direct `channel_action` tool and
 the current binding/work snapshot. Normal assistant text is retained only in
@@ -1118,6 +1121,7 @@ another binding in the same root Session.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 128) — Added raw-ID-preserving external-channel identity mapping tables to model input lowering.
 - **2026-07-23** (spec_version 127) — Made adapter-computed `needs_follow_up` the normalized lifecycle source of truth by combining client-tool semantics with best-effort dialect signals; empty terminal output now completes the Run.
 - **2026-07-22** (spec_version 126) — Added External Channel batch preparation, explicit source lowering, conditional `channel_action`, and binding-aware idle continuation.
 

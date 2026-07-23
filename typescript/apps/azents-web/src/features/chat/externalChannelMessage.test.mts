@@ -65,6 +65,42 @@ void test("keeps deleted and empty messages visible", () => {
   assert.equal(empty?.body, "[Message has no text content.]");
 });
 
+void test("renders mapped Slack references without changing provider IDs", () => {
+  const projected = externalChannelMessagePresentation(
+    message(
+      {
+        content: "<@U1> asked @W2 to review <#C1|incidents> and #G2.",
+      },
+      {
+        resource_label: "C1 / 1721600000.000100",
+        provider_user_id: "U1",
+        sender_display_name: "",
+        reference_mappings: JSON.stringify({
+          users: { U1: "Alice", W2: "Bob" },
+          channels: { C1: "#incidents", G2: "#private" },
+        }),
+      },
+    ),
+  );
+
+  assert.ok(projected);
+  assert.equal(projected.resourceLabel, "#incidents");
+  assert.equal(projected.senderDisplayName, "Alice");
+  assert.equal(projected.providerUserId, "U1");
+  assert.equal(
+    projected.body,
+    "@Alice asked @Bob to review #incidents and #private.",
+  );
+});
+
+void test("ignores malformed reference mappings", () => {
+  const projected = externalChannelMessagePresentation(
+    message({ content: "<@U1>" }, { reference_mappings: "not-json" }),
+  );
+
+  assert.equal(projected?.body, "<@U1>");
+});
+
 void test("ignores ordinary Azents user messages", () => {
   assert.equal(
     externalChannelMessagePresentation(message({}, { source: "web_user" })),

@@ -5,6 +5,7 @@ export interface ExternalChannelMessagePresentation {
   resourceLabel: string;
   resourceType: string;
   senderDisplayName: string;
+  providerUserId: string | null;
   authorType: string;
   authorization: string;
   lifecycle: string;
@@ -13,6 +14,11 @@ export interface ExternalChannelMessagePresentation {
   originalUrl: string | null;
   correctionOfRevisionId: string | null;
   body: string;
+}
+
+interface ReferenceMappings {
+  users: Record<string, string>;
+  channels: Record<string, string>;
 }
 
 function validHttpUrl(value?: string): string | null {
@@ -37,6 +43,81 @@ function visibleBody(message: ChatMessage, lifecycle: string): string {
   return content ? (message.content ?? "") : "[Message has no text content.]";
 }
 
+function referenceMappings(
+  metadata: Record<string, string>,
+): ReferenceMappings {
+  const fallback: ReferenceMappings = { users: {}, channels: {} };
+  const raw = metadata.reference_mappings;
+  if (!raw) {
+    return fallback;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) {
+      return fallback;
+    }
+    return {
+      users: stringRecord(parsed.users),
+      channels: stringRecord(parsed.channels),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  const entries: Array<[string, string]> = [];
+  for (const [identifier, displayName] of Object.entries(value)) {
+    if (identifier && typeof displayName === "string" && displayName) {
+      entries.push([identifier, displayName]);
+    }
+  }
+  return Object.fromEntries(entries);
+}
+
+function visibleReferences(body: string, mappings: ReferenceMappings): string {
+  return body
+    .replace(
+      /<@([A-Z0-9]+)(?:\|[^>]+)?>|@([UW][A-Z0-9]+)/g,
+      (match: string, one?: string, two?: string) => {
+        const identifier = one ?? two;
+        if (!identifier) {
+          return match;
+        }
+        const displayName = mappings.users[identifier];
+        return displayName ? `@${displayName}` : match;
+      },
+    )
+    .replace(
+      /<#([CG][A-Z0-9]+)(?:\|[^>]+)?>|#([CG][A-Z0-9]+)/g,
+      (match: string, one?: string, two?: string) => {
+        const identifier = one ?? two;
+        if (!identifier) {
+          return match;
+        }
+        const displayName = mappings.channels[identifier];
+        return displayName ? displayName : match;
+      },
+    );
+}
+
+function visibleResourceLabel(
+  resourceLabel: string,
+  mappings: ReferenceMappings,
+): string {
+  const channelId = resourceLabel.match(/^([CG][A-Z0-9]+)/)?.[1];
+  return channelId
+    ? (mappings.channels[channelId] ?? resourceLabel)
+    : resourceLabel;
+}
+
 export function externalChannelMessagePresentation(
   message: ChatMessage,
 ): ExternalChannelMessagePresentation | null {
@@ -49,14 +130,23 @@ export function externalChannelMessagePresentation(
     metadata.provider_updated_at ??
     metadata.provider_created_at ??
     message.createdAt;
+  const mappings = referenceMappings(metadata);
+  const senderDisplayName = metadata.sender_display_name?.trim();
   return {
     provider: metadata.provider ?? "external",
-    resourceLabel: metadata.resource_label ?? "Unknown resource",
+    resourceLabel: visibleResourceLabel(
+      metadata.resource_label ?? "Unknown resource",
+      mappings,
+    ),
     resourceType: metadata.resource_type ?? "resource",
     senderDisplayName:
-      metadata.sender_display_name ??
-      metadata.provider_user_id ??
+      (senderDisplayName ||
+        (metadata.provider_user_id
+          ? (mappings.users[metadata.provider_user_id] ??
+            metadata.provider_user_id)
+          : null)) ??
       "Unknown sender",
+    providerUserId: metadata.provider_user_id ?? null,
     authorType: metadata.author_type ?? "unknown",
     authorization: metadata.authorization ?? "context_only",
     lifecycle,
@@ -64,6 +154,6 @@ export function externalChannelMessagePresentation(
     providerTimestamp,
     originalUrl: validHttpUrl(metadata.original_url),
     correctionOfRevisionId: metadata.correction_of_revision_id ?? null,
-    body: visibleBody(message, lifecycle),
+    body: visibleReferences(visibleBody(message, lifecycle), mappings),
   };
 }

@@ -4,8 +4,10 @@ import {
   Anchor,
   Badge,
   Box,
+  Button,
   Collapse,
   Group,
+  Modal,
   Paper,
   rem,
   SimpleGrid,
@@ -78,10 +80,13 @@ function sourceMetadataRows(
   t: ChatTranslator,
   locale: string,
 ): Array<{ label: string; value: string }> {
+  const sender = source.providerUserId
+    ? `${source.senderDisplayName} (${abbreviatedId(source.providerUserId)})`
+    : source.senderDisplayName;
   const rows = [
     { label: t("externalMessage.provider"), value: source.provider },
     { label: t("externalMessage.resource"), value: source.resourceLabel },
-    { label: t("externalMessage.sender"), value: source.senderDisplayName },
+    { label: t("externalMessage.sender"), value: sender },
     { label: t("externalMessage.authorType"), value: source.authorType },
     {
       label: t("externalMessage.authorization"),
@@ -108,6 +113,16 @@ function sourceMetadataRows(
   return rows;
 }
 
+function abbreviatedId(identifier: string): string {
+  return identifier.length > 7 ? `${identifier.slice(0, 5)}…` : identifier;
+}
+
+function summaryPreview(value: string): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  const maximum = 120;
+  return compact.length > maximum ? `${compact.slice(0, maximum)}…` : compact;
+}
+
 export function ExternalChannelMessage({
   source,
   partial = false,
@@ -115,6 +130,7 @@ export function ExternalChannelMessage({
   const t = useTranslations("chat");
   const locale = useLocale();
   const [opened, { toggle }] = useDisclosure(false);
+  const [detailsOpened, details] = useDisclosure(false);
   const sourceLabel = `${source.senderDisplayName} · ${source.resourceLabel}`;
 
   return (
@@ -149,20 +165,11 @@ export function ExternalChannelMessage({
               stroke={1.8}
               style={{ flexShrink: 0 }}
             />
-            <Text size="xs" fw={600} tt="capitalize" style={{ flexShrink: 0 }}>
-              {source.provider}
-            </Text>
-            <Text size="xs" c="dimmed" aria-hidden="true">
-              ·
-            </Text>
-            <Text size="xs" fw={600} truncate style={{ minWidth: 0 }}>
-              {source.senderDisplayName} ({source.authorType})
-            </Text>
-            <Text size="xs" c="dimmed" aria-hidden="true">
-              ·
+            <Text size="xs" fw={600} style={{ flexShrink: 0 }}>
+              {source.senderDisplayName}:
             </Text>
             <Text size="xs" truncate style={{ minWidth: 0 }}>
-              {source.resourceLabel}
+              {summaryPreview(source.body)}
             </Text>
             <Badge
               size="xs"
@@ -172,14 +179,6 @@ export function ExternalChannelMessage({
             >
               {sourceStatusLabel(source, t)}
             </Badge>
-            <Text
-              size="xs"
-              c="dimmed"
-              visibleFrom="sm"
-              style={{ flexShrink: 0 }}
-            >
-              {formatTimestamp(source.providerTimestamp, locale)}
-            </Text>
           </Group>
         </UnstyledButton>
 
@@ -195,7 +194,7 @@ export function ExternalChannelMessage({
             bg="var(--mantine-color-body)"
             style={{ minWidth: 0, overflow: "hidden" }}
           >
-            <Stack gap="md">
+            <Stack gap="sm">
               <Box style={{ overflowWrap: "anywhere" }}>
                 <MarkdownContent>{source.body}</MarkdownContent>
                 {partial && (
@@ -204,29 +203,6 @@ export function ExternalChannelMessage({
                   </Text>
                 )}
               </Box>
-
-              <SimpleGrid
-                component="dl"
-                cols={{ base: 1, sm: 2 }}
-                spacing="sm"
-                m={0}
-              >
-                {sourceMetadataRows(source, t, locale).map((row) => (
-                  <Stack key={row.label} gap={rem(2)}>
-                    <Text component="dt" size="xs" c="dimmed" fw={600}>
-                      {row.label}
-                    </Text>
-                    <Text
-                      component="dd"
-                      m={0}
-                      size="xs"
-                      style={{ overflowWrap: "anywhere" }}
-                    >
-                      {row.value}
-                    </Text>
-                  </Stack>
-                ))}
-              </SimpleGrid>
 
               {source.originalUrl !== null ? (
                 <Anchor
@@ -249,10 +225,45 @@ export function ExternalChannelMessage({
                   {t("externalMessage.originalUnavailable")}
                 </Text>
               )}
+
+              <Button
+                variant="subtle"
+                color="gray"
+                size="compact-sm"
+                w="fit-content"
+                onClick={details.open}
+              >
+                {t("externalMessage.details")}
+              </Button>
             </Stack>
           </Paper>
         </Collapse>
       </Stack>
+
+      <Modal
+        opened={detailsOpened}
+        onClose={details.close}
+        title={t("externalMessage.detailsTitle")}
+        centered
+      >
+        <SimpleGrid component="dl" cols={{ base: 1, sm: 2 }} spacing="sm" m={0}>
+          {sourceMetadataRows(source, t, locale).map((row) => (
+            <Stack key={row.label} gap={rem(2)}>
+              <Text component="dt" size="xs" c="dimmed" fw={600}>
+                {row.label}
+              </Text>
+              <Text
+                component="dd"
+                m={0}
+                size="sm"
+                style={{ overflowWrap: "anywhere" }}
+              >
+                {row.value}
+              </Text>
+            </Stack>
+          ))}
+        </SimpleGrid>
+      </Modal>
     </Box>
   );
 }

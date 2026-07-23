@@ -1250,6 +1250,9 @@ class ExternalChannelInvocationInputBufferProcessor:
                 lifecycle=_external_message_lifecycle(item.revision_kind),
                 body=item.revision_body,
                 attachment_metadata=item.attachment_metadata or {},
+                reference_mappings=_external_reference_mappings(
+                    item.reference_mappings
+                ),
                 provider_created_at=item.provider_created_at,
                 provider_updated_at=item.provider_updated_at,
                 original_url=item.original_url,
@@ -1386,6 +1389,30 @@ def _external_resource_label(item: ExternalChannelInvocationProjectionItem) -> s
     if not isinstance(provider_resource_key, str) or not provider_resource_key:
         raise ValueError("External invocation is missing resource identity.")
     return f"{channel_id}:{thread_ts}" if thread_ts else channel_id
+
+
+def _external_reference_mappings(
+    value: dict[str, object] | None,
+) -> dict[str, dict[str, str]]:
+    """Return a validated provider reference mapping."""
+    if not isinstance(value, dict):
+        return {}
+    mappings: dict[str, dict[str, str]] = {}
+    for category in ("users", "channels"):
+        raw_entries = value.get(category)
+        if not isinstance(raw_entries, dict):
+            continue
+        entries = {
+            identifier: display_name
+            for identifier, display_name in raw_entries.items()
+            if isinstance(identifier, str)
+            and identifier
+            and isinstance(display_name, str)
+            and display_name
+        }
+        if entries:
+            mappings[category] = entries
+    return mappings
 
 
 def _external_message_lifecycle(

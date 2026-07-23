@@ -20,7 +20,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-07-23
-spec_version: 2
+spec_version: 3
 ---
 
 # External Channel Authorization
@@ -37,7 +37,7 @@ When the participant invokes the Agent:
 
 1. The event processor creates one idempotent access request for the route and source message.
 2. The request snapshots truncation counters, expires after seven days, and contains an opaque ID.
-3. One ordinary Slack control-message intent is persisted and attempted once with an authenticated Azents approval URL.
+3. One Slack Block Kit control-message intent is persisted and attempted once with an authenticated Azents approval URL rendered as a button plus accessible fallback text.
 4. The approval page requires an authenticated user who is an administrator of the routed Agent. Unauthorized, cross-Agent, missing, and expired requests do not disclose the request and appear not found or unavailable.
 
 ## Decisions
@@ -65,5 +65,6 @@ Agent administrators can revoke active grants or remove blocks. Grant revocation
 
 ## Changelog
 
+- **2026-07-23** (spec_version 3) — Rendered Slack approval control messages as accessible Block Kit button actions.
 - **2026-07-23** (spec_version 2) — Removed route lifecycle state from authorization admission; route identity remains while Agent lifecycle and resource state determine eligibility.
 - **2026-07-22** (spec_version 1) — Promoted external-principal isolation, opaque approval, idempotent decisions, scoped grants/blocks, hydration-fenced activation, and same-binding pending-context release.

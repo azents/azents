@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-22
-spec_version: 1
+last_verified_at: 2026-07-23
+spec_version: 2
 ---
 
 # External Channel Delivery and Channel Work
@@ -47,11 +47,13 @@ Provider mutations are never automatically retried. Stale `attempting` recovery 
 
 ## Slack Operations
 
-- Conversational replies use `chat.postMessage` in the bound thread.
-- Creating unfinished tasks creates one separate progress message.
-- Task changes update that provider message with `chat.update`.
+- Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
+- Creating unfinished tasks creates one separate Block Kit progress message with top-level accessible fallback `text`.
+- Task changes update that provider message with the same fallback text and Block Kit payload through `chat.update`.
 - Finishing or clearing all tasks deletes it with `chat.delete`.
 - A later new work cycle creates a new progress message rather than reusing a deleted one.
+
+Authorization control messages use Block Kit with a URL button and accessible fallback text; they do not expose an approval URL as ordinary body text.
 
 The progress message identity and drift/error state are durable management data. A failed or unknown projection never replaces canonical Channel Work state.
 
@@ -65,4 +67,5 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-23** (spec_version 2) — Added Slack Markdown reply payloads, provider-bound length validation, and Block Kit operational/approval delivery with accessible fallback text.
 - **2026-07-22** (spec_version 1) — Promoted direct `channel_action`, binding-scoped Channel Work, commit-before-call delivery, terminal outcomes, one-attempt Slack operations, continuation, and cleanup delivery.
