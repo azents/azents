@@ -203,6 +203,35 @@ class RuntimeProviderRepository:
         )
         await session.flush()
 
+    async def is_available_to_workspace(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        workspace_id: str,
+    ) -> bool:
+        """Check explicit Workspace membership for selected-Workspace availability."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProviderWorkspaceAvailability.provider_id).where(
+                RDBRuntimeProviderWorkspaceAvailability.provider_id == provider_id,
+                RDBRuntimeProviderWorkspaceAvailability.workspace_id == workspace_id,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def get_by_provider_id_for_update(
+        self,
+        session: AsyncSession,
+        *,
+        provider_logical_id: str,
+    ) -> RuntimeProvider | None:
+        """Fetch a Provider by logical ID while holding its row lock."""
+        return await self.get_by_provider_id(
+            session,
+            provider_logical_id=provider_logical_id,
+            for_update=True,
+        )
+
     async def get_or_create_bootstrap_source(
         self,
         session: AsyncSession,
@@ -440,6 +469,8 @@ class RuntimeProviderRepository:
             enabled=rdb.enabled,
             lifecycle_state=rdb.lifecycle_state,
             availability_mode=rdb.availability_mode,
+            accepted_contract_revision_id=rdb.accepted_contract_revision_id,
+            active_config_revision_id=rdb.active_config_revision_id,
             admin_version=rdb.admin_version,
             capabilities=rdb.capabilities,
             config_schema=rdb.config_schema,

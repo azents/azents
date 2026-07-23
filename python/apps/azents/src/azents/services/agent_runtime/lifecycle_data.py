@@ -68,6 +68,15 @@ class ProviderDisconnected:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeProviderUnavailable:
+    """No eligible Runtime Provider can provision this logical Runtime."""
+
+    code: str
+    provider_id: str | None
+    message: str
+
+
+@dataclasses.dataclass(frozen=True)
 class InvalidResetFinalDesiredState:
     """reset final desired state is invalid."""
 
@@ -85,5 +94,6 @@ __all__ = [
     "AgentRuntimeSummaryState",
     "InvalidResetFinalDesiredState",
     "ProviderDisconnected",
+    "RuntimeProviderUnavailable",
     "RuntimeNotFound",
 ]

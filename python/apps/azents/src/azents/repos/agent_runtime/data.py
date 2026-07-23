@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimeProviderBindingOrigin,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
@@ -23,6 +24,18 @@ class AgentRuntime(BaseModel):
     agent_id: str = Field(description="Agent ID")
     runtime_provider_id: str | None = Field(
         default=None, description="Runtime Provider logical ID"
+    )
+    runtime_provider_resource_id: str | None = Field(
+        default=None, description="Immutable Runtime Provider aggregate ID"
+    )
+    provider_binding_origin: RuntimeProviderBindingOrigin | None = Field(
+        default=None, description="Input that selected the immutable Provider binding"
+    )
+    provider_binding_evidence: dict[str, Any] | None = Field(
+        default=None, description="Sanitized immutable Provider binding evidence"
+    )
+    runtime_policy_snapshot_id: str | None = Field(
+        default=None, description="Current immutable Runtime policy snapshot ID"
     )
     provider_config: dict[str, Any] | None = Field(
         default=None, description="Runtime Provider config override"
@@ -98,9 +111,28 @@ class AgentRuntimeCreate(BaseModel):
     runtime_provider_id: str | None = Field(
         default=None, description="Runtime Provider logical ID"
     )
+    runtime_provider_resource_id: str | None = Field(
+        default=None, description="Immutable Runtime Provider aggregate ID"
+    )
+    provider_binding_origin: RuntimeProviderBindingOrigin | None = Field(
+        default=None, description="Input that selected the immutable Provider binding"
+    )
+    provider_binding_evidence: dict[str, Any] | None = Field(
+        default=None, description="Sanitized immutable Provider binding evidence"
+    )
+    runtime_policy_snapshot_id: str | None = Field(
+        default=None, description="Current immutable Runtime policy snapshot ID"
+    )
     provider_config: dict[str, Any] | None = Field(
         default=None, description="Runtime Provider config override"
     )
+
+
+class AgentRuntimeEnsureResult(BaseModel):
+    """One Runtime creation attempt and its race outcome."""
+
+    runtime: AgentRuntime = Field(description="Existing or newly created Runtime")
+    created: bool = Field(description="Whether this transaction created the Runtime")
 
 
 class AgentRuntimeFailurePatch(BaseModel):

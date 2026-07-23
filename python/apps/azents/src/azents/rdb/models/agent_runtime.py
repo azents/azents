@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimeProviderBindingOrigin,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
@@ -55,6 +56,12 @@ runtime_runner_state_enum = ENUM(
     create_type=False,
     values_callable=_enum_values,
 )
+runtime_provider_binding_origin_enum = ENUM(
+    RuntimeProviderBindingOrigin,
+    name="runtime_provider_binding_origin",
+    create_type=False,
+    values_callable=_enum_values,
+)
 
 
 class RDBAgentRuntime(RDBModel):
@@ -74,6 +81,10 @@ class RDBAgentRuntime(RDBModel):
     IX_WORKSPACE_ID = sa.Index("ix_agent_runtimes_workspace_id", "workspace_id")
     IX_RUNTIME_PROVIDER_ID = sa.Index(
         "ix_agent_runtimes_runtime_provider_id", "runtime_provider_id"
+    )
+    IX_RUNTIME_PROVIDER_RESOURCE_ID = sa.Index(
+        "ix_agent_runtimes_runtime_provider_resource_id",
+        "runtime_provider_resource_id",
     )
     IX_DESIRED_OBSERVED = sa.Index(
         "ix_agent_runtimes_desired_observed",
@@ -113,6 +124,35 @@ class RDBAgentRuntime(RDBModel):
 
     runtime_provider_id: Mapped[str | None] = mapped_column(
         sa.String(120),
+        nullable=True,
+        default=None,
+    )
+    runtime_provider_resource_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("runtime_providers.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    provider_binding_origin: Mapped[RuntimeProviderBindingOrigin | None] = (
+        mapped_column(
+            runtime_provider_binding_origin_enum,
+            nullable=True,
+            default=None,
+        )
+    )
+    provider_binding_evidence: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
+    runtime_policy_snapshot_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "runtime_policy_snapshots.id",
+            ondelete="RESTRICT",
+            use_alter=True,
+            name="fk_agent_runtimes_runtime_policy_snapshot_id",
+        ),
         nullable=True,
         default=None,
     )
@@ -265,6 +305,7 @@ class RDBAgentRuntime(RDBModel):
         UQ_ID_WORKSPACE_ID,
         IX_WORKSPACE_ID,
         IX_RUNTIME_PROVIDER_ID,
+        IX_RUNTIME_PROVIDER_RESOURCE_ID,
         IX_DESIRED_OBSERVED,
         IX_LIFECYCLE_DISPATCH,
         IX_PROVIDER_CONNECTION_STATE,

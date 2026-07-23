@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import pytest
+import sqlalchemy as sa
 from azcommon.result import Success
 from azents_runtime_control.provider import (
     RuntimeProviderObservedState as SharedProviderState,
@@ -19,6 +21,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -99,6 +102,38 @@ async def test_provider_running_report_clears_start_timeout_failure(
     assert runtime.failure_generation is None
     assert runtime.failure_code is None
     assert runtime.failure_message is None
+
+
+async def test_provider_report_rejects_bound_runtime_provider_mismatch(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A bound Runtime accepts reports only from its selected Provider."""
+    repo = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        runtime_id = await _create_runtime(session, "provider-sink-binding-mismatch")
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime_id)
+            .values(runtime_provider_id="provider-bound")
+        )
+    sink = RuntimeProviderReportRepositorySink(repo, rdb_session_manager)
+
+    with pytest.raises(ValueError, match="immutable Runtime Provider binding"):
+        await sink.record_provider_report(
+            RuntimeProviderReport(
+                runtime_id=runtime_id,
+                provider_id="provider-other",
+                provider_generation=1,
+                observed_state=SharedProviderState.RUNNING,
+                observed_desired_generation=0,
+                provider_runtime_id="provider-runtime",
+                workspace_path="/workspace/agent",
+                reason="mismatch",
+                diagnostic={},
+                reported_at=datetime.now(UTC),
+                terminal_delete_acknowledged=False,
+            )
+        )
 
 
 async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(

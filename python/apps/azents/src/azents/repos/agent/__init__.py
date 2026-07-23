@@ -82,6 +82,20 @@ class AgentRepository:
             return None
         return self._build_row(rdb_agent)
 
+    async def get_runtime_selection_input_for_update(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> Agent | None:
+        """Fetch one Agent while serializing Runtime Provider selection."""
+        result = await session.execute(
+            sa.select(RDBAgent).where(RDBAgent.id == agent_id).with_for_update()
+        )
+        rdb_agent = result.scalar_one_or_none()
+        if rdb_agent is None:
+            return None
+        return self._build_row(rdb_agent)
+
     async def list_by_workspace(
         self, session: AsyncSession, workspace_id: str
     ) -> AgentList:

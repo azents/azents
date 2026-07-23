@@ -16,10 +16,12 @@ from azents.core.enums import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 
 from .data import (
     AgentRuntime,
     AgentRuntimeCreate,
+    AgentRuntimeEnsureResult,
     AgentRuntimeFailurePatch,
     AgentRuntimeLifecycleCommand,
 )
@@ -43,6 +45,10 @@ class AgentRuntimeRepository:
             workspace_id=create.workspace_id,
             agent_id=create.agent_id,
             runtime_provider_id=create.runtime_provider_id,
+            runtime_provider_resource_id=create.runtime_provider_resource_id,
+            provider_binding_origin=create.provider_binding_origin,
+            provider_binding_evidence=create.provider_binding_evidence,
+            runtime_policy_snapshot_id=create.runtime_policy_snapshot_id,
             provider_config=create.provider_config,
         )
         session.add(rdb)
@@ -73,6 +79,90 @@ class AgentRuntimeRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def get_by_agent_id_for_update(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> AgentRuntime | None:
+        """Fetch one Agent Runtime while serializing its binding transaction."""
+        result = await session.execute(
+            sa.select(RDBAgentRuntime)
+            .where(RDBAgentRuntime.agent_id == agent_id)
+            .with_for_update()
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
+    async def provider_report_matches_binding(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_logical_id: str,
+    ) -> bool:
+        """Validate a Provider report against the Runtime's durable binding."""
+        result = await session.execute(
+            sa.select(
+                RDBAgentRuntime.runtime_provider_id,
+                RDBRuntimeProvider.provider_id,
+            )
+            .outerjoin(
+                RDBRuntimeProvider,
+                RDBRuntimeProvider.id == RDBAgentRuntime.runtime_provider_resource_id,
+            )
+            .where(RDBAgentRuntime.id == runtime_id)
+        )
+        row = result.one_or_none()
+        if row is None:
+            return False
+        logical_id, bound_resource_logical_id = row
+        if bound_resource_logical_id is not None:
+            return bound_resource_logical_id == provider_logical_id and logical_id in (
+                None,
+                bound_resource_logical_id,
+            )
+        return logical_id is None or logical_id == provider_logical_id
+
+    async def ensure_with_create(
+        self,
+        session: AsyncSession,
+        *,
+        create: AgentRuntimeCreate,
+    ) -> AgentRuntimeEnsureResult:
+        """Create a Runtime once or return the winner of a creation race."""
+        existing = await self.get_by_agent_id_for_update(session, create.agent_id)
+        if existing is not None:
+            return AgentRuntimeEnsureResult(runtime=existing, created=False)
+
+        insert_stmt = (
+            insert(RDBAgentRuntime)
+            .values(
+                id=uuid7().hex,
+                workspace_id=create.workspace_id,
+                agent_id=create.agent_id,
+                runtime_provider_id=create.runtime_provider_id,
+                runtime_provider_resource_id=create.runtime_provider_resource_id,
+                provider_binding_origin=create.provider_binding_origin,
+                provider_binding_evidence=create.provider_binding_evidence,
+                runtime_policy_snapshot_id=create.runtime_policy_snapshot_id,
+                provider_config=create.provider_config,
+            )
+            .on_conflict_do_nothing(index_elements=["agent_id"])
+            .returning(RDBAgentRuntime)
+        )
+        result = await session.execute(insert_stmt)
+        rdb = result.scalar_one_or_none()
+        if rdb is not None:
+            await session.flush()
+            return AgentRuntimeEnsureResult(runtime=self._build(rdb), created=True)
+
+        raced = await self.get_by_agent_id_for_update(session, create.agent_id)
+        if raced is None:
+            raise RuntimeError("AgentRuntime ensure failed")
+        return AgentRuntimeEnsureResult(runtime=raced, created=False)
 
     async def ensure_for_agent(
         self,
@@ -793,6 +883,10 @@ class AgentRuntimeRepository:
             workspace_id=rdb.workspace_id,
             agent_id=rdb.agent_id,
             runtime_provider_id=rdb.runtime_provider_id,
+            runtime_provider_resource_id=rdb.runtime_provider_resource_id,
+            provider_binding_origin=rdb.provider_binding_origin,
+            provider_binding_evidence=rdb.provider_binding_evidence,
+            runtime_policy_snapshot_id=rdb.runtime_policy_snapshot_id,
             provider_config=rdb.provider_config,
             desired_state=rdb.desired_state,
             desired_generation=rdb.desired_generation,

@@ -37,6 +37,12 @@ class RuntimeProvider(BaseModel):
     availability_mode: RuntimeProviderAvailabilityMode = Field(
         description="Workspace availability policy"
     )
+    accepted_contract_revision_id: str | None = Field(
+        default=None, description="Accepted capability contract revision ID"
+    )
+    active_config_revision_id: str | None = Field(
+        default=None, description="Desired active Provider configuration revision ID"
+    )
     admin_version: int = Field(description="Provider Admin policy version")
     capabilities: dict[str, Any] = Field(description="Provider capabilities")
     config_schema: dict[str, Any] | None = Field(
