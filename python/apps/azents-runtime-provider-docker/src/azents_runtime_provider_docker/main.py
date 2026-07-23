@@ -12,6 +12,7 @@ from azents_runtime_control.grpc_provider_client import (
     GrpcProviderControlClient,
     RuntimeProviderControlStreamClosed,
 )
+from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.provider import (
     ProviderConnectionRejected,
     ProviderRegistration,
@@ -100,12 +101,13 @@ async def _run_control_loop(
             "workspace_path": settings.workspace_path,
             "tmp_path": settings.tmp_path,
         },
-        auth_credential_id=settings.auth_credential_id,
     )
     while not stop.is_set():
         control_client = GrpcProviderControlClient.from_endpoint(
             settings.control_endpoint,
             provider_credential=settings.provider_credential,
+            tls=settings.control_tls,
+            allow_insecure=settings.allow_insecure_control,
         )
         connection_id = _control_connection_id(settings.connection_id)
         _LOGGER.info(
@@ -154,6 +156,10 @@ class ProviderSettings:
     def __init__(self) -> None:
         """Load deployment-critical settings from the environment."""
         self.control_endpoint = _required_env("AZ_RUNTIME_CONTROL_ENDPOINT")
+        self.control_tls = _control_tls_from_env()
+        self.allow_insecure_control = _required_bool_env(
+            "AZ_RUNTIME_CONTROL_ALLOW_INSECURE"
+        )
         self.provider_id = _required_env("AZ_RUNTIME_PROVIDER_ID")
         self.docker_network = _required_env("AZ_RUNTIME_PROVIDER_DOCKER_NETWORK")
         self.host_data_root = Path(_required_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT"))
@@ -163,9 +169,6 @@ class ProviderSettings:
         )
         self.tmp_path = os.environ.get("AZ_RUNTIME_PROVIDER_TMP_PATH", "/tmp/agent")
         self.runner_env = _runner_env_from_env()
-        self.auth_credential_id = _required_env(
-            "AZ_RUNTIME_PROVIDER_AUTH_CREDENTIAL_ID"
-        )
         self.docker_host = os.environ.get("AZ_RUNTIME_PROVIDER_DOCKER_HOST")
         self.connection_id = os.environ.get(
             "AZ_RUNTIME_PROVIDER_CONNECTION_ID",
@@ -205,6 +208,22 @@ def _required_env(name: str) -> str:
     if value is None or not value:
         raise RuntimeError(f"required environment variable is missing: {name}")
     return value
+
+
+def _required_bool_env(name: str) -> bool:
+    value = _required_env(name).lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise RuntimeError(f"{name} must be true or false")
+
+
+def _control_tls_from_env() -> GrpcClientTlsConfig | None:
+    path = os.environ.get("AZ_RUNTIME_CONTROL_TLS_CA_FILE")
+    if path is None:
+        return None
+    return GrpcClientTlsConfig(root_certificates=Path(path).read_bytes())
 
 
 if __name__ == "__main__":

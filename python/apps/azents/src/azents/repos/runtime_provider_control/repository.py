@@ -148,6 +148,30 @@ class RuntimeProviderControlRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def list_active_bootstrap_credentials(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        source_id: str,
+    ) -> tuple[RuntimeProviderCredential, ...]:
+        """List active credentials issued by one owning bootstrap source."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProviderCredential)
+            .join(
+                RDBRuntimeProviderEnrollmentGrant,
+                RDBRuntimeProviderEnrollmentGrant.id
+                == RDBRuntimeProviderCredential.issued_grant_id,
+            )
+            .where(
+                RDBRuntimeProviderCredential.provider_id == provider_id,
+                RDBRuntimeProviderCredential.state
+                == RuntimeProviderCredentialState.ACTIVE,
+                RDBRuntimeProviderEnrollmentGrant.issued_by_source_id == source_id,
+            )
+        )
+        return tuple(self._build_credential(row) for row in result.scalars())
+
     async def revoke_credential(
         self,
         session: AsyncSession,
@@ -172,6 +196,19 @@ class RuntimeProviderControlRepository:
             .returning(RDBRuntimeProviderCredential)
         )
         credential = result.scalar_one_or_none()
+        if credential is not None:
+            await session.execute(
+                sa.update(RDBRuntimeProviderConnection)
+                .where(
+                    RDBRuntimeProviderConnection.credential_id == credential_id,
+                    RDBRuntimeProviderConnection.status
+                    == RuntimeProviderConnectionStatus.CONNECTED,
+                )
+                .values(
+                    status=RuntimeProviderConnectionStatus.DISCONNECTED,
+                    disconnected_at=revoked_at,
+                )
+            )
         return self._build_credential(credential) if credential is not None else None
 
     async def create_connection(
@@ -268,6 +305,38 @@ class RuntimeProviderControlRepository:
                 disconnected_at=disconnected_at,
             )
             .returning(RDBRuntimeProviderConnection.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def connection_active(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        credential_id: str,
+        generation: int,
+        now: datetime.datetime,
+    ) -> bool:
+        """Return whether a connection and its credential remain active."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProviderConnection.id).where(
+                RDBRuntimeProviderConnection.provider_id == provider_id,
+                RDBRuntimeProviderConnection.credential_id == credential_id,
+                RDBRuntimeProviderConnection.generation == generation,
+                RDBRuntimeProviderConnection.status
+                == RuntimeProviderConnectionStatus.CONNECTED,
+                sa.exists(
+                    sa.select(RDBRuntimeProviderCredential.id).where(
+                        RDBRuntimeProviderCredential.id == credential_id,
+                        RDBRuntimeProviderCredential.state
+                        == RuntimeProviderCredentialState.ACTIVE,
+                        sa.or_(
+                            RDBRuntimeProviderCredential.expires_at.is_(None),
+                            RDBRuntimeProviderCredential.expires_at > now,
+                        ),
+                    )
+                ),
+            )
         )
         return result.scalar_one_or_none() is not None
 

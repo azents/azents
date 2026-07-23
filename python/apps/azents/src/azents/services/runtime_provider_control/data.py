@@ -37,7 +37,7 @@ class RuntimeProviderCredentialAuthentication:
     provider_workspace_id: str | None
 
 
-@dataclass(frozen=True)
+@dataclass
 class RuntimeProviderEnrollmentUnavailable(Exception):
     """Enrollment grant cannot be exchanged safely."""
 
@@ -50,7 +50,7 @@ class RuntimeProviderEnrollmentUnavailable(Exception):
         )
 
 
-@dataclass(frozen=True)
+@dataclass
 class RuntimeProviderCredentialUnavailable(Exception):
     """Provider credential cannot authenticate a control stream."""
 

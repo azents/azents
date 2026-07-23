@@ -8,12 +8,14 @@ import signal
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 
 import grpc
 from azents_runtime_control.grpc_provider_client import (
     GrpcProviderControlClient,
     RuntimeProviderControlStreamClosed,
 )
+from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.provider import (
     ProviderConnectionRejected,
     ProviderRegistration,
@@ -129,12 +131,14 @@ async def _run_control_loop(
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={"workspace_path": settings.workspace_path},
-        auth_credential_id=settings.auth_credential_id,
     )
     while not stop.is_set():
+        _set_readiness(settings.readiness_file, ready=False)
         control_client = GrpcProviderControlClient.from_endpoint(
             settings.control_endpoint,
             provider_credential=settings.provider_credential,
+            tls=settings.control_tls,
+            allow_insecure=settings.allow_insecure_control,
         )
         control_connection_id = _control_connection_id(settings.connection_id)
         _LOGGER.info(
@@ -154,6 +158,7 @@ async def _run_control_loop(
         )
         try:
             await run_loop.start()
+            _set_readiness(settings.readiness_file, ready=True)
             watch_task = asyncio.create_task(
                 _report_pod_watch_events(
                     lifecycle,
@@ -198,6 +203,7 @@ async def _run_control_loop(
             )
             await _wait_for_reconnect(stop)
         finally:
+            _set_readiness(settings.readiness_file, ready=False)
             await control_client.close()
 
 
@@ -353,6 +359,11 @@ class ProviderSettings:
     def __init__(self) -> None:
         """Load settings without implicit defaults for deployment-critical fields."""
         self.control_endpoint: str = _required_env("AZ_RUNTIME_CONTROL_ENDPOINT")
+        self.control_tls = _control_tls_from_env()
+        self.allow_insecure_control = _required_bool_env(
+            "AZ_RUNTIME_CONTROL_ALLOW_INSECURE"
+        )
+        self.readiness_file = Path(_required_env("AZ_RUNTIME_PROVIDER_READINESS_FILE"))
         self.provider_id: str = _required_env("AZ_RUNTIME_PROVIDER_ID")
         self.namespace: str = _required_env("AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE")
         self.workload_namespace: str = _required_env(
@@ -382,9 +393,6 @@ class ProviderSettings:
         self.pod_tolerations: tuple[Toleration, ...] = _json_tolerations_env(
             "AZ_RUNTIME_PROVIDER_POD_TOLERATIONS"
         )
-        self.auth_credential_id: str = _required_env(
-            "AZ_RUNTIME_PROVIDER_AUTH_CREDENTIAL_ID"
-        )
         self.lease_duration_seconds: int = int(
             _required_env("AZ_RUNTIME_PROVIDER_LEASE_DURATION_SECONDS")
         )
@@ -404,6 +412,29 @@ def _required_env(name: str) -> str:
     if value is None or not value:
         raise RuntimeError(f"required environment variable is missing: {name}")
     return value
+
+
+def _required_bool_env(name: str) -> bool:
+    value = _required_env(name).lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise RuntimeError(f"{name} must be true or false")
+
+
+def _control_tls_from_env() -> GrpcClientTlsConfig | None:
+    path = os.environ.get("AZ_RUNTIME_CONTROL_TLS_CA_FILE")
+    if path is None:
+        return None
+    return GrpcClientTlsConfig(root_certificates=Path(path).read_bytes())
+
+
+def _set_readiness(path: Path, *, ready: bool) -> None:
+    if ready:
+        path.write_text("ready\n")
+        return
+    path.unlink(missing_ok=True)
 
 
 def _selected_env(names: tuple[str, ...]) -> Mapping[str, str]:

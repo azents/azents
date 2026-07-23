@@ -78,6 +78,11 @@ server:
       enabled: false
       existingSecret: ""
       tokenKey: runtime-control-token
+    tls:
+      existingSecret: ""
+      certificateKey: tls.crt
+      privateKeyKey: tls.key
+      caKey: ca.crt
     runnerImage:
       repository: ""
       tag: ""

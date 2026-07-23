@@ -62,6 +62,8 @@ class RuntimeContainerAuth:
     control_endpoint: str
     runner_auth_token: str
     control_token: str | None
+    control_tls_ca_pem: str | None
+    allow_insecure_control: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -114,7 +116,6 @@ class ProviderRegistration:
     capabilities: Sequence[str]
     config_schema_version: str
     metadata: Mapping[str, JsonValue]
-    auth_credential_id: str
 
 
 @dataclasses.dataclass(frozen=True)

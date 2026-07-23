@@ -79,6 +79,7 @@ async def _run(
                 provider_logical_id=args.provider_id,
                 credential=ensured.secret,
             )
+            await service.revoke_superseded(ensured.revoke_after_write)
         logger.info(
             "Runtime Provider bootstrap credential is active",
             extra={

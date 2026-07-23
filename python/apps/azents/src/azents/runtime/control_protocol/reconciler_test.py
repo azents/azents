@@ -98,6 +98,8 @@ async def test_reconciler_dispatches_periodic_provider_observe(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
             runner_control_auth_token="control-token",
+            runner_control_tls_ca_pem=None,
+            allow_insecure_runner_control=True,
             observe_interval=datetime.timedelta(minutes=1),
         ),
     )
@@ -164,6 +166,8 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
             runner_control_auth_token="control-token",
+            runner_control_tls_ca_pem=None,
+            allow_insecure_runner_control=True,
         ),
     )
 

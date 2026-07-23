@@ -12,6 +12,10 @@ from typing import Protocol
 import grpc
 from google.protobuf import timestamp_pb2
 
+from azents_runtime_control.grpc_tls import (
+    GrpcClientTlsConfig,
+    create_grpc_aio_channel,
+)
 from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
     runtime_runner_control_pb2_grpc,
@@ -86,9 +90,15 @@ class GrpcRunnerControlClient(RunnerControlClient):
         *,
         heartbeat_ack_timeout_seconds: float = 10.0,
         control_auth_token: str | None = None,
+        tls: GrpcClientTlsConfig | None,
+        allow_insecure: bool,
     ) -> "GrpcRunnerControlClient":
-        """Create a client using an insecure gRPC channel."""
-        channel = grpc.aio.insecure_channel(endpoint)
+        """Create a client using authenticated TLS or explicit insecure mode."""
+        channel = create_grpc_aio_channel(
+            endpoint,
+            tls=tls,
+            allow_insecure=allow_insecure,
+        )
         stub = runtime_runner_control_pb2_grpc.RuntimeRunnerControlStub(channel)
         return cls(
             stub.ConnectRunner,

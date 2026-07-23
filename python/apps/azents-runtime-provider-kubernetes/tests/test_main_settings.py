@@ -16,6 +16,11 @@ def provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in RUNNER_LIMIT_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
+    monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_READINESS_FILE",
+        "/tmp/runtime-provider-ready",
+    )
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ID", "system-kubernetes")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE", "azents")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE", "azents-runtime")
@@ -29,7 +34,6 @@ def provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_ANNOTATIONS", "{}")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_NODE_SELECTOR", "{}")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_TOLERATIONS", "[]")
-    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_AUTH_CREDENTIAL_ID", "system-kubernetes")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_CREDENTIAL", "test-provider-credential")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_LEASE_DURATION_SECONDS", "30")
 
