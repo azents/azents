@@ -371,6 +371,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Usage-based Auto Compaction and Removal of Tool Output Omit Historical Requirements Reconstruction](requirements/usage-260612-usage-auto-compaction.md) | usage-260612 | 2026-06-12 | - |
 | [Persist the Session Last-Used Inference Profile Historical Requirements Reconstruction](requirements/used-260710-used-inference-profile.md) | used-260710 | 2026-07-10 | - |
 | [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI Historical Requirements Reconstruction](requirements/web-260416-web-viewer.md) | web-260416 | 2026-04-16 | 2026-04-16 |
+| [Provider-Native Channel Work Progress Requirements](requirements/work-260723-provider-native-progress.md) | work-260723 | 2026-07-23 | - |
 | [Session Worktree Archive and Purge Integrity Requirements](requirements/worktree-260722-archive-purge-integrity.md) | worktree-260722 | 2026-07-22 | 2026-07-22 |
 | [Explicit AgentSession Write Target Historical Requirements Reconstruction](requirements/write-260625-write-target.md) | write-260625 | 2026-06-25 | - |
 | [xAI API Key Provider Historical Requirements Reconstruction](requirements/xai-260710-xai-api-key.md) | xai-260710 | 2026-07-10 | 2026-07-10 |
@@ -693,6 +694,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Usage-based Auto Compaction and Removal of Tool Output Omit](adr/usage-260612-usage-auto-compaction.md)
 - [Persist the Session Last-Used Inference Profile](adr/used-260710-used-inference-profile.md)
 - [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI](adr/web-260416-web-viewer.md)
+- [Provider-Native Channel Work Progress](adr/work-260723-provider-native-progress.md)
 - [Session Worktree Archive and Purge Integrity](adr/worktree-260722-archive-purge-integrity.md)
 - [Explicit AgentSession Write Target Historical Decision Reconstruction](adr/write-260625-write-target.md)
 - [xAI API Key Provider Historical Decision Reconstruction](adr/xai-260710-xai-api-key.md)
