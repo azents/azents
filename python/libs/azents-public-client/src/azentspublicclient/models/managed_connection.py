@@ -22,7 +22,6 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.external_channel_connection_status import ExternalChannelConnectionStatus
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
-from azentspublicclient.models.external_channel_route_status import ExternalChannelRouteStatus
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport
 from typing import Optional, Set
 from typing_extensions import Self
@@ -37,7 +36,6 @@ class ManagedConnection(BaseModel):
     provider: ExternalChannelProvider
     transport: ExternalChannelTransport
     status: ExternalChannelConnectionStatus
-    route_status: ExternalChannelRouteStatus
     provider_app_id: Optional[StrictStr]
     provider_tenant_id: Optional[StrictStr]
     provider_bot_user_id: Optional[StrictStr]
@@ -49,7 +47,7 @@ class ManagedConnection(BaseModel):
     socket_gap_reason: Optional[StrictStr]
     disconnected_at: Optional[datetime]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "route_id", "agent_id", "provider", "transport", "status", "route_status", "provider_app_id", "provider_tenant_id", "provider_bot_user_id", "credentials_configured", "capabilities", "last_verified_at", "last_health_at", "socket_gap_detected_at", "socket_gap_reason", "disconnected_at"]
+    __properties: ClassVar[List[str]] = ["id", "route_id", "agent_id", "provider", "transport", "status", "provider_app_id", "provider_tenant_id", "provider_bot_user_id", "credentials_configured", "capabilities", "last_verified_at", "last_health_at", "socket_gap_detected_at", "socket_gap_reason", "disconnected_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -160,7 +158,6 @@ class ManagedConnection(BaseModel):
             "provider": obj.get("provider"),
             "transport": obj.get("transport"),
             "status": obj.get("status"),
-            "route_status": obj.get("route_status"),
             "provider_app_id": obj.get("provider_app_id"),
             "provider_tenant_id": obj.get("provider_tenant_id"),
             "provider_bot_user_id": obj.get("provider_bot_user_id"),

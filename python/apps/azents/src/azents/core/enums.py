@@ -581,13 +581,6 @@ class ExternalChannelConnectionStatus(enum.StrEnum):
     DISCONNECTED = "disconnected"
 
 
-class ExternalChannelRouteStatus(enum.StrEnum):
-    """External connection to Agent route lifecycle status."""
-
-    ACTIVE = "active"
-    INACTIVE = "inactive"
-
-
 class ExternalChannelRouteMode(enum.StrEnum):
     """External connection routing behavior."""
 

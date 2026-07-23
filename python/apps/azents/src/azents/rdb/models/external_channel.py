@@ -29,7 +29,6 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelRouteMode,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -57,12 +56,6 @@ external_channel_transport_enum = ENUM(
 external_channel_connection_status_enum = ENUM(
     ExternalChannelConnectionStatus,
     name="external_channel_connection_status",
-    create_type=False,
-    values_callable=_enum_values,
-)
-external_channel_route_status_enum = ENUM(
-    ExternalChannelRouteStatus,
-    name="external_channel_route_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -330,24 +323,20 @@ class RDBExternalChannelConnection(RDBModel):
 
 
 class RDBExternalChannelAgentRoute(RDBModel):
-    """Availability of one Agent through a provider connection."""
+    """Persistent relationship between one Agent and provider connection."""
 
     __tablename__ = "external_channel_agent_routes"
 
-    IX_AGENT_ID_STATUS = sa.Index(
-        "ix_external_channel_agent_routes_agent_id_status",
-        "agent_id",
-        "status",
-    )
+    IX_AGENT_ID = sa.Index("ix_external_channel_agent_routes_agent_id", "agent_id")
     IX_CONNECTION_ID = sa.Index(
         "ix_external_channel_agent_routes_connection_id",
         "connection_id",
     )
-    UQ_ACTIVE_DEDICATED_CONNECTION = sa.Index(
-        "uq_external_channel_agent_routes_active_dedicated_connection",
+    UQ_DEDICATED_CONNECTION = sa.Index(
+        "uq_external_channel_agent_routes_dedicated_connection",
         "connection_id",
         unique=True,
-        postgresql_where=sa.text("status = 'active' AND route_mode = 'dedicated'"),
+        postgresql_where=sa.text("route_mode = 'dedicated'"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -365,11 +354,6 @@ class RDBExternalChannelAgentRoute(RDBModel):
         sa.String(32),
         sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
-    )
-    status: Mapped[ExternalChannelRouteStatus] = mapped_column(
-        external_channel_route_status_enum,
-        nullable=False,
-        server_default=ExternalChannelRouteStatus.ACTIVE.value,
     )
     route_mode: Mapped[ExternalChannelRouteMode] = mapped_column(
         external_channel_route_mode_enum,
@@ -389,16 +373,10 @@ class RDBExternalChannelAgentRoute(RDBModel):
         server_default=sa.func.now(),
         onupdate=sa.func.now(),
     )
-    deactivated_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-
     __table_args__ = (
-        IX_AGENT_ID_STATUS,
+        IX_AGENT_ID,
         IX_CONNECTION_ID,
-        UQ_ACTIVE_DEDICATED_CONNECTION,
+        UQ_DEDICATED_CONNECTION,
     )
 
 

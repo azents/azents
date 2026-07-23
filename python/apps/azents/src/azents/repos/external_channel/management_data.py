@@ -14,7 +14,6 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -31,7 +30,6 @@ class ManagedConnection(_Projection):
     provider: ExternalChannelProvider
     transport: ExternalChannelTransport
     status: ExternalChannelConnectionStatus
-    route_status: ExternalChannelRouteStatus
     provider_app_id: str | None
     provider_tenant_id: str | None
     provider_bot_user_id: str | None

@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelRouteMode,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
 )
 from azents.rdb.deps import get_session_manager
@@ -165,7 +164,6 @@ class ExternalChannelManagementService:
                 ExternalChannelAgentRouteCreate(
                     connection_id=setup.connection.id,
                     agent_id=agent_id,
-                    status=ExternalChannelRouteStatus.ACTIVE,
                     route_mode=ExternalChannelRouteMode.DEDICATED,
                 ),
             )

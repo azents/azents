@@ -15,7 +15,6 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
-    ExternalChannelRouteStatus,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
@@ -94,8 +93,6 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelBinding.route_id
                     == RDBExternalChannelAgentRoute.id,
                     RDBExternalChannelAgentRoute.agent_id == agent_id,
-                    RDBExternalChannelAgentRoute.status
-                    == ExternalChannelRouteStatus.ACTIVE,
                     RDBExternalChannelAgentRoute.connection_id
                     == RDBExternalChannelConnection.id,
                     RDBExternalChannelConnection.status
@@ -161,8 +158,6 @@ class ExternalChannelWorkRepository:
                     RDBAgentSession.agent_id == agent_id,
                     RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
                     RDBExternalChannelAgentRoute.agent_id == agent_id,
-                    RDBExternalChannelAgentRoute.status
-                    == ExternalChannelRouteStatus.ACTIVE,
                     RDBExternalChannelConnection.status
                     == ExternalChannelConnectionStatus.ACTIVE,
                 )
@@ -290,8 +285,6 @@ class ExternalChannelWorkRepository:
             sa.select(RDBExternalChannelAgentRoute).where(
                 RDBExternalChannelAgentRoute.id == binding.route_id,
                 RDBExternalChannelAgentRoute.agent_id == agent_id,
-                RDBExternalChannelAgentRoute.status
-                == ExternalChannelRouteStatus.ACTIVE,
             )
         )
         if route is None:

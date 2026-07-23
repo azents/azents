@@ -21,7 +21,6 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelRouteMode,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
@@ -118,7 +117,6 @@ async def _setup_binding(session: AsyncSession) -> tuple[str, str]:
         ExternalChannelAgentRouteCreate(
             connection_id=connection.id,
             agent_id=agent.id,
-            status=ExternalChannelRouteStatus.ACTIVE,
             route_mode=ExternalChannelRouteMode.DEDICATED,
         ),
     )

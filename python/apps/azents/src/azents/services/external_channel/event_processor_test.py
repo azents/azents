@@ -1,9 +1,11 @@
 """External Channel event processing domain tests."""
 
+import asyncio
 import datetime
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,11 +22,12 @@ from azents.core.enums import (
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelHydrationStatus,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelRouteMode,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
     LLMProvider,
 )
@@ -33,7 +36,6 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
     RDBExternalChannelAccessRequest,
-    RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
@@ -47,12 +49,15 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
+    ExternalChannelAccessRequestCreate,
     ExternalChannelAgentRoute,
     ExternalChannelAgentRouteCreate,
     ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
     ExternalChannelEvent,
     ExternalChannelEventCreate,
+    ExternalChannelMessageCreate,
+    ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
 )
@@ -63,7 +68,10 @@ from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.external_channel.access import ExternalChannelAccessService
+from azents.services.external_channel.access import (
+    ExternalChannelAccessDecisionError,
+    ExternalChannelAccessService,
+)
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
@@ -152,7 +160,6 @@ async def _setup_route(
         ExternalChannelAgentRouteCreate(
             connection_id=connection.id,
             agent_id=agent.id,
-            status=ExternalChannelRouteStatus.ACTIVE,
             route_mode=ExternalChannelRouteMode.DEDICATED,
         ),
     )
@@ -651,26 +658,20 @@ async def test_credential_failure_preserves_agent_route(
     assert connection.socket_gap_detected_at is None
     assert connection.socket_gap_reason is None
     assert route is not None
-    assert route.status is ExternalChannelRouteStatus.ACTIVE
-    assert route.deactivated_at is None
 
 
-async def test_valid_health_repairs_legacy_inactive_http_route(
+async def test_valid_health_restores_connection_without_mutating_route(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Successful validation repairs route state written by the old failure path."""
+    """Successful validation restores connection health without route state."""
     async with rdb_session_manager() as session:
         connection_id, route_id, _, repository = await _setup_route(session)
         connection = await session.get(RDBExternalChannelConnection, connection_id)
-        route = await session.get(RDBExternalChannelAgentRoute, route_id)
         assert connection is not None
-        assert route is not None
         connection.status = ExternalChannelConnectionStatus.RECONNECT_REQUIRED
         connection.disconnected_at = _at(1)
         connection.socket_gap_detected_at = _at(1)
         connection.socket_gap_reason = "credentials_invalid"
-        route.status = ExternalChannelRouteStatus.INACTIVE
-        route.deactivated_at = _at(1)
         await session.commit()
 
     async with rdb_session_manager() as session:
@@ -700,97 +701,176 @@ async def test_valid_health_repairs_legacy_inactive_http_route(
     assert updated.socket_gap_detected_at is None
     assert updated.socket_gap_reason is None
     assert route is not None
-    assert route.status is ExternalChannelRouteStatus.ACTIVE
-    assert route.deactivated_at is None
 
 
-async def test_valid_health_does_not_restore_intentionally_inactive_route(
+async def test_routable_route_requires_active_agent_lifecycle(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Ordinary health validation must not undo an intentional route shutdown."""
-    async with rdb_session_manager() as session:
-        connection_id, route_id, _, repository = await _setup_route(session)
-        route = await session.get(RDBExternalChannelAgentRoute, route_id)
-        assert route is not None
-        route.status = ExternalChannelRouteStatus.INACTIVE
-        route.deactivated_at = _at(1)
-        await session.commit()
-
-    async with rdb_session_manager() as session:
-        configuration = await repository.get_connection_configuration(
-            session,
-            connection_id=connection_id,
-        )
-        assert configuration is not None
-        assert configuration.encrypted_credentials is not None
-        updated = await repository.update_connection_health(
-            session,
-            connection_id=connection_id,
-            status=ExternalChannelConnectionStatus.ACTIVE,
-            provider_tenant_id="T1",
-            provider_bot_user_id="B1",
-            capabilities={"inbound_events": True},
-            checked_at=_at(3),
-            expected_encrypted_credentials=configuration.encrypted_credentials,
-        )
-        await session.commit()
-
-    async with rdb_session_manager() as session:
-        route = await repository.get_agent_route(session, route_id=route_id)
-
-    assert updated is not None
-    assert route is not None
-    assert route.status is ExternalChannelRouteStatus.INACTIVE
-    assert route.deactivated_at == _at(1)
-
-
-async def test_valid_health_does_not_restore_decommissioned_agent_route(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> None:
-    """Legacy recovery must not reactivate a route after Agent decommission starts."""
+    """Only the routed Agent lifecycle controls new execution eligibility."""
     async with rdb_session_manager() as session:
         connection_id, route_id, agent_id, repository = await _setup_route(session)
-        connection = await session.get(RDBExternalChannelConnection, connection_id)
-        route = await session.get(RDBExternalChannelAgentRoute, route_id)
+        route = await repository.get_agent_route(session, route_id=route_id)
         agent = await session.get(RDBAgent, agent_id)
-        assert connection is not None
         assert route is not None
         assert agent is not None
-        connection.status = ExternalChannelConnectionStatus.RECONNECT_REQUIRED
-        connection.disconnected_at = _at(1)
-        connection.socket_gap_detected_at = _at(1)
-        connection.socket_gap_reason = "credentials_invalid"
-        route.status = ExternalChannelRouteStatus.INACTIVE
-        route.deactivated_at = _at(1)
         agent.lifecycle_status = AgentLifecycleStatus.DECOMMISSIONING
         await session.commit()
 
     async with rdb_session_manager() as session:
-        configuration = await repository.get_connection_configuration(
+        route = await repository.get_agent_route(session, route_id=route_id)
+        routable = await repository.get_routable_route_by_connection_id(
             session,
             connection_id=connection_id,
         )
-        assert configuration is not None
-        assert configuration.encrypted_credentials is not None
-        updated = await repository.update_connection_health(
-            session,
+
+    assert route is not None
+    assert routable is None
+
+
+async def test_routable_route_waits_for_disconnect_transition(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Connection locking prevents selection across a disconnect transition."""
+    async with rdb_session_manager() as transition_session:
+        connection_id, _, _, repository = await _setup_route(transition_session)
+        connection = await repository.lock_connection(
+            transition_session,
             connection_id=connection_id,
-            status=ExternalChannelConnectionStatus.ACTIVE,
-            provider_tenant_id="T1",
-            provider_bot_user_id="B1",
-            capabilities={"inbound_events": True},
-            checked_at=_at(3),
-            expected_encrypted_credentials=configuration.encrypted_credentials,
         )
+        assert connection is not None
+        connection.status = ExternalChannelConnectionStatus.DISCONNECTING
+        await transition_session.flush()
+
+        async def lookup() -> ExternalChannelAgentRoute | None:
+            async with rdb_session_manager() as lookup_session:
+                return await repository.get_routable_route_by_connection_id(
+                    lookup_session,
+                    connection_id=connection_id,
+                )
+
+        lookup_task = asyncio.create_task(lookup())
+        await asyncio.sleep(0.05)
+        assert not lookup_task.done()
+        await transition_session.commit()
+
+    assert await lookup_task is None
+
+
+async def test_pending_allow_requires_routable_connection(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Pending approval cannot create state while disconnect is in progress."""
+    async with rdb_session_manager() as session:
+        connection_id, route_id, _, repository = await _setup_route(session)
+        resource = await repository.create_resource_idempotent(
+            session,
+            ExternalChannelResourceCreate(
+                connection_id=connection_id,
+                resource_type=ExternalChannelResourceType.THREAD,
+                provider_resource_key="slack:T1:C1:1784678400.000100",
+                labels=None,
+                status=ExternalChannelResourceStatus.ACTIVE,
+                hydration_status=ExternalChannelHydrationStatus.PENDING,
+                hydration_cursor=None,
+                hydration_high_watermark_position=None,
+                reconciliation_boundary_received_at=None,
+                reconciliation_boundary_event_id=None,
+                hydration_error_kind=None,
+                hydration_error_summary=None,
+                hydration_started_at=None,
+                hydration_completed_at=None,
+                latest_activity_at=None,
+                unavailable_at=None,
+                deleted_at=None,
+            ),
+        )
+        principal = await repository.create_principal_idempotent(
+            session,
+            ExternalChannelPrincipalCreate(
+                provider=ExternalChannelProvider.SLACK,
+                provider_tenant_id="T1",
+                provider_user_id="U1",
+                author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+                display_name=None,
+                avatar_url=None,
+                profile=None,
+            ),
+        )
+        message = await repository.create_message_idempotent(
+            session,
+            ExternalChannelMessageCreate(
+                resource_id=resource.id,
+                provider_message_key="1710000000.000100",
+                provider_position="00000000001710000000.000100",
+                principal_id=principal.id,
+                author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+                current_revision_id=None,
+                original_url=None,
+                lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+                pending_size=0,
+                provider_created_at=_at(1),
+                provider_updated_at=None,
+            ),
+        )
+        request = await repository.create_access_request_idempotent(
+            session,
+            ExternalChannelAccessRequestCreate(
+                route_id=route_id,
+                resource_id=resource.id,
+                source_message_id=message.id,
+                principal_id=principal.id,
+                agent_session_id=None,
+                status=ExternalChannelAccessRequestStatus.PENDING,
+                decision_policy_snapshot={},
+                decided_by_user_id=None,
+                decision_summary=None,
+                expires_at=_at(10),
+                decided_at=None,
+            ),
+        )
+        approver = await UserRepository().create(
+            session,
+            UserCreate(email="disconnected-allow-approver@example.com"),
+        )
+        connection = await session.get(RDBExternalChannelConnection, connection_id)
+        assert connection is not None
+        connection.status = ExternalChannelConnectionStatus.DISCONNECTING
         await session.commit()
 
-    async with rdb_session_manager() as session:
-        route = await repository.get_agent_route(session, route_id=route_id)
+    access_service = ExternalChannelAccessService(
+        session_manager=rdb_session_manager,
+        repository=repository,
+        agent_repository=AgentRepository(),
+        agent_session_repository=AgentSessionRepository(),
+        input_buffer_service=cast(InputBufferService, MagicMock()),
+        session_lifecycle=cast(SessionLifecycleService, MagicMock()),
+    )
+    with pytest.raises(
+        ExternalChannelAccessDecisionError,
+        match="route is unavailable",
+    ):
+        await access_service.allow(
+            access_request_id=request.id,
+            scope=ExternalChannelAccessGrantScope.SESSION,
+            decided_by_user_id=approver.id,
+            decision_summary="Approve after disconnect.",
+            now=_at(2),
+        )
 
-    assert updated is not None
-    assert route is not None
-    assert route.status is ExternalChannelRouteStatus.INACTIVE
-    assert route.deactivated_at == _at(1)
+    async with rdb_session_manager() as session:
+        persisted_request = await session.get(
+            RDBExternalChannelAccessRequest,
+            request.id,
+        )
+        bindings = list(await session.scalars(sa.select(RDBExternalChannelBinding)))
+        grants = list(await session.scalars(sa.select(RDBExternalChannelAccessGrant)))
+        agent_sessions = list(await session.scalars(sa.select(RDBAgentSession)))
+
+    assert persisted_request is not None
+    assert persisted_request.status is ExternalChannelAccessRequestStatus.PENDING
+    assert bindings == []
+    assert grants == []
+    assert agent_sessions == []
 
 
 async def test_unavailable_http_health_clears_legacy_socket_gap(
@@ -839,20 +919,16 @@ async def test_stale_validation_does_not_revive_disconnecting_connection(
 ) -> None:
     """A validation started before disconnect cannot overwrite its fenced state."""
     async with rdb_session_manager() as session:
-        connection_id, route_id, _, repository = await _setup_route(session)
+        connection_id, _, _, repository = await _setup_route(session)
         configuration = await repository.get_connection_configuration(
             session,
             connection_id=connection_id,
         )
         connection = await session.get(RDBExternalChannelConnection, connection_id)
-        route = await session.get(RDBExternalChannelAgentRoute, route_id)
         assert configuration is not None
         assert configuration.encrypted_credentials is not None
         assert connection is not None
-        assert route is not None
         connection.status = ExternalChannelConnectionStatus.DISCONNECTING
-        route.status = ExternalChannelRouteStatus.INACTIVE
-        route.deactivated_at = _at(1)
         await session.commit()
 
     async with rdb_session_manager() as session:
@@ -873,13 +949,10 @@ async def test_stale_validation_does_not_revive_disconnecting_connection(
             session,
             connection_id=connection_id,
         )
-        route = await repository.get_agent_route(session, route_id=route_id)
 
     assert updated is None
     assert connection is not None
     assert connection.status is ExternalChannelConnectionStatus.DISCONNECTING
-    assert route is not None
-    assert route.status is ExternalChannelRouteStatus.INACTIVE
 
 
 async def test_provider_failure_does_not_revive_disconnected_connection(
@@ -887,16 +960,12 @@ async def test_provider_failure_does_not_revive_disconnected_connection(
 ) -> None:
     """A late provider failure cannot overwrite an explicit disconnect."""
     async with rdb_session_manager() as session:
-        connection_id, route_id, _, repository = await _setup_route(session)
+        connection_id, _, _, repository = await _setup_route(session)
         connection = await session.get(RDBExternalChannelConnection, connection_id)
-        route = await session.get(RDBExternalChannelAgentRoute, route_id)
         assert connection is not None
-        assert route is not None
         connection.status = ExternalChannelConnectionStatus.DISCONNECTED
         connection.encrypted_credentials = None
         connection.disconnected_at = _at(1)
-        route.status = ExternalChannelRouteStatus.INACTIVE
-        route.deactivated_at = _at(1)
         await session.commit()
 
     async with rdb_session_manager() as session:
@@ -914,13 +983,10 @@ async def test_provider_failure_does_not_revive_disconnected_connection(
             session,
             connection_id=connection_id,
         )
-        route = await repository.get_agent_route(session, route_id=route_id)
 
     assert changed is False
     assert connection is not None
     assert connection.status is ExternalChannelConnectionStatus.DISCONNECTED
-    assert route is not None
-    assert route.status is ExternalChannelRouteStatus.INACTIVE
 
 
 async def test_app_uninstall_preserves_agent_route(
@@ -950,5 +1016,3 @@ async def test_app_uninstall_preserves_agent_route(
     assert connection is not None
     assert connection.status is ExternalChannelConnectionStatus.DISCONNECTED
     assert route is not None
-    assert route.status is ExternalChannelRouteStatus.ACTIVE
-    assert route.deactivated_at is None

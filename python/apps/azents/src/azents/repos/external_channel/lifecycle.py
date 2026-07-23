@@ -14,7 +14,6 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
-    ExternalChannelRouteStatus,
     ExternalChannelWorkStatus,
 )
 from azents.rdb.models.base import RDBModel
@@ -440,9 +439,6 @@ class ExternalChannelLifecycleRepository:
             ).all()
         )
         route_ids = [route.id for route in routes]
-        for route in routes:
-            route.status = ExternalChannelRouteStatus.INACTIVE
-            route.deactivated_at = now
         access_request_ids = list(
             (
                 await session.scalars(

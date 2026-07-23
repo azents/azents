@@ -13679,15 +13679,6 @@
         "title": "ExternalChannelProviderIdentity",
         "description": "Validated non-secret identity for one installed provider application."
       },
-      "ExternalChannelRouteStatus": {
-        "type": "string",
-        "enum": [
-          "active",
-          "inactive"
-        ],
-        "title": "ExternalChannelRouteStatus",
-        "description": "External connection to Agent route lifecycle status."
-      },
       "ExternalChannelTransport": {
         "type": "string",
         "enum": [
@@ -15668,9 +15659,6 @@
           "status": {
             "$ref": "#/components/schemas/ExternalChannelConnectionStatus"
           },
-          "route_status": {
-            "$ref": "#/components/schemas/ExternalChannelRouteStatus"
-          },
           "provider_app_id": {
             "anyOf": [
               {
@@ -15788,7 +15776,6 @@
           "provider",
           "transport",
           "status",
-          "route_status",
           "provider_app_id",
           "provider_tenant_id",
           "provider_bot_user_id",

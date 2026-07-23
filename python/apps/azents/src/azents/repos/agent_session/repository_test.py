@@ -24,7 +24,6 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelRouteMode,
-    ExternalChannelRouteStatus,
     ExternalChannelTransport,
     LLMProvider,
     SessionAgentKind,
@@ -1150,7 +1149,6 @@ class TestAgentSessionRepository:
         route = RDBExternalChannelAgentRoute(
             connection_id=connection.id,
             agent_id=agent_id,
-            status=ExternalChannelRouteStatus.ACTIVE,
             route_mode=ExternalChannelRouteMode.DEDICATED,
         )
         resource = RDBExternalChannelResource(
