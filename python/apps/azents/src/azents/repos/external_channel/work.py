@@ -325,7 +325,8 @@ class ExternalChannelWorkRepository:
             )
             .with_for_update()
         )
-        if work is None:
+        created_work = work is None
+        if created_work:
             work = RDBExternalChannelWork(
                 binding_id=binding.id,
                 status=ExternalChannelWorkStatus.ACTIVE,
@@ -376,7 +377,19 @@ class ExternalChannelWorkRepository:
                 state="working",
                 tasks=activity_tasks,
             )
-            if work.progress_provider_message_key is not None:
+            if created_work:
+                operations.append(
+                    (
+                        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                        _provider_payload(
+                            resource.labels,
+                            text=presentation.text,
+                            blocks=presentation.blocks,
+                            desired_progress_revision=(work.desired_progress_revision),
+                        ),
+                    )
+                )
+            elif work.progress_provider_message_key is not None:
                 operations.append(
                     (
                         ExternalChannelDeliveryOperation.PROGRESS_UPDATE,

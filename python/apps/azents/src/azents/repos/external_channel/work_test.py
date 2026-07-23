@@ -417,13 +417,14 @@ async def test_recreated_tracker_catches_up_to_latest_desired_revision(
     assert followup.status is ExternalChannelDeliveryStatus.PENDING
     assert followup.request_payload["provider_message_key"] == ("slack:T1:C1:3.000001")
     assert followup.request_payload["desired_progress_revision"] == 2
-    assert followup.request_payload["text"] == "Agent is working\n◐ Investigate"
+    assert followup.request_payload["text"] == (
+        "Agent is working\nIn progress: Investigate"
+    )
     assert followup.request_payload["blocks"] == [
         {
             "type": "task_card",
             "task_id": "activity-status",
             "title": "Agent is working",
-            "status": "in_progress",
         },
         {
             "type": "task_card",
@@ -432,6 +433,101 @@ async def test_recreated_tracker_catches_up_to_latest_desired_revision(
             "status": "in_progress",
         },
     ]
+
+
+async def test_continue_after_finish_creates_a_new_activity_tracker(
+    rdb_session: AsyncSession,
+) -> None:
+    """A new Todo after finish starts a new work cycle and provider message."""
+    agent_id, binding_id = await _setup_binding(rdb_session)
+    agent_session = await rdb_session.scalar(
+        sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+    )
+    assert agent_session is not None
+    repository = ExternalChannelWorkRepository()
+    await repository.ensure_active_work(rdb_session, binding_id=binding_id)
+    finished_work = await _seed_activity_tracker(
+        rdb_session,
+        binding_id=binding_id,
+    )
+    finished = await repository.commit_action(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent_id,
+        run_id=None,
+        client_tool_call_id="call-finish-before-next-todo",
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.FINISH,
+        message="The first task is complete.",
+        tasks=None,
+        now=_at(2),
+    )
+
+    continued = await repository.commit_action(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent_id,
+        run_id=None,
+        client_tool_call_id="call-next-todo",
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        tasks=[
+            ChannelWorkTask(
+                id="next-task",
+                title="Start the next task",
+                status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+            )
+        ],
+        now=_at(3),
+    )
+
+    assert finished.work_id == finished_work.id
+    assert continued.work_id != finished.work_id
+    assert continued.work_status is ExternalChannelWorkStatus.ACTIVE
+    assert [item.operation for item in continued.deliveries] == [
+        ExternalChannelDeliveryOperation.PROGRESS_CREATE
+    ]
+    create_attempt = await rdb_session.get(
+        RDBExternalChannelDeliveryAttempt,
+        continued.deliveries[0].id,
+    )
+    assert create_attempt is not None
+    assert create_attempt.provider_message_key is None
+    assert create_attempt.request_payload["desired_progress_revision"] == 1
+    assert create_attempt.request_payload["text"] == (
+        "Agent is working\nIn progress: Start the next task"
+    )
+    assert create_attempt.request_payload["blocks"] == [
+        {
+            "type": "task_card",
+            "task_id": "activity-status",
+            "title": "Agent is working",
+        },
+        {
+            "type": "task_card",
+            "task_id": "next-task",
+            "title": "Start the next task",
+            "status": "in_progress",
+        },
+    ]
+    active_work = await rdb_session.scalar(
+        sa.select(RDBExternalChannelWork).where(
+            RDBExternalChannelWork.id == continued.work_id
+        )
+    )
+    assert active_work is not None
+    assert active_work.progress_provider_message_key is None
+    assert active_work.desired_progress_payload == {
+        "state": "working",
+        "tasks": [
+            {
+                "id": "next-task",
+                "title": "Start the next task",
+                "status": "in_progress",
+            }
+        ],
+    }
 
 
 async def test_late_tracker_creation_after_delivered_finish_schedules_cleanup(
