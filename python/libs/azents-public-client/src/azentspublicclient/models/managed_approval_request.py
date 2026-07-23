@@ -37,6 +37,7 @@ class ManagedApprovalRequest(BaseModel):
     status: ExternalChannelAccessRequestStatus
     principal_id: StrictStr
     principal_label: StrictStr
+    principal_provider_user_id: StrictStr
     resource_label: StrictStr
     source_text: Optional[StrictStr]
     original_url: Optional[StrictStr]
@@ -44,7 +45,7 @@ class ManagedApprovalRequest(BaseModel):
     decided_at: Optional[datetime]
     decision_summary: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "workspace_id", "agent_session_id", "provider", "status", "principal_id", "principal_label", "resource_label", "source_text", "original_url", "expires_at", "decided_at", "decision_summary"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "workspace_id", "agent_session_id", "provider", "status", "principal_id", "principal_label", "principal_provider_user_id", "resource_label", "source_text", "original_url", "expires_at", "decided_at", "decision_summary"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -137,6 +138,7 @@ class ManagedApprovalRequest(BaseModel):
             "status": obj.get("status"),
             "principal_id": obj.get("principal_id"),
             "principal_label": obj.get("principal_label"),
+            "principal_provider_user_id": obj.get("principal_provider_user_id"),
             "resource_label": obj.get("resource_label"),
             "source_text": obj.get("source_text"),
             "original_url": obj.get("original_url"),

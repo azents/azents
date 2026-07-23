@@ -244,10 +244,13 @@ function AccessRow({
           <IconShieldX size={rem(18)} color="var(--mantine-color-red-6)" />
         )}
         <Box style={{ minWidth: 0 }}>
-          <Text fw={600} size="sm" truncate>
+          <Text fw={600} size="sm" style={{ overflowWrap: "anywhere" }}>
             {item.principal_label}
           </Text>
-          <Text size="xs" c="dimmed" truncate>
+          <Text size="xs" c="dimmed" style={{ overflowWrap: "anywhere" }}>
+            {item.principal_provider_user_id}
+          </Text>
+          <Text size="xs" c="dimmed" style={{ overflowWrap: "anywhere" }}>
             {isGrant && "scope" in item
               ? t(`grantScope.${item.scope}`)
               : "reason" in item

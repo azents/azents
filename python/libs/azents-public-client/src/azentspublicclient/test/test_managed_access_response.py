@@ -41,6 +41,7 @@ class TestManagedAccessResponse(unittest.TestCase):
                         agent_id = '', 
                         principal_id = '', 
                         principal_label = '', 
+                        principal_provider_user_id = '', 
                         scope = 'session', 
                         agent_session_id = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -52,6 +53,7 @@ class TestManagedAccessResponse(unittest.TestCase):
                         agent_id = '', 
                         principal_id = '', 
                         principal_label = '', 
+                        principal_provider_user_id = '', 
                         reason = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         removed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
@@ -65,6 +67,7 @@ class TestManagedAccessResponse(unittest.TestCase):
                         agent_id = '', 
                         principal_id = '', 
                         principal_label = '', 
+                        principal_provider_user_id = '', 
                         scope = 'session', 
                         agent_session_id = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -76,6 +79,7 @@ class TestManagedAccessResponse(unittest.TestCase):
                         agent_id = '', 
                         principal_id = '', 
                         principal_label = '', 
+                        principal_provider_user_id = '', 
                         reason = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         removed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )

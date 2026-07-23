@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Collapse,
+  CopyButton,
   Group,
   Modal,
   Paper,
@@ -18,7 +19,9 @@ import {
 import { useDisclosure } from "@mantine/hooks";
 import {
   IconBrandSlack,
+  IconCheck,
   IconChevronRight,
+  IconCopy,
   IconExternalLink,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -79,14 +82,11 @@ function sourceMetadataRows(
   source: ExternalChannelMessagePresentation,
   t: ChatTranslator,
   locale: string,
-): Array<{ label: string; value: string }> {
-  const sender = source.providerUserId
-    ? `${source.senderDisplayName} (${abbreviatedId(source.providerUserId)})`
-    : source.senderDisplayName;
-  const rows = [
+): Array<{ label: string; value: string; copyValue?: string }> {
+  const rows: Array<{ label: string; value: string; copyValue?: string }> = [
     { label: t("externalMessage.provider"), value: source.provider },
     { label: t("externalMessage.resource"), value: source.resourceLabel },
-    { label: t("externalMessage.sender"), value: sender },
+    { label: t("externalMessage.sender"), value: source.senderDisplayName },
     { label: t("externalMessage.authorType"), value: source.authorType },
     {
       label: t("externalMessage.authorization"),
@@ -98,6 +98,20 @@ function sourceMetadataRows(
       value: formatTimestamp(source.providerTimestamp, locale),
     },
   ];
+  if (source.providerUserId !== null) {
+    rows.push({
+      label: t("externalMessage.providerUserId"),
+      value: source.providerUserId,
+      copyValue: source.providerUserId,
+    });
+  }
+  if (source.providerMessageKey !== null) {
+    rows.push({
+      label: t("externalMessage.providerMessageId"),
+      value: source.providerMessageKey,
+      copyValue: source.providerMessageKey,
+    });
+  }
   if (source.revisionKind !== "original") {
     rows.push({
       label: t("externalMessage.revision"),
@@ -108,13 +122,10 @@ function sourceMetadataRows(
     rows.push({
       label: t("externalMessage.corrects"),
       value: source.correctionOfRevisionId,
+      copyValue: source.correctionOfRevisionId,
     });
   }
   return rows;
-}
-
-function abbreviatedId(identifier: string): string {
-  return identifier.length > 7 ? `${identifier.slice(0, 5)}…` : identifier;
 }
 
 function summaryPreview(value: string): string {
@@ -252,14 +263,38 @@ export function ExternalChannelMessage({
               <Text component="dt" size="xs" c="dimmed" fw={600}>
                 {row.label}
               </Text>
-              <Text
-                component="dd"
-                m={0}
-                size="sm"
-                style={{ overflowWrap: "anywhere" }}
-              >
-                {row.value}
-              </Text>
+              <Group component="dd" m={0} gap="xs" wrap="nowrap">
+                <Text
+                  size="sm"
+                  style={{ minWidth: 0, overflowWrap: "anywhere" }}
+                >
+                  {row.value}
+                </Text>
+                {typeof row.copyValue === "string" && (
+                  <CopyButton value={row.copyValue} timeout={1600}>
+                    {({ copied, copy }) => (
+                      <Button
+                        variant="subtle"
+                        color="gray"
+                        size="compact-xs"
+                        leftSection={
+                          copied ? (
+                            <IconCheck size={rem(13)} />
+                          ) : (
+                            <IconCopy size={rem(13)} />
+                          )
+                        }
+                        onClick={copy}
+                        style={{ flexShrink: 0 }}
+                      >
+                        {copied
+                          ? t("externalMessage.copied")
+                          : t("externalMessage.copy")}
+                      </Button>
+                    )}
+                  </CopyButton>
+                )}
+              </Group>
             </Stack>
           ))}
         </SimpleGrid>

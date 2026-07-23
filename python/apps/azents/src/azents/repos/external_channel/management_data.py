@@ -94,6 +94,7 @@ class ManagedGrant(_Projection):
     agent_id: str
     principal_id: str
     principal_label: str
+    principal_provider_user_id: str
     scope: ExternalChannelAccessGrantScope
     agent_session_id: str | None
     created_at: datetime.datetime
@@ -105,6 +106,7 @@ class ManagedBlock(_Projection):
     agent_id: str
     principal_id: str
     principal_label: str
+    principal_provider_user_id: str
     reason: str | None
     created_at: datetime.datetime
     removed_at: datetime.datetime | None
@@ -119,6 +121,7 @@ class ManagedApprovalRequest(_Projection):
     status: ExternalChannelAccessRequestStatus
     principal_id: str
     principal_label: str
+    principal_provider_user_id: str
     resource_label: str
     source_text: str | None
     original_url: str | None

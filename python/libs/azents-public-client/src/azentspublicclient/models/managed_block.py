@@ -31,11 +31,12 @@ class ManagedBlock(BaseModel):
     agent_id: StrictStr
     principal_id: StrictStr
     principal_label: StrictStr
+    principal_provider_user_id: StrictStr
     reason: Optional[StrictStr]
     created_at: datetime
     removed_at: Optional[datetime]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "principal_id", "principal_label", "reason", "created_at", "removed_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "principal_id", "principal_label", "principal_provider_user_id", "reason", "created_at", "removed_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -109,6 +110,7 @@ class ManagedBlock(BaseModel):
             "agent_id": obj.get("agent_id"),
             "principal_id": obj.get("principal_id"),
             "principal_label": obj.get("principal_label"),
+            "principal_provider_user_id": obj.get("principal_provider_user_id"),
             "reason": obj.get("reason"),
             "created_at": obj.get("created_at"),
             "removed_at": obj.get("removed_at")
