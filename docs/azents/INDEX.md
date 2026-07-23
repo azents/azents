@@ -17,12 +17,12 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-22 | 52 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-23 | 129 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-23 | 7 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-23 | 8 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-23 | 70 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-23 | 71 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-23 | 45 |
 
@@ -37,8 +37,8 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-23 | 4 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-23 | 4 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 7 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-23 | 5 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 8 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-23 | 6 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-23 | 25 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
@@ -59,6 +59,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Model Session Operations as Turn Actions Historical Requirements Reconstruction](requirements/action-260705-action-as-operation-turn-actions.md) | action-260705 | 2026-07-05 | - |
 | [Keep Action Messages Buffer-Only Historical Requirements Reconstruction](requirements/action-260712-action-messages-buffer-only.md) | action-260712 | 2026-07-12 | - |
 | [Provider Tool Live Activity Historical Requirements Reconstruction](requirements/activity-260716-live-activity.md) | activity-260716 | 2026-07-16 | 2026-07-16 |
+| [Slack Activity Tracker Lifecycle Requirements](requirements/activity-260723-slack-tracker-lifecycle.md) | activity-260723 | 2026-07-23 | - |
 | [Generalize Admin-Managed System Configuration Historical Requirements Reconstruction](requirements/admin-260718-admin-configuration.md) | admin-260718 | 2026-07-18 | - |
 | [Release and Snapshot Artifact Policy Historical Requirements Reconstruction](requirements/and-260623-and-snapshot-artifact-policy.md) | and-260623 | 2026-06-23 | - |
 | [AgentSession Archive Policy Historical Requirements Reconstruction](requirements/archive-260626-archive-policy.md) | archive-260626 | 2026-06-26 | - |
@@ -379,6 +380,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Model Session Operations as Turn Actions](adr/action-260705-action-as-operation-turn-actions.md)
 - [Keep Action Messages Buffer-Only](adr/action-260712-action-messages-buffer-only.md)
 - [Provider Tool Live Activity Historical Decision Reconstruction](adr/activity-260716-live-activity.md)
+- [Slack Activity Tracker Lifecycle](adr/activity-260723-slack-tracker-lifecycle.md)
 - [Generalize Admin-Managed System Configuration](adr/admin-260718-admin-configuration.md)
 - [Release and Snapshot Artifact Policy](adr/and-260623-and-snapshot-artifact-policy.md)
 - [AgentSession Archive Policy](adr/archive-260626-archive-policy.md)

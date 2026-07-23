@@ -457,8 +457,8 @@ async def test_missing_activity_tracker_is_recreated_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recovered_failed_final_reply_skips_completion_update() -> None:
-    """A resumed finish action cannot project completion after reply failure."""
+async def test_recovered_failed_final_reply_skips_tracker_deletion() -> None:
+    """A resumed finish action cannot delete the Tracker after reply failure."""
     events: list[str] = []
     committed = ChannelActionCommit(
         action_id="action-finish",
@@ -478,8 +478,8 @@ async def test_recovered_failed_final_reply_skips_completion_update() -> None:
                 completed_at=_at(2),
             ),
             ChannelWorkDelivery(
-                id="completion",
-                operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                id="cleanup",
+                operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
                 status=ExternalChannelDeliveryStatus.PENDING,
                 provider_message_key="slack:T1:C1:2.000001",
                 error_kind=None,
@@ -517,7 +517,7 @@ async def test_recovered_failed_final_reply_skips_completion_update() -> None:
 
     assert result is committed
     assert repository.skipped == [
-        ("completion", "final_reply_not_delivered"),
+        ("cleanup", "final_reply_not_delivered"),
     ]
     assert "provider" not in events
 

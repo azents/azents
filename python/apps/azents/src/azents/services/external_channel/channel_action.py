@@ -137,7 +137,7 @@ class ExternalChannelActionService:
             if delivery.status is ExternalChannelDeliveryStatus.PENDING:
                 if (
                     delivery.operation
-                    is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                    is ExternalChannelDeliveryOperation.PROGRESS_DELETE
                     and committed.work_status is ExternalChannelWorkStatus.FINISHED
                     and not reply_delivered
                 ):
@@ -147,7 +147,7 @@ class ExternalChannelActionService:
                             delivery_attempt_id=delivery.id,
                             error_kind="final_reply_not_delivered",
                             error_summary=(
-                                "Activity Tracker completion requires a delivered "
+                                "Activity Tracker cleanup requires a delivered "
                                 "final reply."
                             ),
                             now=datetime.datetime.now(datetime.UTC),

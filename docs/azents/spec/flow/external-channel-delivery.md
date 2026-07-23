@@ -21,7 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 4
+spec_version: 5
 ---
 
 # External Channel Delivery and Channel Work
@@ -35,7 +35,11 @@ A tool call must identify a binding owned by the current Agent and Session. The 
 - `continue`: optionally send one conversational reply and replace the ordered Channel Work task list.
 - `finish`: send one required final reply and finish Channel Work.
 
-Tasks use `pending`, `in_progress`, or `completed`. Each binding has independent work state even when several bindings share one AgentSession. The ordinary Session Todo toolkit is not the Channel Work source of truth.
+Tasks use `pending`, `in_progress`, or `completed`, with at most 49 ordered
+tasks in one action so the Slack processing card and every Todo fit one message.
+Each binding has independent work state even when several bindings share one
+AgentSession. The ordinary Session Todo toolkit is not the Channel Work source
+of truth.
 
 ## Durable Commit Before Provider Calls
 
@@ -53,18 +57,34 @@ Provider mutations are never automatically retried. Stale `attempting` recovery 
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
 - Releasing the first eligible invocation while a binding has no unanswered work creates Channel Work and one Block Kit Activity Tracker intent before Session wake-up. Creation does not depend on Todo state or a `channel_action` call.
-- The initial Tracker states that the Agent is checking the message. Every presentation includes top-level accessible fallback `text` and an `Open Azents session` URL button.
-- Task changes update the retained provider message with a complete working-state Block Kit payload through `chat.update`. Task titles use plain-text objects.
-- Finishing requires a final reply. The reply is attempted first; only a durable `delivered` result permits the completion update. Failed, unknown, or not-attempted replies leave completion `not_attempted`.
-- Normal completion updates the same Tracker to a retained `Answer complete` state without active task content. It does not call `chat.delete`.
-- A later work cycle creates a new Tracker rather than reusing the completed cycle's provider identity.
+- Initial binding activation separately creates one button-only `Open Azents session`
+  control message. Later invocations on the binding do not repeat it, and Activity
+  Tracker desired state never contains the Session URL.
+- The initial Tracker states that the Agent is checking the message. Checking and
+  working presentation starts with a native Slack `task_card` carrying the
+  `in_progress` state. Ordered Todo task cards omit status for pending tasks, use
+  `in_progress` for current tasks, and use `complete` for completed tasks. The
+  blocks are read-only and require no Slack interaction callback.
+- Task changes update the retained provider message with the complete current Block
+  Kit payload through `chat.update`. Task titles remain literal strings.
+- Finishing requires a final reply. The reply is attempted first; only a durable
+  `delivered` result permits `chat.delete` for the Tracker. Failed, unknown, or
+  not-attempted replies leave deletion `not_attempted`.
+- A later work cycle creates a new Tracker rather than reusing the deleted cycle's
+  provider identity.
 
 The work cycle stores its desired Tracker payload, desired revision, and retained
 provider identity. A matching Slack deletion event or confirmed
-`message_not_found` update clears that identity and commits one replacement create.
-Ambiguous provider outcomes do not trigger replacement. If work advances while a
-replacement create is in flight, delivery commits and attempts one follow-up update
-for the replacement identity and latest desired revision.
+`message_not_found` update clears that identity and commits one replacement create
+only while work is active and desired state exists. Ambiguous provider outcomes and
+finished work do not trigger replacement. If work advances while a replacement
+create is in flight, delivery commits and attempts one follow-up update for the
+replacement identity and latest desired revision.
+
+Tracker creation and final-reply completion may race. Both completion paths
+idempotently ensure the finished action's delete intent after the reply is delivered
+and a provider Tracker identity exists. A Tracker delete that returns
+`message_not_found` is reconciled as already absent and never recreates the Tracker.
 
 ## Approval Control Messages
 
@@ -101,6 +121,7 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-23** (spec_version 5) — Separated the one-time Session-link message, switched the Tracker to native read-only task cards, limited work to 49 Todos, made successful final replies delete the Tracker, and restricted replacement to active desired work with race-safe cleanup reconciliation.
 - **2026-07-23** (spec_version 4) — Added automatic pre-execution Activity Tracker creation, one-message checking/working/completed transitions, delivered-final-reply completion gating, retained normal completion, confirmed-deletion recreation, and latest-revision replacement reconciliation.
 - **2026-07-23** (spec_version 3) — Added post-decision approval-control deletion and delivery-derived Activity Tracker projection states with canonical task presentation.
 - **2026-07-23** (spec_version 2) — Added Slack Markdown reply payloads, provider-bound length validation, and Block Kit operational/approval delivery with accessible fallback text.

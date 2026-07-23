@@ -34,7 +34,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-23
-spec_version: 7
+spec_version: 8
 ---
 
 # External Channel
@@ -76,8 +76,20 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 - A route has no lifecycle state. A dedicated connection has exactly one route; platform routing may later permit multiple routes. New execution requires a locked `active` or `degraded` connection and active Agent lifecycle, so disconnect cannot commit between admission and related writes. Provider health, reconnect, disconnect, and Agent decommission never write route state.
 - A resource is `active`, `unavailable`, or `deleted`; hydration is `pending`, `running`, `complete`, `bounded`, or `incomplete`.
 - A binding is either active or disconnected. Activation moves from `waiting_hydration` to `active` only after the admitted-event reconciliation boundary is clear.
-- Releasing a new invocation batch creates the current work cycle's Activity Tracker before Session wake-up. Checking, task progress, and delivered-answer completion update one retained provider message; separate work cycles never share that identity.
-- Confirmed deletion clears only the matching Tracker identity and creates one replacement from durable desired state. A replacement that captured an older desired revision is updated once to the latest state after creation.
+- Initial binding activation creates one separate button-only Session navigation
+  message. Releasing a new invocation batch creates the current work cycle's
+  Activity Tracker before Session wake-up. Checking and task progress update one
+  retained provider message; a delivered final answer deletes it, and separate work
+  cycles never share that identity.
+- The Tracker uses native read-only Slack task cards. Processing and in-progress
+  tasks carry the in-progress indicator, pending tasks omit status, and completed
+  tasks carry completed state. One status card leaves capacity for at most 49
+  Channel Work tasks.
+- Confirmed deletion clears only the matching Tracker identity and creates one
+  replacement from durable desired state while work remains active. A replacement
+  that captured an older desired revision is updated once to the latest state after
+  creation. Finished work never recreates a Tracker, and a missing delete target is
+  already absent.
 - Message revisions never rewrite an already projected revision. Later edits or deletes remain distinct corrections.
 - A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, route relationship, and active resource. Blocks take precedence.
 - Restore never reactivates a disconnected binding, ended work item, removed pending context, or connection.
@@ -120,6 +132,7 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-23** (spec_version 8) — Separated one-time Session navigation from native task-card Activity Trackers, limited work cycles to 49 Todos, deleted Trackers after delivered final answers, and restricted replacement to active desired work.
 - **2026-07-23** (spec_version 7) — Added work-cycle-owned Activity Tracker identity, pre-execution creation, retained delivered-answer completion, confirmed-deletion replacement, and current-work projection scoping.
 - **2026-07-23** (spec_version 6) — Added bounded Block Kit fallback normalization, durable approval-control deletion, hard grant removal, delivery-derived Activity Tracker state, complete provider identities, in-product confirmations, and narrow-screen presentation behavior.
 - **2026-07-23** (spec_version 5) — Added immutable bounded Slack reference mappings, readable external-message presentation, and connected-app self-message exclusion while retaining canonical provider IDs and bodies.

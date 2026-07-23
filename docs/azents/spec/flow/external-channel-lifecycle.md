@@ -19,7 +19,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 7
+spec_version: 8
 ---
 
 # External Channel Lifecycle
@@ -99,6 +99,7 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 8) — Made normal delivered-answer completion delete the transient Activity Tracker while retaining terminal lifecycle cleanup for any remaining provider identity.
 - **2026-07-23** (spec_version 7) — Clarified that normal completion retains Activity Trackers while binding, connection, Session, and Agent lifecycle transitions own terminal provider deletion.
 - **2026-07-23** (spec_version 6) — Added hard grant removal, complete access identities, in-product destructive confirmations, and task/progress lifecycle presentation.
 - **2026-07-23** (spec_version 5) — Removed route lifecycle transitions. Connection status owns disconnect and provider health, while Agent lifecycle owns new-execution eligibility.

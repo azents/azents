@@ -23,6 +23,7 @@ from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.engine.tools.external_channel import (
+    ContinueChannelActionInput,
     ExternalChannelToolkit,
     render_channel_work_prompt,
 )
@@ -203,6 +204,25 @@ async def test_continue_requires_unfinished_work() -> None:
                     }
                 )
             )
+
+
+def test_continue_limits_todos_to_available_activity_blocks() -> None:
+    """One status card leaves 49 Slack message blocks for Todo cards."""
+    with pytest.raises(ValueError, match="at most 49"):
+        ContinueChannelActionInput.model_validate(
+            {
+                "mode": "continue",
+                "binding": "binding-1",
+                "todo_update": [
+                    {
+                        "id": f"task-{index}",
+                        "title": f"Task {index}",
+                        "status": "pending",
+                    }
+                    for index in range(50)
+                ],
+            }
+        )
 
 
 @pytest.mark.asyncio
