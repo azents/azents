@@ -309,10 +309,26 @@ class _Handler(BaseHTTPRequestHandler):
             return
         serialized = json.dumps(request, ensure_ascii=False)
         if _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized:
-            with _State.lock:
-                _State.external_channel_progress_requests.append(
-                    external_channel_progress_evidence(request)
+            evidence = external_channel_progress_evidence(request)
+            evidence["path"] = self.path
+            evidence["matched"] = is_external_channel_progress_request(request)
+            evidence["stage"] = (
+                "after_finish"
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_FINISH_CALL_ID,
                 )
+                else (
+                    "after_progress"
+                    if request_has_tool_output(
+                        request,
+                        _EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+                    )
+                    else "initial"
+                )
+            )
+            with _State.lock:
+                _State.external_channel_progress_requests.append(evidence)
         if self.path == "/v1/responses" and is_external_channel_progress_request(
             request
         ):

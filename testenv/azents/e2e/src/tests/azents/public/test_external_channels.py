@@ -207,6 +207,63 @@ def _progress_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]
     ]
 
 
+def _channel_action_tool_evidence(
+    public_server_url: str,
+    token: str,
+    session_id: str,
+) -> list[dict[str, object]]:
+    """Return sanitized Channel Action call and result evidence."""
+    response = requests.get(
+        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        return []
+    items = cast(dict[str, object], payload).get("items")
+    if not isinstance(items, list):
+        return []
+    evidence: list[dict[str, object]] = []
+    for raw_event in cast(list[object], items):
+        if not isinstance(raw_event, dict):
+            continue
+        event = cast(dict[str, object], raw_event)
+        kind = event.get("kind")
+        if kind not in {"client_tool_call", "client_tool_result"}:
+            continue
+        raw_payload = event.get("payload")
+        if not isinstance(raw_payload, dict):
+            continue
+        event_payload = cast(dict[str, object], raw_payload)
+        if (
+            event_payload.get("name") != "channel_action"
+            and event_payload.get("call_id") != "call_external_channel_progress"
+        ):
+            continue
+        item: dict[str, object] = {
+            "kind": kind,
+            "call_id": event_payload.get("call_id"),
+            "name": event_payload.get("name"),
+        }
+        status = event_payload.get("status")
+        if isinstance(status, str):
+            item["status"] = status
+        output = event_payload.get("output")
+        if isinstance(output, list):
+            texts = [
+                cast(dict[str, object], part).get("text")
+                for part in cast(list[object], output)
+                if isinstance(part, dict)
+                and isinstance(cast(dict[str, object], part).get("text"), str)
+            ]
+            if texts:
+                item["output"] = " ".join(cast(list[str], texts))[:1_000]
+        evidence.append(item)
+    return evidence
+
+
 def _login_main_web(
     driver: WebDriver,
     *,
@@ -714,12 +771,51 @@ def test_provider_native_channel_work_progress_journey(
             message="Channel Work model request did not reach the proxy",
         ),
     )
-    assert {
+    expected_request_evidence = {
         "binding": binding_id,
         "resolved_user_reference": True,
         "resolved_channel_reference": True,
         "progress_tool_available": True,
-    } in request_evidence
+        "path": "/v1/responses",
+        "matched": True,
+        "stage": "initial",
+    }
+    assert any(
+        all(item.get(key) == value for key, value in expected_request_evidence.items())
+        for item in request_evidence
+    ), request_evidence
+
+    def completed_channel_action() -> list[dict[str, object]]:
+        evidence = _channel_action_tool_evidence(
+            azents_public_server_url,
+            token,
+            session_id,
+        )
+        assert any(
+            item.get("kind") == "client_tool_call"
+            and item.get("call_id") == "call_external_channel_progress"
+            for item in evidence
+        ), f"Channel Action tool call was not recorded: {evidence!r}"
+        assert any(
+            item.get("kind") == "client_tool_result"
+            and item.get("call_id") == "call_external_channel_progress"
+            for item in evidence
+        ), f"Channel Action tool result was not recorded: {evidence!r}"
+        return evidence
+
+    tool_evidence = wait_until(
+        completed_channel_action,
+        timeout=20,
+        interval=0.2,
+        message="Channel Action tool execution did not complete",
+    )
+    progress_result = next(
+        item
+        for item in tool_evidence
+        if item.get("kind") == "client_tool_result"
+        and item.get("call_id") == "call_external_channel_progress"
+    )
+    assert progress_result.get("status") == "completed", tool_evidence
 
     def rich_management_projection() -> object | None:
         projection = external_api.external_channel_v1_list_session_channels(
