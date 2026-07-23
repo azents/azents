@@ -216,50 +216,50 @@ def upgrade() -> None:
         )
         SELECT DISTINCT
             md5(
-                grant.provider_id
+                enrollment.provider_id
                 || CASE
-                    WHEN grant.issued_by_source_id IS NULL THEN ':' || 'admin'
-                    ELSE ':' || 'bootstrap' || ':' || grant.issued_by_source_id
+                    WHEN enrollment.issued_by_source_id IS NULL THEN ':' || 'admin'
+                    ELSE ':' || 'bootstrap' || ':' || enrollment.issued_by_source_id
                 END
             ),
-            grant.provider_id,
+            enrollment.provider_id,
             'azents_issued_token',
-            'provider:' || grant.provider_id
+            'provider:' || enrollment.provider_id
                 || CASE
-                    WHEN grant.issued_by_source_id IS NULL THEN ':' || 'admin'
-                    ELSE ':' || 'bootstrap' || ':' || grant.issued_by_source_id
+                    WHEN enrollment.issued_by_source_id IS NULL THEN ':' || 'admin'
+                    ELSE ':' || 'bootstrap' || ':' || enrollment.issued_by_source_id
                 END,
             'active',
             CASE
-                WHEN grant.issued_by_source_id IS NULL THEN 'admin'
+                WHEN enrollment.issued_by_source_id IS NULL THEN 'admin'
                 ELSE 'bootstrap'
             END,
             declaration.id,
             jsonb_build_object(
                 'migration', '2743073ba95b',
                 'issuer', CASE
-                    WHEN grant.issued_by_source_id IS NULL THEN 'admin'
+                    WHEN enrollment.issued_by_source_id IS NULL THEN 'admin'
                     ELSE 'bootstrap'
                 END
             )
-        FROM runtime_provider_enrollment_grants AS grant
+        FROM runtime_provider_enrollment_grants AS enrollment
         LEFT JOIN runtime_provider_bootstrap_declarations AS declaration
-            ON declaration.provider_id = grant.provider_id
-            AND declaration.source_id = grant.issued_by_source_id
+            ON declaration.provider_id = enrollment.provider_id
+            AND declaration.source_id = enrollment.issued_by_source_id
     """)
     )
     bind.execute(
         sa.text("""
-        UPDATE runtime_provider_enrollment_grants AS grant
+        UPDATE runtime_provider_enrollment_grants AS enrollment
         SET binding_id = binding.id
         FROM runtime_provider_auth_bindings AS binding
-        WHERE binding.provider_id = grant.provider_id
+        WHERE binding.provider_id = enrollment.provider_id
           AND binding.auth_method = 'azents_issued_token'
           AND binding.subject = (
-              'provider:' || grant.provider_id
+              'provider:' || enrollment.provider_id
               || CASE
-                  WHEN grant.issued_by_source_id IS NULL THEN ':' || 'admin'
-                  ELSE ':' || 'bootstrap' || ':' || grant.issued_by_source_id
+                  WHEN enrollment.issued_by_source_id IS NULL THEN ':' || 'admin'
+                  ELSE ':' || 'bootstrap' || ':' || enrollment.issued_by_source_id
               END
           )
     """)
@@ -267,9 +267,9 @@ def upgrade() -> None:
     bind.execute(
         sa.text("""
         UPDATE runtime_provider_credentials AS credential
-        SET binding_id = grant.binding_id
-        FROM runtime_provider_enrollment_grants AS grant
-        WHERE credential.issued_grant_id = grant.id
+        SET binding_id = enrollment.binding_id
+        FROM runtime_provider_enrollment_grants AS enrollment
+        WHERE credential.issued_grant_id = enrollment.id
     """)
     )
     bind.execute(
