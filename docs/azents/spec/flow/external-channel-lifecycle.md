@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/core/session_lifecycle.py
   - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
   - python/apps/azents/src/azents/services/external_channel/lifecycle.py
+  - python/apps/azents/src/azents/services/external_channel/file_transfer.py
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/session_lifecycle/orchestrator.py
   - python/apps/azents/src/azents/services/session_lifecycle/registry.py
@@ -19,7 +20,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 8
+spec_version: 9
 ---
 
 # External Channel Lifecycle
@@ -44,6 +45,13 @@ Revoking a participant grant deletes the selected grant policy row after an owne
 check. It does not delete canonical provider content, invocation history, projected
 Session events, or unrelated grants.
 
+Every new file download and file-bearing publication revalidates the current Agent,
+Session, route, binding, connection, and directional capability. Binding disconnect,
+connection disconnect, Session archive, and Agent decommission therefore prevent new
+transfers immediately through the existing lifecycle fences. A provider access change or
+file deletion is observed at download time. An in-progress outbound provider attempt
+retains its existing one-attempt outcome and is never replayed after a lifecycle change.
+
 Provider credential and permission failures move only connection health to
 `reconnect_required`; they preserve route relationships, bindings, and work. Slack
 App uninstall clears provider credentials and terminalizes provider resources while
@@ -63,6 +71,8 @@ Archive uses the explicit terminal transition policy inside the caller-owned arc
 5. create one cleanup delivery intent for each retained Activity Tracker.
 
 Provider cleanup runs after commit. Failure or an unknown result does not roll back Session archive.
+External Channel file transfer adds no stored byte object or file-specific cleanup
+participant; only existing metadata, action, and delivery rows follow lifecycle cleanup.
 
 Restore uses `preserve`. It validates that terminal bindings, ended work, removed pending context, and cleanup bookkeeping remain terminal. Restore never reactivates External Channel state; managers must establish new provider state explicitly.
 
@@ -99,6 +109,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 9) — Applied existing binding, connection, Session, and
+  Agent fences to every file transfer and clarified that transferred bytes add no
+  retention or purge participant.
 - **2026-07-23** (spec_version 8) — Made normal delivered-answer completion delete the transient Activity Tracker while retaining terminal lifecycle cleanup for any remaining provider identity.
 - **2026-07-23** (spec_version 7) — Clarified that normal completion retains Activity Trackers while binding, connection, Session, and Agent lifecycle transitions own terminal provider deletion.
 - **2026-07-23** (spec_version 6) — Added hard grant removal, complete access identities, in-product destructive confirmations, and task/progress lifecycle presentation.

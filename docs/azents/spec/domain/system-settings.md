@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-07-20
+updated: 2026-07-23
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -9,6 +9,7 @@ owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/core/system_setting.py
   - python/apps/azents/src/azents/core/github_system_setting.py
+  - python/apps/azents/src/azents/core/external_channel_file_system_setting.py
   - python/apps/azents/src/azents/api/admin/system_setting/**
   - python/apps/azents/src/azents/services/system_setting/**
   - python/apps/azents/src/azents/services/github_platform_system_setting/**
@@ -21,6 +22,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/app/system-settings/**
   - typescript/apps/azents-admin-web/src/features/system-settings/**
   - typescript/apps/azents-admin-web/src/trpc/routers/systemSettings.ts
+  - python/apps/azents/db-schemas/rdb/migrations/versions/496235caed34_add_external_channel_file_system_.py
   - infra/charts/azents/templates/server/apiserver-deployment.yaml.tpl
   - infra/charts/azents/templates/server/adminserver-deployment.yaml.tpl
   - infra/charts/azents/templates/server/worker-deployment.yaml.tpl
@@ -37,6 +39,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/retention.ts
 api_routes:
   - /system-setting/v1/sections
+  - /system-setting/v1/sections/external-channel-files
   - /system-setting/v1/sections/platform-github-app
   - /system-setting/v1/sections/platform-github-app/candidate/validate
   - /system-setting/v1/sections/platform-github-app/candidate/confirm
@@ -46,18 +49,19 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-07-22
-spec_version: 3
+last_verified_at: 2026-07-23
+spec_version: 4
 ---
 
 # System Settings
 
 ## Overview
 
-System Settings owns instance-wide, administrator-managed product configuration and policy. Two
+System Settings owns instance-wide, administrator-managed product configuration and policy. Several
 independent setting families currently use this domain:
 
 - the provider-neutral Section lifecycle, whose first compiled Section is the Platform GitHub App;
+- the direct-activation `external_channel_files` Section for provider-neutral transfer policy;
 - archived-session retention under the file-lifecycle API; and
 - the confirmed `platform_runtime` Section, whose typed non-secret configuration stores the
   Platform default Provider logical ID used only by exact Runtime selection.
@@ -73,8 +77,8 @@ Settings authority.
 A compiled `SystemSettingRegistry` defines every typed Section. A definition declares the Section key,
 schema version, separate Pydantic config and secret models, activation mode, environment bindings,
 candidate TTL, local validator, and any in-memory payload migrations needed to read older schema
-versions. The first and currently only definition is `platform_github_app`, schema version 1, with
-confirmed activation and a 24-hour candidate TTL.
+versions. `platform_github_app` uses confirmed activation. `external_channel_files` and
+`platform_runtime` use direct activation.
 
 PostgreSQL is the correctness source. The lifecycle uses these tables:
 
@@ -131,6 +135,11 @@ impact inside the serialized Section transaction. Drift returns `409` and requir
 revalidation. Successful activation increments the Admin version, replaces current ciphertext, deletes
 the candidate, and appends a metadata-only audit event.
 
+A direct Section mutation validates and activates the merged Admin base in the same
+serialized transaction. It still requires `expected_version`, increments the Admin
+version, and appends the normal activation audit event, but it creates no candidate,
+confirmation, or health workflow.
+
 ### Health and audit
 
 Health checks validate the current effective Section without mutating the Admin base. A result is stored
@@ -184,6 +193,30 @@ defaults. Selected keys are injected into Public API, Admin API, and Worker only
 Platform GitHub App Secret reference. An empty `server.platformGitHubApp.*Key` value leaves that field
 under Admin-managed database control, while a non-empty Secret key permanently owns the field for the
 receiving processes until the key value is cleared and those processes restart.
+
+## External Channel Files Section
+
+`external_channel_files` is schema version 1, has no secret or environment-bound fields,
+and activates directly. Its positive bounded integer configuration is:
+
+| Field | Default | Configured maximum |
+| --- | ---: | ---: |
+| `inbound_max_file_bytes` | 25 MiB | 100 MiB |
+| `outbound_max_file_bytes` | 25 MiB | 100 MiB |
+| `outbound_max_action_bytes` | 100 MiB | 2,000 MiB |
+
+The outbound aggregate must be at least the outbound per-file limit. Runtime stream chunk
+size is not administrator-configurable.
+
+The dedicated Admin GET returns effective byte values, schema version, and Admin version
+without effective generation or secret state. PATCH accepts an optimistic partial byte
+update, rejects null, empty, out-of-range, and invalid aggregate results, and returns a
+typed `409 stale_system_setting_version` envelope on conflict.
+
+Admin Web renders an independent `External Channel files` card. Administrators edit
+whole-MiB values, see exact effective bytes and version, receive explicit unsaved/error
+state, and save directly. Successful save invalidates both detail and audit queries. The
+card intentionally has no candidate validation or health-check controls.
 
 ## Archived-session retention policy
 
@@ -277,6 +310,9 @@ page resumes the application returned by the settings endpoint.
 
 ## Changelog
 
+- **2026-07-23** — v4. Added the direct-activation provider-neutral External Channel file
+  limits, optimistic Admin API, generated clients, audit behavior, and whole-MiB
+  direct-save Admin surface.
 - **2026-07-20** — v3. Retired the legacy unbound Platform GitHub App transition state, required App IDs for persisted installation rows and Platform Toolkits, and retained impact confirmation only for actual App identity changes.
 - **2026-07-20** — v2. Added the provider-neutral typed Section lifecycle, encrypted current/candidate
   persistence, field-level environment precedence, Platform GitHub App validation and impact
