@@ -17,12 +17,12 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-22 | 52 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-23 | 129 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-23 | 6 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-23 | 7 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-22 | 69 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-23 | 70 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-23 | 45 |
 
@@ -37,8 +37,8 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-23 | 4 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-23 | 3 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 6 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-23 | 4 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 7 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-23 | 6 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-23 | 25 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
@@ -360,6 +360,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Split TodoToolkit as Always-on Toolkit Historical Requirements Reconstruction](requirements/toolkit-260613-todo-toolkit-always-on.md) | toolkit-260613 | 2026-06-13 | - |
 | [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections Historical Requirements Reconstruction](requirements/toolkit-260623-toolkit-level-mcp-oauth.md) | toolkit-260623 | 2026-06-23 | - |
 | [Toolkit Wake-Up Snapshot Revision Requirements](requirements/toolkit-260721-wakeup-snapshot-revision.md) | toolkit-260721 | 2026-07-21 | 2026-07-21 |
+| [Slack Activity Tracker Lifecycle Requirements](requirements/tracker-260723-slack-activity-lifecycle.md) | tracker-260723 | 2026-07-23 | - |
 | [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
 | [Expose Typed Actionable Profile Resolution Failures Historical Requirements Reconstruction](requirements/typed-260710-typed-profile-resolution-failures.md) | typed-260710 | 2026-07-10 | - |
 | [Unified OAuth Authentication Flow Historical Requirements Reconstruction](requirements/unified-260327-unified-oauth.md) | unified-260327 | 2026-03-27 | 2026-03-27 |
@@ -679,6 +680,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Split TodoToolkit as Always-on Toolkit](adr/toolkit-260613-todo-toolkit-always-on.md)
 - [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections](adr/toolkit-260623-toolkit-level-mcp-oauth.md)
 - [Toolkit Wake-Up Snapshot Revision](adr/toolkit-260721-wakeup-snapshot-revision.md)
+- [Slack Activity Tracker Lifecycle](adr/tracker-260723-slack-activity-lifecycle.md)
 - [Continue FIFO Processing After Failed TurnActions](adr/turn-260708-turn-action-fifo-continuation.md)
 - [Expose Typed Actionable Profile Resolution Failures](adr/typed-260710-typed-profile-resolution-failures.md)
 - [Unified OAuth Authentication Flow Historical Decision Reconstruction](adr/unified-260327-unified-oauth.md)

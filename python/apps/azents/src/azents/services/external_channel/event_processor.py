@@ -36,6 +36,12 @@ from azents.core.enums import (
     InputBufferKind,
     InputBufferSchedulingMode,
 )
+from azents.core.external_channel_activity import (
+    ActivityTrackerPresentation,
+    activity_tracker_payload,
+    render_activity_tracker,
+    render_persisted_activity_tracker,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -61,8 +67,11 @@ from azents.repos.external_channel.data import (
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
+    ExternalChannelWork,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.workspace import WorkspaceRepository
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
     get_slack_validation_http_client,
@@ -129,7 +138,16 @@ class ExternalChannelPersistedMessage:
     resource_id: str
     hydration_required: bool
     control_delivery_attempt_id: str | None
+    activity_delivery_attempt_id: str | None
     wake_up: SessionWakeUp | None
+
+
+@dataclasses.dataclass(frozen=True)
+class ExternalChannelReleasedInvocation:
+    """Committed invocation batch and optional initial Tracker intent."""
+
+    batch: ExternalChannelInvocationBatch
+    activity_delivery_attempt_id: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -173,6 +191,10 @@ class ExternalChannelEventProcessorService:
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
     ]
+    work_repository: Annotated[
+        ExternalChannelWorkRepository,
+        Depends(ExternalChannelWorkRepository),
+    ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
         Depends(get_external_channel_credentials_codec),
@@ -188,6 +210,10 @@ class ExternalChannelEventProcessorService:
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
+    ]
+    workspace_repository: Annotated[
+        WorkspaceRepository,
+        Depends(WorkspaceRepository),
     ]
     config: Annotated[Config, Depends(get_config)]
     input_buffer_service: Annotated[
@@ -312,16 +338,33 @@ class ExternalChannelEventProcessorService:
             )
             if grant is None:
                 return False
-            batch = await self._release_pending_context(
+            configuration = await self.repository.get_connection_configuration(
+                session,
+                connection_id=route.connection_id,
+            )
+            if configuration is None or configuration.encrypted_credentials is None:
+                return False
+            released = await self._release_pending_context(
                 session,
                 binding=binding,
                 trigger_message_id=trigger.id,
                 now=now,
                 initial_activation=True,
+                workspace_id=configuration.workspace_id,
+                agent_id=route.agent_id,
             )
-            if batch is None:
+            if released is None:
                 return False
             await session.commit()
+            if released.activity_delivery_attempt_id is not None:
+                credentials = self.credentials_codec.decrypt(
+                    configuration.encrypted_credentials
+                )
+                await self._attempt_activity_delivery(
+                    configuration=configuration,
+                    delivery_attempt_id=released.activity_delivery_attempt_id,
+                    bot_token=credentials.bot_token,
+                )
             await self.session_lifecycle.send_session_wake_up(
                 SessionWakeUp(
                     agent_id=route.agent_id,
@@ -460,14 +503,20 @@ class ExternalChannelEventProcessorService:
             channel_display_name=None if access is None else access.display_name,
             reference_mappings=reference_mappings,
         )
-        if persisted.wake_up is not None:
-            await self.session_lifecycle.send_session_wake_up(persisted.wake_up)
         if persisted.control_delivery_attempt_id is not None:
             await self._attempt_control_delivery(
                 configuration=configuration,
                 delivery_attempt_id=persisted.control_delivery_attempt_id,
                 bot_token=credentials.bot_token,
             )
+        if persisted.activity_delivery_attempt_id is not None:
+            await self._attempt_activity_delivery(
+                configuration=configuration,
+                delivery_attempt_id=persisted.activity_delivery_attempt_id,
+                bot_token=credentials.bot_token,
+            )
+        if persisted.wake_up is not None:
+            await self.session_lifecycle.send_session_wake_up(persisted.wake_up)
         if persisted.hydration_required:
             try:
                 await self._hydrate_resource(
@@ -723,10 +772,6 @@ class ExternalChannelEventProcessorService:
                 )
             if resource.status is not ExternalChannelResourceStatus.ACTIVE:
                 raise SlackEventExcluded("The external conversation is unavailable.")
-            if connection_authored(configuration, message):
-                raise SlackEventExcluded(
-                    "Connection-authored Slack message was ignored."
-                )
             binding = await self.repository.lock_active_binding_by_route_resource(
                 session,
                 route_id=route.id,
@@ -741,7 +786,35 @@ class ExternalChannelEventProcessorService:
             resource = locked_resource
             if resource.status is not ExternalChannelResourceStatus.ACTIVE:
                 raise SlackEventExcluded("The external conversation is unavailable.")
+            recovery_attempt_id = None
+            if (
+                binding is not None
+                and message.revision_kind is ExternalChannelMessageRevisionKind.DELETE
+            ):
+                recovery_attempt_id = (
+                    await self._create_deleted_activity_recovery_intent(
+                        session,
+                        event=event,
+                        binding=binding,
+                        resource=resource,
+                        deleted_provider_message_key=message.provider_message_key,
+                    )
+                )
+            if recovery_attempt_id is not None:
+                await session.commit()
+                return ExternalChannelPersistedMessage(
+                    resource_id=resource.id,
+                    hydration_required=False,
+                    control_delivery_attempt_id=None,
+                    activity_delivery_attempt_id=recovery_attempt_id,
+                    wake_up=None,
+                )
+            if connection_authored(configuration, message):
+                raise SlackEventExcluded(
+                    "Connection-authored Slack message was ignored."
+                )
             wake_session_id: str | None = None
+            activity_delivery_attempt_id: str | None = None
 
             persisted_revision = await self._persist_normalized_message(
                 session,
@@ -798,15 +871,20 @@ class ExternalChannelEventProcessorService:
                     and message.revision_kind
                     is ExternalChannelMessageRevisionKind.ORIGINAL
                 ):
-                    released_batch = await self._release_pending_context(
+                    released = await self._release_pending_context(
                         session,
                         binding=binding,
                         trigger_message_id=canonical_message.id,
                         now=now,
                         initial_activation=False,
+                        workspace_id=configuration.workspace_id,
+                        agent_id=route.agent_id,
                     )
-                    if released_batch is not None:
+                    if released is not None:
                         wake_session_id = binding.agent_session_id
+                        activity_delivery_attempt_id = (
+                            released.activity_delivery_attempt_id
+                        )
                 elif message.invocation and not blocked:
                     if binding is None and grant is not None:
                         binding = await self._create_granted_initial_binding(
@@ -858,6 +936,7 @@ class ExternalChannelEventProcessorService:
                     and not _hydration_terminal(resource.hydration_status)
                 ),
                 control_delivery_attempt_id=control_delivery_attempt_id,
+                activity_delivery_attempt_id=activity_delivery_attempt_id,
                 wake_up=(
                     SessionWakeUp(
                         agent_id=route.agent_id,
@@ -1151,6 +1230,164 @@ class ExternalChannelEventProcessorService:
             if attempt.status is ExternalChannelDeliveryStatus.PENDING
             else None
         )
+
+    async def _create_deleted_activity_recovery_intent(
+        self,
+        session: AsyncSession,
+        *,
+        event: ExternalChannelEvent,
+        binding: ExternalChannelBinding,
+        resource: ExternalChannelResource,
+        deleted_provider_message_key: str,
+    ) -> str | None:
+        """Recreate a Tracker after Slack confirms external deletion."""
+        work = await self.repository.get_work_by_progress_provider_message_key(
+            session,
+            binding_id=binding.id,
+            provider_message_key=deleted_provider_message_key,
+        )
+        if work is None:
+            return None
+        presentation = _render_persisted_activity(work)
+        cleared = await self.repository.clear_work_progress_provider_message_key(
+            session,
+            work_id=work.id,
+            provider_message_key=deleted_provider_message_key,
+        )
+        if not cleared:
+            return None
+        attempt = await self.repository.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id=event.id,
+                channel_action_id=None,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                request_payload={
+                    **_activity_provider_target(resource, work),
+                    "text": presentation.text,
+                    "blocks": presentation.blocks,
+                    "desired_progress_revision": work.desired_progress_revision,
+                    "replaces_provider_message_key": deleted_provider_message_key,
+                },
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            ),
+        )
+        return (
+            attempt.id
+            if attempt.status is ExternalChannelDeliveryStatus.PENDING
+            else None
+        )
+
+    async def _attempt_activity_delivery(
+        self,
+        *,
+        configuration: ExternalChannelConnectionConfiguration,
+        delivery_attempt_id: str,
+        bot_token: str,
+    ) -> None:
+        """Attempt one Activity Tracker mutation and durable reconciliation."""
+        async with self.session_manager() as session:
+            attempt = await self.repository.start_delivery_attempt(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+                attempted_at=_now(),
+            )
+            await session.commit()
+        if attempt is None:
+            return
+        payload = attempt.request_payload
+        tenant_id = payload.get("tenant_id")
+        channel_id = payload.get("channel_id")
+        thread_ts = payload.get("thread_ts")
+        text = payload.get("text")
+        blocks = payload.get("blocks")
+        if (
+            not isinstance(tenant_id, str)
+            or not tenant_id
+            or not isinstance(channel_id, str)
+            or not channel_id
+            or not isinstance(thread_ts, str)
+            or not thread_ts
+            or not isinstance(text, str)
+            or not text
+            or not isinstance(blocks, list)
+            or not all(isinstance(block, dict) for block in blocks)
+        ):
+            result_status = ExternalChannelDeliveryStatus.FAILED
+            provider_message_key = None
+            error_kind = "activity_payload_invalid"
+            error_summary = "The persisted Activity Tracker payload is invalid."
+        elif attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
+            result = await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+                blocks=[block for block in blocks if isinstance(block, dict)],
+            )
+            result_status = ExternalChannelDeliveryStatus(result.status)
+            provider_message_key = result.provider_message_key
+            error_kind = result.error_kind
+            error_summary = result.error_summary
+        elif attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
+            target_provider_message_key = payload.get("provider_message_key")
+            message_ts = _provider_message_ts(target_provider_message_key)
+            if message_ts is None:
+                result_status = ExternalChannelDeliveryStatus.FAILED
+                provider_message_key = None
+                error_kind = "activity_payload_invalid"
+                error_summary = "The persisted Activity Tracker payload is invalid."
+            else:
+                result = await self.slack_client.update_message(
+                    bot_token=bot_token,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    message_ts=message_ts,
+                    text=text,
+                    blocks=[block for block in blocks if isinstance(block, dict)],
+                )
+                result_status = ExternalChannelDeliveryStatus(result.status)
+                provider_message_key = result.provider_message_key
+                error_kind = result.error_kind
+                error_summary = result.error_summary
+        else:
+            result_status = ExternalChannelDeliveryStatus.FAILED
+            provider_message_key = None
+            error_kind = "activity_operation_invalid"
+            error_summary = "The persisted Activity Tracker operation is invalid."
+        async with self.session_manager() as session:
+            followup_delivery_id = await self.work_repository.finish_delivery(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+                status=result_status,
+                provider_message_key=provider_message_key,
+                error_kind=error_kind,
+                error_summary=error_summary,
+                now=_now(),
+            )
+            if error_kind in {"credentials_invalid", "missing_scope"}:
+                await self.repository.mark_connection_reconnect_required(
+                    session,
+                    connection_id=configuration.id,
+                    reason=error_kind,
+                    now=_now(),
+                    required_socket_lease_owner=None,
+                )
+            await session.commit()
+        if followup_delivery_id is not None:
+            await self._attempt_activity_delivery(
+                configuration=configuration,
+                delivery_attempt_id=followup_delivery_id,
+                bot_token=bot_token,
+            )
 
     async def _attempt_control_delivery(
         self,
@@ -1460,7 +1697,9 @@ class ExternalChannelEventProcessorService:
         trigger_message_id: str,
         now: datetime.datetime,
         initial_activation: bool,
-    ) -> ExternalChannelInvocationBatch | None:
+        workspace_id: str,
+        agent_id: str,
+    ) -> ExternalChannelReleasedInvocation | None:
         existing = await self.repository.get_invocation_batch(
             session,
             binding_id=binding.id,
@@ -1486,7 +1725,14 @@ class ExternalChannelEventProcessorService:
             through_provider_position=trigger.provider_position,
         )
         if not pending:
-            return existing
+            return (
+                None
+                if existing is None
+                else ExternalChannelReleasedInvocation(
+                    batch=existing,
+                    activity_delivery_attempt_id=None,
+                )
+            )
         batch = await self.repository.create_invocation_batch_idempotent(
             session,
             ExternalChannelInvocationBatchCreate(
@@ -1514,9 +1760,58 @@ class ExternalChannelEventProcessorService:
             binding=binding,
             batch=batch,
         )
-        await self.repository.ensure_active_work(
+        workspace = await self.workspace_repository.get_by_id(session, workspace_id)
+        if workspace is None:
+            raise RuntimeError("External Channel Workspace disappeared.")
+        session_url = _session_url(
+            self.config.web_url,
+            workspace.handle,
+            agent_id,
+            binding.agent_session_id,
+        )
+        if session_url is None:
+            raise RuntimeError("External Channel Activity Tracker URL is unavailable.")
+        work = await self.repository.ensure_active_work(
             session,
             binding_id=binding.id,
+            desired_progress_payload=activity_tracker_payload(
+                state="checking",
+                tasks=(),
+                session_url=session_url,
+            ),
+        )
+        presentation = render_activity_tracker(
+            state="checking",
+            tasks=(),
+            session_url=session_url,
+        )
+        resource = await self.repository.get_resource(
+            session,
+            resource_id=binding.resource_id,
+        )
+        if resource is None:
+            raise RuntimeError("External Channel resource disappeared.")
+        activity_attempt = await self.repository.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id=work.id,
+                channel_action_id=None,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                request_payload={
+                    **_activity_provider_target(resource, work),
+                    "text": presentation.text,
+                    "blocks": presentation.blocks,
+                    "desired_progress_revision": work.desired_progress_revision,
+                },
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            ),
         )
         await self.repository.delete_pending_context_ids(
             session,
@@ -1535,7 +1830,14 @@ class ExternalChannelEventProcessorService:
                 binding_id=binding.id,
                 projected_through_position=pending[-1].provider_position,
             )
-        return batch
+        return ExternalChannelReleasedInvocation(
+            batch=batch,
+            activity_delivery_attempt_id=(
+                activity_attempt.id
+                if activity_attempt.status is ExternalChannelDeliveryStatus.PENDING
+                else None
+            ),
+        )
 
     async def _ensure_invocation_input_buffer(
         self,
@@ -1688,6 +1990,60 @@ def _approval_url(web_url: str, access_request_id: str) -> str | None:
     if not normalized:
         return None
     return f"{normalized}/external-channel/access/{access_request_id}"
+
+
+def _session_url(
+    web_url: str,
+    workspace_handle: str,
+    agent_id: str,
+    session_id: str,
+) -> str | None:
+    """Build the browser URL retained by an Activity Tracker."""
+    normalized = web_url.rstrip("/")
+    if not normalized:
+        return None
+    return f"{normalized}/w/{workspace_handle}/agents/{agent_id}/sessions/{session_id}"
+
+
+def _activity_provider_target(
+    resource: ExternalChannelResource,
+    work: ExternalChannelWork,
+) -> dict[str, object]:
+    """Build the persisted provider target for one Activity Tracker."""
+    labels = resource.labels or {}
+    tenant_id = labels.get("tenant_id")
+    channel_id = labels.get("channel_id")
+    thread_ts = labels.get("thread_ts")
+    if (
+        not isinstance(tenant_id, str)
+        or not tenant_id
+        or not isinstance(channel_id, str)
+        or not channel_id
+        or not isinstance(thread_ts, str)
+        or not thread_ts
+    ):
+        raise RuntimeError("External Channel Slack resource labels are invalid.")
+    return {
+        "work_id": work.id,
+        "tenant_id": tenant_id,
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+    }
+
+
+def _render_persisted_activity(
+    work: ExternalChannelWork,
+) -> ActivityTrackerPresentation:
+    """Render the latest desired Tracker state retained by one work cycle."""
+    return render_persisted_activity_tracker(work.desired_progress_payload)
+
+
+def _provider_message_ts(value: object) -> str | None:
+    """Extract the provider timestamp from one durable Slack message identity."""
+    if not isinstance(value, str) or ":" not in value:
+        return None
+    message_ts = value.rsplit(":", 1)[-1]
+    return message_ts or None
 
 
 def _resource_correlation_key(resource: ExternalChannelResource) -> str:

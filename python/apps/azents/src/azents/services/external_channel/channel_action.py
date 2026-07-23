@@ -15,6 +15,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
+    ExternalChannelWorkStatus,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -122,9 +123,40 @@ class ExternalChannelActionService:
                 now=datetime.datetime.now(datetime.UTC),
             )
             await session.commit()
+        reply_delivered = (
+            committed.work_status is not ExternalChannelWorkStatus.FINISHED
+        )
         for delivery in committed.deliveries:
+            if (
+                delivery.operation is ExternalChannelDeliveryOperation.REPLY
+                and delivery.status is not ExternalChannelDeliveryStatus.PENDING
+            ):
+                reply_delivered = (
+                    delivery.status is ExternalChannelDeliveryStatus.DELIVERED
+                )
             if delivery.status is ExternalChannelDeliveryStatus.PENDING:
-                await self.attempt_delivery(delivery.id)
+                if (
+                    delivery.operation
+                    is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                    and committed.work_status is ExternalChannelWorkStatus.FINISHED
+                    and not reply_delivered
+                ):
+                    async with self.session_manager() as session:
+                        await self.repository.skip_delivery(
+                            session,
+                            delivery_attempt_id=delivery.id,
+                            error_kind="final_reply_not_delivered",
+                            error_summary=(
+                                "Activity Tracker completion requires a delivered "
+                                "final reply."
+                            ),
+                            now=datetime.datetime.now(datetime.UTC),
+                        )
+                        await session.commit()
+                    continue
+                outcome = await self.attempt_delivery(delivery.id)
+                if delivery.operation is ExternalChannelDeliveryOperation.REPLY:
+                    reply_delivered = outcome is ExternalChannelDeliveryStatus.DELIVERED
         async with self.session_manager() as session:
             result = await self.repository.complete_action(
                 session,
@@ -151,20 +183,23 @@ class ExternalChannelActionService:
                 return None
             return target
 
-    async def attempt_delivery(self, delivery_attempt_id: str) -> None:
+    async def attempt_delivery(
+        self,
+        delivery_attempt_id: str,
+    ) -> ExternalChannelDeliveryStatus | None:
         """Attempt one pending provider operation without automatic retry."""
         target = await self.prepare_delivery(delivery_attempt_id)
         if target is None:
-            return
-        await self.attempt_prepared_delivery(target)
+            return None
+        return await self.attempt_prepared_delivery(target)
 
     async def attempt_prepared_delivery(
         self,
         target: ChannelDeliveryTarget,
-    ) -> None:
+    ) -> ExternalChannelDeliveryStatus | None:
         """Attempt a target captured before connection credentials were purged."""
         if target.status is not ExternalChannelDeliveryStatus.PENDING:
-            return
+            return None
         async with self.session_manager() as session:
             started = await self.repository.start_delivery(
                 session,
@@ -173,7 +208,7 @@ class ExternalChannelActionService:
             )
             await session.commit()
         if not started:
-            return
+            return None
         try:
             result = await self._deliver(target)
         except asyncio.CancelledError:
@@ -182,7 +217,7 @@ class ExternalChannelActionService:
             )
             raise
         async with self.session_manager() as session:
-            await self.repository.finish_delivery(
+            recovery_delivery_id = await self.repository.finish_delivery(
                 session,
                 delivery_attempt_id=target.delivery_attempt_id,
                 status=ExternalChannelDeliveryStatus(result.status),
@@ -192,6 +227,9 @@ class ExternalChannelActionService:
                 now=datetime.datetime.now(datetime.UTC),
             )
             await session.commit()
+        if recovery_delivery_id is not None:
+            await self.attempt_delivery(recovery_delivery_id)
+        return ExternalChannelDeliveryStatus(result.status)
 
     async def drain_archive_cleanup(
         self,
