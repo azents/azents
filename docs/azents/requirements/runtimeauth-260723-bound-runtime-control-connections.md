@@ -40,6 +40,7 @@ Deployment Operator
 - A Platform Admin creates, observes, rotates, and revokes Provider authentication bindings through the Admin product surface while Provider identity remains unchanged.
 - A trusted Platform Kubernetes Provider reconnects after Pod replacement and retains the same Provider identity through its workload identity binding.
 - A stale or replayed Runtime Runner credential cannot claim a different Runtime or a newer Runtime incarnation.
+- Existing Runtime workloads reconnect after the authentication rollout without losing data or changing their bound PersistentVolumeClaim.
 
 ## Goals
 
@@ -50,6 +51,7 @@ Deployment Operator
 - Allow new Provider authentication methods to integrate through one normalized authentication contract without method fallback.
 - Remove operator-managed Provider and shared Runner credentials from the deployment path.
 - Restore deployment availability with the complete target authentication model rather than an interim compatibility path.
+- Preserve all existing Runtime data and storage bindings throughout the authentication rollout.
 
 ## Ideal Goal
 
@@ -69,6 +71,7 @@ Additional workload identity implementations and cross-cluster trust policies re
 - Replace the existing Workspace Provider enrollment and Azents-issued token lifecycle.
 - Preserve the credential-bootstrap, external Provider Secret, or shared Runner token paths as compatibility fallbacks.
 - Change Provider selection, Runtime lifecycle, capability, configuration, or Workspace availability behavior.
+- Recreate, migrate, reset, or replace existing Runtime PersistentVolumes or PersistentVolumeClaims.
 
 ## Requirements
 
@@ -164,6 +167,18 @@ Provider authentication implementations must return one normalized authenticated
 - Unknown methods and method/configuration mismatches fail closed.
 - Long-running connections cannot retain authority after the authenticated binding, credential, or verified workload evidence expires or is revoked.
 
+### REQ-10. Non-destructive Runtime storage rollout
+
+Merging and deploying the authentication change must preserve every existing Runtime's data and continue using the same PersistentVolume and PersistentVolumeClaim.
+
+**Acceptance criteria**
+
+- Authentication schema migrations do not modify Runtime storage identity or lifecycle state.
+- A Runtime Pod restart or replacement caused by the compatible deployment reuses the Runtime's existing PersistentVolumeClaim.
+- The authentication rollout does not issue Runtime reset or delete operations and does not delete, recreate, rename, or replace existing Runtime PersistentVolumeClaims.
+- Helm, Home, and Argo CD pruning remove only obsolete authentication resources and cannot select or own Runtime PersistentVolumeClaims.
+- E2E or provider regression coverage records the PersistentVolumeClaim identity before and after rollout and verifies that the identity and stored data are unchanged.
+
 ## Fixed Constraints
 
 - Runtime and sandbox containers must never receive a host Docker socket.
@@ -175,6 +190,7 @@ Provider authentication implementations must return one normalized authenticated
 - Executed database migrations are immutable; any schema change requires a new revision and revision pointer update.
 - Plaintext credentials must never be committed.
 - The complete durable binding model and Admin management surface are part of this delivery, not deferred cleanup.
+- Existing Runtime data and PersistentVolume/PersistentVolumeClaim identities must survive the complete authentication rollout unchanged.
 
 ## Open Assumptions
 
@@ -183,4 +199,4 @@ Provider authentication implementations must return one normalized authenticated
 
 ## Confirmation
 
-Confirmed by the requester on 2026-07-23 through the instructions to correct the accumulated Provider and Runtime Control authentication requirements, treat the current state as a deployment-blocking incident, implement through the documented ideal authentication stage, and finish with clean branches rebased on the latest `main` and passing CI.
+Confirmed by the requester on 2026-07-23 through the instructions to correct the accumulated Provider and Runtime Control authentication requirements, treat the current state as a deployment-blocking incident, implement through the documented ideal authentication stage, preserve all existing Runtime data on the same PersistentVolumes throughout deployment, and finish with clean branches rebased on the latest `main` and passing CI.

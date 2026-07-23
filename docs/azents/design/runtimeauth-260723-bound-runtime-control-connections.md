@@ -63,7 +63,8 @@ The implementation includes:
 7. Runtime-bound signed Runner credentials validated against durable Runtime desired generation;
 8. removal of active Provider credential bootstrap and shared Runner token configuration;
 9. coordinated Helm and Home rollout with immutable chart and image pins; and
-10. E2E validation and living-spec promotion.
+10. non-destructive reuse of every existing Runtime PersistentVolumeClaim throughout the cutover; and
+11. E2E validation and living-spec promotion.
 
 Additional workload identity implementations and cross-cluster trust policy are outside this delivery but use the completed method and binding contracts.
 
@@ -213,7 +214,7 @@ The signed credential contains:
 
 The plaintext token is delivered only in the Provider lifecycle command and the Runtime container environment. It is never persisted or logged. The deterministic credential identifier recorded for diagnostics is a one-way fingerprint, not the token.
 
-The token remains valid only while the durable Runtime has the same desired generation and the token validity window has not elapsed. Lifecycle changes that advance desired generation invalidate the previous token. Long-running Runners receive a refreshed token through the controlled Provider lifecycle/observe channel before expiry and reconnect without changing logical Runtime identity.
+The token remains valid only while the durable Runtime has the same desired generation. Lifecycle changes that advance desired generation invalidate the previous token. The credential does not use a wall-clock refresh contract that would require mutating or replacing an otherwise current Runtime Pod.
 
 ### Connection validation
 
@@ -228,6 +229,14 @@ The server then:
 5. registers a connection using the authenticated Runtime ID and a non-secret credential fingerprint.
 
 Coordination-store Runner connection generation remains separate and continues to fence replaced physical Runner streams.
+
+### Existing Runtime storage preservation
+
+Runner authentication changes do not change logical Runtime identity, Runtime storage identity, or Provider lifecycle intent. Existing Runtime Pods may reconnect or be replaced during the compatible deployment, but the Kubernetes Provider must mount the same pre-existing PersistentVolumeClaim.
+
+The authentication rollout does not emit reset or delete lifecycle operations. Authentication migrations do not update Runtime lifecycle or storage state. Chart and Home resource removal is limited to obsolete authentication resources and uses no labels, ownership references, or pruning scope that can select Runtime PersistentVolumeClaims.
+
+The rollout validation captures each test Runtime's PVC name and UID plus a stored-data sentinel before deployment, then verifies the same name, UID, bound PersistentVolume, and sentinel after Provider and Runner reconnection.
 
 ### Provider and Runner changes
 
@@ -258,6 +267,8 @@ Home also removes the obsolete ExternalSecret and PushSecret resources. The Argo
 No Infisical values are added. Existing stale values, if any, are not part of the deployment contract and may be deleted operationally after recovery.
 
 No live-cluster write occurs without explicit requester approval.
+
+Existing Runtime PVCs are not migration resources in this rollout. Provider/Runner workload replacement must converge through the existing start or recreate path that preserves the PVC, never through reset or delete. Argo CD pruning applies only to obsolete chart-owned authentication resources and cannot match dynamically created Runtime PVCs.
 
 ## Failure Handling
 
@@ -290,9 +301,10 @@ Method registration is explicit at Runtime Control startup. Unknown or unavailab
 | Admin creates, rotates, or revokes a binding | Inventory, audit, connection authority, and optimistic version update consistently |
 | Conflicting bootstrap/Admin subject ownership | Reconciliation reports conflict and preserves the existing binding |
 | Runner with valid signed credential and current desired generation | Connects as the bound Runtime |
-| Runner token replayed for another Runtime, expired, or stale desired generation | Rejected before registration or stream authority expires |
+| Runner token replayed for another Runtime or stale desired generation | Rejected before registration or retained authority is accepted |
 | Helm render with Kubernetes Provider enabled | Contains projected token and TokenReview RBAC; contains no Provider/shared Runner Secret dependency |
 | Home render with compatible snapshot | Contains no obsolete auth Secret references and preserves TLS |
+| Existing Runtime across authentication rollout | Reconnects with the same PVC name, UID, bound PV, and stored data |
 
 ### E2E plan
 
@@ -308,11 +320,12 @@ If CI cannot provide a Kubernetes TokenReview API, deterministic server tests us
 - Provider connection persistence for both methods;
 - binding creation, bootstrap reconciliation, ownership conflict, optimistic mutation, rotation, revocation, audit, and Admin projection;
 - Runner credential signing, tamper rejection, Runtime binding, and stale-generation rejection;
-- evidence and Runner stream expiry;
+- Provider evidence expiry and Runner desired-generation fencing;
 - Kubernetes and Docker Provider Runner environment changes;
 - Runtime Control startup without the old shared token;
+- Provider start/recreate authentication transitions that preserve the existing PVC and never invoke reset/delete;
 - Helm schema, lint, and render tests;
-- Home pre-commit and Kustomize rendering.
+- Home pre-commit and Kustomize rendering, including proof that removed authentication resources cannot select or own Runtime PVCs.
 
 ### Fixtures and evidence
 

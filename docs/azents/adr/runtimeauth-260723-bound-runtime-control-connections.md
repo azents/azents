@@ -108,6 +108,20 @@ The PR stack includes the durable binding aggregate, the two Provider methods, c
 
 The implementation provides a reusable method contract and explicit connection-expiry handling so additional methods do not require another control-domain rewrite. The current delivery does not need to implement authentication methods other than Kubernetes ServiceAccount and Azents-issued token, nor cross-cluster issuer policy.
 
+### runtimeauth-260723/ADR-D8. Preserve existing Runtime storage identity during rollout
+
+The authentication cutover is a control-plane authentication change, not a Runtime storage migration. Existing logical Runtimes retain their current storage identity, and any Runtime Pod restart or replacement reuses the same PersistentVolumeClaim.
+
+Authentication migrations, reconciliation, Helm resources, Home manifests, and Argo CD pruning must not reset a Runtime or delete, recreate, rename, replace, select, or own Runtime PersistentVolumeClaims. Only an explicit pre-existing Runtime reset or delete operation may use the Provider's PVC deletion paths; the authentication rollout must never synthesize either operation.
+
+Validation records the PVC identity and stored-data sentinel before and after the compatible rollout.
+
+**Rejected alternatives**
+
+- Recreating Runtime PVCs as part of the authentication cutover.
+- Treating a newly provisioned volume with copied data as equivalent to retaining the existing PersistentVolume.
+- Relying only on Kubernetes reclaim policy after deleting a Runtime PVC.
+
 ## Consequences
 
 - Trusted Kubernetes bootstrap no longer depends on Azents-issued secret material.
@@ -117,6 +131,7 @@ The implementation provides a reusable method contract and explicit connection-e
 - Provider authentication bindings and binding-backed connection persistence require forward migrations.
 - Server, Provider, Runner, chart, and Home snapshot changes must be deployed as one compatible cutover.
 - The Admin surface grows a safe authentication-binding inventory and lifecycle workflow.
+- Existing Runtime storage remains attached through the cutover without a data or volume migration.
 
 ## Security Invariants
 
@@ -126,3 +141,4 @@ The implementation provides a reusable method contract and explicit connection-e
 - The Provider ServiceAccount receives no TokenReview or Secret-write permission.
 - Runtime and sandbox containers receive no Provider credential, host Docker socket, or generic privileged toggle.
 - Plaintext authentication material is excluded from logs, diagnostics, rendered manifests, and Git.
+- Authentication rollout resources cannot own, select, prune, reset, or replace existing Runtime PersistentVolumeClaims.
