@@ -23,7 +23,6 @@ __all__ = [
     "HealthV1Api",
     "InvitationV1Api",
     "ModelCatalogV1Api",
-    "RuntimeProviderEnrollmentV1Api",
     "RuntimeProviderV1Api",
     "SystemBootstrapV1Api",
     "SystemSettingsV1Api",
@@ -72,11 +71,20 @@ __all__ = [
     "PlatformGitHubAppFieldResponse",
     "PlatformGitHubAppHealthResponse",
     "PlatformGitHubAppPatchRequest",
+    "RuntimeProviderAuthMethod",
+    "RuntimeProviderAuthenticationBindingAuditEventResponse",
+    "RuntimeProviderAuthenticationBindingAuditListResponse",
+    "RuntimeProviderAuthenticationBindingCreateRequest",
+    "RuntimeProviderAuthenticationBindingListResponse",
+    "RuntimeProviderAuthenticationBindingResponse",
+    "RuntimeProviderAuthenticationBindingRevokeRequest",
+    "RuntimeProviderAuthenticationBindingRotateRequest",
+    "RuntimeProviderAuthenticationBindingRotateResponse",
     "RuntimeProviderAvailabilityMode",
     "RuntimeProviderAvailabilityRequest",
-    "RuntimeProviderCredentialRevokeResponse",
-    "RuntimeProviderEnrollmentGrantIssueRequest",
-    "RuntimeProviderEnrollmentGrantIssueResponse",
+    "RuntimeProviderBindingAuditEventType",
+    "RuntimeProviderBindingOwner",
+    "RuntimeProviderBindingState",
     "RuntimeProviderLifecycleState",
     "RuntimeProviderListResponse",
     "RuntimeProviderPolicyUpdateRequest",
@@ -134,7 +142,6 @@ from azentsadminclient.api.debug_v1_api import DebugV1Api as DebugV1Api
 from azentsadminclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api as ModelCatalogV1Api
-from azentsadminclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api as RuntimeProviderEnrollmentV1Api
 from azentsadminclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
 from azentsadminclient.api.system_bootstrap_v1_api import SystemBootstrapV1Api as SystemBootstrapV1Api
 from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api as SystemSettingsV1Api
@@ -187,11 +194,20 @@ from azentsadminclient.models.platform_git_hub_app_effective_status import Platf
 from azentsadminclient.models.platform_git_hub_app_field_response import PlatformGitHubAppFieldResponse as PlatformGitHubAppFieldResponse
 from azentsadminclient.models.platform_git_hub_app_health_response import PlatformGitHubAppHealthResponse as PlatformGitHubAppHealthResponse
 from azentsadminclient.models.platform_git_hub_app_patch_request import PlatformGitHubAppPatchRequest as PlatformGitHubAppPatchRequest
+from azentsadminclient.models.runtime_provider_auth_method import RuntimeProviderAuthMethod as RuntimeProviderAuthMethod
+from azentsadminclient.models.runtime_provider_authentication_binding_audit_event_response import RuntimeProviderAuthenticationBindingAuditEventResponse as RuntimeProviderAuthenticationBindingAuditEventResponse
+from azentsadminclient.models.runtime_provider_authentication_binding_audit_list_response import RuntimeProviderAuthenticationBindingAuditListResponse as RuntimeProviderAuthenticationBindingAuditListResponse
+from azentsadminclient.models.runtime_provider_authentication_binding_create_request import RuntimeProviderAuthenticationBindingCreateRequest as RuntimeProviderAuthenticationBindingCreateRequest
+from azentsadminclient.models.runtime_provider_authentication_binding_list_response import RuntimeProviderAuthenticationBindingListResponse as RuntimeProviderAuthenticationBindingListResponse
+from azentsadminclient.models.runtime_provider_authentication_binding_response import RuntimeProviderAuthenticationBindingResponse as RuntimeProviderAuthenticationBindingResponse
+from azentsadminclient.models.runtime_provider_authentication_binding_revoke_request import RuntimeProviderAuthenticationBindingRevokeRequest as RuntimeProviderAuthenticationBindingRevokeRequest
+from azentsadminclient.models.runtime_provider_authentication_binding_rotate_request import RuntimeProviderAuthenticationBindingRotateRequest as RuntimeProviderAuthenticationBindingRotateRequest
+from azentsadminclient.models.runtime_provider_authentication_binding_rotate_response import RuntimeProviderAuthenticationBindingRotateResponse as RuntimeProviderAuthenticationBindingRotateResponse
 from azentsadminclient.models.runtime_provider_availability_mode import RuntimeProviderAvailabilityMode as RuntimeProviderAvailabilityMode
 from azentsadminclient.models.runtime_provider_availability_request import RuntimeProviderAvailabilityRequest as RuntimeProviderAvailabilityRequest
-from azentsadminclient.models.runtime_provider_credential_revoke_response import RuntimeProviderCredentialRevokeResponse as RuntimeProviderCredentialRevokeResponse
-from azentsadminclient.models.runtime_provider_enrollment_grant_issue_request import RuntimeProviderEnrollmentGrantIssueRequest as RuntimeProviderEnrollmentGrantIssueRequest
-from azentsadminclient.models.runtime_provider_enrollment_grant_issue_response import RuntimeProviderEnrollmentGrantIssueResponse as RuntimeProviderEnrollmentGrantIssueResponse
+from azentsadminclient.models.runtime_provider_binding_audit_event_type import RuntimeProviderBindingAuditEventType as RuntimeProviderBindingAuditEventType
+from azentsadminclient.models.runtime_provider_binding_owner import RuntimeProviderBindingOwner as RuntimeProviderBindingOwner
+from azentsadminclient.models.runtime_provider_binding_state import RuntimeProviderBindingState as RuntimeProviderBindingState
 from azentsadminclient.models.runtime_provider_lifecycle_state import RuntimeProviderLifecycleState as RuntimeProviderLifecycleState
 from azentsadminclient.models.runtime_provider_list_response import RuntimeProviderListResponse as RuntimeProviderListResponse
 from azentsadminclient.models.runtime_provider_policy_update_request import RuntimeProviderPolicyUpdateRequest as RuntimeProviderPolicyUpdateRequest

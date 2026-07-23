@@ -301,6 +301,79 @@ class RuntimeProviderControlRepository:
             )
         return self._build_credential(credential) if credential is not None else None
 
+    async def revoke_binding_authority(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+        revoked_at: datetime.datetime,
+        revoked_by_user_id: str | None,
+    ) -> None:
+        """Revoke every outstanding grant, credential, and connection for a binding."""
+        await session.execute(
+            sa.update(RDBRuntimeProviderEnrollmentGrant)
+            .where(
+                RDBRuntimeProviderEnrollmentGrant.binding_id == binding_id,
+                RDBRuntimeProviderEnrollmentGrant.state
+                == RuntimeProviderEnrollmentGrantState.ISSUED,
+            )
+            .values(
+                state=RuntimeProviderEnrollmentGrantState.REVOKED,
+                revoked_at=revoked_at,
+                revoked_by_user_id=revoked_by_user_id,
+            )
+        )
+        await session.execute(
+            sa.update(RDBRuntimeProviderCredential)
+            .where(
+                RDBRuntimeProviderCredential.binding_id == binding_id,
+                RDBRuntimeProviderCredential.state
+                == RuntimeProviderCredentialState.ACTIVE,
+            )
+            .values(
+                state=RuntimeProviderCredentialState.REVOKED,
+                revoked_at=revoked_at,
+                revoked_by_user_id=revoked_by_user_id,
+            )
+        )
+        await session.execute(
+            sa.update(RDBRuntimeProviderConnection)
+            .where(
+                RDBRuntimeProviderConnection.binding_id == binding_id,
+                RDBRuntimeProviderConnection.status
+                == RuntimeProviderConnectionStatus.CONNECTED,
+            )
+            .values(
+                status=RuntimeProviderConnectionStatus.DISCONNECTED,
+                disconnected_at=revoked_at,
+            )
+        )
+
+    async def has_connected_connection_for_binding(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Return whether one binding retains a connected Provider stream."""
+        result = await session.execute(
+            sa.select(
+                sa.exists().where(
+                    RDBRuntimeProviderConnection.binding_id == binding_id,
+                    RDBRuntimeProviderConnection.status
+                    == RuntimeProviderConnectionStatus.CONNECTED,
+                    _active_connection_binding(),
+                    _active_connection_provider(),
+                    sa.or_(
+                        RDBRuntimeProviderConnection.evidence_expires_at.is_(None),
+                        RDBRuntimeProviderConnection.evidence_expires_at > now,
+                    ),
+                )
+            )
+        )
+        return result.scalar_one()
+
     async def create_connection(
         self,
         session: AsyncSession,

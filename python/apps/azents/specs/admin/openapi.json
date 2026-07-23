@@ -950,6 +950,345 @@
         }
       }
     },
+    "/runtime-provider/v1/providers/{provider_id}/authentication-bindings": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "List Auth Bindings",
+        "description": "List secret-safe authentication bindings for one Provider.",
+        "operationId": "runtime_provider_v1_list_auth_bindings",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Create Auth Binding",
+        "description": "Create one Admin-owned issued-token authentication binding.",
+        "operationId": "runtime_provider_v1_create_auth_binding",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/authentication-bindings/{binding_id}": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Get Auth Binding",
+        "description": "Inspect one secret-safe authentication binding.",
+        "operationId": "runtime_provider_v1_get_auth_binding",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Binding Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/authentication-bindings/{binding_id}/rotate": {
+      "post": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Rotate Auth Binding",
+        "description": "Rotate binding-scoped enrollment authority and return its secret once.",
+        "operationId": "runtime_provider_v1_rotate_auth_binding",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Binding Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingRotateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingRotateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/authentication-bindings/{binding_id}/revoke": {
+      "post": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Revoke Auth Binding",
+        "description": "Revoke one binding and all retained Provider authority.",
+        "operationId": "runtime_provider_v1_revoke_auth_binding",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Binding Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingRevokeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/authentication-bindings/{binding_id}/audit-events": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "List Auth Binding Audit Events",
+        "description": "List metadata-only binding audit history.",
+        "operationId": "runtime_provider_v1_list_auth_binding_audit_events",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Binding Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingAuditListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime-provider/v1/providers": {
       "get": {
         "tags": [
@@ -1124,112 +1463,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RuntimeProviderResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/runtime-provider-enrollment/v1/runtime-providers/{provider_id}/enrollment-grants": {
-      "post": {
-        "tags": [
-          "Runtime Provider Enrollment v1"
-        ],
-        "summary": "Issue Enrollment Grant",
-        "description": "Issue one-time Provider enrollment authority for a Deployment Operator.",
-        "operationId": "runtime_provider_enrollment_v1_issue_enrollment_grant",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "provider_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Provider Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RuntimeProviderEnrollmentGrantIssueRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuntimeProviderEnrollmentGrantIssueResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/runtime-provider-enrollment/v1/runtime-provider-credentials/{credential_id}": {
-      "delete": {
-        "tags": [
-          "Runtime Provider Enrollment v1"
-        ],
-        "summary": "Revoke Credential",
-        "description": "Revoke one Provider credential without deleting its audit history.",
-        "operationId": "runtime_provider_enrollment_v1_revoke_credential",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "credential_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Credential Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuntimeProviderCredentialRevokeResponse"
                 }
               }
             }
@@ -4005,6 +4238,384 @@
         "title": "PlatformGitHubAppPatchRequest",
         "description": "Optimistic partial update for the Platform GitHub App Admin base."
       },
+      "RuntimeProviderAuthMethod": {
+        "type": "string",
+        "enum": [
+          "azents_issued_token",
+          "kubernetes_service_account"
+        ],
+        "title": "RuntimeProviderAuthMethod",
+        "description": "Authentication method used by a Provider Control connection."
+      },
+      "RuntimeProviderAuthenticationBindingAuditEventResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "binding_id": {
+            "type": "string",
+            "title": "Binding Id"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/RuntimeProviderBindingAuditEventType"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "previous_admin_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Admin Version"
+          },
+          "new_admin_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Admin Version"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "binding_id",
+          "event_type",
+          "actor_user_id",
+          "previous_admin_version",
+          "new_admin_version",
+          "metadata",
+          "created_at"
+        ],
+        "title": "RuntimeProviderAuthenticationBindingAuditEventResponse",
+        "description": "Metadata-only binding audit event."
+      },
+      "RuntimeProviderAuthenticationBindingAuditListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingAuditEventResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "RuntimeProviderAuthenticationBindingAuditListResponse",
+        "description": "Binding audit history response."
+      },
+      "RuntimeProviderAuthenticationBindingCreateRequest": {
+        "properties": {
+          "auth_method": {
+            "$ref": "#/components/schemas/RuntimeProviderAuthMethod"
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Subject"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          }
+        },
+        "type": "object",
+        "required": [
+          "auth_method",
+          "subject",
+          "config"
+        ],
+        "title": "RuntimeProviderAuthenticationBindingCreateRequest",
+        "description": "Create one Admin-owned Provider authentication binding."
+      },
+      "RuntimeProviderAuthenticationBindingListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "RuntimeProviderAuthenticationBindingListResponse",
+        "description": "Provider-scoped authentication binding inventory."
+      },
+      "RuntimeProviderAuthenticationBindingResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "auth_method": {
+            "$ref": "#/components/schemas/RuntimeProviderAuthMethod"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RuntimeProviderBindingState"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/RuntimeProviderBindingOwner"
+          },
+          "bootstrap_declaration_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bootstrap Declaration Id"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "admin_version": {
+            "type": "integer",
+            "title": "Admin Version"
+          },
+          "connected": {
+            "type": "boolean",
+            "title": "Connected"
+          },
+          "last_authenticated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Authenticated At"
+          },
+          "last_connected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Connected At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "revoked_by_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked By User Id"
+          },
+          "revocation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revocation Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_id",
+          "auth_method",
+          "subject",
+          "state",
+          "owner",
+          "bootstrap_declaration_id",
+          "config",
+          "admin_version",
+          "connected",
+          "last_authenticated_at",
+          "last_connected_at",
+          "revoked_at",
+          "revoked_by_user_id",
+          "revocation_reason",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RuntimeProviderAuthenticationBindingResponse",
+        "description": "Secret-safe Provider authentication binding."
+      },
+      "RuntimeProviderAuthenticationBindingRevokeRequest": {
+        "properties": {
+          "expected_admin_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Admin Version"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_admin_version",
+          "reason"
+        ],
+        "title": "RuntimeProviderAuthenticationBindingRevokeRequest",
+        "description": "Revoke a binding using optimistic concurrency."
+      },
+      "RuntimeProviderAuthenticationBindingRotateRequest": {
+        "properties": {
+          "expected_admin_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Admin Version"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_admin_version",
+          "expires_at"
+        ],
+        "title": "RuntimeProviderAuthenticationBindingRotateRequest",
+        "description": "Rotate issued-token enrollment authority."
+      },
+      "RuntimeProviderAuthenticationBindingRotateResponse": {
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/RuntimeProviderAuthenticationBindingResponse"
+          },
+          "grant_id": {
+            "type": "string",
+            "title": "Grant Id"
+          },
+          "secret": {
+            "type": "string",
+            "title": "Secret"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "binding",
+          "grant_id",
+          "secret",
+          "expires_at"
+        ],
+        "title": "RuntimeProviderAuthenticationBindingRotateResponse",
+        "description": "One-time enrollment secret plus the rotated safe binding."
+      },
       "RuntimeProviderAvailabilityMode": {
         "type": "string",
         "enum": [
@@ -4029,64 +4640,37 @@
         "title": "RuntimeProviderAvailabilityRequest",
         "description": "Workspace allow-list replacement request."
       },
-      "RuntimeProviderCredentialRevokeResponse": {
-        "properties": {
-          "revoked": {
-            "type": "boolean",
-            "title": "Revoked"
-          }
-        },
-        "type": "object",
-        "required": [
+      "RuntimeProviderBindingAuditEventType": {
+        "type": "string",
+        "enum": [
+          "created",
+          "reconciled",
+          "authenticated",
+          "connected",
+          "rotated",
+          "revoked",
+          "conflict"
+        ],
+        "title": "RuntimeProviderBindingAuditEventType",
+        "description": "Metadata-only authentication binding audit event."
+      },
+      "RuntimeProviderBindingOwner": {
+        "type": "string",
+        "enum": [
+          "admin",
+          "bootstrap"
+        ],
+        "title": "RuntimeProviderBindingOwner",
+        "description": "Authority that owns a durable Provider authentication binding."
+      },
+      "RuntimeProviderBindingState": {
+        "type": "string",
+        "enum": [
+          "active",
           "revoked"
         ],
-        "title": "RuntimeProviderCredentialRevokeResponse",
-        "description": "Result of revoking one Provider credential."
-      },
-      "RuntimeProviderEnrollmentGrantIssueRequest": {
-        "properties": {
-          "expires_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Expires At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "expires_at"
-        ],
-        "title": "RuntimeProviderEnrollmentGrantIssueRequest",
-        "description": "System Admin enrollment grant issuance input."
-      },
-      "RuntimeProviderEnrollmentGrantIssueResponse": {
-        "properties": {
-          "grant_id": {
-            "type": "string",
-            "title": "Grant Id"
-          },
-          "provider_id": {
-            "type": "string",
-            "title": "Provider Id"
-          },
-          "secret": {
-            "type": "string",
-            "title": "Secret"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Expires At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "grant_id",
-          "provider_id",
-          "secret",
-          "expires_at"
-        ],
-        "title": "RuntimeProviderEnrollmentGrantIssueResponse",
-        "description": "One-time enrollment grant returned only to a System Admin."
+        "title": "RuntimeProviderBindingState",
+        "description": "Lifecycle state of a durable Provider authentication binding."
       },
       "RuntimeProviderLifecycleState": {
         "type": "string",
@@ -5619,10 +6203,6 @@
     {
       "name": "Runtime Provider v1",
       "description": "\nRuntime Provider API (Admin)\n\nInventory and mutable administrative policy for durable Runtime Providers.\n"
-    },
-    {
-      "name": "Runtime Provider Enrollment v1",
-      "description": "\nRuntime Provider Enrollment API (Admin)\n\nSystem Admin control-plane operations for Provider enrollment authority.\n"
     },
     {
       "name": "System v1",

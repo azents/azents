@@ -7,6 +7,7 @@ import {
   Divider,
   Group,
   Loader,
+  Modal,
   Paper,
   ScrollArea,
   Stack,
@@ -15,6 +16,9 @@ import {
 } from "@mantine/core";
 import { IconCircleCheck, IconCircleX, IconServer } from "@tabler/icons-react";
 import type {
+  RuntimeProviderAuthAuditState,
+  RuntimeProviderAuthBindingItem,
+  RuntimeProviderAuthBindingState,
   RuntimeProviderItem,
   RuntimeProvidersPageContentProps,
 } from "../containers/useRuntimeProvidersPageContainer";
@@ -75,14 +79,190 @@ function ProviderListItem({
   );
 }
 
+function AuthenticationSection({
+  state,
+  mutating,
+  onCreate,
+  onRotate,
+  onRevoke,
+  onViewAudit,
+}: {
+  state: RuntimeProviderAuthBindingState;
+  mutating: boolean;
+  onCreate: () => void;
+  onRotate: (binding: RuntimeProviderAuthBindingItem) => void;
+  onRevoke: (binding: RuntimeProviderAuthBindingItem) => void;
+  onViewAudit: (binding: RuntimeProviderAuthBindingItem) => void;
+}): React.ReactElement {
+  return (
+    <Stack gap="sm">
+      <Group justify="space-between" align="flex-start">
+        <Stack gap={2}>
+          <Text size="sm" fw={600}>
+            Authentication
+          </Text>
+          <Text size="xs" c="dimmed">
+            Binding identity, lifecycle, ownership, and connection health.
+          </Text>
+        </Stack>
+        <Button size="xs" variant="light" loading={mutating} onClick={onCreate}>
+          Create issued-token binding
+        </Button>
+      </Group>
+
+      {state.type === "IDLE" && (
+        <Text size="sm" c="dimmed">
+          Select a Provider to inspect authentication.
+        </Text>
+      )}
+      {state.type === "LOADING" && <Loader size="sm" />}
+      {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
+      {state.type === "LOADED" && state.items.length === 0 && (
+        <Alert color="yellow">No authentication bindings.</Alert>
+      )}
+      {state.type === "LOADED" &&
+        state.items.map((binding) => (
+          <Paper key={binding.id} withBorder p="sm" radius="sm">
+            <Stack gap="xs">
+              <Group justify="space-between" align="flex-start" wrap="nowrap">
+                <Stack gap={2}>
+                  <Group gap="xs">
+                    <Badge variant="light">{binding.auth_method}</Badge>
+                    <Badge
+                      color={binding.state === "active" ? "green" : "gray"}
+                      variant="light"
+                    >
+                      {binding.state}
+                    </Badge>
+                    <Badge
+                      color={binding.connected ? "blue" : "gray"}
+                      variant="light"
+                    >
+                      {binding.connected ? "Connected" : "Disconnected"}
+                    </Badge>
+                  </Group>
+                  <Text size="sm" ff="monospace">
+                    {binding.subject}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    Owner: {binding.owner} · Version {binding.admin_version}
+                  </Text>
+                </Stack>
+                <Group gap="xs">
+                  <Button
+                    size="xs"
+                    variant="subtle"
+                    onClick={() => onViewAudit(binding)}
+                  >
+                    Audit
+                  </Button>
+                  {binding.owner === "admin" && binding.state === "active" && (
+                    <>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        loading={mutating}
+                        onClick={() => onRotate(binding)}
+                      >
+                        Rotate
+                      </Button>
+                      <Button
+                        size="xs"
+                        color="red"
+                        variant="light"
+                        loading={mutating}
+                        onClick={() => onRevoke(binding)}
+                      >
+                        Revoke
+                      </Button>
+                    </>
+                  )}
+                </Group>
+              </Group>
+              {binding.owner === "bootstrap" && (
+                <Text size="xs" c="dimmed">
+                  Managed by bootstrap declaration. Admin actions are read-only.
+                </Text>
+              )}
+              <Text size="xs" c="dimmed">
+                Last authenticated: {binding.last_authenticated_at ?? "Never"} ·
+                Last connected: {binding.last_connected_at ?? "Never"}
+              </Text>
+            </Stack>
+          </Paper>
+        ))}
+    </Stack>
+  );
+}
+
+function AuthenticationAudit({
+  state,
+}: {
+  state: RuntimeProviderAuthAuditState;
+}): React.ReactElement | null {
+  switch (state.type) {
+    case "IDLE":
+      return null;
+    case "LOADING":
+      return <Loader size="sm" />;
+    case "ERROR":
+      return <Alert color="red">{state.message}</Alert>;
+    case "LOADED":
+      return (
+        <Stack gap="sm">
+          <Text size="sm" ff="monospace">
+            {state.binding.subject}
+          </Text>
+          {state.items.length === 0 && (
+            <Alert color="yellow">No audit events.</Alert>
+          )}
+          {state.items.map((event) => (
+            <Paper key={event.id} withBorder p="sm" radius="sm">
+              <Stack gap={2}>
+                <Group justify="space-between">
+                  <Badge variant="light">{event.event_type}</Badge>
+                  <Text size="xs" c="dimmed">
+                    {event.created_at}
+                  </Text>
+                </Group>
+                <Text size="xs" c="dimmed">
+                  Actor: {event.actor_user_id ?? "System"} · Version:{" "}
+                  {event.previous_admin_version ?? "—"} →{" "}
+                  {event.new_admin_version ?? "—"}
+                </Text>
+                {event.metadata && (
+                  <Text size="xs" ff="monospace">
+                    {JSON.stringify(event.metadata)}
+                  </Text>
+                )}
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+      );
+  }
+}
+
 function ProviderDetail({
   provider,
+  authBindingState,
+  authMutating,
   updating,
   onToggleEnabled,
+  onCreateAuthBinding,
+  onRotateAuthBinding,
+  onRevokeAuthBinding,
+  onOpenAuthAudit,
 }: {
   provider: RuntimeProviderItem;
+  authBindingState: RuntimeProviderAuthBindingState;
+  authMutating: boolean;
   updating: boolean;
   onToggleEnabled: () => void;
+  onCreateAuthBinding: () => void;
+  onRotateAuthBinding: (binding: RuntimeProviderAuthBindingItem) => void;
+  onRevokeAuthBinding: (binding: RuntimeProviderAuthBindingItem) => void;
+  onOpenAuthAudit: (binding: RuntimeProviderAuthBindingItem) => void;
 }): React.ReactElement {
   return (
     <Stack gap="lg">
@@ -161,6 +341,16 @@ function ProviderDetail({
           </Text>
         </Stack>
       </Stack>
+
+      <Divider />
+      <AuthenticationSection
+        state={authBindingState}
+        mutating={authMutating}
+        onCreate={onCreateAuthBinding}
+        onRotate={onRotateAuthBinding}
+        onRevoke={onRevokeAuthBinding}
+        onViewAudit={onOpenAuthAudit}
+      />
     </Stack>
   );
 }
@@ -168,13 +358,46 @@ function ProviderDetail({
 export function RuntimeProvidersPageContent({
   state,
   selectedProvider,
+  authBindingState,
+  authAuditState,
+  authMutating,
+  oneTimeSecret,
   updating,
   errorMessage,
   onSelectProvider,
   onToggleEnabled,
+  onCreateAuthBinding,
+  onRotateAuthBinding,
+  onRevokeAuthBinding,
+  onOpenAuthAudit,
+  onCloseAuthAudit,
+  onClearOneTimeSecret,
 }: RuntimeProvidersPageContentProps): React.ReactElement {
   return (
     <Stack gap="lg" p="md">
+      <Modal
+        opened={oneTimeSecret !== null}
+        onClose={onClearOneTimeSecret}
+        title="One-time enrollment secret"
+      >
+        <Stack gap="sm">
+          <Alert color="yellow">
+            Copy this secret now. It cannot be displayed again.
+          </Alert>
+          <Text ff="monospace" style={{ overflowWrap: "anywhere" }}>
+            {oneTimeSecret?.secret}
+          </Text>
+          <Button onClick={onClearOneTimeSecret}>Done</Button>
+        </Stack>
+      </Modal>
+      <Modal
+        opened={authAuditState.type !== "IDLE"}
+        onClose={onCloseAuthAudit}
+        title="Authentication audit"
+      >
+        <AuthenticationAudit state={authAuditState} />
+      </Modal>
+
       <Stack gap={4}>
         <Title order={2}>Runtime Providers</Title>
         <Text c="dimmed">
@@ -183,7 +406,6 @@ export function RuntimeProvidersPageContent({
       </Stack>
 
       {errorMessage && <Alert color="red">{errorMessage}</Alert>}
-
       {state.type === "LOADING" && <Loader />}
       {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
       {state.type === "LOADED" && state.items.length === 0 && (
@@ -213,8 +435,14 @@ export function RuntimeProvidersPageContent({
               {selectedProvider ? (
                 <ProviderDetail
                   provider={selectedProvider}
+                  authBindingState={authBindingState}
+                  authMutating={authMutating}
                   updating={updating}
                   onToggleEnabled={() => onToggleEnabled(selectedProvider)}
+                  onCreateAuthBinding={onCreateAuthBinding}
+                  onRotateAuthBinding={onRotateAuthBinding}
+                  onRevokeAuthBinding={onRevokeAuthBinding}
+                  onOpenAuthAudit={onOpenAuthAudit}
                 />
               ) : (
                 <Text c="dimmed">Select a Provider to inspect its state.</Text>

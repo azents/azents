@@ -216,6 +216,28 @@ class RuntimeProviderAuthBindingRepository:
             )
         return self._build(binding) if binding is not None else None
 
+    async def rotate(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+        expected_admin_version: int,
+    ) -> RuntimeProviderAuthBinding | None:
+        """Advance one active binding version using optimistic concurrency."""
+        result = await session.execute(
+            sa.update(RDBRuntimeProviderAuthBinding)
+            .where(
+                RDBRuntimeProviderAuthBinding.id == binding_id,
+                RDBRuntimeProviderAuthBinding.state
+                == RuntimeProviderBindingState.ACTIVE,
+                RDBRuntimeProviderAuthBinding.admin_version == expected_admin_version,
+            )
+            .values(admin_version=RDBRuntimeProviderAuthBinding.admin_version + 1)
+            .returning(RDBRuntimeProviderAuthBinding)
+        )
+        binding = result.scalar_one_or_none()
+        return self._build(binding) if binding is not None else None
+
     async def append_audit_event(
         self,
         session: AsyncSession,
