@@ -867,13 +867,29 @@ async def load_skill_projection_for_actions(
     )
     if vfs_projection_service is None:
         return filesystem
-    projection = await vfs_projection_service.projection_for_actions(
-        agent_id=agent_id,
-        session_id=session_id,
-        workspace_id=workspace_id,
-        running=run_state == AgentSessionRunState.RUNNING,
-        active_run_id=active_run_id,
-    )
+    try:
+        projection = await vfs_projection_service.projection_for_actions(
+            agent_id=agent_id,
+            session_id=session_id,
+            workspace_id=workspace_id,
+            running=run_state == AgentSessionRunState.RUNNING,
+            active_run_id=active_run_id,
+        )
+    except VfsFileResolutionError as exc:
+        if exc.code != "storage_unavailable":
+            raise
+        logger.warning(
+            "Managed Skill actions unavailable because the VFS projection is not ready",
+            extra={
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "workspace_id": workspace_id,
+                "run_state": run_state.value,
+                "active_run_id": active_run_id,
+                "vfs_error_code": exc.code,
+            },
+        )
+        return filesystem
     return filesystem.model_copy(
         update={
             "items": [
