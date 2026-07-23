@@ -53,7 +53,6 @@ _SLACK_PROVIDER_INTERNAL_API_URL = "http://slack-fake:8083/api"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
 _RUNTIME_CONTAINER_NAME_RE = re.compile(r"^azents-runtime-[0-9a-f]{32}$")
-_ECR_CACHE_PREFIX = "azents-production-server"
 _DOCKER_BUILDER_ENV = "AZENTS_E2E_DOCKER_BUILDER"
 _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
 _LOCAL_DOCKER_CACHE_WRITE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_WRITE_ROOT"
@@ -496,12 +495,7 @@ def _build_e2e_image(
     cache_to: dict[str, str] | None = None
     builder = os.environ.get(_DOCKER_BUILDER_ENV)
 
-    ecr_registry = os.environ.get("ECR_REGISTRY")
-    if ecr_registry:
-        cache_uri = f"{ecr_registry}/{_ECR_CACHE_PREFIX}/{cache_repository}:cache"
-        cache_from.append({"type": "registry", "ref": cache_uri})
-        cache_to = {"type": "registry", "ref": cache_uri, "mode": "min"}
-    elif builder:
+    if builder:
         local_cache_root = os.environ.get(_LOCAL_DOCKER_CACHE_ROOT_ENV)
         if local_cache_root:
             local_cache_path = Path(local_cache_root) / cache_repository
