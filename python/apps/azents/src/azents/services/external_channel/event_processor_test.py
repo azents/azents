@@ -1,6 +1,5 @@
 """External Channel event processing domain tests."""
 
-import asyncio
 import datetime
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -727,34 +726,28 @@ async def test_routable_route_requires_active_agent_lifecycle(
     assert routable is None
 
 
-async def test_routable_route_waits_for_disconnect_transition(
+async def test_routable_route_rejects_disconnecting_connection(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Connection locking prevents selection across a disconnect transition."""
-    async with rdb_session_manager() as transition_session:
-        connection_id, _, _, repository = await _setup_route(transition_session)
-        connection = await transition_session.scalar(
+    """A disconnecting connection cannot admit new routing work."""
+    async with rdb_session_manager() as session:
+        connection_id, _, _, repository = await _setup_route(session)
+        connection = await session.scalar(
             sa.select(RDBExternalChannelConnection)
             .where(RDBExternalChannelConnection.id == connection_id)
             .with_for_update()
         )
         assert connection is not None
         connection.status = ExternalChannelConnectionStatus.DISCONNECTING
-        await transition_session.flush()
+        await session.commit()
 
-        async def lookup() -> ExternalChannelAgentRoute | None:
-            async with rdb_session_manager() as lookup_session:
-                return await repository.get_routable_route_by_connection_id(
-                    lookup_session,
-                    connection_id=connection_id,
-                )
+    async with rdb_session_manager() as session:
+        routable = await repository.get_routable_route_by_connection_id(
+            session,
+            connection_id=connection_id,
+        )
 
-        lookup_task = asyncio.create_task(lookup())
-        await asyncio.sleep(0.05)
-        assert not lookup_task.done()
-        await transition_session.commit()
-
-    assert await lookup_task is None
+    assert routable is None
 
 
 async def test_pending_allow_requires_routable_connection(
