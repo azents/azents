@@ -11,6 +11,7 @@ Use this sequence:
 requirement interview
 → confirmed Requirements snapshot
 → system-grounded problem framing
+→ complete ADR decision-backlog briefing
 → ADR decisions
 → complete design draft
 → feasibility validation
@@ -159,9 +160,28 @@ Capture:
 
 Do not treat assumptions as current behavior. Do not let existing code structure silently redefine the confirmed Requirements.
 
-## Phase 4: ADR baseline and design decisions
+## Phase 4: ADR decision backlog, baseline, and discussion
 
-Create the ADR before accepting the first design decision. The initial ADR may contain unresolved questions while discussion is active.
+Before discussing any individual ADR decision, present the complete current
+design-decision backlog to the user. This briefing is mandatory in collaborative
+mode and must:
+
+- list every currently known hard-to-reverse architecture or product-contract
+  decision that requires requester judgment;
+- show the intended discussion order and important dependencies;
+- keep trivial, reversible engineering choices out of the requester decision list;
+- identify decisions already fixed by confirmed Requirements rather than reopening
+  them; and
+- remain visible as an explicit checklist with pending, current, and accepted items.
+
+If later research, an accepted decision, or a blocker adds, removes, splits, or
+reorders a decision, update and re-brief the complete backlog before discussing the
+next decision. Do not silently append a new decision during one-at-a-time
+discussion.
+
+After the backlog briefing, create the ADR before accepting the first design
+decision. The initial ADR may contain the unresolved backlog while discussion is
+active.
 
 For Azents, create the ADR at `docs/azents/adr/{requirements-basename}.md`. Use `<snapshot>/ADR` for the document and `<snapshot>/ADR-DN` for accepted decisions. Keep all hard-to-reverse decisions for the snapshot in this one ADR. Do not allocate a global ADR number. Legacy numbered ADRs are historical inputs only and are not valid current ADR files after migration.
 
@@ -308,6 +328,8 @@ For final output, use:
 - Do not let research subagents own or interrupt the interview.
 - Do not turn benchmark patterns into requirements without user acceptance.
 - Do not create an ADR before the Requirements document is confirmed.
+- Do not begin individual ADR decision discussion before briefing the complete
+  current decision backlog.
 - Do not duplicate the Requirements source of truth in the ADR or design.
 - Do not create or retain a numbered ADR file, or use a different primary Design basename, for an Azents development snapshot. Legacy numbered ADRs may appear only in explicit historical provenance or ambiguity records.
 - Do not silently weaken a requirement to avoid a feasibility problem.

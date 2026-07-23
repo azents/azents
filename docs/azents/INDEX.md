@@ -156,6 +156,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Adopt Agent File Exchange Storage Separate from Sandbox Workspace Historical Requirements Reconstruction](requirements/file-260505-file-exchange.md) | file-260505 | 2026-05-05 | 2026-05-06 |
 | [Attachment, Artifact, and FilePart lifecycle Historical Requirements Reconstruction](requirements/file-260601-file-media-resource-lifecycle.md) | file-260601 | 2026-06-01 | 2026-06-01 |
 | [Add Agent Workspace File Management Operations Historical Requirements Reconstruction](requirements/file-260628-file-management.md) | file-260628 | 2026-06-28 | - |
+| [External Channel File Transfer Requirements](requirements/files-260723-external-channel-transfer.md) | files-260723 | 2026-07-23 | - |
 | [Filesystem Skill Projection Revisions Historical Requirements Reconstruction](requirements/filesystem-260701-filesystem-skill-projection-revisions.md) | filesystem-260701 | 2026-07-01 | - |
 | [Fold Turn Eligibility with Failure Veto Historical Requirements Reconstruction](requirements/fold-260712-fold-turn-eligibility-with-failure-veto.md) | fold-260712 | 2026-07-12 | - |
 | [Agent User Folder Recognition Historical Requirements Reconstruction](requirements/folder-260403-folder-recognition.md) | folder-260403 | 2026-04-03 | 2026-04-03 |
@@ -482,6 +483,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Adopt Agent File Exchange Storage Separate from Sandbox Workspace](adr/file-260505-file-exchange.md)
 - [Attachment, Artifact, and FilePart lifecycle](adr/file-260601-file-media-resource-lifecycle.md)
 - [Add Agent Workspace File Management Operations](adr/file-260628-file-management.md)
+- [External Channel File Transfer](adr/files-260723-external-channel-transfer.md)
 - [Filesystem Skill Projection Revisions](adr/filesystem-260701-filesystem-skill-projection-revisions.md)
 - [Fold Turn Eligibility with Failure Veto](adr/fold-260712-fold-turn-eligibility-with-failure-veto.md)
 - [Agent User Folder Recognition Historical Decision Reconstruction](adr/folder-260403-folder-recognition.md)
