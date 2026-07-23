@@ -3,6 +3,7 @@
 import dataclasses
 import hashlib
 import json
+import logging
 import os
 from collections.abc import Mapping, Sequence
 from typing import ClassVar
@@ -11,6 +12,10 @@ from openai.types.responses.response_includable import ResponseIncludable
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.engine.events.external_channel_rendering import (
+    render_external_channel_message,
+    render_external_channel_turn,
+)
 from azents.engine.events.file_parts import (
     FilePartLoweringCapabilities,
     ModelFileResolver,
@@ -26,9 +31,9 @@ from azents.engine.events.provider_tool_rendering import render_provider_tool_se
 from azents.engine.events.responses_continuation import sanitize_responses_native_item
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
-    format_goal_continuation_reminder,
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
+    format_idle_continuation_reminder,
     format_interrupted_reminder,
     format_plain_system_reminder,
 )
@@ -41,6 +46,7 @@ from azents.engine.events.types import (
     ClientToolResultPayload,
     CompactionSummaryPayload,
     Event,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     InputContentPart,
     InputTextPart,
@@ -69,6 +75,7 @@ _PROMPT_CACHE_KEY_PREFIX = "azs"
 _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
 _REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
 _HISTORICAL_CUSTOM_TOOL_OUTPUT_MAX_CHARS = 2_000
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -240,7 +247,38 @@ class ResponsesRequestLowerer:
             kwargs["instructions"] = instructions
 
         replayable_plaintext_custom_call_ids: set[str] = set()
-        for event in transcript:
+        seen_external_batch_ids: set[str] = set()
+        index = 0
+        while index < len(transcript):
+            event = transcript[index]
+            if isinstance(event.payload, ExternalChannelMessagePayload):
+                batch_id = event.payload.invocation_batch_id
+                if batch_id in seen_external_batch_ids:
+                    logger.warning(
+                        "External invocation batch is not contiguous in transcript",
+                        extra={"invocation_batch_id": batch_id},
+                    )
+                seen_external_batch_ids.add(batch_id)
+                batch: list[ExternalChannelMessagePayload] = []
+                while index < len(transcript):
+                    candidate = transcript[index]
+                    if (
+                        not isinstance(
+                            candidate.payload,
+                            ExternalChannelMessagePayload,
+                        )
+                        or candidate.payload.invocation_batch_id != batch_id
+                    ):
+                        break
+                    batch.append(candidate.payload)
+                    index += 1
+                input_items.append(
+                    {
+                        "role": "user",
+                        "content": render_external_channel_turn(batch),
+                    }
+                )
+                continue
             native_items = self._compatible_native_items(event)
             if native_items is not None:
                 input_items.extend(native_items)
@@ -248,6 +286,7 @@ class ResponsesRequestLowerer:
                     payload = event.payload
                     assert isinstance(payload, ClientToolCallPayload)
                     replayable_plaintext_custom_call_ids.add(payload.call_id)
+                index += 1
                 continue
 
             lowered = self._lower_event(
@@ -260,6 +299,7 @@ class ResponsesRequestLowerer:
                     payload = event.payload
                     assert isinstance(payload, ClientToolCallPayload)
                     replayable_plaintext_custom_call_ids.add(payload.call_id)
+            index += 1
 
         if kwargs.get("store") is False:
             # With store=False, provider response items are not persisted; replaying
@@ -439,9 +479,7 @@ class ResponsesRequestLowerer:
         ):
             return {
                 "role": "user",
-                "content": format_goal_continuation_reminder(
-                    event.payload.metadata.get("goal_objective")
-                ),
+                "content": format_idle_continuation_reminder(event.payload.metadata),
             }
         if event.kind == EventKind.GOAL_UPDATED and isinstance(
             event.payload, UserMessagePayload
@@ -463,6 +501,11 @@ class ResponsesRequestLowerer:
             return {
                 "role": "user",
                 "content": _format_agent_message(event.payload),
+            }
+        if isinstance(event.payload, ExternalChannelMessagePayload):
+            return {
+                "role": "user",
+                "content": render_external_channel_message(event.payload),
             }
         match event.payload:
             case UserMessagePayload(content=content, attachments=attachments):

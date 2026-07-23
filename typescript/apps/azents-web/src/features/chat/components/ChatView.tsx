@@ -1456,6 +1456,7 @@ export function ChatView({
                   const editableUserMessage =
                     readOnlyNotice === null &&
                     msg.role === "user" &&
+                    msg.metadata?.source !== "external_channel" &&
                     Boolean(msg.content) &&
                     msg.status !== "partial" &&
                     index > latestCompactionIndex &&

@@ -57,6 +57,7 @@ dependencies = [
     "google-analytics-admin==0.29.0",
     "grpcio==1.80.0",
     "azents-runtime-control",
+    "websockets==15.0.1",
 ]
 
 [dependency-groups]

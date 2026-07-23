@@ -92,6 +92,43 @@ def test_validator_reports_complete_paths_for_lifecycle_root_and_multipath() -> 
     assert "fk_worktrees_context" in worktree_violations[0].message
 
 
+def test_external_channel_manifest_excludes_canonical_provider_state() -> None:
+    """External Channel lifecycle metadata covers only Session-bound state."""
+    manifest = get_session_lifecycle_ownership_manifest()
+    resources = {
+        resource.name: resource.classification
+        for resource in manifest.resources
+        if resource.name.startswith("external_channel_")
+    }
+
+    assert resources == {
+        "external_channel_bindings": (
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
+        ),
+        "external_channel_invocation_batches": (
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
+        ),
+        "external_channel_invocation_batch_items": (
+            SessionLifecycleResourceClassification.PURE_DATABASE_CHILD
+        ),
+        "external_channel_access_requests": (
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
+        ),
+        "external_channel_access_grants": (
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
+        ),
+        "external_channel_works": (
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
+        ),
+        "external_channel_actions": (
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
+        ),
+        "external_channel_delivery_attempts": (
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
+        ),
+    }
+
+
 async def test_installed_catalog_reader_exposes_current_worktree_risk(
     rdb_session: AsyncSession,
 ) -> None:

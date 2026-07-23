@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ActionExecutionStatus,
     EventKind,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
     InputBufferKind,
     InputBufferSchedulingMode,
 )
@@ -34,6 +36,7 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import (
     AgentMessagePayload,
     Event,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     SkillLoadedPayload,
     SystemErrorPayload,
@@ -58,6 +61,8 @@ from azents.repos.action_execution.data import ActionExecution, ActionExecutionC
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.external_channel.data import ExternalChannelInvocationProjectionItem
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
 from azents.services.exchange_file import ExchangeFileService
@@ -69,6 +74,9 @@ logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 _CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
 _AGENT_MESSAGE_ADAPTER = TypeAdapter(AgentMessagePayload)
+EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY = (
+    "external_channel_invocation_batch_id"
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -236,6 +244,10 @@ class InputBufferService:
     vfs_projection_service: Annotated[
         VfsProjectionService | None,
         Depends(get_vfs_projection_service),
+    ]
+    external_channel_repository: Annotated[
+        ExternalChannelRepository,
+        Depends(ExternalChannelRepository),
     ]
 
     async def enqueue(
@@ -829,6 +841,8 @@ class InputBufferService:
                 return _GoalContinuationInputBufferProcessor(self)
             case InputBufferKind.AGENT_MESSAGE:
                 return _AgentMessageInputBufferProcessor(self)
+            case InputBufferKind.EXTERNAL_CHANNEL_INVOCATION:
+                return ExternalChannelInvocationInputBufferProcessor(self)
             case InputBufferKind.ACTION_MESSAGE:
                 if buffer.action is None:
                     raise ValueError(
@@ -1169,6 +1183,95 @@ class _AgentMessageInputBufferProcessor:
 
 
 @dataclasses.dataclass(frozen=True)
+class ExternalChannelInvocationInputBufferProcessor:
+    """Prepare one durable external invocation batch as contiguous events."""
+
+    service: InputBufferService
+
+    async def process(
+        self,
+        context: InputBufferPreparationContext,
+        buffer: InputBuffer,
+    ) -> InputBufferPreparationOutcome:
+        batch_id = buffer.metadata.get(
+            EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY
+        )
+        if not batch_id:
+            raise ValueError(
+                "External invocation InputBuffer requires an invocation batch ID."
+            )
+        repository = self.service.external_channel_repository
+        items = await repository.list_invocation_projection_items(
+            context.session,
+            batch_id=batch_id,
+        )
+        if not items:
+            raise ValueError("External invocation batch has no projection items.")
+        if any(item.batch_id != batch_id for item in items):
+            raise ValueError("External invocation batch projection is inconsistent.")
+        if [item.sequence for item in items] != list(range(len(items))):
+            raise ValueError("External invocation batch sequence is not contiguous.")
+
+        promoted: list[_PromotedInputBuffer] = []
+        for item in items:
+            provider_tenant_id = item.provider_tenant_id
+            if not provider_tenant_id:
+                raise ValueError("External invocation is missing provider tenant ID.")
+            resource_label = _external_resource_label(item)
+            external_id = (
+                f"external-channel:{item.binding_id}:"
+                f"{item.message_id}:{item.revision_id}"
+            )
+            payload = ExternalChannelMessagePayload(
+                provider=item.provider,
+                provider_tenant_id=provider_tenant_id,
+                resource_id=item.resource_id,
+                resource_label=resource_label,
+                resource_type=item.resource_type,
+                binding_id=item.binding_id,
+                invocation_batch_id=item.batch_id,
+                external_message_id=item.message_id,
+                revision_id=item.revision_id,
+                revision_kind=item.revision_kind,
+                projection_root_id=(
+                    f"external-channel:{item.binding_id}:{item.message_id}"
+                ),
+                provider_message_key=item.provider_message_key,
+                provider_position=item.provider_position,
+                principal_id=item.principal_id,
+                provider_user_id=item.provider_user_id,
+                sender_display_name=item.sender_display_name,
+                author_type=item.author_type,
+                authorization=(
+                    "authorized_invocation"
+                    if item.message_id == item.trigger_message_id
+                    else "context_only"
+                ),
+                lifecycle=_external_message_lifecycle(item.revision_kind),
+                body=item.revision_body,
+                attachment_metadata=item.attachment_metadata or {},
+                provider_created_at=item.provider_created_at,
+                provider_updated_at=item.provider_updated_at,
+                original_url=item.original_url,
+                truncated_context_message_count=item.truncation_message_count,
+                truncated_context_size=item.truncation_size,
+                correction_of_revision_id=item.correction_of_revision_id,
+            )
+            promoted.append(
+                _PromotedInputBuffer(
+                    buffer=buffer,
+                    user_message=None,
+                    event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                    payload=_JSON_OBJECT_ADAPTER.validate_python(
+                        payload.model_dump(mode="json")
+                    ),
+                    external_id=external_id,
+                )
+            )
+        return _preparation_outcome(promoted, TurnEffect.ELIGIBLE)
+
+
+@dataclasses.dataclass(frozen=True)
 class _GoalActionInputBufferProcessor:
     """Prepare a closed Goal action."""
 
@@ -1268,6 +1371,38 @@ def _turn_effect_for_promoted(
     return TurnEffect.NEUTRAL
 
 
+def _external_resource_label(item: ExternalChannelInvocationProjectionItem) -> str:
+    """Return the validated provider resource label for one projection item."""
+    labels = item.resource_labels
+    provider_resource_key = item.provider_resource_key
+    if not isinstance(labels, dict) or not labels:
+        raise ValueError("External invocation is missing resource labels.")
+    channel_id = labels.get("channel_id") or labels.get("channel_name")
+    if not isinstance(channel_id, str) or not channel_id:
+        raise ValueError("External invocation is missing resource channel label.")
+    thread_ts = labels.get("thread_ts")
+    if thread_ts is not None and not isinstance(thread_ts, str):
+        raise ValueError("External invocation has an invalid thread label.")
+    if not isinstance(provider_resource_key, str) or not provider_resource_key:
+        raise ValueError("External invocation is missing resource identity.")
+    return f"{channel_id}:{thread_ts}" if thread_ts else channel_id
+
+
+def _external_message_lifecycle(
+    revision_kind: ExternalChannelMessageRevisionKind,
+) -> ExternalChannelMessageLifecycle:
+    """Return the immutable lifecycle represented by one revision."""
+    match revision_kind:
+        case ExternalChannelMessageRevisionKind.ORIGINAL:
+            return ExternalChannelMessageLifecycle.CURRENT
+        case ExternalChannelMessageRevisionKind.EDIT:
+            return ExternalChannelMessageLifecycle.EDITED
+        case ExternalChannelMessageRevisionKind.DELETE:
+            return ExternalChannelMessageLifecycle.DELETED
+        case _:
+            assert_never(revision_kind)
+
+
 def _buffer_requires_inference(buffer: InputBuffer) -> bool:
     """Return whether preparing the buffer needs a resolved inference state."""
     match buffer.kind:
@@ -1275,6 +1410,7 @@ def _buffer_requires_inference(buffer: InputBuffer) -> bool:
             InputBufferKind.USER_MESSAGE
             | InputBufferKind.GOAL_CONTINUATION
             | InputBufferKind.AGENT_MESSAGE
+            | InputBufferKind.EXTERNAL_CHANNEL_INVOCATION
         ):
             return True
         case InputBufferKind.ACTION_MESSAGE:

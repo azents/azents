@@ -12,16 +12,28 @@ from azents.core.session_lifecycle import (
     SessionLifecyclePurgeContext,
     SessionLifecycleRegistry,
     SessionLifecycleTransitionContext,
+    SessionLifecycleTransitionPolicy,
 )
 from azents.rdb.session import SessionManager
-from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.archived_session_retention import (
+    ArchivedSessionPurgeParticipantSnapshotInvalid,
+    ArchivedSessionRetentionRepository,
+)
 from azents.repos.archived_session_retention.data import (
+    ArchivedSessionPurgeParticipantExecution,
     ArchivedSessionPurgeParticipantSnapshot,
 )
 
 PurgeParticipantOperation = Callable[
     [SessionLifecycleParticipantDefinition],
     Awaitable[dict[str, object] | None],
+]
+TransitionParticipantOperation = Callable[
+    [
+        SessionLifecycleParticipantDefinition,
+        SessionLifecycleTransitionContext,
+    ],
+    Awaitable[None],
 ]
 TransitionOperation = Callable[[], Awaitable[None]]
 
@@ -51,6 +63,23 @@ class SessionLifecyclePurgeParticipantFailure(RuntimeError):
         super().__init__(self.error_summary)
 
 
+class SessionLifecyclePurgeSnapshotValidationFailure(RuntimeError):
+    """A participant snapshot failed validation before lifecycle side effects."""
+
+    def __init__(
+        self,
+        *,
+        participant_key: str | None,
+        error: Exception,
+    ) -> None:
+        """Initialize a structured snapshot validation failure."""
+        self.participant_key = participant_key
+        self.phase = ArchivedSessionPurgeParticipantPhase.PENDING
+        self.error_kind = type(error).__name__
+        self.error_summary = str(error) or self.error_kind
+        super().__init__(self.error_summary)
+
+
 @dataclasses.dataclass(frozen=True)
 class SessionLifecycleOrchestrator:
     """Own cross-domain lifecycle checkpoints without owning domain cleanup."""
@@ -65,38 +94,132 @@ class SessionLifecycleOrchestrator:
         purge_job_id: str,
         lease_owner: str,
     ) -> None:
-        """Persist the active participant/version set in the claim transaction."""
-        await retention_repository.materialize_purge_participant_executions(
-            session,
-            job_id=purge_job_id,
-            lease_owner=lease_owner,
-            participants=tuple(
-                ArchivedSessionPurgeParticipantSnapshot(
-                    participant_key=participant.key,
-                    policy_version=participant.policy_version,
+        """Materialize once or validate the existing immutable participant snapshot."""
+        try:
+            executions = (
+                await retention_repository.materialize_purge_participant_executions(
+                    session,
+                    job_id=purge_job_id,
+                    lease_owner=lease_owner,
+                    participants=tuple(
+                        ArchivedSessionPurgeParticipantSnapshot(
+                            participant_key=participant.key,
+                            policy_version=participant.policy_version,
+                        )
+                        for participant in self.registry.participants
+                    ),
                 )
-                for participant in self.registry.participants
-            ),
+            )
+        except ArchivedSessionPurgeParticipantSnapshotInvalid as error:
+            raise SessionLifecyclePurgeSnapshotValidationFailure(
+                participant_key=error.participant_key,
+                error=error,
+            ) from error
+        self._require_purge_snapshot_participants(executions)
+
+    def _snapshot_validation_failure(
+        self,
+        *,
+        participant_key: str | None,
+        message: str,
+        error: Exception | None = None,
+    ) -> SessionLifecyclePurgeSnapshotValidationFailure:
+        """Build one structured immutable snapshot validation failure."""
+        return SessionLifecyclePurgeSnapshotValidationFailure(
+            participant_key=participant_key,
+            error=error or RuntimeError(message),
         )
+
+    def _require_purge_snapshot_participants(
+        self,
+        executions: list[ArchivedSessionPurgeParticipantExecution],
+    ) -> tuple[SessionLifecycleParticipantDefinition, ...]:
+        """Resolve one complete, supported immutable participant snapshot."""
+        executions_by_key = {
+            execution.participant_key: execution for execution in executions
+        }
+        if not executions or len(executions_by_key) != len(executions):
+            raise self._snapshot_validation_failure(
+                participant_key=None,
+                message="Purge participant snapshot is incomplete.",
+            )
+
+        snapshot_participant_keys = set(executions_by_key)
+        for execution in executions:
+            try:
+                self.registry.require_policy_version(
+                    key=execution.participant_key,
+                    policy_version=execution.policy_version,
+                )
+            except ValueError as error:
+                raise self._snapshot_validation_failure(
+                    participant_key=execution.participant_key,
+                    message=str(error),
+                    error=error,
+                ) from error
+        snapshot_participants = tuple(
+            participant
+            for participant in self.registry.participants
+            if participant.key in snapshot_participant_keys
+        )
+        for participant in snapshot_participants:
+            missing_dependencies = tuple(
+                dependency
+                for dependency in participant.dependencies
+                if dependency not in executions_by_key
+            )
+            if missing_dependencies:
+                raise self._snapshot_validation_failure(
+                    participant_key=participant.key,
+                    message=(
+                        "Purge participant snapshot is missing dependencies for "
+                        f"{participant.key}: {', '.join(missing_dependencies)}."
+                    ),
+                )
+        return snapshot_participants
 
     async def archive(
         self,
         *,
         context: SessionLifecycleTransitionContext,
+        participant_operation: TransitionParticipantOperation,
         transition: TransitionOperation,
     ) -> None:
-        """Run the archive transition after validating its participant registry."""
+        """Run participant archive operations before the locked root transition.
+
+        The caller owns the surrounding database transaction. Participant failures
+        propagate directly so the caller rolls back participant and root state
+        together.
+        """
         self._require_transition_context(context)
+        for participant in self.registry.participants:
+            if participant.archive_policy is SessionLifecycleTransitionPolicy.PRESERVE:
+                continue
+            await participant_operation(participant, context)
         await transition()
 
     async def restore(
         self,
         *,
         context: SessionLifecycleTransitionContext,
+        participant_operation: TransitionParticipantOperation,
         transition: TransitionOperation,
     ) -> None:
-        """Run the restore transition after validating its participant registry."""
+        """Run restore validation or mutation before the locked root transition.
+
+        A terminal-on-archive participant has no inverse mutation, but is dispatched
+        for validation that its terminal state remains preserved. Ordinary
+        preserve-only participants require no restore operation.
+        """
         self._require_transition_context(context)
+        for participant in reversed(self.registry.participants):
+            if (
+                participant.restore_policy is SessionLifecycleTransitionPolicy.PRESERVE
+                and participant.archive_policy
+                is not SessionLifecycleTransitionPolicy.TERMINATE
+            ):
+                continue
+            await participant_operation(participant, context)
         await transition()
 
     async def run_purge_phase(
@@ -119,22 +242,13 @@ class SessionLifecycleOrchestrator:
                 session,
                 job_id=context.purge_job_id,
             )
+        snapshot_participants = self._require_purge_snapshot_participants(executions)
         executions_by_key = {
             execution.participant_key: execution for execution in executions
         }
-        if len(executions_by_key) != len(self.registry.participants):
-            raise RuntimeError("Purge participant snapshot is incomplete.")
 
-        for participant in self.registry.participants:
-            execution = executions_by_key.get(participant.key)
-            if execution is None:
-                raise RuntimeError(
-                    f"Purge participant snapshot is missing {participant.key}."
-                )
-            self.registry.require_policy_version(
-                key=participant.key,
-                policy_version=execution.policy_version,
-            )
+        for participant in snapshot_participants:
+            execution = executions_by_key[participant.key]
             if _PURGE_PHASE_ORDER[execution.phase] >= _PURGE_PHASE_ORDER[phase]:
                 continue
 

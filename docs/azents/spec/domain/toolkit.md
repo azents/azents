@@ -30,6 +30,10 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
   - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
+  - python/apps/azents/src/azents/engine/tools/external_channel.py
+  - python/apps/azents/src/azents/engine/tooling/execution_context.py
+  - python/apps/azents/src/azents/services/external_channel/channel_action.py
+  - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/worker/deps.py
   - python/apps/azents/src/azents/repos/mcp_oauth_connection/**
@@ -45,8 +49,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-21
-spec_version: 68
+last_verified_at: 2026-07-22
+spec_version: 69
 ---
 
 # Toolkit
@@ -661,7 +665,24 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 - **ShellEnvironment** — workspace sandbox network profile. Lists allowed/denied domains.
 - **Fernet** — `cryptography` symmetric encryption. URL-safe base64 32 byte key from `AZ_CREDENTIAL_ENCRYPTION_KEY` environment variable.
 
+## External Channel Action Tool
+
+`channel_action` is a conditional direct tool, not a Workspace `ToolkitConfig`
+and not an automatic assistant-output relay. Runtime exposes its unprefixed
+name only when the current root AgentSession has an active External Channel
+binding. Execution context includes the binding-scoped Channel Work snapshot,
+and every call must target a binding owned by the current Agent and Session.
+
+The tool atomically commits an optional conversational reply and the complete
+ordered task replacement before any provider call. `continue` preserves
+unfinished Channel Work; `finish` ends or clears it. Provider delivery is
+one-attempt persisted work with terminal `delivered`, `failed`, or `unknown`
+outcomes. Ordinary Session Todo state remains separate and never becomes the
+Channel Work source of truth.
+
 ## Changelog
+
+- **2026-07-22** (spec_version 69) — Added the conditional direct `channel_action` tool, binding-scoped work snapshot, atomic action boundary, and separation from Session Todo state.
 
 - **2026-07-21** (spec_version 67) — Generalized client-tool wire selection into semantic model profiles, adapter profile preferences, and tool-declared variants without model-visible tool-name branches.
 - **2026-07-21** (spec_version 66) — Kept existing `apply_patch` eligibility and selected plaintext custom only for the native OpenAI Responses adapter; all other eligible transports retain the JSON-function variant.

@@ -112,11 +112,13 @@ from azents.engine.run.types import (
 from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import (
+    get_external_channel_toolkit_provider,
     get_goal_toolkit_provider,
     get_todo_toolkit_provider,
     get_toolkit_registry,
     get_vfs_projection_service,
 )
+from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
@@ -360,6 +362,10 @@ class RunExecutor:
     goal_toolkit_provider: Annotated[
         GoalToolkitProvider, Depends(get_goal_toolkit_provider)
     ]
+    external_channel_toolkit_provider: Annotated[
+        ExternalChannelToolkitProvider,
+        Depends(get_external_channel_toolkit_provider),
+    ]
     skill_toolkit_provider: Annotated[
         SkillToolkitProvider, Depends(get_skill_toolkit_provider)
     ]
@@ -543,6 +549,7 @@ class RunExecutor:
             claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
             todo_toolkit_provider=self.todo_toolkit_provider,
             goal_toolkit_provider=self.goal_toolkit_provider,
+            external_channel_toolkit_provider=(self.external_channel_toolkit_provider),
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
             memory_enabled=agent.memory_enabled if agent is not None else True,
@@ -1097,6 +1104,7 @@ class RunExecutor:
             claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
             todo_toolkit_provider=self.todo_toolkit_provider,
             goal_toolkit_provider=self.goal_toolkit_provider,
+            external_channel_toolkit_provider=(self.external_channel_toolkit_provider),
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
             memory_enabled=agent_memory_enabled,

@@ -12,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import EventKind, ExchangeFileStatus, ModelFileStatus
 from azents.engine.context.compaction import compute_summary_budget
 from azents.engine.context.window import compute_auto_compaction_threshold_tokens
+from azents.engine.events.external_channel_rendering import (
+    external_channel_message_visible_value,
+    render_external_channel_message,
+)
 from azents.engine.events.file_parts import file_output_part_placeholder_text
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
@@ -29,9 +33,9 @@ from azents.engine.events.protocols import (
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
-    format_goal_continuation_reminder,
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
+    format_idle_continuation_reminder,
     format_interrupted_reminder,
     format_plain_system_reminder,
 )
@@ -45,6 +49,7 @@ from azents.engine.events.types import (
     CompactionSummaryPayload,
     Event,
     EventPayload,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     InputTextPart,
     InterruptedPayload,
@@ -833,15 +838,15 @@ def _render_continuity_event(
 def _model_visible_event_value(event: Event) -> object | None:
     """Return model-visible structured content for token estimation."""
     payload = event.payload
+    if isinstance(payload, ExternalChannelMessagePayload):
+        return external_channel_message_visible_value(payload)
     if event.kind == EventKind.GOAL_CONTINUATION and isinstance(
         payload,
         UserMessagePayload,
     ):
         return {
             "role": "user",
-            "content": format_goal_continuation_reminder(
-                payload.metadata.get("goal_objective")
-            ),
+            "content": format_idle_continuation_reminder(payload.metadata),
         }
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):
         return {"role": "user", "content": _format_goal_updated_event_reminder(payload)}
@@ -902,13 +907,15 @@ def _model_visible_event_text(
 ) -> str | None:
     """Return readable model-visible content for continuity rendering."""
     payload = event.payload
+    if isinstance(payload, ExternalChannelMessagePayload):
+        return render_external_channel_message(payload, include_label=include_label)
     if event.kind == EventKind.GOAL_CONTINUATION and isinstance(
         payload,
         UserMessagePayload,
     ):
         return _format_continuity_block(
             "User",
-            format_goal_continuation_reminder(payload.metadata.get("goal_objective")),
+            format_idle_continuation_reminder(payload.metadata),
             include_label=include_label,
         )
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):

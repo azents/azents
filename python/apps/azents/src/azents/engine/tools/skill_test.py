@@ -33,7 +33,7 @@ from azents.engine.tools.skill import (
     skill_items_from_vfs_projection,
 )
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
-from azents.services.vfs import VfsResolvedFile
+from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 
 
 def _skill_item(
@@ -209,6 +209,28 @@ class _VfsService:
             raise TypeError("active_run_id must be a string")
         self.action_calls.append((bool(kwargs["running"]), active_run_id))
         return self.projection
+
+
+class _UnavailableVfsService:
+    """VFS projection test double that simulates an in-progress run."""
+
+    async def projection_for_actions(self, **_kwargs: object) -> VfsProjection:
+        """Report that the current run has not persisted a VFS projection yet."""
+        raise VfsFileResolutionError(
+            "storage_unavailable",
+            "Active run VFS projection is unavailable",
+        )
+
+
+class _ForbiddenVfsService:
+    """VFS projection test double that rejects access."""
+
+    async def projection_for_actions(self, **_kwargs: object) -> VfsProjection:
+        """Report an authorization failure that must not be hidden."""
+        raise VfsFileResolutionError(
+            "permission_denied",
+            "Run VFS projection access denied",
+        )
 
 
 class _SkillStore:
@@ -521,6 +543,44 @@ class TestSkillAction:
             filesystem.skill_path,
             "azents://skills/azents/review/SKILL.md",
         ]
+
+    @pytest.mark.asyncio
+    async def test_running_actions_omit_managed_skills_when_vfs_is_unavailable(
+        self,
+    ) -> None:
+        """A not-yet-persisted run projection cannot break the composer."""
+        filesystem = _skill_item()
+        store = _SkillStore(
+            SkillProjectionState(active=SkillProjectionSnapshot(items=[filesystem]))
+        )
+
+        snapshot = await load_skill_projection_for_actions(
+            store,  # pyright: ignore[reportArgumentType]
+            vfs_projection_service=_UnavailableVfsService(),  # pyright: ignore[reportArgumentType]
+            agent_id="agent-1",
+            session_id="session-1",
+            workspace_id="workspace-1",
+            run_state=AgentSessionRunState.RUNNING,
+            active_run_id=None,
+        )
+
+        assert snapshot.items == [filesystem]
+
+    @pytest.mark.asyncio
+    async def test_running_actions_propagate_vfs_access_denial(self) -> None:
+        """Only temporary VFS unavailability falls back to filesystem actions."""
+        store = _SkillStore(SkillProjectionState())
+
+        with pytest.raises(VfsFileResolutionError, match="access denied"):
+            await load_skill_projection_for_actions(
+                store,  # pyright: ignore[reportArgumentType]
+                vfs_projection_service=_ForbiddenVfsService(),  # pyright: ignore[reportArgumentType]
+                agent_id="agent-1",
+                session_id="session-1",
+                workspace_id="workspace-1",
+                run_state=AgentSessionRunState.RUNNING,
+                active_run_id="run-1",
+            )
 
 
 def test_projection_state_dump_is_json_safe() -> None:

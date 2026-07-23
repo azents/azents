@@ -44,7 +44,16 @@ from websockets.exceptions import InvalidStatus
 from websockets.http11 import Response as WebSocketHTTPResponse
 
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
-from azents.core.enums import AgentRunStatus, EventKind, LLMProvider
+from azents.core.enums import (
+    AgentRunStatus,
+    EventKind,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
+    LLMProvider,
+)
 from azents.core.llm_catalog import ModelCapabilities
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
@@ -71,6 +80,7 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
     Event,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     NativeArtifact,
     ProviderToolCallPayload,
@@ -120,6 +130,39 @@ def _event(content: str = "hello") -> Event:
         kind=EventKind.USER_MESSAGE,
         payload=UserMessagePayload(content=content),
         created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+def _external_payload(message_id: str, batch_id: str) -> ExternalChannelMessagePayload:
+    """Create one deterministic external message payload."""
+    return ExternalChannelMessagePayload(
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="tenant-1",
+        resource_id="resource-1",
+        resource_label="#incident / thread",
+        resource_type=ExternalChannelResourceType.THREAD,
+        binding_id="binding-1",
+        invocation_batch_id=batch_id,
+        external_message_id=message_id,
+        revision_id=f"revision-{message_id}",
+        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+        projection_root_id=f"external-channel:binding-1:{message_id}",
+        provider_message_key=f"slack:tenant-1:C1:{message_id}",
+        provider_position=f"000000000000000000{message_id}.000001",
+        principal_id="principal-1",
+        provider_user_id="U1",
+        sender_display_name="Alice",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        authorization="authorized_invocation",
+        lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+        body=f"message-{message_id}",
+        attachment_metadata={},
+        provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),
+        provider_updated_at=None,
+        original_url=None,
+        truncated_context_message_count=0,
+        truncated_context_size=0,
+        correction_of_revision_id=None,
     )
 
 
@@ -2571,3 +2614,31 @@ async def test_missing_previous_response_retries_full_input_once(
         False,
     ]
     assert "resp_previous" not in caplog.text
+
+
+def test_openai_lowerer_groups_external_invocation_batch() -> None:
+    """OpenAI lowerer uses the same explicit external-turn envelope."""
+    lowerer = OpenAIResponsesLowerer(provider="openai", model="gpt-5.1")
+    transcript = [
+        Event(
+            id="1" * 32,
+            session_id="session-1",
+            kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            payload=_external_payload("1", "batch-1"),
+            created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
+        ),
+        Event(
+            id="2" * 32,
+            session_id="session-1",
+            kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            payload=_external_payload("2", "batch-1"),
+            created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
+        ),
+    ]
+
+    request = lowerer.lower(transcript, model="gpt-5.1")
+    content = request.input[-1]["content"]
+    assert isinstance(content, str)
+    assert content.startswith("Message Type: EXTERNAL_CHANNEL_TURN")
+    assert "Body: message-1" in content
+    assert "Body: message-2" in content

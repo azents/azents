@@ -24,7 +24,10 @@ from azents.core.enums import (
     InputBufferSchedulingMode,
 )
 from azents.core.inference_profile import AppliedInferenceProfile
-from azents.core.session_lifecycle import SessionLifecycleTransitionContext
+from azents.core.session_lifecycle import (
+    SessionLifecycleParticipantDefinition,
+    SessionLifecycleTransitionContext,
+)
 from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.engine.events.types import AgentRunState, ClientToolCallPayload, Event
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
@@ -57,6 +60,7 @@ from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
@@ -335,6 +339,10 @@ class ChatSessionService:
     lifecycle_orchestrator: Annotated[
         SessionLifecycleOrchestrator,
         Depends(get_session_lifecycle_orchestrator),
+    ]
+    external_channel_lifecycle_service: Annotated[
+        ExternalChannelLifecycleService,
+        Depends(ExternalChannelLifecycleService),
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -957,6 +965,7 @@ class ChatSessionService:
         user_id: str,
     ) -> Result[ArchiveSessionResult, ArchiveSessionError]:
         """Archive an active non-primary AgentSession after access validation."""
+        archive_cleanup_ids: tuple[str, ...] = ()
         async with self.session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
@@ -1044,12 +1053,29 @@ class ChatSessionService:
                     retention_days=settings.archived_session_retention_days,
                 )
 
+            async def archive_participant(
+                definition: SessionLifecycleParticipantDefinition,
+                context: SessionLifecycleTransitionContext,
+            ) -> None:
+                """Run a participant inside this Session tree lock transaction."""
+                nonlocal archive_cleanup_ids
+                result = (
+                    await self.external_channel_lifecycle_service.archive_participant(
+                        session,
+                        definition,
+                        context,
+                    )
+                )
+                if result is not None:
+                    archive_cleanup_ids = result.progress_delete_intent_ids
+
             await self.lifecycle_orchestrator.archive(
                 context=SessionLifecycleTransitionContext(
                     transition_id=f"{session_id}:archive",
                     root_session_id=session_id,
                     subtree_session_ids=tuple(session_ids),
                 ),
+                participant_operation=archive_participant,
                 transition=archive_tree,
             )
             if purge_after is not None:
@@ -1061,10 +1087,16 @@ class ChatSessionService:
                     now=archived_at,
                 )
             await session.commit()
+            cleanup_requested = (
+                await self.external_channel_lifecycle_service.consume_archive_cleanup(
+                    archive_cleanup_ids
+                )
+                > 0
+            )
             return Success(
                 ArchiveSessionResult(
                     archived_session_id=session_id,
-                    cleanup_requested=False,
+                    cleanup_requested=cleanup_requested,
                 )
             )
 
@@ -1155,12 +1187,24 @@ class ChatSessionService:
                     session_ids=[item.id for item in tree],
                 )
 
+            async def restore_participant(
+                definition: SessionLifecycleParticipantDefinition,
+                context: SessionLifecycleTransitionContext,
+            ) -> None:
+                """Validate a participant inside this Session tree lock transaction."""
+                await self.external_channel_lifecycle_service.restore_participant(
+                    session,
+                    definition,
+                    context,
+                )
+
             await self.lifecycle_orchestrator.restore(
                 context=SessionLifecycleTransitionContext(
                     transition_id=f"{session_id}:restore",
                     root_session_id=session_id,
                     subtree_session_ids=tuple(item.id for item in tree),
                 ),
+                participant_operation=restore_participant,
                 transition=restore_tree,
             )
             await session.commit()
@@ -1326,8 +1370,9 @@ class ChatSessionService:
                 session, session_id
             )
             input_buffer_events = [
-                input_buffer_to_live_event(input_buffer)
+                event
                 for input_buffer in input_buffers
+                if (event := input_buffer_to_live_event(input_buffer)) is not None
             ]
             run = await self.agent_run_repository.get_running_by_session_id(
                 session,

@@ -8,7 +8,17 @@ from contextlib import asynccontextmanager
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import EventKind, ExchangeFileStatus, ModelFileStatus
+import azents.engine.events.filters as filters
+from azents.core.enums import (
+    EventKind,
+    ExchangeFileStatus,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
+    ModelFileStatus,
+)
 from azents.engine.events.filters import (
     EventAttachmentAvailabilityFilter,
     EventAutoCompactionFilter,
@@ -30,6 +40,7 @@ from azents.engine.events.types import (
     CompactionSummaryPayload,
     Event,
     EventPayload,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     InputTextPart,
     NativeArtifact,
@@ -1747,6 +1758,39 @@ def _event(
     )
 
 
+def _external_payload() -> ExternalChannelMessagePayload:
+    """Create one external message fixture."""
+    return ExternalChannelMessagePayload(
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="tenant-1",
+        resource_id="resource-1",
+        resource_label="#incident / thread",
+        resource_type=ExternalChannelResourceType.THREAD,
+        binding_id="binding-1",
+        invocation_batch_id="batch-1",
+        external_message_id="message-1",
+        revision_id="revision-1",
+        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+        projection_root_id="external-channel:binding-1:message-1",
+        provider_message_key="slack:tenant-1:C1:1.000001",
+        provider_position="00000000000000000001.000001",
+        principal_id="principal-1",
+        provider_user_id="U1",
+        sender_display_name="Alice",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        authorization="context_only",
+        lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+        body="context body",
+        attachment_metadata={},
+        provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),
+        provider_updated_at=None,
+        original_url=None,
+        truncated_context_message_count=3,
+        truncated_context_size=256,
+        correction_of_revision_id=None,
+    )
+
+
 def _payload_from_create(create: EventCreate) -> EventPayload:
     """Restore payload type from EventCreate."""
     match create.kind:
@@ -1764,3 +1808,28 @@ def _payload_from_create(create: EventCreate) -> EventPayload:
             return RunMarkerPayload.model_validate(create.payload)
         case _:
             raise AssertionError(f"unsupported test payload kind: {create.kind}")
+
+
+def test_external_message_is_visible_to_tokens_and_continuity() -> None:
+    """External source metadata survives model-value and continuity rendering."""
+    event = _event(
+        "1",
+        EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        _external_payload(),
+    )
+
+    value = filters._model_visible_event_value(  # pyright: ignore[reportPrivateUsage]
+        event
+    )
+    text = filters._model_visible_event_text(  # pyright: ignore[reportPrivateUsage]
+        event
+    )
+
+    assert isinstance(value, dict)
+    assert value["message_type"] == "external_channel_message"
+    assert value["authorization"] == "context_only"
+    assert value["truncated_context"] == {"message_count": 3, "size": 256}
+    assert text is not None
+    assert "Provider: slack" in text
+    assert "Authorization: context_only" in text
+    assert "context body" in text

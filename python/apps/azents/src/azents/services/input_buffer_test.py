@@ -22,6 +22,10 @@ from azents.core.enums import (
     EventKind,
     ExchangeFileOrigin,
     ExchangeFileStatus,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
     InputBufferKind,
     InputBufferSchedulingMode,
     LLMProvider,
@@ -61,6 +65,10 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file.data import ExchangeFile
+from azents.repos.external_channel.data import (
+    ExternalChannelInvocationProjectionItem,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
 from azents.repos.model_file.data import ModelFile
@@ -88,7 +96,10 @@ from azents.testing.model_selection import (
 )
 
 from .input_buffer import (
+    EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY,
+    ExternalChannelInvocationInputBufferProcessor,
     InputBufferEnqueue,
+    InputBufferPreparationContext,
     InputBufferPreparationStaleError,
     InputBufferService,
     PreparedInputBufferFiles,
@@ -676,6 +687,7 @@ def _input_buffer_service(
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=vfs_projection_service,  # pyright: ignore[reportArgumentType]
+        external_channel_repository=ExternalChannelRepository(),
     )
 
 
@@ -765,6 +777,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
             ActionExecutionRepository,
             AsyncMock(spec=ActionExecutionRepository),
         ),
+        external_channel_repository=cast(ExternalChannelRepository, object()),
         vfs_projection_service=None,
     )
 
@@ -835,6 +848,7 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
             ActionExecutionRepository,
             AsyncMock(spec=ActionExecutionRepository),
         ),
+        external_channel_repository=cast(ExternalChannelRepository, object()),
         vfs_projection_service=None,
     )
 
@@ -863,6 +877,7 @@ async def test_cancelled_promotion_discards_prepared_model_files() -> None:
         event_transcript_repository=cast(EventTranscriptRepository, object()),
         agent_run_repository=cast(AgentRunRepository, object()),
         action_execution_repository=cast(ActionExecutionRepository, object()),
+        external_channel_repository=cast(ExternalChannelRepository, object()),
         vfs_projection_service=None,
     )
     prepared = PreparedInputBufferFiles(
@@ -1109,6 +1124,7 @@ class TestInputBufferService:
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
+            external_channel_repository=ExternalChannelRepository(),
         )
         enqueue = InputBufferEnqueue(
             session_id="session-001",
@@ -2181,3 +2197,120 @@ class TestInputBufferService:
         assert result.claimed_count == 0
         assert result.user_messages == []
         assert result.events == []
+
+
+async def test_external_invocation_projection() -> None:
+    """Project one batch contiguously with an authorized trigger boundary."""
+
+    def at(second: int) -> datetime.datetime:
+        return datetime.datetime(
+            2026,
+            7,
+            22,
+            0,
+            0,
+            second,
+            tzinfo=datetime.UTC,
+        )
+
+    class _ProjectionRepository:
+        async def list_invocation_projection_items(
+            self,
+            session: AsyncSession,
+            *,
+            batch_id: str,
+        ) -> list[ExternalChannelInvocationProjectionItem]:
+            del session
+            assert batch_id == "batch-1"
+            first = ExternalChannelInvocationProjectionItem(
+                batch_id="batch-1",
+                binding_id="binding-1",
+                trigger_message_id="message-2",
+                truncation_message_count=2,
+                truncation_size=128,
+                sequence=0,
+                message_id="message-1",
+                revision_id="revision-1",
+                revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+                revision_body="Context",
+                attachment_metadata=None,
+                provider_occurred_at=at(1),
+                resource_id="resource-1",
+                provider_resource_key="C123:1.0",
+                resource_type=ExternalChannelResourceType.THREAD,
+                resource_labels={"channel_id": "C123", "thread_ts": "1.0"},
+                provider=ExternalChannelProvider.SLACK,
+                provider_tenant_id="T1",
+                provider_message_key="C123:1.0:1",
+                provider_position="1",
+                principal_id="principal-1",
+                provider_user_id="U1",
+                sender_display_name="Alice",
+                author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+                provider_created_at=at(1),
+                provider_updated_at=None,
+                original_url="https://slack.example/message",
+                correction_of_revision_id=None,
+            )
+            return [
+                first,
+                first.model_copy(
+                    update={
+                        "sequence": 1,
+                        "message_id": "message-2",
+                        "revision_id": "revision-2",
+                        "revision_body": "Invoke",
+                        "provider_message_key": "C123:1.0:2",
+                        "provider_position": "2",
+                        "provider_occurred_at": at(2),
+                        "provider_created_at": at(2),
+                    }
+                ),
+            ]
+
+    input_buffer = InputBuffer(
+        id="buffer-1",
+        session_id="session-1",
+        kind=InputBufferKind.EXTERNAL_CHANNEL_INVOCATION,
+        scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
+        actor_user_id=None,
+        content="",
+        idempotency_key="external-channel-invocation:batch-1",
+        metadata={EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY: "batch-1"},
+        action=None,
+        attachments=[],
+        file_parts=[],
+        created_at=at(0),
+    )
+    service = cast(
+        InputBufferService,
+        SimpleNamespace(external_channel_repository=_ProjectionRepository()),
+    )
+    processor = ExternalChannelInvocationInputBufferProcessor(service)
+
+    outcome = await processor.process(
+        InputBufferPreparationContext(
+            session=cast(AsyncSession, object()),
+            session_id="session-1",
+            active_run_id=None,
+            required_inference_profile=None,
+            prepared_inference_state=None,
+            prepared_files=PreparedInputBufferFiles(
+                attachments=[],
+                file_parts=[],
+                created_model_file_ids=[],
+            ),
+        ),
+        input_buffer,
+    )
+
+    assert outcome.turn_effect is TurnEffect.ELIGIBLE
+    assert [item.external_id for item in outcome.promoted] == [
+        "external-channel:binding-1:message-1:revision-1",
+        "external-channel:binding-1:message-2:revision-2",
+    ]
+    assert outcome.promoted[0].payload["authorization"] == "context_only"
+    assert outcome.promoted[1].payload["authorization"] == "authorized_invocation"
+    assert outcome.promoted[0].payload["invocation_batch_id"] == "batch-1"

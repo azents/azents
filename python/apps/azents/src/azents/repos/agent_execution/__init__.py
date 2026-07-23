@@ -190,7 +190,10 @@ class EventTranscriptRepository:
         event: RDBEvent,
     ) -> None:
         """Update AgentSession latest user input timestamp for user messages."""
-        if event.kind != EventKind.USER_MESSAGE:
+        if event.kind not in {
+            EventKind.USER_MESSAGE,
+            EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        }:
             return
         await session.execute(
             sa.update(RDBAgentSession)

@@ -156,6 +156,19 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_update_session_goal**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal) | **PATCH** /chat/v1/sessions/{session_id}/goal | Update Session Goal
 *ChatV1Api* | [**chat_v1_update_session_goal_status**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal_status) | **PATCH** /chat/v1/sessions/{session_id}/goal/status | Update Session Goal Status
 *ChatV1Api* | [**chat_v1_upload_file_for_agent**](azentspublicclient/docs/ChatV1Api.md#chat_v1_upload_file_for_agent) | **POST** /chat/v1/agents/{agent_id}/upload | Upload File For Agent
+*ExternalChannelV1Api* | [**external_channel_v1_decide_approval_request**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_decide_approval_request) | **POST** /external-channel/v1/approval-requests/{access_request_id}/decision | Decide Approval Request
+*ExternalChannelV1Api* | [**external_channel_v1_disconnect_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_disconnect_connection) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id} | Disconnect Connection
+*ExternalChannelV1Api* | [**external_channel_v1_disconnect_session_channel**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_disconnect_session_channel) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id} | Disconnect Session Channel
+*ExternalChannelV1Api* | [**external_channel_v1_get_approval_request**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_approval_request) | **GET** /external-channel/v1/approval-requests/{access_request_id} | Get Approval Request
+*ExternalChannelV1Api* | [**external_channel_v1_get_manifest_guidance**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_manifest_guidance) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest | Get Manifest Guidance
+*ExternalChannelV1Api* | [**external_channel_v1_list_agent_access**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_agent_access) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access | List Agent Access
+*ExternalChannelV1Api* | [**external_channel_v1_list_connections**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_connections) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels | List Connections
+*ExternalChannelV1Api* | [**external_channel_v1_list_session_channels**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_session_channels) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels | List Session Channels
+*ExternalChannelV1Api* | [**external_channel_v1_remove_access_block**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_remove_access_block) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/blocks/{block_id} | Remove Access Block
+*ExternalChannelV1Api* | [**external_channel_v1_revoke_access_grant**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_revoke_access_grant) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/grants/{grant_id} | Revoke Access Grant
+*ExternalChannelV1Api* | [**external_channel_v1_setup_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
+*ExternalChannelV1Api* | [**external_channel_v1_update_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack | Update Slack Connection
+*ExternalChannelV1Api* | [**external_channel_v1_validate_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/validate | Validate Connection
 *HealthV1Api* | [**health_v1_liveness**](azentspublicclient/docs/HealthV1Api.md#health_v1_liveness) | **GET** /health/v1/liveness | Liveness
 *HealthV1Api* | [**health_v1_readiness**](azentspublicclient/docs/HealthV1Api.md#health_v1_readiness) | **GET** /health/v1/readiness | Readiness
 *InvitationV1Api* | [**invitation_v1_accept_invitation**](azentspublicclient/docs/InvitationV1Api.md#invitation_v1_accept_invitation) | **POST** /invitation/v1/invitations/{invitation_id}/accept | Accept Invitation
@@ -340,6 +353,21 @@ Class | Method | HTTP request | Description
  - [ElevateWithPasswordRequest](azentspublicclient/docs/ElevateWithPasswordRequest.md)
  - [EventKind](azentspublicclient/docs/EventKind.md)
  - [ExistingProjectWorkspaceItemResponse](azentspublicclient/docs/ExistingProjectWorkspaceItemResponse.md)
+ - [ExternalChannelAccessGrantScope](azentspublicclient/docs/ExternalChannelAccessGrantScope.md)
+ - [ExternalChannelAccessRequestStatus](azentspublicclient/docs/ExternalChannelAccessRequestStatus.md)
+ - [ExternalChannelBindingActivationStatus](azentspublicclient/docs/ExternalChannelBindingActivationStatus.md)
+ - [ExternalChannelBindingStatus](azentspublicclient/docs/ExternalChannelBindingStatus.md)
+ - [ExternalChannelCapabilitySnapshot](azentspublicclient/docs/ExternalChannelCapabilitySnapshot.md)
+ - [ExternalChannelConnectionStatus](azentspublicclient/docs/ExternalChannelConnectionStatus.md)
+ - [ExternalChannelConnectionStatusSnapshot](azentspublicclient/docs/ExternalChannelConnectionStatusSnapshot.md)
+ - [ExternalChannelCredentialSnapshot](azentspublicclient/docs/ExternalChannelCredentialSnapshot.md)
+ - [ExternalChannelDecisionInput](azentspublicclient/docs/ExternalChannelDecisionInput.md)
+ - [ExternalChannelDeliveryOperation](azentspublicclient/docs/ExternalChannelDeliveryOperation.md)
+ - [ExternalChannelDeliveryStatus](azentspublicclient/docs/ExternalChannelDeliveryStatus.md)
+ - [ExternalChannelProvider](azentspublicclient/docs/ExternalChannelProvider.md)
+ - [ExternalChannelProviderIdentity](azentspublicclient/docs/ExternalChannelProviderIdentity.md)
+ - [ExternalChannelTransport](azentspublicclient/docs/ExternalChannelTransport.md)
+ - [ExternalChannelWorkStatus](azentspublicclient/docs/ExternalChannelWorkStatus.md)
  - [GcpConfig](azentspublicclient/docs/GcpConfig.md)
  - [GcpSecrets](azentspublicclient/docs/GcpSecrets.md)
  - [GetAuthMethodsResponse](azentspublicclient/docs/GetAuthMethodsResponse.md)
@@ -390,6 +418,17 @@ Class | Method | HTTP request | Description
  - [LoginMethodsResponse](azentspublicclient/docs/LoginMethodsResponse.md)
  - [MCPOAuthConnectionStatus](azentspublicclient/docs/MCPOAuthConnectionStatus.md)
  - [MCPOAuthConnectionSummaryResponse](azentspublicclient/docs/MCPOAuthConnectionSummaryResponse.md)
+ - [ManagedAccessResponse](azentspublicclient/docs/ManagedAccessResponse.md)
+ - [ManagedApprovalRequest](azentspublicclient/docs/ManagedApprovalRequest.md)
+ - [ManagedBinding](azentspublicclient/docs/ManagedBinding.md)
+ - [ManagedBindingListResponse](azentspublicclient/docs/ManagedBindingListResponse.md)
+ - [ManagedBlock](azentspublicclient/docs/ManagedBlock.md)
+ - [ManagedConnection](azentspublicclient/docs/ManagedConnection.md)
+ - [ManagedConnectionListResponse](azentspublicclient/docs/ManagedConnectionListResponse.md)
+ - [ManagedConnectionSetup](azentspublicclient/docs/ManagedConnectionSetup.md)
+ - [ManagedDelivery](azentspublicclient/docs/ManagedDelivery.md)
+ - [ManagedGrant](azentspublicclient/docs/ManagedGrant.md)
+ - [ManagedWork](azentspublicclient/docs/ManagedWork.md)
  - [MeResponse](azentspublicclient/docs/MeResponse.md)
  - [MemoryCreateRequest](azentspublicclient/docs/MemoryCreateRequest.md)
  - [MemoryListResponse](azentspublicclient/docs/MemoryListResponse.md)
@@ -474,6 +513,9 @@ Class | Method | HTTP request | Description
  - [SetPasswordRequest](azentspublicclient/docs/SetPasswordRequest.md)
  - [SignupStatusResponse](azentspublicclient/docs/SignupStatusResponse.md)
  - [SkillAction](azentspublicclient/docs/SkillAction.md)
+ - [SlackConnectionCredentials](azentspublicclient/docs/SlackConnectionCredentials.md)
+ - [SlackConnectionSetupRequest](azentspublicclient/docs/SlackConnectionSetupRequest.md)
+ - [SlackManifestGuidance](azentspublicclient/docs/SlackManifestGuidance.md)
  - [SubagentSettings](azentspublicclient/docs/SubagentSettings.md)
  - [SubagentTreeNodeResponse](azentspublicclient/docs/SubagentTreeNodeResponse.md)
  - [SubagentTreeResponse](azentspublicclient/docs/SubagentTreeResponse.md)

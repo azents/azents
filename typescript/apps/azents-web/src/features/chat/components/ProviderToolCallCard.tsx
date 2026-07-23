@@ -37,20 +37,28 @@ interface ProviderToolCallCardProps {
 
 function RawProviderToolDetails({
   toolCall,
+  showToolName = false,
 }: {
   toolCall: ProviderToolCall;
-}): ReactElement | null {
+  showToolName?: boolean;
+}): ReactElement {
+  const t = useTranslations("chat.toolCall");
   const hasArguments = toolCall.arguments.trim().length > 0;
   const hasOutput = (toolCall.output?.trim().length ?? 0) > 0;
-  if (!hasArguments && !hasOutput) {
-    return null;
-  }
   return (
     <Stack gap="sm">
+      {showToolName ? (
+        <Box>
+          <Text size="xs" c="dimmed" mb="xs">
+            {t("toolName")}
+          </Text>
+          <Code block>{toolCall.name}</Code>
+        </Box>
+      ) : null}
       {hasArguments ? (
         <Box>
           <Text size="xs" c="dimmed" mb="xs">
-            Arguments
+            {t("arguments")}
           </Text>
           <ScrollArea.Autosize
             mah={rem(240)}
@@ -64,7 +72,7 @@ function RawProviderToolDetails({
       {hasOutput ? (
         <Box>
           <Text size="xs" c="dimmed" mb="xs">
-            Output
+            {t("result")}
           </Text>
           <ScrollArea.Autosize
             mah={rem(240)}
@@ -227,7 +235,7 @@ export function ProviderToolCallCard({
         centered
         size="lg"
       >
-        {hasRawDetails ? <RawProviderToolDetails toolCall={toolCall} /> : null}
+        <RawProviderToolDetails toolCall={toolCall} showToolName />
       </Modal>
     </>
   );

@@ -4,7 +4,7 @@ created: 2026-06-09
 tags: [frontend, backend, chat]
 spec_type: flow
 owner: "@Hardtack"
-touches_domains: [conversation, agent]
+touches_domains: [conversation, agent, external-channel]
 code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/services/chat/**
@@ -18,8 +18,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-21
-spec_version: 40
+last_verified_at: 2026-07-22
+spec_version: 41
 ---
 
 # Chat Session Resync
@@ -455,7 +455,25 @@ finite transaction periodically.
 - Full Subagent Tree navigation is exposed through the Subagents tab without a duplicate chat top-bar drawer.
 - Child subagent detail views are human read-only for input but retain stop controls for running child sessions.
 
-## 11. Changelog
+## 11. External Channel Timeline Projection
+
+`external_channel_message` is a dedicated compact, left-aligned source item
+rather than a normal human message bubble. Its collapsed state identifies the
+provider, external conversation, and sender. Expansion reveals the safe body,
+provider timestamp, author type, lifecycle, and invocation authorization state.
+A validated `https://` provider permalink renders an accessible “open original”
+action in a new tab with `noopener noreferrer`; missing or invalid URLs render
+no broken action.
+
+History and live projection derive one semantic identity from binding,
+canonical message, and revision. During resync, durable history replaces the
+matching live item without duplication or disappearance. Expansion state is
+presentation-only and does not change canonical content or model lowering.
+Session Channels management state is queried separately from timeline resync.
+
+## 12. Changelog
+
+- **2026-07-22** — v41. Added External Channel source-item rendering, safe permalink behavior, and stable live/durable resync identity.
 
 - **2026-07-19** — v36. Defined terminal `agent_result` timeline reuse, promotion-time unread clearing, and tree invalidation after observation cursor advancement.
 - **2026-07-19** — v35. Removed the duplicate chat top-bar Subagent Tree drawer and kept full tree navigation in the Subagents tab.
