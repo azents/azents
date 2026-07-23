@@ -455,6 +455,8 @@ class SlackConversationClient:
         channel_id: str,
         thread_ts: str,
         approval_url: str,
+        participant_label: str,
+        participant_provider_user_id: str,
     ) -> SlackControlMessageResult:
         """Attempt one ordinary thread reply containing an approval link."""
         try:
@@ -465,7 +467,11 @@ class SlackConversationClient:
                 json_body={
                     "channel": channel_id,
                     "thread_ts": thread_ts,
-                    **_approval_message_payload(approval_url),
+                    **_approval_message_payload(
+                        approval_url,
+                        participant_label=participant_label,
+                        participant_provider_user_id=participant_provider_user_id,
+                    ),
                     "unfurl_links": False,
                     "unfurl_media": False,
                 },
@@ -826,10 +832,16 @@ def _channel_display_name(channel: dict[str, object]) -> str | None:
     return None
 
 
-def _approval_message_payload(approval_url: str) -> dict[str, object]:
+def _approval_message_payload(
+    approval_url: str,
+    *,
+    participant_label: str,
+    participant_provider_user_id: str,
+) -> dict[str, object]:
     """Render one accessible Block Kit access-approval message."""
+    participant = f"{participant_label} ({participant_provider_user_id})"
     return {
-        "text": "Approval is required before this participant can invoke the Agent.",
+        "text": (f"Approval is required before {participant} can invoke the Agent."),
         "blocks": [
             {
                 "type": "section",
@@ -837,6 +849,8 @@ def _approval_message_payload(approval_url: str) -> dict[str, object]:
                     "type": "mrkdwn",
                     "text": (
                         "*Approval required*\n"
+                        f"Participant: *{participant_label}* "
+                        f"(`{participant_provider_user_id}`)\n"
                         "Approve this participant before the Agent can respond."
                     ),
                 },

@@ -410,8 +410,6 @@ class ExternalChannelManagementService:
             raise ExternalChannelManagementNotFound(grant_id)
         await self.access_service.revoke_grant(
             grant_id=grant_id,
-            revoked_by_user_id=user_id,
-            now=datetime.datetime.now(datetime.UTC),
         )
 
     async def remove_block(
@@ -479,7 +477,7 @@ class ExternalChannelManagementService:
         await self.get_approval(access_request_id=access_request_id, user_id=user_id)
         now = datetime.datetime.now(datetime.UTC)
         if decision.decision == "allow_session":
-            await self.access_service.allow(
+            result = await self.access_service.allow(
                 access_request_id=access_request_id,
                 scope=ExternalChannelAccessGrantScope.SESSION,
                 decided_by_user_id=user_id,
@@ -487,7 +485,7 @@ class ExternalChannelManagementService:
                 now=now,
             )
         elif decision.decision == "allow_agent":
-            await self.access_service.allow(
+            result = await self.access_service.allow(
                 access_request_id=access_request_id,
                 scope=ExternalChannelAccessGrantScope.AGENT,
                 decided_by_user_id=user_id,
@@ -495,18 +493,22 @@ class ExternalChannelManagementService:
                 now=now,
             )
         elif decision.decision == "deny":
-            await self.access_service.deny(
+            result = await self.access_service.deny(
                 access_request_id=access_request_id,
                 decided_by_user_id=user_id,
                 decision_summary=decision.summary,
                 now=now,
             )
         else:
-            await self.access_service.block(
+            result = await self.access_service.block(
                 access_request_id=access_request_id,
                 decided_by_user_id=user_id,
                 decision_summary=decision.summary,
                 now=now,
+            )
+        if result.control_delete_delivery_id is not None:
+            await self.action_service.attempt_delivery(
+                result.control_delete_delivery_id
             )
         return await self.get_approval(
             access_request_id=access_request_id,

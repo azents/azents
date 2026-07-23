@@ -23,6 +23,7 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
+    RDBExternalChannelAccessRequest,
     RDBExternalChannelAction,
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
@@ -436,6 +437,51 @@ class ExternalChannelWorkRepository:
         delivery_attempt_id: str,
     ) -> ChannelDeliveryTarget | None:
         """Load provider target and encrypted credentials for one intent."""
+        attempt = await session.get(
+            RDBExternalChannelDeliveryAttempt,
+            delivery_attempt_id,
+        )
+        if attempt is None:
+            return None
+        if attempt.binding_id is None:
+            if (
+                attempt.origin_type
+                is not ExternalChannelDeliveryOriginType.ACCESS_REQUEST
+            ):
+                return None
+            request_route = (
+                await session.execute(
+                    sa.select(
+                        RDBExternalChannelAgentRoute,
+                        RDBExternalChannelConnection,
+                    )
+                    .join(
+                        RDBExternalChannelAccessRequest,
+                        RDBExternalChannelAccessRequest.route_id
+                        == RDBExternalChannelAgentRoute.id,
+                    )
+                    .join(
+                        RDBExternalChannelConnection,
+                        RDBExternalChannelConnection.id
+                        == RDBExternalChannelAgentRoute.connection_id,
+                    )
+                    .where(RDBExternalChannelAccessRequest.id == attempt.origin_id)
+                )
+            ).one_or_none()
+            if request_route is None:
+                return None
+            route, connection = request_route
+            return ChannelDeliveryTarget(
+                delivery_attempt_id=attempt.id,
+                operation=attempt.operation,
+                status=attempt.status,
+                binding_id=None,
+                connection_id=route.connection_id,
+                provider=connection.provider,
+                encrypted_credentials=connection.encrypted_credentials,
+                provider_tenant_id=connection.provider_tenant_id,
+                request_payload=dict(attempt.request_payload),
+            )
         row = (
             await session.execute(
                 sa.select(
@@ -464,8 +510,6 @@ class ExternalChannelWorkRepository:
         if row is None:
             return None
         attempt, route, connection = row
-        if attempt.binding_id is None:
-            return None
         return ChannelDeliveryTarget(
             delivery_attempt_id=attempt.id,
             operation=attempt.operation,

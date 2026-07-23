@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
     ExternalChannelBindingActivationStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
@@ -366,6 +367,25 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
     assert result.hydration_required is True
 
     async with rdb_session_manager() as session:
+        started = await repository.start_delivery_attempt(
+            session,
+            delivery_attempt_id=attempts[0].id,
+            attempted_at=_at(2),
+        )
+        assert started is not None
+        delivered = await repository.finish_delivery_attempt(
+            session,
+            delivery_attempt_id=attempts[0].id,
+            status=ExternalChannelDeliveryStatus.DELIVERED,
+            provider_message_key="slack:T1:C1:1784678400.000200",
+            error_kind=None,
+            error_summary=None,
+            completed_at=_at(2),
+        )
+        assert delivered is not None
+        await session.commit()
+
+    async with rdb_session_manager() as session:
         approver = await UserRepository().create(
             session,
             UserCreate(email="external-channel-approver@example.com"),
@@ -414,6 +434,14 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
             allowed.binding.agent_session_id,
         )
         grants = list(await session.scalars(sa.select(RDBExternalChannelAccessGrant)))
+        delete_attempts = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelDeliveryAttempt).where(
+                    RDBExternalChannelDeliveryAttempt.operation
+                    == ExternalChannelDeliveryOperation.PROGRESS_DELETE
+                )
+            )
+        )
 
     assert allowed.request.status is ExternalChannelAccessRequestStatus.ALLOWED
     assert allowed.binding.activation_status is (
@@ -422,6 +450,12 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
     assert created_session is not None
     assert created_session.start_reason is AgentSessionStartReason.EXTERNAL_CHANNEL
     assert len(grants) == 1
+    assert allowed.control_delete_delivery_id is not None
+    assert repeated.control_delete_delivery_id == allowed.control_delete_delivery_id
+    assert len(delete_attempts) == 1
+    assert delete_attempts[0].id == allowed.control_delete_delivery_id
+    assert delete_attempts[0].status is ExternalChannelDeliveryStatus.PENDING
+    assert delete_attempts[0].provider_message_key == ("slack:T1:C1:1784678400.000200")
     assert repeated.binding.id == allowed.binding.id
     assert repeated.grant.id == allowed.grant.id
 
@@ -590,6 +624,22 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
     assert all(item.correction_of_revision_id is None for item in projection_items)
     assert len(remaining_pending) == 1
     assert remaining_pending[0].provider_position == later_context.provider_position
+
+    revoked = await access_service.revoke_grant(grant_id=allowed.grant.id)
+
+    async with rdb_session_manager() as session:
+        deleted_grant = await session.get(
+            RDBExternalChannelAccessGrant,
+            allowed.grant.id,
+        )
+        retained_source_message = await repository.get_message(
+            session,
+            message_id=requests[0].source_message_id,
+        )
+
+    assert revoked.grant.id == allowed.grant.id
+    assert deleted_grant is None
+    assert retained_source_message is not None
 
 
 async def test_pending_context_is_trimmed_by_count_and_size(

@@ -148,6 +148,13 @@ class _SlackClient:
         assert kwargs["markdown_text"] == "Reply"
         return self.result
 
+    async def delete_message(self, **kwargs: str) -> SlackControlMessageResult:
+        self.events.append("provider")
+        self.bot_tokens.append(kwargs["bot_token"])
+        assert kwargs["channel_id"] == "C1"
+        assert kwargs["message_ts"] == "2.000001"
+        return self.result
+
 
 @asynccontextmanager
 async def _session_manager(
@@ -260,6 +267,44 @@ async def test_failed_delivery_is_terminal_and_not_reported_as_success() -> None
         (ExternalChannelDeliveryStatus.FAILED, None, "resource_unavailable")
     ]
     assert events.count("provider") == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_control_message_delete_remains_a_terminal_outcome() -> None:
+    """Approval cleanup failure is recorded after the decision-owned intent."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "operation": ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+            "binding_id": None,
+            "request_payload": {
+                "channel_id": "C1",
+                "thread_ts": "1.000001",
+                "provider_message_key": "slack:T1:C1:2.000001",
+            },
+        }
+    )
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="message_not_found",
+                error_summary="Slack could not delete the approval message.",
+            ),
+        ),
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert repository.finished == [
+        (ExternalChannelDeliveryStatus.FAILED, None, "message_not_found")
+    ]
+    assert events == ["start", "commit", "provider", "finish", "commit"]
 
 
 @pytest.mark.asyncio
