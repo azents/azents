@@ -165,6 +165,47 @@ def test_event_callback_projects_bounded_routing_and_message_fields() -> None:
     assert "unexpected" not in event
 
 
+def test_event_callback_projects_bounded_rich_text_content() -> None:
+    """Retain readable block-only content without arbitrary Block Kit fields."""
+    payload = json.loads(_event_body())
+    event = payload["event"]
+    event["text"] = ""
+    event["blocks"] = [
+        {
+            "type": "rich_text",
+            "block_id": "untrusted-provider-block-id",
+            "elements": [
+                {
+                    "type": "rich_text_section",
+                    "elements": [
+                        {"type": "text", "text": "Ask "},
+                        {"type": "user", "user_id": "U2"},
+                        {"type": "text", "text": " in "},
+                        {"type": "channel", "channel_id": "C2"},
+                    ],
+                }
+            ],
+        }
+    ]
+
+    result = parse_slack_callback(
+        connection_id="connection-1",
+        raw_body=json.dumps(payload).encode(),
+        received_at=_NOW,
+    )
+
+    assert isinstance(result, SlackEventCallback)
+    projected_event = result.event.envelope["event"]
+    assert isinstance(projected_event, dict)
+    assert projected_event["blocks"] == [
+        {
+            "type": "rich_text",
+            "normalized_text": "Ask <@U2> in <#C2>",
+        }
+    ]
+    assert "untrusted-provider-block-id" not in repr(projected_event)
+
+
 def test_event_callback_rejects_oversized_body() -> None:
     """Bound the provider inbox before JSON normalization."""
     with pytest.raises(SlackHTTPPayloadTooLarge):
