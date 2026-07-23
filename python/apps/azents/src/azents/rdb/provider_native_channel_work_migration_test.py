@@ -78,6 +78,159 @@ def _seed_legacy_work(
     )
 
 
+def _seed_legacy_binding_graph(
+    connection: sa.Connection,
+    *,
+    binding_ids: Sequence[str],
+) -> None:
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO workspaces (id, name, handle)
+            VALUES ('workspace-migration', 'Migration test', 'migration-test')
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO agents (
+                id,
+                workspace_id,
+                name,
+                model_selection,
+                lightweight_model_selection,
+                selectable_model_options,
+                main_model_label,
+                lightweight_model_label
+            )
+            VALUES (
+                'agent-migration',
+                'workspace-migration',
+                'Migration test Agent',
+                '{}'::jsonb,
+                '{}'::jsonb,
+                '[]'::jsonb,
+                'migration-main',
+                'migration-lightweight'
+            )
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO agent_sessions (
+                id,
+                workspace_id,
+                agent_id,
+                status,
+                start_reason,
+                handle,
+                session_kind
+            )
+            VALUES (
+                'session-migration',
+                'workspace-migration',
+                'agent-migration',
+                'active',
+                'external_channel',
+                'migration-session',
+                'root'
+            )
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO external_channel_connections (
+                id,
+                workspace_id,
+                provider,
+                transport,
+                status
+            )
+            VALUES (
+                'connection-migration',
+                'workspace-migration',
+                'slack',
+                'http',
+                'active'
+            )
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO external_channel_agent_routes (
+                id,
+                connection_id,
+                agent_id,
+                route_mode
+            )
+            VALUES (
+                'route-migration',
+                'connection-migration',
+                'agent-migration',
+                'dedicated'
+            )
+            """
+        )
+    )
+    for index, binding_id in enumerate(binding_ids):
+        resource_id = f"resource-migration-{index}"
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO external_channel_resources (
+                    id,
+                    connection_id,
+                    resource_type,
+                    provider_resource_key,
+                    status
+                )
+                VALUES (
+                    :id,
+                    'connection-migration',
+                    'thread',
+                    :provider_resource_key,
+                    'active'
+                )
+                """
+            ),
+            {
+                "id": resource_id,
+                "provider_resource_key": f"slack:T1:C1:{index}.000001",
+            },
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO external_channel_bindings (
+                    id,
+                    resource_id,
+                    route_id,
+                    agent_session_id,
+                    status
+                )
+                VALUES (
+                    :binding_id,
+                    :resource_id,
+                    'route-migration',
+                    'session-migration',
+                    'active'
+                )
+                """
+            ),
+            {
+                "binding_id": binding_id,
+                "resource_id": resource_id,
+            },
+        )
+
+
 def test_provider_native_progress_migration_round_trip(
     check_docker_availability: None,
 ) -> None:
@@ -102,7 +255,14 @@ def test_provider_native_progress_migration_round_trip(
             }
         ]
         with engine.begin() as connection:
-            connection.execute(sa.text("SET session_replication_role = replica"))
+            _seed_legacy_binding_graph(
+                connection,
+                binding_ids=(
+                    "binding-checking",
+                    "binding-working",
+                    "binding-finished",
+                ),
+            )
             _seed_legacy_work(
                 connection,
                 work_id="work-checking",
@@ -133,7 +293,6 @@ def test_provider_native_progress_migration_round_trip(
                 tasks=finished_tasks,
                 desired_progress_payload=None,
             )
-            connection.execute(sa.text("SET session_replication_role = origin"))
 
         alembic_command.upgrade(config, _PROGRESS_REVISION)
         with engine.begin() as connection:

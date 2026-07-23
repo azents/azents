@@ -13,6 +13,7 @@ import { useDocumentVisibility } from "@mantine/hooks";
 import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
+import { externalChannelReferenceMappingsMetadata } from "../externalChannelMessage";
 import { isLivePartialHistoryEvent } from "../hooks/chatLiveHistoryProjection";
 import {
   liveRunForDisplay,
@@ -799,6 +800,9 @@ function externalChannelEventMetadata(
   event: ChatEventResponse,
 ): Record<string, string> {
   const payload = event.payload;
+  const referenceMappings = externalChannelReferenceMappingsMetadata(
+    payload.reference_mappings,
+  );
   return {
     ...eventMetadata(event),
     source: "external_channel",
@@ -823,6 +827,9 @@ function externalChannelEventMetadata(
     ...optionalEventMetadata(payload, "sender_display_name"),
     ...optionalEventMetadata(payload, "original_url"),
     ...optionalEventMetadata(payload, "correction_of_revision_id"),
+    ...(referenceMappings === null
+      ? {}
+      : { reference_mappings: referenceMappings }),
   };
 }
 

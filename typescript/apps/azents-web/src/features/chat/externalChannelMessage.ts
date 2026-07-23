@@ -83,6 +83,25 @@ function stringRecord(value: unknown): Record<string, string> {
   return Object.fromEntries(entries);
 }
 
+export function externalChannelReferenceMappingsMetadata(
+  value: unknown,
+): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const mappings: ReferenceMappings = {
+    users: stringRecord(value.users),
+    channels: stringRecord(value.channels),
+  };
+  if (
+    Object.keys(mappings.users).length === 0 &&
+    Object.keys(mappings.channels).length === 0
+  ) {
+    return null;
+  }
+  return JSON.stringify(mappings);
+}
+
 function visibleReferences(body: string, mappings: ReferenceMappings): string {
   return body
     .replace(
