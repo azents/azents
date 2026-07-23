@@ -1,10 +1,12 @@
 """Session input buffer service."""
 
+import asyncio
 import dataclasses
 import datetime
 import enum
 import logging
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from typing import Annotated, Protocol, assert_never
 
 from fastapi import Depends
@@ -64,6 +66,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.model_file import ModelFileService
 from azents.services.session_title import initial_title_from_event
 from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
 
@@ -180,6 +183,7 @@ class PreparedInputBufferFiles:
 
     attachments: list[RuntimeAttachment]
     file_parts: list[FileOutputPart]
+    created_model_file_ids: list[str]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -226,6 +230,7 @@ class InputBufferService:
         InputBufferRepository, Depends(InputBufferRepository)
     ]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
+    model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
@@ -441,8 +446,12 @@ class InputBufferService:
         prepared_files = await self._prepare_input_buffer_attachments(
             session_id=session_id,
             expected_buffer_id=expected_buffer_id,
+            include_action_messages=include_action_messages,
         )
-        async with self.session_manager() as session:
+        async with (
+            self._discard_prepared_model_files_on_failure(prepared_files),
+            self.session_manager() as session,
+        ):
             agent_session = await self.agent_session_repository.lock_by_id(
                 session,
                 session_id,
@@ -671,6 +680,7 @@ class InputBufferService:
         *,
         session_id: str,
         expected_buffer_id: str | None,
+        include_action_messages: bool,
     ) -> PreparedInputBufferFiles:
         """Resolve the FIFO head attachments without holding a database session."""
         async with self.session_manager() as session:
@@ -692,11 +702,28 @@ class InputBufferService:
                 "Input buffer FIFO head changed during preparation"
             )
         if buffer is None:
-            return PreparedInputBufferFiles(attachments=[], file_parts=[])
+            return PreparedInputBufferFiles(
+                attachments=[],
+                file_parts=[],
+                created_model_file_ids=[],
+            )
 
         file_parts = list(buffer.file_parts)
+        if (
+            buffer.kind is InputBufferKind.ACTION_MESSAGE
+            and not include_action_messages
+        ):
+            return PreparedInputBufferFiles(
+                attachments=[],
+                file_parts=file_parts,
+                created_model_file_ids=[],
+            )
         if not buffer.attachments:
-            return PreparedInputBufferFiles(attachments=[], file_parts=file_parts)
+            return PreparedInputBufferFiles(
+                attachments=[],
+                file_parts=file_parts,
+                created_model_file_ids=[],
+            )
         if buffer.actor_user_id is None:
             raise ValueError("Input buffer attachments require an actor user")
         materialized = await materialize_user_input_exchange_file_attachments(
@@ -704,13 +731,57 @@ class InputBufferService:
             agent_id=agent_session.agent_id,
             session_id=buffer.session_id,
             exchange_file_service=self.exchange_file_service,
-            model_file_service=None,
+            model_file_service=(None if file_parts else self.model_file_service),
             user_id=buffer.actor_user_id,
         )
+        if not file_parts:
+            file_parts.extend(materialized.file_parts)
         return PreparedInputBufferFiles(
             attachments=materialized.attachments,
             file_parts=file_parts,
+            created_model_file_ids=[
+                part.model_file_id for part in materialized.file_parts
+            ],
         )
+
+    @asynccontextmanager
+    async def _discard_prepared_model_files_on_failure(
+        self,
+        prepared_files: PreparedInputBufferFiles,
+    ) -> AsyncIterator[None]:
+        """Discard newly created ModelFiles if FIFO promotion fails."""
+        try:
+            yield
+        except asyncio.CancelledError:
+            if prepared_files.created_model_file_ids:
+                try:
+                    await asyncio.shield(
+                        self.model_file_service.discard_pending_input(
+                            model_file_ids=prepared_files.created_model_file_ids,
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to discard prepared ModelFiles after cancellation",
+                        extra={
+                            "model_file_ids": prepared_files.created_model_file_ids,
+                        },
+                    )
+            raise
+        except Exception:
+            if prepared_files.created_model_file_ids:
+                try:
+                    await self.model_file_service.discard_pending_input(
+                        model_file_ids=prepared_files.created_model_file_ids,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to discard prepared ModelFiles after promotion failure",
+                        extra={
+                            "model_file_ids": prepared_files.created_model_file_ids,
+                        },
+                    )
+            raise
 
     async def _promote_claimed_buffers(
         self,

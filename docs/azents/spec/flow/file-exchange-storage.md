@@ -44,8 +44,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-21
-spec_version: 24
+last_verified_at: 2026-07-23
+spec_version: 25
 ---
 
 # File Exchange Storage
@@ -60,9 +60,9 @@ File Exchange Storage is the flow that separately stores and retrieves user-faci
 
 1. azents-web `useFileUpload` sends multipart upload to chat API.
 2. API verifies workspace/session access, file size, and media type.
-3. Successful upload creates user-facing Exchange attachment and model-input ModelFile/FilePart together. If either cannot be created, upload fails and does not return success response.
-4. File body is stored in each store, and attachment URI snapshot and FilePart snapshot remain as independent fields in event/input buffer. Do not reverse-infer FilePart by reading attachment URI.
-5. Agent execution loop does not automatically convert attachment to rich file input when transforming user input event to LLM input. Model rich input is delivered only as FilePart content of user input.
+3. Successful upload creates only the user-facing Exchange attachment. The upload response does not expose a client-owned FilePart.
+4. Input acceptance stores and claims the attachment URI. Before the FIFO input is promoted, the worker resolves the claimed attachment outside the database lock, creates a ModelFile, and includes its FilePart in the promoted user message. Deferred action inputs skip this preparation, and a stale, failed, or cancelled promotion marks newly created ModelFiles deleted for lifecycle cleanup.
+5. Attachment and FilePart snapshots remain independent in the durable user event. The Attachment supports preview, download, and runtime import, while the FilePart supplies rich model input without requiring the Agent to call `import_file`.
 6. Exchange attachment has `status`, `expires_at`, and `expired_at` metadata. Scheduler-owned cleanup marks Exchange files past expiration time as `expired` and attempts blob deletion. Resolver, download API, lowerer, and UI treat expired/unavailable as normal history state based on DB availability.
 
 An ExchangeFile created for a concrete session is bound immediately to that session's root
@@ -91,7 +91,7 @@ Event transcript keeps only artifact metadata and `artifact://...` URI. Lowerer 
 
 ### Explicit FilePart for model rich input
 
-Attachment and Artifact are not automatically converted to ModelFile/FilePart. If model rich input is needed, upload boundary or tool implementation that directly has bytes creates normalized blob in ModelFileStore and returns FilePart. Example is `read_image` tool for showing runtime image bytes to model. A separate FilePart creation tool exposed to model is not current contract. FilePart references ModelFile entity by `model_file_id`, not URI. ModelFile itself does not create URI.
+Attachment and Artifact are not generally converted to ModelFile/FilePart. The user-input promotion boundary is the explicit exception for claimed upload attachments: it resolves the Exchange bytes and creates a FilePart before the user event enters model input. Tool implementations that directly have bytes may also create normalized blobs in ModelFileStore and return FilePart; `read_image` is the runtime-file example. A separate FilePart creation tool exposed to the model is not current contract. FilePart references ModelFile entity by `model_file_id`, not URI. ModelFile itself does not create URI.
 
 ModelFileStore is model input blob store, not original preservation store. Image ModelFile is normalized to JPEG at creation. Non-image ModelFile is not normalized and only size cap applies. ModelFile has current lifecycle status `available` or `deleted`; persistent run-age degradation and `unreachable` stages are not part of the current lifecycle. Scheduler-owned GC deletes unpinned ModelFiles after their single durable FilePart event falls behind the AgentSession model-input head cursor.
 If original non-image payload exceeds size cap, ModelFile is not created and is replaced with user-visible size cap message.

@@ -83,6 +83,7 @@ from azents.services.external_channel.slack_events import (
     normalize_slack_event,
 )
 from azents.services.input_buffer import InputBufferService
+from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import make_test_model_selection_dict
 from azents.worker.session.lifecycle import SessionLifecycleService
 
@@ -228,6 +229,7 @@ def _service(
             session_manager=session_manager,
             input_buffer_repository=InputBufferRepository(),
             exchange_file_service=cast(ExchangeFileService, MagicMock()),
+            model_file_service=cast(ModelFileService, MagicMock()),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
@@ -347,6 +349,7 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
             session_manager=rdb_session_manager,
             input_buffer_repository=InputBufferRepository(),
             exchange_file_service=cast(ExchangeFileService, MagicMock()),
+            model_file_service=cast(ModelFileService, MagicMock()),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
