@@ -11,7 +11,6 @@ Name | Type | Description | Notes
 **provider** | [**ExternalChannelProvider**](ExternalChannelProvider.md) |  | 
 **transport** | [**ExternalChannelTransport**](ExternalChannelTransport.md) |  | 
 **status** | [**ExternalChannelConnectionStatus**](ExternalChannelConnectionStatus.md) |  | 
-**route_status** | [**ExternalChannelRouteStatus**](ExternalChannelRouteStatus.md) |  | 
 **provider_app_id** | **str** |  | 
 **provider_tenant_id** | **str** |  | 
 **provider_bot_user_id** | **str** |  | 

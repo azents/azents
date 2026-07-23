@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-22 | 52 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-23 | 128 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-22 | 3 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-23 | 4 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
@@ -36,10 +36,10 @@ Design documents are accumulated records and are not listed individually in this
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-22 | 41 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-22 | 1 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-23 | 2 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-22 | 1 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-22 | 4 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-22 | 3 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 5 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-23 | 4 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-21 | 24 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |

@@ -43,7 +43,6 @@ const connection: ManagedConnection = {
   provider: "slack",
   transport: "socket",
   status: "active",
-  route_status: "active",
   provider_app_id: "A0123456789",
   provider_tenant_id: "Engineering Workspace",
   provider_bot_user_id: "U0123456789",

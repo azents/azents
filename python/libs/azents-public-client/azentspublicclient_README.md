@@ -366,7 +366,6 @@ Class | Method | HTTP request | Description
  - [ExternalChannelDeliveryStatus](azentspublicclient/docs/ExternalChannelDeliveryStatus.md)
  - [ExternalChannelProvider](azentspublicclient/docs/ExternalChannelProvider.md)
  - [ExternalChannelProviderIdentity](azentspublicclient/docs/ExternalChannelProviderIdentity.md)
- - [ExternalChannelRouteStatus](azentspublicclient/docs/ExternalChannelRouteStatus.md)
  - [ExternalChannelTransport](azentspublicclient/docs/ExternalChannelTransport.md)
  - [ExternalChannelWorkStatus](azentspublicclient/docs/ExternalChannelWorkStatus.md)
  - [GcpConfig](azentspublicclient/docs/GcpConfig.md)

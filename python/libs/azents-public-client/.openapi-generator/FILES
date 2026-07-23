@@ -147,7 +147,6 @@ azentspublicclient/docs/ExternalChannelDeliveryOperation.md
 azentspublicclient/docs/ExternalChannelDeliveryStatus.md
 azentspublicclient/docs/ExternalChannelProvider.md
 azentspublicclient/docs/ExternalChannelProviderIdentity.md
-azentspublicclient/docs/ExternalChannelRouteStatus.md
 azentspublicclient/docs/ExternalChannelTransport.md
 azentspublicclient/docs/ExternalChannelV1Api.md
 azentspublicclient/docs/ExternalChannelWorkStatus.md
@@ -481,7 +480,6 @@ azentspublicclient/models/external_channel_delivery_operation.py
 azentspublicclient/models/external_channel_delivery_status.py
 azentspublicclient/models/external_channel_provider.py
 azentspublicclient/models/external_channel_provider_identity.py
-azentspublicclient/models/external_channel_route_status.py
 azentspublicclient/models/external_channel_transport.py
 azentspublicclient/models/external_channel_work_status.py
 azentspublicclient/models/gcp_config.py
@@ -806,7 +804,6 @@ azentspublicclient/test/test_external_channel_delivery_operation.py
 azentspublicclient/test/test_external_channel_delivery_status.py
 azentspublicclient/test/test_external_channel_provider.py
 azentspublicclient/test/test_external_channel_provider_identity.py
-azentspublicclient/test/test_external_channel_route_status.py
 azentspublicclient/test/test_external_channel_transport.py
 azentspublicclient/test/test_external_channel_v1_api.py
 azentspublicclient/test/test_external_channel_work_status.py
