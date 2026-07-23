@@ -882,9 +882,9 @@ def _bounded_text(value: object) -> str:
 
 def _normalized_message_body(message: dict[str, object]) -> str:
     """Prefer Slack fallback text and derive readable block-only content."""
-    fallback = _bounded_text(message.get("text"))
-    if fallback.strip():
-        return fallback
+    fallback = message.get("text")
+    if isinstance(fallback, str) and fallback.strip():
+        return _bounded_text(fallback)
     return _bounded_text(slack_blocks_text(message.get("blocks")))
 
 

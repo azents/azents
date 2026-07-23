@@ -240,6 +240,40 @@ def test_normalizes_block_only_rich_text_and_reference_ids() -> None:
     )
 
 
+def test_long_blank_fallback_does_not_hide_block_only_content() -> None:
+    """Check blankness before truncation adds a visible fallback marker."""
+    normalized = normalize_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        envelope=_envelope(
+            {
+                "type": "message",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U1",
+                "ts": "1721600000.000100",
+                "text": " " * (70 * 1024),
+                "blocks": [
+                    {
+                        "type": "rich_text",
+                        "elements": [
+                            {
+                                "type": "rich_text_section",
+                                "elements": [
+                                    {"type": "text", "text": "Readable from blocks"}
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+    )
+
+    assert isinstance(normalized, SlackNormalizedMessage)
+    assert normalized.normalized_body == "Readable from blocks"
+
+
 def test_rich_text_edit_revision_identity_uses_normalized_body() -> None:
     """Changing block-only content creates a distinct edit revision key."""
 
