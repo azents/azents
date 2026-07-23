@@ -1364,6 +1364,7 @@
     "thinkingLabel": "Thinking",
     "collapseThinking": "Collapse thinking",
     "goalContinuationIndicator": "Goal continuation queued",
+    "externalChannelContinuationIndicator": "Channel work continuation queued",
     "interruptedIndicator": "Interrupted by user",
     "pendingInput": {
       "listTitle": "Buffered messages ({count})",

@@ -66,10 +66,13 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ActivityMessageRow.tsx
+  - typescript/apps/azents-web/src/features/chat/components/MessageBubble.tsx
+  - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-23
-spec_version: 128
+spec_version: 129
 ---
 
 # Agent Execution Loop
@@ -1117,10 +1120,14 @@ provider operations execute outside the transaction.
 After a successful run, unfinished Channel Work is an idle-continuation source.
 Continuation remains eligible until every relevant binding finishes or clears
 its tasks. One completed binding does not cancel continuation required by
-another binding in the same root Session.
+another binding in the same root Session. Its durable input retains the common
+`goal_continuation` event kind, but `source=external_channel` metadata is preserved
+through the chat projection so the UI labels it as a Channel Work continuation
+with a channel/message icon rather than presenting it as Goal continuation.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 129) — Distinguished External Channel idle continuation from Goal continuation in chat labels and icons while retaining the common durable event kind.
 - **2026-07-23** (spec_version 128) — Added raw-ID-preserving external-channel identity mapping tables to model input lowering.
 - **2026-07-23** (spec_version 127) — Made adapter-computed `needs_follow_up` the normalized lifecycle source of truth by combining client-tool semantics with best-effort dialect signals; empty terminal output now completes the Run.
 - **2026-07-22** (spec_version 126) — Added External Channel batch preparation, explicit source lowering, conditional `channel_action`, and binding-aware idle continuation.

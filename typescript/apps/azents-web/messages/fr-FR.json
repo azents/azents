@@ -1364,6 +1364,7 @@
     "thinkingLabel": "Thinking",
     "collapseThinking": "Réduire le raisonnement",
     "goalContinuationIndicator": "Continuation du goal ajoutée",
+    "externalChannelContinuationIndicator": "Continuation du travail de canal ajoutée",
     "interruptedIndicator": "Interrompu par l’utilisateur",
     "pendingInput": {
       "listTitle": "Messages en mémoire tampon ({count})",

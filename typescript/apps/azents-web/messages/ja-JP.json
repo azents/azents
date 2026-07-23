@@ -1364,6 +1364,7 @@
     "thinkingLabel": "Thinking",
     "collapseThinking": "思考過程を折りたたむ",
     "goalContinuationIndicator": "Goal continuation が入力されました",
+    "externalChannelContinuationIndicator": "Channel Work の継続が入力されました",
     "interruptedIndicator": "ユーザーの操作により中断されました",
     "pendingInput": {
       "listTitle": "バッファ済みメッセージ ({count})",

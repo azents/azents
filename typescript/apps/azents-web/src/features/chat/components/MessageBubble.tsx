@@ -23,12 +23,14 @@ import {
   IconCheck,
   IconChevronRight,
   IconClock,
+  IconMessageCircle,
   IconPencil,
   IconRobot,
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import { memo } from "react";
+import { continuationPresentation } from "../continuationPresentation";
 import { externalChannelMessagePresentation } from "../externalChannelMessage";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import {
@@ -353,7 +355,13 @@ function AssistantTextMessage({
   );
 }
 
-function GoalControlMessage({ label }: { label: string }): React.ReactElement {
+function InlineControlMessage({
+  icon,
+  label,
+}: {
+  icon: React.ReactNode;
+  label: string;
+}): React.ReactElement {
   return (
     <Group
       gap={rem(6)}
@@ -362,7 +370,7 @@ function GoalControlMessage({ label }: { label: string }): React.ReactElement {
       wrap="nowrap"
       className={inlineControlClasses.root}
     >
-      <IconTargetArrow aria-hidden="true" size={14} stroke={1.8} />
+      {icon}
       <Text size="xs" className={inlineControlClasses.label}>
         {label}
       </Text>
@@ -555,9 +563,19 @@ export const MessageBubble = memo(function MessageBubble({
   const externalChannelSource = externalChannelMessagePresentation(message);
 
   if (message.role === "goal_continuation") {
+    const continuation = continuationPresentation(message);
     return (
       <Box opacity={dimmed ? 0.45 : 1}>
-        <GoalControlMessage label={t("goalContinuationIndicator")} />
+        <InlineControlMessage
+          icon={
+            continuation.icon === "channel" ? (
+              <IconMessageCircle aria-hidden="true" size={14} stroke={1.8} />
+            ) : (
+              <IconTargetArrow aria-hidden="true" size={14} stroke={1.8} />
+            )
+          }
+          label={t(continuation.labelKey)}
+        />
       </Box>
     );
   }
@@ -565,7 +583,10 @@ export const MessageBubble = memo(function MessageBubble({
   if (message.role === "goal_updated") {
     return (
       <Box opacity={dimmed ? 0.45 : 1}>
-        <GoalControlMessage label={t("goalUpdatedIndicator")} />
+        <InlineControlMessage
+          icon={<IconTargetArrow aria-hidden="true" size={14} stroke={1.8} />}
+          label={t("goalUpdatedIndicator")}
+        />
       </Box>
     );
   }

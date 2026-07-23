@@ -328,6 +328,17 @@ export const GoalContinuationIndicator = {
   },
 } satisfies Story;
 
+export const ExternalChannelContinuationIndicator = {
+  args: {
+    message: createChatMessage({
+      id: "external-channel-continuation",
+      role: "goal_continuation",
+      content: null,
+      metadata: { source: "external_channel" },
+    }),
+  },
+} satisfies Story;
+
 export const GoalUpdatedIndicator = {
   args: {
     message: createChatMessage({

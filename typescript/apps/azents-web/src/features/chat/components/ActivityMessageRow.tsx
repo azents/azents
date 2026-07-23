@@ -1,7 +1,12 @@
 "use client";
 
-import { IconBubble, IconTargetArrow } from "@tabler/icons-react";
+import {
+  IconBubble,
+  IconMessageCircle,
+  IconTargetArrow,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { continuationPresentation } from "../continuationPresentation";
 import { ActivityRow } from "./ActivityRow";
 import { activityRowIconSize } from "./activityRowPresentation";
 import type { ActivityEvent } from "../toolActivityPresentation";
@@ -28,10 +33,11 @@ export function ActivityMessageRow({
     return null;
   }
 
+  const continuation = continuationPresentation(event.message);
   const label =
     event.kind === "goal-control"
       ? event.message?.role === "goal_continuation"
-        ? t("goalContinuationIndicator")
+        ? t(continuation.labelKey)
         : t("goalUpdatedIndicator")
       : (activityPreview(event.message?.content ?? "") ?? t("agentFallback"));
 
@@ -40,7 +46,11 @@ export function ActivityMessageRow({
       ariaLabel={label}
       icon={
         event.kind === "goal-control" ? (
-          <IconTargetArrow aria-hidden="true" size={activityRowIconSize} />
+          continuation.icon === "channel" ? (
+            <IconMessageCircle aria-hidden="true" size={activityRowIconSize} />
+          ) : (
+            <IconTargetArrow aria-hidden="true" size={activityRowIconSize} />
+          )
         ) : (
           <IconBubble aria-hidden="true" size={activityRowIconSize} />
         )

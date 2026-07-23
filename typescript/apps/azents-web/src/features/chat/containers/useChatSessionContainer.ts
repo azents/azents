@@ -13,6 +13,7 @@ import { useDocumentVisibility } from "@mantine/hooks";
 import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
+import { continuationMetadata } from "../continuationPresentation";
 import { externalChannelReferenceMappingsMetadata } from "../externalChannelMessage";
 import { isLivePartialHistoryEvent } from "../hooks/chatLiveHistoryProjection";
 import {
@@ -1233,7 +1234,10 @@ function mapEvents(
           content: null,
           createdAt: event.created_at,
           status: "complete",
-          metadata: eventMetadata(event),
+          metadata: {
+            ...eventMetadata(event),
+            ...continuationMetadata(payload.metadata),
+          },
         });
       }
       case "goal_updated": {
