@@ -1560,6 +1560,7 @@
       "result": "結果",
       "genericDetails": "汎用の詳細",
       "rawData": "生データ",
+      "toolName": "ツール名",
       "viewRawDataFor": "{action} の生データを表示",
       "fromCharacter": "{offset} 文字目から",
       "filesChanged": "{count} 件のファイルを変更",

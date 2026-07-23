@@ -103,6 +103,15 @@ export const CompletedWithOutputAndAttachment = {
       canvas.getByRole("button", { name: "Show tool details" }),
     );
     await expect(canvas.getByText("Generated one image.")).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", {
+        name: "View raw data for Image generation",
+      }),
+    );
+    await expect(within(document.body).getByText("Tool name")).toBeVisible();
+    await expect(
+      within(document.body).getByText("image_generation"),
+    ).toBeVisible();
   },
 } satisfies Story;
 
@@ -147,5 +156,18 @@ export const UnknownHistoricalStatus = {
       arguments: "",
       status: "unknown",
     },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", {
+        name: "View raw data for Custom retrieval",
+      }),
+    );
+    await expect(within(document.body).getByText("Raw data")).toBeVisible();
+    await expect(within(document.body).getByText("Tool name")).toBeVisible();
+    await expect(
+      within(document.body).getByText("custom_retrieval"),
+    ).toBeVisible();
   },
 } satisfies Story;

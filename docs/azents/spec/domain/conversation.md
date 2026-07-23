@@ -101,8 +101,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-22
-spec_version: 127
+last_verified_at: 2026-07-23
+spec_version: 128
 ---
 
 # Conversation & Events
@@ -678,7 +678,8 @@ Reasoning, Skill, client-tool, provider-tool, and non-interactive control events
 Activity-row grid for vertical padding, disclosure-chevron space, icon size, text baseline, status, and
 right-side action placement. A missing disclosure keeps the same leading slot, and right-side status or
 actions do not shift the left summary columns. Every client or provider Tool row reserves and renders a
-sibling Raw data `…` action even when its retained arguments and result are empty. A validated specialized
+sibling Raw data `…` action even when its retained arguments and result are empty. Its dialog always presents
+the canonical technical tool name before retained arguments and result. A validated specialized
 client tool row shows its localized action, privacy-reviewed resource identity or bounded qualifier, and
 minimal semantic detail. Memory content, Goal/Todo text, Skill bodies, messages, tasks, tool-search queries,
 file URIs, and search patterns remain expanded-only or Raw-only according to the renderer. Generic rows
@@ -984,6 +985,7 @@ participant.
 
 - **2026-07-22** — v126. Added External Channel batch InputBuffer promotion, source-attributed transcript events, stable live/durable identity, and revision/lifecycle ownership.
 
+- **2026-07-23** — v128. Raw data dialogs show the canonical technical Tool name before retained arguments and result for both client and provider calls.
 - **2026-07-22** — v126. Added archive-time worktree integrity inspection, dirty-worktree preservation, purge-only forced cleanup, terminal absence classification, ambiguous-target safety, and ordinary retry convergence.
 - **2026-07-21** — v125. Added closed client-tool wire dialect persistence, same-dialect replay and pairing, and bounded non-executable custom history projection.
 - **2026-07-21** — v123. Completed validated specialized presentation coverage for source-less client builtins, added rich provider `web_search`, standardized Activity event rows and fixed Raw data action placement, removed Generic filler copy, and kept sensitive payloads out of collapsed summaries.

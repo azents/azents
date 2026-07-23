@@ -13,7 +13,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-22 | 52 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-22 | 127 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-23 | 128 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-23 | 4 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-21 | 10 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
