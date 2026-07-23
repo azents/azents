@@ -173,6 +173,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if operation == "conversations.info":
             self._conversation_info()
             return
+        if operation == "users.info":
+            self._user_info(query)
+            return
         if operation == "conversations.replies":
             self._conversation_replies(query)
             return
@@ -246,6 +249,27 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
                 "bot": {
                     "id": bot_id,
                     "app_id": "A-E2E",
+                },
+            },
+        )
+
+    def _user_info(self, query: dict[str, list[str]]) -> None:
+        scenario = self.state.auth_scenario
+        if self._common_failure(scenario):
+            return
+        user_id = query.get("user", ["unknown"])[0]
+        self._json_response(
+            200,
+            {
+                "ok": True,
+                "user": {
+                    "id": user_id,
+                    "name": user_id.lower(),
+                    "real_name": f"User {user_id}",
+                    "profile": {
+                        "display_name": f"User {user_id}",
+                        "real_name": f"User {user_id}",
+                    },
                 },
             },
         )
@@ -348,6 +372,17 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             "outcome": "delivered",
             "approval_request_id": approval_request_id,
         }
+        blocks = body.get("blocks")
+        typed_blocks = cast(list[object], blocks) if isinstance(blocks, list) else []
+        first_block: object | None = typed_blocks[0] if typed_blocks else None
+        if (
+            operation == "chat.update"
+            and isinstance(blocks, list)
+            and isinstance(first_block, dict)
+            and cast(dict[str, object], first_block).get("type") == "plan"
+        ):
+            delivery["text"] = _optional_string(body, "text")
+            delivery["blocks"] = blocks
         with self.state.lock:
             self.state.deliveries.append(delivery)
         self._json_response(200, {"ok": True, "ts": timestamp})
@@ -528,7 +563,7 @@ def _query_metadata(query: dict[str, list[str]]) -> dict[str, object]:
     return {
         key: values[0]
         for key, values in query.items()
-        if key in {"channel", "ts", "message_ts", "cursor", "limit"} and values
+        if key in {"channel", "user", "ts", "message_ts", "cursor", "limit"} and values
     }
 
 

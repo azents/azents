@@ -168,6 +168,7 @@ __all__ = [
     "ExternalChannelProviderIdentity",
     "ExternalChannelTransport",
     "ExternalChannelWorkStatus",
+    "ExternalChannelWorkTaskStatus",
     "GcpConfig",
     "GcpSecrets",
     "GetAuthMethodsResponse",
@@ -229,6 +230,8 @@ __all__ = [
     "ManagedDelivery",
     "ManagedGrant",
     "ManagedWork",
+    "ManagedWorkSource",
+    "ManagedWorkTask",
     "MeResponse",
     "MemoryCreateRequest",
     "MemoryListResponse",
@@ -520,6 +523,7 @@ from azentspublicclient.models.external_channel_provider import ExternalChannelP
 from azentspublicclient.models.external_channel_provider_identity import ExternalChannelProviderIdentity as ExternalChannelProviderIdentity
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport as ExternalChannelTransport
 from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus as ExternalChannelWorkStatus
+from azentspublicclient.models.external_channel_work_task_status import ExternalChannelWorkTaskStatus as ExternalChannelWorkTaskStatus
 from azentspublicclient.models.gcp_config import GcpConfig as GcpConfig
 from azentspublicclient.models.gcp_secrets import GcpSecrets as GcpSecrets
 from azentspublicclient.models.get_auth_methods_response import GetAuthMethodsResponse as GetAuthMethodsResponse
@@ -581,6 +585,8 @@ from azentspublicclient.models.managed_connection_setup import ManagedConnection
 from azentspublicclient.models.managed_delivery import ManagedDelivery as ManagedDelivery
 from azentspublicclient.models.managed_grant import ManagedGrant as ManagedGrant
 from azentspublicclient.models.managed_work import ManagedWork as ManagedWork
+from azentspublicclient.models.managed_work_source import ManagedWorkSource as ManagedWorkSource
+from azentspublicclient.models.managed_work_task import ManagedWorkTask as ManagedWorkTask
 from azentspublicclient.models.me_response import MeResponse as MeResponse
 from azentspublicclient.models.memory_create_request import MemoryCreateRequest as MemoryCreateRequest
 from azentspublicclient.models.memory_list_response import MemoryListResponse as MemoryListResponse

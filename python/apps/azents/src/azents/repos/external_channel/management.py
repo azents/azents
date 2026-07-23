@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_progress import ExternalChannelWorkTask
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -43,6 +44,8 @@ from azents.repos.external_channel.management_data import (
     ManagedDelivery,
     ManagedGrant,
     ManagedWork,
+    ManagedWorkSource,
+    ManagedWorkTask,
 )
 
 
@@ -710,10 +713,25 @@ def _work(
     *,
     progress_delivery: RDBExternalChannelDeliveryAttempt | None,
 ) -> ManagedWork:
+    tasks = [ExternalChannelWorkTask.model_validate(task) for task in work.tasks]
     return ManagedWork(
         id=work.id,
         status=work.status,
-        tasks=list(work.tasks),
+        title=work.title,
+        tasks=[
+            ManagedWorkTask(
+                id=task.id,
+                title=task.title,
+                status=task.status,
+                details=task.details,
+                output=task.output,
+                sources=[
+                    ManagedWorkSource(url=source.url, label=source.label)
+                    for source in task.sources
+                ],
+            )
+            for task in tasks
+        ],
         state_revision=work.state_revision,
         desired_progress_revision=work.desired_progress_revision,
         progress_projected=work.progress_provider_message_key is not None,

@@ -38,6 +38,9 @@ from azentspublicclient.models.external_channel_decision_input import (
 from azentspublicclient.models.external_channel_transport import (
     ExternalChannelTransport,
 )
+from azentspublicclient.models.external_channel_work_task_status import (
+    ExternalChannelWorkTaskStatus,
+)
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
@@ -164,6 +167,27 @@ def _approval_request_id(slack_provider_fake_url: str) -> str:
         if isinstance(request_id, str) and request_id:
             return request_id
     return ""
+
+
+def _plan_delivery(slack_provider_fake_url: str) -> dict[str, object] | None:
+    """Return the latest captured Slack Plan mutation."""
+    deliveries = _provider_state(slack_provider_fake_url).get("deliveries")
+    if not isinstance(deliveries, list):
+        return None
+    for raw_delivery in reversed(cast(list[object], deliveries)):
+        if not isinstance(raw_delivery, dict):
+            continue
+        delivery = cast(dict[str, object], raw_delivery)
+        blocks = delivery.get("blocks")
+        if (
+            delivery.get("operation") == "chat.update"
+            and isinstance(blocks, list)
+            and blocks
+            and isinstance(blocks[0], dict)
+            and cast(dict[str, object], blocks[0]).get("type") == "plan"
+        ):
+            return delivery
+    return None
 
 
 def _login_main_web(
@@ -513,6 +537,229 @@ def test_connection_update_and_repeated_disconnect(
     )
     assert repeated.status is ExternalChannelConnectionStatus.DISCONNECTED
     assert repeated.credentials_configured is False
+
+
+def test_provider_native_channel_work_progress_journey(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_engine_worker_container: Container,
+    slack_provider_fake_url: str,
+) -> None:
+    """Render one rich canonical work snapshot through Slack's native Plan."""
+    del azents_engine_worker_container
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    root_timestamp = f"{int(time.time()) - 60}.000300"
+    message_text = (
+        "<@B-E2E> Provider-native Channel Work progress E2E. "
+        "Ask <@UREVIEWER> in <#CRELATED>."
+    )
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "user": "U-EXTERNAL",
+                        "ts": root_timestamp,
+                        "text": message_text,
+                    }
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_slack_connection(
+        agent_id=agent_id,
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id=_APP_ID,
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=headers,
+    )
+    validated = external_api.external_channel_v1_validate_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert validated.status is ExternalChannelConnectionStatus.ACTIVE
+
+    callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+    event_body = json.dumps(
+        {
+            "type": "event_callback",
+            "event_id": f"Ev-{unique()}",
+            "event_time": int(time.time()),
+            "api_app_id": _APP_ID,
+            "team_id": _TEAM_ID,
+            "event": {
+                "type": "app_mention",
+                "channel": _CHANNEL_ID,
+                "channel_type": "channel",
+                "user": "U-EXTERNAL",
+                "text": message_text,
+                "ts": root_timestamp,
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    response = requests.post(
+        callback_url,
+        data=event_body,
+        headers=_signed_headers(event_body),
+        timeout=5,
+    )
+    assert response.status_code == 200
+
+    request_id = wait_until(
+        lambda: _approval_request_id(slack_provider_fake_url),
+        timeout=15,
+        interval=0.2,
+        message="Channel Work approval control message was not delivered",
+    )
+    decided = external_api.external_channel_v1_decide_approval_request(
+        access_request_id=request_id,
+        external_channel_decision_input=ExternalChannelDecisionInput(
+            decision="allow_agent",
+            summary="Provider-native progress E2E approval",
+        ),
+        _headers=headers,
+    )
+    assert decided.agent_session_id is not None
+    session_id = decided.agent_session_id
+
+    plan_delivery = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _plan_delivery(slack_provider_fake_url),
+            timeout=30,
+            interval=0.2,
+            message="Slack Plan update was not delivered",
+        ),
+    )
+    assert plan_delivery["text"] == (
+        "Investigating error logs…\n"
+        "In progress: Inspect recent failures\n"
+        "Completed: Verify the affected release\n"
+        "Failed: Trace the unavailable dependency\n"
+        "Pending: Summarize the incident"
+    )
+    blocks = cast(list[dict[str, object]], plan_delivery["blocks"])
+    assert len(blocks) == 1
+    plan = blocks[0]
+    assert plan["type"] == "plan"
+    assert plan["title"] == "Investigating error logs…"
+    assert "plan_id" not in plan
+    tasks = cast(list[dict[str, object]], plan["tasks"])
+    assert [task["task_id"] for task in tasks] == [
+        "inspect",
+        "verify",
+        "trace",
+        "summarize",
+    ]
+    assert [task["status"] for task in tasks] == [
+        "in_progress",
+        "complete",
+        "error",
+        "pending",
+    ]
+    assert all("type" not in task for task in tasks)
+    assert tasks[0]["details"] == {
+        "type": "rich_text",
+        "elements": [
+            {
+                "type": "rich_text_section",
+                "elements": [
+                    {
+                        "type": "text",
+                        "text": "Comparing recent application errors.",
+                    }
+                ],
+            }
+        ],
+    }
+    assert tasks[0]["sources"] == [
+        {
+            "type": "url",
+            "url": "https://example.com/logs",
+            "text": "Error log dashboard",
+        }
+    ]
+    assert tasks[1]["output"] == {
+        "type": "rich_text",
+        "elements": [
+            {
+                "type": "rich_text_section",
+                "elements": [
+                    {
+                        "type": "text",
+                        "text": "Release 2026.07.23 contains the regression.",
+                    }
+                ],
+            }
+        ],
+    }
+
+    def rich_management_projection() -> object | None:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=session_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            len(projection.items) == 1
+            and projection.items[0].work is not None
+            and projection.items[0].work.title == "Investigating error logs…"
+            and len(projection.items[0].work.tasks) == 4
+        ):
+            return projection
+        return None
+
+    projection = cast(
+        Any,
+        wait_until(
+            rich_management_projection,
+            timeout=15,
+            interval=0.2,
+            message="Typed Channel Work management projection was not available",
+        ),
+    )
+    work = projection.items[0].work
+    assert work is not None
+    assert [task.status for task in work.tasks] == [
+        ExternalChannelWorkTaskStatus.IN_PROGRESS,
+        ExternalChannelWorkTaskStatus.COMPLETED,
+        ExternalChannelWorkTaskStatus.FAILED,
+        ExternalChannelWorkTaskStatus.PENDING,
+    ]
+    assert work.tasks[0].details == "Comparing recent application errors."
+    assert work.tasks[0].sources[0].label == "Error log dashboard"
+    assert work.tasks[1].output == "Release 2026.07.23 contains the regression."
+
+    provider_state = _provider_state(slack_provider_fake_url)
+    request_counts = cast(dict[str, int], provider_state["request_counts"])
+    assert request_counts["users.info"] >= 4
+    assert request_counts["conversations.info"] >= 3
+    assert _BOT_TOKEN not in str(provider_state)
+    assert _SIGNING_SECRET not in str(provider_state)
 
 
 def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(

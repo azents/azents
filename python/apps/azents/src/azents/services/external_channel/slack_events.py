@@ -554,6 +554,15 @@ class SlackConversationClient:
                 error_kind="rate_limited",
                 error_summary="Slack rate limited the control message attempt.",
             )
+        except SlackProviderRequestRejected as error:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="provider_rejected",
+                error_summary=(
+                    f"Slack rejected the control message ({error.error_code})."
+                ),
+            )
         except SlackProviderTemporaryError:
             return SlackControlMessageResult(
                 status="unknown",
@@ -629,6 +638,8 @@ class SlackConversationClient:
                 "ts": message_ts,
                 "text": text,
                 **({"blocks": blocks} if blocks is not None else {}),
+                "parse": "none",
+                "link_names": False,
             },
             expected_message_ts=message_ts,
         )
@@ -654,6 +665,9 @@ class SlackConversationClient:
                 "thread_ts": thread_ts,
                 "text": text,
                 "blocks": blocks,
+                "mrkdwn": False,
+                "parse": "none",
+                "link_names": False,
                 "unfurl_links": False,
                 "unfurl_media": False,
             },

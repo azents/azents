@@ -16,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
+    ExternalChannelWorkTaskStatus,
 )
 
 
@@ -53,10 +54,25 @@ class ManagedDelivery(_Projection):
     created_at: datetime.datetime
 
 
+class ManagedWorkSource(_Projection):
+    url: str
+    label: str
+
+
+class ManagedWorkTask(_Projection):
+    id: str
+    title: str
+    status: ExternalChannelWorkTaskStatus
+    details: str | None
+    output: str | None
+    sources: list[ManagedWorkSource]
+
+
 class ManagedWork(_Projection):
     id: str
     status: ExternalChannelWorkStatus
-    tasks: list[dict[str, Any]]
+    title: str | None
+    tasks: list[ManagedWorkTask]
     state_revision: int
     desired_progress_revision: int
     progress_projected: bool

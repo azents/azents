@@ -53,8 +53,19 @@ class TestManagedBindingListResponse(unittest.TestCase):
                         work = azentspublicclient.models.managed_work.ManagedWork(
                             id = '', 
                             status = 'active', 
+                            title = '', 
                             tasks = [
-                                { }
+                                azentspublicclient.models.managed_work_task.ManagedWorkTask(
+                                    id = '', 
+                                    title = '', 
+                                    status = 'pending', 
+                                    details = '', 
+                                    output = '', 
+                                    sources = [
+                                        azentspublicclient.models.managed_work_source.ManagedWorkSource(
+                                            url = '', 
+                                            label = '', )
+                                        ], )
                                 ], 
                             state_revision = 56, 
                             desired_progress_revision = 56, 
@@ -106,8 +117,19 @@ class TestManagedBindingListResponse(unittest.TestCase):
                         work = azentspublicclient.models.managed_work.ManagedWork(
                             id = '', 
                             status = 'active', 
+                            title = '', 
                             tasks = [
-                                { }
+                                azentspublicclient.models.managed_work_task.ManagedWorkTask(
+                                    id = '', 
+                                    title = '', 
+                                    status = 'pending', 
+                                    details = '', 
+                                    output = '', 
+                                    sources = [
+                                        azentspublicclient.models.managed_work_source.ManagedWorkSource(
+                                            url = '', 
+                                            label = '', )
+                                        ], )
                                 ], 
                             state_revision = 56, 
                             desired_progress_revision = 56, 

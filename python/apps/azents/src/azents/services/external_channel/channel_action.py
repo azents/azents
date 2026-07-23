@@ -106,6 +106,7 @@ class ExternalChannelActionService:
         binding_id: str,
         mode: ExternalChannelActionMode,
         message: str | None,
+        title: str | None,
         tasks: Sequence[ChannelWorkTask] | None,
     ) -> ChannelActionCommit:
         """Commit canonical state, then attempt every provider intent once."""
@@ -119,6 +120,7 @@ class ExternalChannelActionService:
                 binding_id=binding_id,
                 mode=mode,
                 message=message,
+                title=title,
                 tasks=tasks,
                 now=datetime.datetime.now(datetime.UTC),
             )

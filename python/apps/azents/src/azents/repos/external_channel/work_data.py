@@ -11,7 +11,9 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
-    ExternalChannelWorkTaskStatus,
+)
+from azents.core.external_channel_progress import (
+    ExternalChannelWorkTask as ChannelWorkTask,
 )
 
 
@@ -19,14 +21,6 @@ class _Record(BaseModel):
     """Immutable repository data base."""
 
     model_config = ConfigDict(frozen=True)
-
-
-class ChannelWorkTask(_Record):
-    """One ordered task within binding-scoped Channel Work."""
-
-    id: str
-    title: str
-    status: ExternalChannelWorkTaskStatus
 
 
 class ChannelWorkDelivery(_Record):
@@ -48,6 +42,7 @@ class ChannelWorkSnapshot(_Record):
     binding_id: str
     provider: ExternalChannelProvider
     resource_label: str
+    title: str | None
     tasks: list[ChannelWorkTask]
     state_revision: int
     desired_progress_revision: int

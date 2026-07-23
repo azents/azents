@@ -594,6 +594,30 @@ async def test_control_message_reports_ambiguous_network_outcome_without_retry()
     assert result.error_kind == "provider_ambiguous"
 
 
+async def test_control_message_reports_confirmed_provider_rejection() -> None:
+    """A Slack validation response is failed rather than transport-ambiguous."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": False, "error": "invalid_blocks"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_approval_control_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            approval_url="https://azents.example/access/request-1",
+            participant_label="Alice",
+            participant_provider_user_id="U1",
+        )
+
+    assert result.status == "failed"
+    assert result.error_kind == "provider_rejected"
+    assert result.error_summary == (
+        "Slack rejected the control message (invalid_blocks)."
+    )
+
+
 @pytest.mark.parametrize(
     ("operation", "expected_path", "expected_ts"),
     [
@@ -650,6 +674,9 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
         assert payload["markdown_text"] == "Reply"
         assert "text" not in payload
         assert "blocks" not in payload
+    elif operation == "update":
+        assert payload["parse"] == "none"
+        assert payload["link_names"] is False
 
 
 async def test_missing_update_target_is_reported_as_confirmed_deletion() -> None:
@@ -729,6 +756,9 @@ async def test_operational_blocks_include_accessible_fallback_text() -> None:
                 "text": {"type": "mrkdwn", "text": "*Working*"},
             }
         ],
+        "mrkdwn": False,
+        "parse": "none",
+        "link_names": False,
         "unfurl_links": False,
         "unfurl_media": False,
     }

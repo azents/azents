@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -99,6 +100,10 @@ _CAPTURED_MODEL_PROMPTS = {
     "xAI OAuth image generation repeated 401",
     "xAI image generation disabled",
 }
+_EXTERNAL_CHANNEL_PROGRESS_MARKER = "Provider-native Channel Work progress E2E"
+_EXTERNAL_CHANNEL_PROGRESS_CALL_ID = "call_external_channel_progress"
+_EXTERNAL_CHANNEL_FINISH_CALL_ID = "call_external_channel_finish"
+_EXTERNAL_CHANNEL_BINDING = re.compile(r"### Binding `([^`]+)`")
 
 
 def _last_user_text(request: dict[str, object]) -> str | None:
@@ -130,6 +135,59 @@ def _last_user_text(request: dict[str, object]) -> str | None:
                 text_parts.append(text)
         return "".join(text_parts)
     return None
+
+
+def _request_has_named_tool(request: dict[str, object], name: str) -> bool:
+    """Return whether a model request exposes one named function tool."""
+    tools = request.get("tools")
+    if not isinstance(tools, list):
+        return False
+    for raw_tool in cast(list[object], tools):
+        if not isinstance(raw_tool, dict):
+            continue
+        tool = cast(dict[str, object], raw_tool)
+        if tool.get("name") == name:
+            return True
+    return False
+
+
+def request_has_tool_output(value: object, call_id: str) -> bool:
+    """Find one completed tool output in nested Responses or Chat input."""
+    if isinstance(value, dict):
+        item = cast(dict[str, object], value)
+        item_type = item.get("type")
+        if (
+            item_type in {"function_call_output", "custom_tool_call_output"}
+            and item.get("call_id") == call_id
+        ):
+            return True
+        if item.get("role") == "tool" and item.get("tool_call_id") == call_id:
+            return True
+        return any(request_has_tool_output(child, call_id) for child in item.values())
+    if isinstance(value, list):
+        return any(
+            request_has_tool_output(child, call_id)
+            for child in cast(list[object], value)
+        )
+    return False
+
+
+def external_channel_binding(request: dict[str, object]) -> str | None:
+    """Extract the dynamic binding handle from the Channel Work prompt."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    match = _EXTERNAL_CHANNEL_BINDING.search(serialized)
+    return None if match is None else match.group(1)
+
+
+def is_external_channel_progress_request(request: dict[str, object]) -> bool:
+    """Recognize the deterministic progress journey after display resolution."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    return (
+        _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized
+        and "@User UREVIEWER" in serialized
+        and "#e2e" in serialized
+        and _request_has_named_tool(request, "channel_action")
+    )
 
 
 def _is_semantic_compaction_request(request: dict[str, object]) -> bool:
@@ -232,6 +290,78 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/responses" and user_text == _PROMPT:
             self._write_image_generation_response(request)
             return
+        if self.path == "/v1/responses" and is_external_channel_progress_request(
+            request
+        ):
+            binding = external_channel_binding(request)
+            if binding is not None:
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_FINISH_CALL_ID,
+                ):
+                    self._write_text_response(
+                        request,
+                        "External Channel progress E2E completed.",
+                        response_id="resp_external_channel_progress_completed",
+                    )
+                    return
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+                ):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_FINISH_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "finish",
+                            "binding": binding,
+                            "message": "The deterministic investigation is complete.",
+                        },
+                    )
+                    return
+                self._write_function_call_response(
+                    request,
+                    call_id=_EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+                    name="channel_action",
+                    arguments={
+                        "mode": "continue",
+                        "binding": binding,
+                        "title": "Investigating error logs…",
+                        "todo_update": [
+                            {
+                                "id": "inspect",
+                                "title": "Inspect recent failures",
+                                "status": "in_progress",
+                                "details": "Comparing recent application errors.",
+                                "sources": [
+                                    {
+                                        "url": "https://example.com/logs",
+                                        "label": "Error log dashboard",
+                                    }
+                                ],
+                            },
+                            {
+                                "id": "verify",
+                                "title": "Verify the affected release",
+                                "status": "completed",
+                                "output": "Release 2026.07.23 contains the regression.",
+                            },
+                            {
+                                "id": "trace",
+                                "title": "Trace the unavailable dependency",
+                                "status": "failed",
+                                "output": "The dependency trace was unavailable.",
+                            },
+                            {
+                                "id": "summarize",
+                                "title": "Summarize the incident",
+                                "status": "pending",
+                            },
+                        ],
+                    },
+                )
+                return
         if user_text == _SEMANTIC_PROMPT:
             self._write_semantic_web_search_response(request)
             return
@@ -970,6 +1100,80 @@ class _Handler(BaseHTTPRequestHandler):
                 {
                     "type": "response.completed",
                     "sequence_number": 8,
+                    "response": response,
+                },
+            ]
+        )
+
+    def _write_function_call_response(
+        self,
+        request: dict[str, object],
+        *,
+        call_id: str,
+        name: str,
+        arguments: dict[str, object],
+    ) -> None:
+        """Write one deterministic Responses function call."""
+        model_value = request.get("model")
+        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        response_id = f"resp_{call_id.removeprefix('call_')}"
+        item_id = f"fc_{call_id.removeprefix('call_')}"
+        encoded_arguments = json.dumps(
+            arguments,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        function_item: dict[str, object] = {
+            "id": item_id,
+            "type": "function_call",
+            "status": "completed",
+            "call_id": call_id,
+            "name": name,
+            "arguments": encoded_arguments,
+        }
+        response = self._response(
+            request=request,
+            response_id=response_id,
+            model=model,
+            output=[function_item],
+        )
+        if request.get("stream") is not True:
+            self._write_json(200, response)
+            return
+        self._write_sse(
+            [
+                {
+                    "type": "response.created",
+                    "sequence_number": 0,
+                    "response": {**response, "status": "in_progress", "output": []},
+                },
+                {
+                    "type": "response.output_item.added",
+                    "sequence_number": 1,
+                    "output_index": 0,
+                    "item": {
+                        **function_item,
+                        "status": "in_progress",
+                        "arguments": "",
+                    },
+                },
+                {
+                    "type": "response.function_call_arguments.done",
+                    "sequence_number": 2,
+                    "output_index": 0,
+                    "item_id": item_id,
+                    "name": name,
+                    "arguments": encoded_arguments,
+                },
+                {
+                    "type": "response.output_item.done",
+                    "sequence_number": 3,
+                    "output_index": 0,
+                    "item": function_item,
+                },
+                {
+                    "type": "response.completed",
+                    "sequence_number": 4,
                     "response": response,
                 },
             ]

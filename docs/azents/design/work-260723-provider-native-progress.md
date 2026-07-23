@@ -78,6 +78,12 @@ ExternalChannelDesiredProgress
 
 The canonical status enum adds `failed`. Provider adapters map it to their native error state; warning or critical prose remains details or output rather than becoming a new status.
 
+One serialized desired progress snapshot is limited to 64 KiB. The complete
+canonical snapshot is rejected before commit when it exceeds that aggregate
+limit, rather than being silently truncated for the provider or continuation
+prompt. This keeps every accepted title, task identity, status, detail, output,
+and source available during recovery and later Agent turns.
+
 ## Agent-Facing Action Contract
 
 `ContinueChannelActionInput` adds an optional `title` field. Its description tells the Agent to:
@@ -262,6 +268,8 @@ Update the colocated Storybook stories with titled work, rich task metadata, fai
 ## Security and Validation
 
 - Tool inputs use bounded strings and bounded list counts.
+- The complete serialized desired progress snapshot is limited to 64 KiB before
+  canonical state or a provider delivery intent is committed.
 - Source URLs accept only HTTP and HTTPS.
 - Provider adapters validate provider field and surface constraints before a mutation request is attempted.
 - Slack details and output are literal rich text, not mrkdwn.

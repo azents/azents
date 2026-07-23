@@ -71,7 +71,30 @@ const binding: ManagedBinding = {
   work: {
     id: "work_01",
     status: "active",
-    tasks: [{ title: "Identify the failing shard" }, { title: "Post update" }],
+    title: "Investigating database replication errors…",
+    tasks: [
+      {
+        id: "identify-shard",
+        title: "Identify the failing shard",
+        status: "completed",
+        details: "Compared replication lag across all database shards.",
+        output: "Shard 7 is missing two WAL segments.",
+        sources: [
+          {
+            url: "https://status.example.com/incidents/database",
+            label: "Database incident dashboard",
+          },
+        ],
+      },
+      {
+        id: "post-update",
+        title: "Post the channel update",
+        status: "failed",
+        details: "Preparing a concise incident summary for participants.",
+        output: "The provider rejected the first progress update.",
+        sources: [],
+      },
+    ],
     state_revision: 6,
     desired_progress_revision: 8,
     progress_projected: false,

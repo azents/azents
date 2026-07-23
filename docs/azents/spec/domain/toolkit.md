@@ -50,7 +50,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-23
-spec_version: 72
+spec_version: 73
 ---
 
 # Toolkit
@@ -675,15 +675,21 @@ and every call must target a binding owned by the current Agent and Session.
 
 Ingress creates the current work cycle and its initial Slack Activity Tracker before
 Agent execution. The tool atomically commits an optional conversational reply and
-the complete ordered task replacement before any provider call. One update supports
-at most 49 tasks so one native Slack plan and its required-status Todo cards fit the
-provider message. `continue` preserves unfinished Channel Work and updates the
-retained Tracker. `finish` requires a final reply, ends the work cycle, and deletes
-the Tracker only after the reply is durably delivered. Ordinary Session Todo state
-remains separate and never becomes the Channel Work source of truth.
+an optional current-work title plus complete ordered task replacement before any
+provider call. Task updates require a same-call title. The tool guides the Agent to
+write a concise concrete in-progress phrase in the participant's language ending in
+an ellipsis. Tasks have stable IDs, `pending`, `in_progress`, `completed`, or
+`failed` state, and optional details, output, and labeled URL sources. One update
+supports at most 49 tasks, and its complete desired progress snapshot must fit the
+64 KiB aggregate canonical bound. `continue` preserves unfinished Channel Work and
+updates the retained Tracker; message-only continuation leaves progress unchanged.
+`finish` requires a final reply, ends the work cycle, and deletes the Tracker only
+after the reply is durably delivered. Ordinary Session Todo state remains separate
+and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 73) — Added Agent-authored progressive Channel Work titles and provider-neutral rich task metadata with failed state to `channel_action`.
 - **2026-07-23** (spec_version 72) — Rendered Channel Work tasks inside one Slack plan with an explicit status on every Todo card.
 - **2026-07-23** (spec_version 71) — Limited Channel Work to 49 tasks and changed delivered `finish` actions from retained completion updates to Activity Tracker deletion.
 - **2026-07-23** (spec_version 70) — Added pre-execution Activity Tracker creation, same-message task updates, required final replies, and delivered-reply completion gating to the External Channel Action contract.
