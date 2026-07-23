@@ -1,8 +1,16 @@
 """Shared model-visible rendering for External Channel messages."""
 
+import re
 from collections.abc import Sequence
 
 from azents.engine.events.types import ExternalChannelMessagePayload
+
+_SLACK_VISIBLE_REFERENCE = re.compile(
+    r"<@(?P<user_angle>[A-Z0-9]+)(?:\|[^>]+)?>"
+    r"|(?<![A-Za-z0-9])@(?P<user_raw>[UW][A-Z0-9]+)\b"
+    r"|<#(?P<channel_angle>[A-Z0-9]+)(?:\|[^>]+)?>"
+    r"|(?<![A-Za-z0-9])#(?P<channel_raw>[CG][A-Z0-9]+)\b"
+)
 
 
 def external_channel_message_visible_value(
@@ -123,17 +131,6 @@ def render_external_channel_turn(
                 f"   Correction of revision: {payload.correction_of_revision_id}"
             )
         lines.append(f"   Body: {_body(payload)}")
-    mappings = _reference_mappings(payloads)
-    if mappings:
-        lines.extend(["", "Identity Mappings"])
-        for category, heading in (("users", "Users"), ("channels", "Channels")):
-            entries = mappings.get(category)
-            if entries:
-                lines.append(heading)
-                lines.extend(
-                    f"- {identifier}: {display_name}"
-                    for identifier, display_name in sorted(entries.items())
-                )
     return "\n".join(lines)
 
 
@@ -143,17 +140,30 @@ def _body(payload: ExternalChannelMessagePayload) -> str:
         return "[Message deleted by provider.]"
     if payload.body is None or not payload.body.strip():
         return "[Message has no text content.]"
-    return payload.body
+    return _display_body(payload.body, payload.reference_mappings)
 
 
-def _reference_mappings(
-    payloads: Sequence[ExternalChannelMessagePayload],
-) -> dict[str, dict[str, str]]:
-    """Merge one turn's immutable provider ID-to-name mappings."""
-    merged: dict[str, dict[str, str]] = {}
-    for payload in payloads:
-        for category, entries in payload.reference_mappings.items():
-            if category not in {"users", "channels"}:
-                continue
-            merged.setdefault(category, {}).update(entries)
-    return merged
+def _display_body(
+    body: str,
+    mappings: dict[str, dict[str, str]],
+) -> str:
+    """Resolve provider references only in the visible body projection."""
+    user_mappings = mappings.get("users", {})
+    channel_mappings = mappings.get("channels", {})
+
+    def replace(match: re.Match[str]) -> str:
+        user_id = match.group("user_angle") or match.group("user_raw")
+        if user_id is not None:
+            display_name = user_mappings.get(user_id)
+            if display_name is None:
+                return match.group(0)
+            return display_name if display_name.startswith("@") else f"@{display_name}"
+        channel_id = match.group("channel_angle") or match.group("channel_raw")
+        if channel_id is None:
+            return match.group(0)
+        display_name = channel_mappings.get(channel_id)
+        if display_name is None:
+            return match.group(0)
+        return display_name if display_name.startswith("#") else f"#{display_name}"
+
+    return _SLACK_VISIBLE_REFERENCE.sub(replace, body)

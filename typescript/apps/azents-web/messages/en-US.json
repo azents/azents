@@ -1020,10 +1020,14 @@
         "noWork": "No Channel Work is associated with this binding.",
         "taskCount": "{count, plural, =1 {1 task} other {# tasks}}",
         "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "taskDetails": "Details",
+        "taskOutput": "Output",
+        "taskSources": "Sources",
         "taskStatus": {
           "pending": "Pending",
           "in_progress": "In progress",
-          "completed": "Completed"
+          "completed": "Completed",
+          "failed": "Failed"
         },
         "projectionState": {
           "synchronized": "Synchronized",

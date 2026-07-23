@@ -54,6 +54,22 @@ def _at(second: int) -> datetime.datetime:
     return datetime.datetime(2026, 7, 22, 0, 0, second, tzinfo=datetime.UTC)
 
 
+def _task(
+    *,
+    id: str,
+    title: str,
+    status: ExternalChannelWorkTaskStatus,
+) -> ChannelWorkTask:
+    return ChannelWorkTask(
+        id=id,
+        title=title,
+        status=status,
+        details=None,
+        output=None,
+        sources=[],
+    )
+
+
 async def _seed_activity_tracker(
     session: AsyncSession,
     *,
@@ -68,7 +84,9 @@ async def _seed_activity_tracker(
     assert work is not None
     work.desired_progress_revision = 1
     work.desired_progress_payload = {
+        "schema_version": 2,
         "state": "checking",
+        "title": None,
         "tasks": [],
     }
     work.progress_provider_message_key = "slack:T1:C1:2.000001"
@@ -207,7 +225,7 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
     await repository.ensure_active_work(rdb_session, binding_id=binding_id)
     await _seed_activity_tracker(rdb_session, binding_id=binding_id)
     tasks = [
-        ChannelWorkTask(
+        _task(
             id="investigate",
             title="Investigate the incident",
             status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
@@ -223,6 +241,7 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
         binding_id=binding_id,
         mode=ExternalChannelActionMode.CONTINUE,
         message="I am investigating.",
+        title="Investigating the incident…",
         tasks=tasks,
         now=_at(2),
     )
@@ -235,6 +254,7 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
         binding_id=binding_id,
         mode=ExternalChannelActionMode.CONTINUE,
         message="I am investigating.",
+        title="Investigating the incident…",
         tasks=tasks,
         now=_at(3),
     )
@@ -259,6 +279,7 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
             binding_id=binding_id,
             mode=ExternalChannelActionMode.CONTINUE,
             message="Different input.",
+            title="Investigating the incident…",
             tasks=tasks,
             now=_at(4),
         )
@@ -285,8 +306,9 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
         binding_id=binding_id,
         mode=ExternalChannelActionMode.CONTINUE,
         message=None,
+        title="Preparing the channel update…",
         tasks=[
-            ChannelWorkTask(
+            _task(
                 id="notify",
                 title="Notify the channel",
                 status=ExternalChannelWorkTaskStatus.PENDING,
@@ -319,6 +341,7 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
         binding_id=binding_id,
         mode=ExternalChannelActionMode.FINISH,
         message="Done.",
+        title=None,
         tasks=None,
         now=_at(5),
     )
@@ -460,6 +483,7 @@ async def test_continue_after_finish_creates_a_new_activity_tracker(
         binding_id=binding_id,
         mode=ExternalChannelActionMode.FINISH,
         message="The first task is complete.",
+        title=None,
         tasks=None,
         now=_at(2),
     )
@@ -473,8 +497,9 @@ async def test_continue_after_finish_creates_a_new_activity_tracker(
         binding_id=binding_id,
         mode=ExternalChannelActionMode.CONTINUE,
         message=None,
+        title="Starting the next task…",
         tasks=[
-            ChannelWorkTask(
+            _task(
                 id="next-task",
                 title="Start the next task",
                 status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
@@ -554,6 +579,7 @@ async def test_late_tracker_creation_after_delivered_finish_schedules_cleanup(
         binding_id=binding_id,
         mode=ExternalChannelActionMode.FINISH,
         message="Done.",
+        title=None,
         tasks=None,
         now=_at(2),
     )
@@ -647,6 +673,7 @@ async def test_missing_tracker_delete_is_reconciled_as_already_absent(
         binding_id=binding_id,
         mode=ExternalChannelActionMode.FINISH,
         message="Done.",
+        title=None,
         tasks=None,
         now=_at(2),
     )
@@ -716,8 +743,9 @@ async def test_recovery_terminalizes_pending_and_attempting_without_execution(
         binding_id=binding_id,
         mode=ExternalChannelActionMode.CONTINUE,
         message="Working on it.",
+        title="Completing the work…",
         tasks=[
-            ChannelWorkTask(
+            _task(
                 id="work",
                 title="Complete the work",
                 status=ExternalChannelWorkTaskStatus.IN_PROGRESS,

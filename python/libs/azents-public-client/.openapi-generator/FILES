@@ -150,6 +150,7 @@ azentspublicclient/docs/ExternalChannelProviderIdentity.md
 azentspublicclient/docs/ExternalChannelTransport.md
 azentspublicclient/docs/ExternalChannelV1Api.md
 azentspublicclient/docs/ExternalChannelWorkStatus.md
+azentspublicclient/docs/ExternalChannelWorkTaskStatus.md
 azentspublicclient/docs/GcpConfig.md
 azentspublicclient/docs/GcpSecrets.md
 azentspublicclient/docs/GetAuthMethodsResponse.md
@@ -216,6 +217,8 @@ azentspublicclient/docs/ManagedConnectionSetup.md
 azentspublicclient/docs/ManagedDelivery.md
 azentspublicclient/docs/ManagedGrant.md
 azentspublicclient/docs/ManagedWork.md
+azentspublicclient/docs/ManagedWorkSource.md
+azentspublicclient/docs/ManagedWorkTask.md
 azentspublicclient/docs/MeResponse.md
 azentspublicclient/docs/MemoryCreateRequest.md
 azentspublicclient/docs/MemoryListResponse.md
@@ -482,6 +485,7 @@ azentspublicclient/models/external_channel_provider.py
 azentspublicclient/models/external_channel_provider_identity.py
 azentspublicclient/models/external_channel_transport.py
 azentspublicclient/models/external_channel_work_status.py
+azentspublicclient/models/external_channel_work_task_status.py
 azentspublicclient/models/gcp_config.py
 azentspublicclient/models/gcp_secrets.py
 azentspublicclient/models/get_auth_methods_response.py
@@ -541,6 +545,8 @@ azentspublicclient/models/managed_connection_setup.py
 azentspublicclient/models/managed_delivery.py
 azentspublicclient/models/managed_grant.py
 azentspublicclient/models/managed_work.py
+azentspublicclient/models/managed_work_source.py
+azentspublicclient/models/managed_work_task.py
 azentspublicclient/models/mcpo_auth_connection_status.py
 azentspublicclient/models/mcpo_auth_connection_summary_response.py
 azentspublicclient/models/me_response.py
@@ -807,6 +813,7 @@ azentspublicclient/test/test_external_channel_provider_identity.py
 azentspublicclient/test/test_external_channel_transport.py
 azentspublicclient/test/test_external_channel_v1_api.py
 azentspublicclient/test/test_external_channel_work_status.py
+azentspublicclient/test/test_external_channel_work_task_status.py
 azentspublicclient/test/test_gcp_config.py
 azentspublicclient/test/test_gcp_secrets.py
 azentspublicclient/test/test_get_auth_methods_response.py
@@ -871,6 +878,8 @@ azentspublicclient/test/test_managed_connection_setup.py
 azentspublicclient/test/test_managed_delivery.py
 azentspublicclient/test/test_managed_grant.py
 azentspublicclient/test/test_managed_work.py
+azentspublicclient/test/test_managed_work_source.py
+azentspublicclient/test/test_managed_work_task.py
 azentspublicclient/test/test_mcpo_auth_connection_status.py
 azentspublicclient/test/test_mcpo_auth_connection_summary_response.py
 azentspublicclient/test/test_me_response.py

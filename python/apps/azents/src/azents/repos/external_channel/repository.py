@@ -2334,7 +2334,8 @@ class ExternalChannelRepository:
             ExternalChannelWorkCreate(
                 binding_id=binding_id,
                 status=ExternalChannelWorkStatus.ACTIVE,
-                schema_version=1,
+                schema_version=2,
+                title=None,
                 tasks=[],
                 state_revision=1,
                 desired_progress_revision=1,

@@ -7,8 +7,12 @@ domain: external-channel
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/*external_channel*.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/*channel_work*.py
   - python/apps/azents/src/azents/core/external_channel.py
+  - python/apps/azents/src/azents/core/external_channel_progress.py
+  - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/core/enums.py
+  - python/apps/azents/src/azents/engine/events/external_channel_rendering.py
   - python/apps/azents/src/azents/rdb/models/external_channel.py
   - python/apps/azents/src/azents/repos/external_channel/**
   - python/apps/azents/src/azents/services/external_channel/**
@@ -34,7 +38,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-23
-spec_version: 11
+spec_version: 12
 ---
 
 # External Channel
@@ -63,12 +67,12 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 | Resource | One Slack thread with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. |
 | Event | Durable provider envelope admission keyed by connection and provider event identity. Processing is at-least-once and domain writes are idempotent. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Message and revision | Canonical provider message plus immutable original/edit/delete revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Raw provider blocks cannot supply Azents' internal normalized-text projection; only the authenticated admission projection may be consumed through the trusted projection path. Revisions retain optional bounded Slack user/channel ID-to-display-name mappings for model and UI presentation. `original_url` is nullable and is set only from a successful provider permalink lookup. |
+| Message and revision | Canonical provider message plus immutable original/edit/delete revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Raw provider blocks cannot supply Azents' internal normalized-text projection; only the authenticated admission projection may be consumed through the trusted projection path. Revisions retain optional bounded Slack user/channel ID-to-display-name mappings. Canonical bodies and provider identities keep raw IDs, while visible body projections replace known Slack user and channel references with readable names. `original_url` is nullable and is set only from a successful provider permalink lookup. |
 | Pending context | Unprojected same-route/resource revisions retained for at most 7 days, 100 messages, and 256 KiB. Oldest content is expired or trimmed first. |
 | Binding | Active or disconnected link from one route/resource to one AgentSession. Initial activation waits for hydration reconciliation. |
 | Invocation batch | Immutable ordered revision membership released through one authorized trigger and referenced by a batch InputBuffer. |
 | Access request/grant/block | Opaque approval request, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
-| Channel Work/action/delivery | Binding-scoped durable tasks, one work-cycle-owned Activity Tracker desired state and provider identity, one atomic explicit action, and persisted provider intents/outcomes. Management derives projection state from the latest progress operation belonging to the current work cycle. |
+| Channel Work/action/delivery | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources; one work-cycle-owned desired progress state and provider identity; one atomic explicit action; and persisted provider intents/outcomes. Management derives projection state from the latest progress operation belonging to the current work cycle. |
 
 ## State Invariants
 
@@ -81,11 +85,19 @@ Slack is the first provider. Each connection uses a manually configured dedicate
   Activity Tracker before Session wake-up. Checking and task progress update one
   retained provider message; a delivered final answer deletes it, and separate work
   cycles never share that identity.
-- The Tracker uses one native read-only Slack task card before Todo creation.
-  Once tasks exist, one native Slack plan carries the `Agent is working` title
-  and up to 49 ordered task cards. Every nested task carries its required
-  `pending`, `in_progress`, or `complete` provider status; only the active task
-  carries the circular in-progress indicator.
+- The Tracker uses one native read-only Slack task card before Channel Work is
+  declared. Once tasks exist, one native Slack plan carries the Agent-authored
+  current-work title and up to 49 ordered tasks. Canonical task states are
+  `pending`, `in_progress`, `completed`, and `failed`; Slack lowers them to
+  `pending`, `in_progress`, `complete`, and `error`. Nested Plan tasks omit a
+  standalone block `type` and may contain literal rich-text details/output and
+  labeled HTTP or HTTPS sources. The payload sends no Slack `plan_id`.
+- Channel Work desired state is a versioned provider-neutral complete snapshot.
+  A serialized desired snapshot is limited to 64 KiB and is rejected atomically
+  before canonical state changes when it exceeds that bound.
+  Slack-specific blocks and revision-derived `block_id` values are created only
+  at the provider presentation boundary. Slack streaming is not used; retained
+  `chat.postMessage` and `chat.update` mutations apply complete snapshots.
 - Confirmed deletion clears only the matching Tracker identity and creates one
   replacement from durable desired state while work remains active. A replacement
   that captured an older desired revision is updated once to the latest state after
@@ -118,7 +130,8 @@ connection before attempting provider cleanup. Repeating disconnect is safe.
 Disconnected rows remain as retained history roots but are omitted from the active
 Agent connection list.
 
-Session Channels shows bindings, ordered work tasks, Activity Tracker projection
+Session Channels shows bindings, the current Channel Work title, typed ordered
+tasks, failed state, details, output, source links, Activity Tracker projection
 state, truncation, delivery outcomes, grants, and terminal disconnect state.
 Approval and management detail surfaces show complete provider user identities with
 copy controls, while regular timeline summaries remain name-first. Destructive
@@ -133,6 +146,7 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-23** (spec_version 12) — Added provider-neutral titled Channel Work with rich typed tasks and failed state, Slack-native complete Plan rendering, typed management/UI projection, and visible-only Slack reference resolution.
 - **2026-07-23** (spec_version 10) — Made approval-control delivery and access decisions converge in either completion order on one idempotent post-decision delete intent.
 - **2026-07-23** (spec_version 9) — Separated raw Slack block normalization from trusted Azents admission projections so provider-supplied `normalized_text` cannot bypass supported-block traversal.
 - **2026-07-23** (spec_version 8) — Separated one-time Session navigation from native task-card Activity Trackers, limited work cycles to 49 Todos, deleted Trackers after delivered final answers, and restricted replacement to active desired work.

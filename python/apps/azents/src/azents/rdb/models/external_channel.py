@@ -1536,7 +1536,11 @@ class RDBExternalChannelWork(RDBModel):
     schema_version: Mapped[int] = mapped_column(
         sa.Integer,
         nullable=False,
-        server_default="1",
+        server_default="2",
+    )
+    title: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
     )
     tasks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     state_revision: Mapped[int] = mapped_column(

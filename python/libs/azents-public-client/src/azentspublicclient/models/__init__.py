@@ -135,6 +135,7 @@ from azentspublicclient.models.external_channel_provider import ExternalChannelP
 from azentspublicclient.models.external_channel_provider_identity import ExternalChannelProviderIdentity
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport
 from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus
+from azentspublicclient.models.external_channel_work_task_status import ExternalChannelWorkTaskStatus
 from azentspublicclient.models.gcp_config import GcpConfig
 from azentspublicclient.models.gcp_secrets import GcpSecrets
 from azentspublicclient.models.get_auth_methods_response import GetAuthMethodsResponse
@@ -196,6 +197,8 @@ from azentspublicclient.models.managed_connection_setup import ManagedConnection
 from azentspublicclient.models.managed_delivery import ManagedDelivery
 from azentspublicclient.models.managed_grant import ManagedGrant
 from azentspublicclient.models.managed_work import ManagedWork
+from azentspublicclient.models.managed_work_source import ManagedWorkSource
+from azentspublicclient.models.managed_work_task import ManagedWorkTask
 from azentspublicclient.models.me_response import MeResponse
 from azentspublicclient.models.memory_create_request import MemoryCreateRequest
 from azentspublicclient.models.memory_list_response import MemoryListResponse

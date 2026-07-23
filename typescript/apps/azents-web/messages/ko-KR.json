@@ -1020,10 +1020,14 @@
         "noWork": "이 binding에 연결된 Channel Work가 없습니다.",
         "taskCount": "작업 {count}개",
         "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "taskDetails": "상세 내용",
+        "taskOutput": "결과",
+        "taskSources": "출처",
         "taskStatus": {
           "pending": "대기 중",
           "in_progress": "진행 중",
-          "completed": "완료"
+          "completed": "완료",
+          "failed": "실패"
         },
         "projectionState": {
           "synchronized": "동기화됨",

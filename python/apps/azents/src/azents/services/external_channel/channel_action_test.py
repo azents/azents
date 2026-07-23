@@ -512,6 +512,7 @@ async def test_recovered_failed_final_reply_skips_tracker_deletion() -> None:
         binding_id="binding-1",
         mode=ExternalChannelActionMode.FINISH,
         message="Final answer",
+        title=None,
         tasks=None,
     )
 

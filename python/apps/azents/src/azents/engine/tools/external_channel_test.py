@@ -47,11 +47,15 @@ def _snapshot(binding_id: str = "binding-1") -> ChannelWorkSnapshot:
         binding_id=binding_id,
         provider=ExternalChannelProvider.SLACK,
         resource_label="#incident",
+        title="Investigating the incident…",
         tasks=[
             ChannelWorkTask(
                 id="investigate",
                 title="Investigate the incident",
                 status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+                details=None,
+                output=None,
+                sources=[],
             )
         ],
         state_revision=3,
@@ -155,6 +159,7 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
                     "mode": "continue",
                     "binding": "binding-1",
                     "message": "I am investigating.",
+                    "title": "Investigating the incident…",
                     "todo_update": [
                         {
                             "id": "investigate",
@@ -194,6 +199,7 @@ async def test_continue_requires_unfinished_work() -> None:
                     {
                         "mode": "continue",
                         "binding": "binding-1",
+                        "title": "Wrapping up the work…",
                         "todo_update": [
                             {
                                 "id": "done",
@@ -213,6 +219,7 @@ def test_continue_limits_todos_to_available_activity_blocks() -> None:
             {
                 "mode": "continue",
                 "binding": "binding-1",
+                "title": "Reviewing the task list…",
                 "todo_update": [
                     {
                         "id": f"task-{index}",

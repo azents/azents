@@ -130,21 +130,33 @@ def test_turn_renderer_labels_corrections() -> None:
     assert "Correction of revision: revision-original" in rendered
 
 
-def test_turn_renderer_keeps_reference_ids_and_display_names_together() -> None:
-    """The Agent receives provider-safe identity references with readable labels."""
-    rendered = render_external_channel_turn(
-        [
-            _payload(
-                body="<@U1> asked #C1 to investigate.",
-                reference_mappings={
-                    "users": {"U1": "Alice"},
-                    "channels": {"C1": "#incidents"},
-                },
-            )
-        ]
+def test_turn_renderer_resolves_visible_references_but_retains_raw_payload() -> None:
+    """Visible text uses names while canonical payload identity stays unchanged."""
+    payload = _payload(
+        body="<@U1> asked <#C1> to investigate.",
+        reference_mappings={
+            "users": {"U1": "Alice"},
+            "channels": {"C1": "#incidents"},
+        },
+    )
+    rendered = render_external_channel_turn([payload])
+
+    assert "Body: @Alice asked #incidents to investigate." in rendered
+    assert "U1" not in rendered
+    assert "C1" not in rendered
+    assert payload.body == "<@U1> asked <#C1> to investigate."
+    assert payload.reference_mappings["users"]["U1"] == "Alice"
+
+
+def test_visible_reference_resolution_does_not_reprocess_display_names() -> None:
+    payload = _payload(
+        body="<@U1> and <@U2> discussed <#C1> with <#C2>.",
+        reference_mappings={
+            "users": {"U1": "U2", "U2": "Alice"},
+            "channels": {"C1": "C2", "C2": "incidents"},
+        },
     )
 
-    assert "Body: <@U1> asked #C1 to investigate." in rendered
-    assert "Identity Mappings" in rendered
-    assert "- U1: Alice" in rendered
-    assert "- C1: #incidents" in rendered
+    rendered = render_external_channel_turn([payload])
+
+    assert "Body: @U2 and @Alice discussed #C2 with #incidents." in rendered

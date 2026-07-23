@@ -13697,6 +13697,17 @@
         "title": "ExternalChannelWorkStatus",
         "description": "Binding-scoped Channel Work lifecycle status."
       },
+      "ExternalChannelWorkTaskStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "in_progress",
+          "completed",
+          "failed"
+        ],
+        "title": "ExternalChannelWorkTaskStatus",
+        "description": "Status of one ordered Channel Work task."
+      },
       "GcpConfig": {
         "properties": {
           "type": {
@@ -15981,10 +15992,20 @@
           "status": {
             "$ref": "#/components/schemas/ExternalChannelWorkStatus"
           },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
           "tasks": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ManagedWorkTask"
             },
             "type": "array",
             "title": "Tasks"
@@ -16030,6 +16051,7 @@
         "required": [
           "id",
           "status",
+          "title",
           "tasks",
           "state_revision",
           "desired_progress_revision",
@@ -16038,6 +16060,78 @@
           "finished_at"
         ],
         "title": "ManagedWork"
+      },
+      "ManagedWorkSource": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "label"
+        ],
+        "title": "ManagedWorkSource"
+      },
+      "ManagedWorkTask": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalChannelWorkTaskStatus"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedWorkSource"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "status",
+          "details",
+          "output",
+          "sources"
+        ],
+        "title": "ManagedWorkTask"
       },
       "MeResponse": {
         "properties": {

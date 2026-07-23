@@ -7,7 +7,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **str** |  | 
 **status** | [**ExternalChannelWorkStatus**](ExternalChannelWorkStatus.md) |  | 
-**tasks** | **List[Optional[Dict[str, object]]]** |  | 
+**title** | **str** |  | 
+**tasks** | [**List[ManagedWorkTask]**](ManagedWorkTask.md) |  | 
 **state_revision** | **int** |  | 
 **desired_progress_revision** | **int** |  | 
 **progress_projected** | **bool** |  | 

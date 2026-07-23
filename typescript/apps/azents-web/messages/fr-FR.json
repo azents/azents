@@ -1020,10 +1020,14 @@
         "noWork": "Aucun Channel Work n’est associé à cette liaison.",
         "taskCount": "{count, plural, =1 {1 tâche} other {# tâches}}",
         "revisionDetail": "Révision d’état {current} · révision souhaitée {desired}",
+        "taskDetails": "Détails",
+        "taskOutput": "Résultat",
+        "taskSources": "Sources",
         "taskStatus": {
           "pending": "En attente",
           "in_progress": "En cours",
-          "completed": "Terminée"
+          "completed": "Terminée",
+          "failed": "Échec"
         },
         "projectionState": {
           "synchronized": "Synchronisée",

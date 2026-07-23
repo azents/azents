@@ -581,6 +581,7 @@ class ExternalChannelWork(_Record):
     binding_id: str
     status: ExternalChannelWorkStatus
     schema_version: int
+    title: str | None
     tasks: list[dict[str, Any]]
     state_revision: int
     desired_progress_revision: int
@@ -597,6 +598,7 @@ class ExternalChannelWorkCreate(_Record):
     binding_id: str
     status: ExternalChannelWorkStatus
     schema_version: int
+    title: str | None
     tasks: list[dict[str, Any]]
     state_revision: int
     desired_progress_revision: int

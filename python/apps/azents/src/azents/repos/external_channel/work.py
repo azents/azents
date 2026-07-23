@@ -20,11 +20,13 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
-from azents.core.external_channel_activity import (
-    ActivityTrackerTask,
-    activity_tracker_payload,
-    render_activity_tracker,
-    render_persisted_activity_tracker,
+from azents.core.external_channel_progress import (
+    ExternalChannelDesiredProgress,
+)
+from azents.core.slack_external_channel_progress import (
+    SlackProgressPresentation,
+    render_slack_persisted_progress,
+    render_slack_progress,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -72,7 +74,8 @@ class ExternalChannelWorkRepository:
             RDBExternalChannelWork(
                 binding_id=binding_id,
                 status=ExternalChannelWorkStatus.ACTIVE,
-                schema_version=1,
+                schema_version=2,
+                title=None,
                 tasks=[],
                 state_revision=1,
                 desired_progress_revision=0,
@@ -200,6 +203,7 @@ class ExternalChannelWorkRepository:
                     binding_id=binding.id,
                     provider=connection.provider,
                     resource_label=_resource_label(resource.labels, binding.id),
+                    title=work.title,
                     tasks=[ChannelWorkTask.model_validate(task) for task in work.tasks],
                     state_revision=work.state_revision,
                     desired_progress_revision=work.desired_progress_revision,
@@ -229,6 +233,7 @@ class ExternalChannelWorkRepository:
         binding_id: str,
         mode: ExternalChannelActionMode,
         message: str | None,
+        title: str | None,
         tasks: Sequence[ChannelWorkTask] | None,
         now: datetime.datetime,
     ) -> ChannelActionCommit:
@@ -242,6 +247,7 @@ class ExternalChannelWorkRepository:
             "binding": binding_id,
             "mode": mode.value,
             **({"message": message} if message is not None else {}),
+            **({"title": title} if title is not None else {}),
             **({"todo_update": requested_tasks} if requested_tasks is not None else {}),
         }
         if mode is ExternalChannelActionMode.FINISH and message is None:
@@ -330,7 +336,8 @@ class ExternalChannelWorkRepository:
             work = RDBExternalChannelWork(
                 binding_id=binding.id,
                 status=ExternalChannelWorkStatus.ACTIVE,
-                schema_version=1,
+                schema_version=2,
+                title=None,
                 tasks=[],
                 state_revision=1,
                 desired_progress_revision=0,
@@ -341,9 +348,6 @@ class ExternalChannelWorkRepository:
             session.add(work)
             await session.flush()
 
-        next_tasks = (
-            requested_tasks if requested_tasks is not None else list(work.tasks)
-        )
         operations: list[
             tuple[ExternalChannelDeliveryOperation, dict[str, object]]
         ] = []
@@ -355,53 +359,84 @@ class ExternalChannelWorkRepository:
                 )
             )
         if mode is ExternalChannelActionMode.CONTINUE:
-            validated_tasks = [
-                ChannelWorkTask.model_validate(task) for task in next_tasks
-            ]
-            if not any(
-                task.status is not ExternalChannelWorkTaskStatus.COMPLETED
-                for task in validated_tasks
-            ):
-                raise ValueError(
-                    "Continue must leave at least one unfinished Channel Work task."
+            progress_changed = title is not None or requested_tasks is not None
+            if requested_tasks is not None and title is None:
+                raise ValueError("A Channel Work task update requires a work title.")
+            if title is not None and not title.endswith(("…", "...")):
+                raise ValueError("Channel Work titles must end with an ellipsis.")
+            if title is not None and requested_tasks is None and not work.tasks:
+                raise ValueError("A title-only update requires existing Channel Work.")
+            if progress_changed:
+                next_tasks = (
+                    requested_tasks if requested_tasks is not None else list(work.tasks)
                 )
-            work.tasks = next_tasks
-            work.state_revision += 1
-            activity_tasks = _activity_tasks(validated_tasks)
-            presentation = render_activity_tracker(
-                state="working",
-                tasks=activity_tasks,
-            )
-            work.desired_progress_revision += 1
-            work.desired_progress_payload = activity_tracker_payload(
-                state="working",
-                tasks=activity_tasks,
-            )
-            if created_work:
-                operations.append(
-                    (
-                        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                        _provider_payload(
-                            resource.labels,
-                            text=presentation.text,
-                            blocks=presentation.blocks,
-                            desired_progress_revision=(work.desired_progress_revision),
-                        ),
+                validated_tasks = [
+                    ChannelWorkTask.model_validate(task) for task in next_tasks
+                ]
+                if not validated_tasks:
+                    raise ValueError("Working Channel Work requires at least one task.")
+                if not any(
+                    task.status
+                    not in {
+                        ExternalChannelWorkTaskStatus.COMPLETED,
+                        ExternalChannelWorkTaskStatus.FAILED,
+                    }
+                    for task in validated_tasks
+                ):
+                    raise ValueError(
+                        "Continue must leave at least one unfinished Channel Work task."
                     )
+                next_title = title if title is not None else work.title
+                if next_title is None:
+                    raise ValueError("Working Channel Work requires a title.")
+                progress = ExternalChannelDesiredProgress(
+                    schema_version=2,
+                    state="working",
+                    title=next_title,
+                    tasks=validated_tasks,
                 )
-            elif work.progress_provider_message_key is not None:
-                operations.append(
-                    (
-                        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                        _provider_payload(
-                            resource.labels,
-                            text=presentation.text,
-                            blocks=presentation.blocks,
-                            provider_message_key=work.progress_provider_message_key,
-                            desired_progress_revision=(work.desired_progress_revision),
-                        ),
+                work.title = next_title
+                work.tasks = [task.model_dump(mode="json") for task in validated_tasks]
+                work.state_revision += 1
+                work.desired_progress_revision += 1
+                work.desired_progress_payload = progress.model_dump(mode="json")
+                presentation = _render_progress(
+                    connection.provider,
+                    progress,
+                    work_id=work.id,
+                    desired_progress_revision=work.desired_progress_revision,
+                )
+                if created_work:
+                    operations.append(
+                        (
+                            ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                            _provider_payload(
+                                resource.labels,
+                                text=presentation.text,
+                                blocks=presentation.blocks,
+                                desired_progress_revision=(
+                                    work.desired_progress_revision
+                                ),
+                            ),
+                        )
                     )
-                )
+                elif work.progress_provider_message_key is not None:
+                    operations.append(
+                        (
+                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                            _provider_payload(
+                                resource.labels,
+                                text=presentation.text,
+                                blocks=presentation.blocks,
+                                provider_message_key=(
+                                    work.progress_provider_message_key
+                                ),
+                                desired_progress_revision=(
+                                    work.desired_progress_revision
+                                ),
+                            ),
+                        )
+                    )
         else:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.state_revision += 1
@@ -670,8 +705,11 @@ class ExternalChannelWorkRepository:
                 and isinstance(attempted_revision, int)
                 and work.desired_progress_revision > attempted_revision
             ):
-                presentation = render_persisted_activity_tracker(
-                    work.desired_progress_payload
+                presentation = _render_persisted_progress(
+                    ExternalChannelProvider.SLACK,
+                    work.desired_progress_payload,
+                    work_id=work.id,
+                    desired_progress_revision=work.desired_progress_revision,
                 )
                 existing_catchup = await session.scalar(
                     sa.select(RDBExternalChannelDeliveryAttempt).where(
@@ -1217,16 +1255,42 @@ def _provider_payload(
     return payload
 
 
-def _activity_tasks(tasks: Sequence[ChannelWorkTask]) -> list[ActivityTrackerTask]:
-    """Convert canonical Channel Work tasks into presentation tasks."""
-    return [
-        ActivityTrackerTask(
-            id=task.id,
-            title=task.title,
-            status=task.status.value,
-        )
-        for task in tasks
-    ]
+def _render_progress(
+    provider: ExternalChannelProvider,
+    progress: ExternalChannelDesiredProgress,
+    *,
+    work_id: str,
+    desired_progress_revision: int,
+) -> SlackProgressPresentation:
+    """Lower canonical progress through the active provider adapter."""
+    match provider:
+        case ExternalChannelProvider.SLACK:
+            return render_slack_progress(
+                progress,
+                work_id=work_id,
+                desired_progress_revision=desired_progress_revision,
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _render_persisted_progress(
+    provider: ExternalChannelProvider,
+    payload: object,
+    *,
+    work_id: str,
+    desired_progress_revision: int,
+) -> SlackProgressPresentation:
+    """Validate and lower one durable canonical progress snapshot."""
+    match provider:
+        case ExternalChannelProvider.SLACK:
+            return render_slack_persisted_progress(
+                payload,
+                work_id=work_id,
+                desired_progress_revision=desired_progress_revision,
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _validate_message_length(

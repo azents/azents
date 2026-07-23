@@ -36,12 +36,12 @@ from azents.core.enums import (
     InputBufferKind,
     InputBufferSchedulingMode,
 )
-from azents.core.external_channel_activity import (
-    ActivityTrackerPresentation,
-    activity_tracker_payload,
-    render_activity_tracker,
-    render_persisted_activity_tracker,
-    render_session_link,
+from azents.core.external_channel_progress import checking_progress
+from azents.core.slack_external_channel_progress import (
+    SlackProgressPresentation,
+    render_slack_persisted_progress,
+    render_slack_progress,
+    render_slack_session_link,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -1949,14 +1949,12 @@ class ExternalChannelEventProcessorService:
         work = await self.repository.ensure_active_work(
             session,
             binding_id=binding.id,
-            desired_progress_payload=activity_tracker_payload(
-                state="checking",
-                tasks=(),
-            ),
+            desired_progress_payload=checking_progress().model_dump(mode="json"),
         )
-        presentation = render_activity_tracker(
-            state="checking",
-            tasks=(),
+        presentation = render_slack_progress(
+            checking_progress(),
+            work_id=work.id,
+            desired_progress_revision=work.desired_progress_revision,
         )
         resource = await self.repository.get_resource(
             session,
@@ -1980,7 +1978,7 @@ class ExternalChannelEventProcessorService:
             )
             if session_url is None:
                 raise RuntimeError("External Channel Session URL is unavailable.")
-            session_link = render_session_link(session_url)
+            session_link = render_slack_session_link(session_url)
             session_link_attempt = (
                 await self.repository.create_delivery_attempt_idempotent(
                     session,
@@ -2260,9 +2258,13 @@ def _provider_thread_target(
 
 def _render_persisted_activity(
     work: ExternalChannelWork,
-) -> ActivityTrackerPresentation:
+) -> SlackProgressPresentation:
     """Render the latest desired Tracker state retained by one work cycle."""
-    return render_persisted_activity_tracker(work.desired_progress_payload)
+    return render_slack_persisted_progress(
+        work.desired_progress_payload,
+        work_id=work.id,
+        desired_progress_revision=work.desired_progress_revision,
+    )
 
 
 def _provider_message_ts(value: object) -> str | None:

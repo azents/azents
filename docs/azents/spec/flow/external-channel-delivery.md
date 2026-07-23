@@ -6,7 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation, toolkit]
 code_paths:
-  - python/apps/azents/src/azents/core/external_channel_activity.py
+  - python/apps/azents/src/azents/core/external_channel_progress.py
+  - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/engine/tools/external_channel.py
   - python/apps/azents/src/azents/engine/tools/deps.py
   - python/apps/azents/src/azents/engine/tooling/execution_context.py
@@ -21,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 9
+spec_version: 10
 ---
 
 # External Channel Delivery and Channel Work
@@ -32,14 +33,23 @@ Normal model output is never relayed to Slack. The only model-facing publication
 
 A tool call must identify a binding owned by the current Agent and Session. The tool supports two atomic modes:
 
-- `continue`: optionally send one conversational reply and replace the ordered Channel Work task list.
+- `continue`: optionally send one conversational reply, replace the current
+  provider-neutral work title, and replace the ordered Channel Work task list.
 - `finish`: send one required final reply and finish Channel Work.
 
-Tasks use `pending`, `in_progress`, or `completed`, with at most 49 ordered
-tasks in one action so the Slack processing plan and every Todo fit one message.
-Each binding has independent work state even when several bindings share one
-AgentSession. The ordinary Session Todo toolkit is not the Channel Work source
-of truth.
+Task updates require a concise current-work title in the same call. Guidance tells
+the Agent to use the participant's language, concrete progressive wording, and an
+ellipsis, for example `Investigating error logs…`. A title-only update is valid
+only after tasks exist. Message-only continuation does not change canonical
+progress or its desired revision.
+
+Tasks use `pending`, `in_progress`, `completed`, or `failed`, with at most 49
+ordered tasks in one action. They have stable IDs and may include literal details,
+literal output, and ordered labeled HTTP or HTTPS sources. The complete serialized
+desired snapshot must fit 64 KiB; an oversized update is rejected before canonical
+state changes so accepted continuation context is never silently truncated. Each
+binding has independent work state even when several bindings share one AgentSession.
+The ordinary Session Todo toolkit is not the Channel Work source of truth.
 
 ## Durable Commit Before Provider Calls
 
@@ -61,22 +71,25 @@ Provider mutations are never automatically retried. Stale `attempting` recovery 
   control message. Later invocations on the binding do not repeat it, and Activity
   Tracker desired state never contains the Session URL.
 - The initial Tracker states that the Agent is checking the message with one
-  `task_card` carrying the `in_progress` state. Once any Todo exists, one `plan`
-  block carries the `Agent is working` title and contains the ordered Todo
-  `task_card` entries. Every nested task carries Slack's required status:
-  `pending`, `in_progress`, or `complete`. The plan title has no task indicator,
-  so the current Todo exclusively owns the circular progress indicator. The
-  blocks are read-only and require no Slack interaction callback.
-- Task changes update the retained provider message with the complete current Block
-  Kit payload through `chat.update`. Task titles remain literal strings.
+  `task_card` carrying the `in_progress` state. Once Channel Work exists, one
+  `plan` block carries the Agent-authored title and complete ordered task list.
+  Nested tasks use `task_id`, literal title, Slack status, and optional literal
+  rich-text details/output plus labeled URL sources. They omit standalone
+  `task_card` block types. The Plan sends no `plan_id`, is read-only, and requires
+  no Slack interaction callback.
+- Task or title changes update the retained provider message with the complete
+  latest Block Kit payload through `chat.update`. A revision-derived provider-only
+  `block_id` changes for each message iteration. Slack Agent streaming methods are
+  not used.
 - Finishing requires a final reply. The reply is attempted first; only a durable
   `delivered` result permits `chat.delete` for the Tracker. Failed, unknown, or
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
 
-The work cycle stores its desired Tracker payload, desired revision, and retained
-provider identity. A matching Slack deletion event or confirmed
+The work cycle stores its title, complete provider-neutral version-2 desired
+snapshot, desired revision, and retained provider identity. A matching Slack
+deletion event or confirmed
 `message_not_found` update clears that identity and commits one replacement create
 only while work is active and desired state exists. Ambiguous provider outcomes and
 finished work do not trigger replacement. If work advances while a replacement
@@ -94,6 +107,10 @@ Authorization control messages use Block Kit with a URL button and accessible
 fallback text; they do not expose an approval URL as ordinary body text. Provider
 participant labels and IDs are rendered in Slack plain-text objects so untrusted
 mrkdwn cannot create mentions, links, or formatting.
+
+Slack API validation responses for approval controls are confirmed
+`failed/provider_rejected` outcomes. Only transport or server ambiguity is
+`unknown/provider_ambiguous`.
 
 Every compatible final approval decision creates a delete intent for a successfully
 delivered control message in the same transaction as the decision, then attempts
@@ -134,6 +151,7 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-23** (spec_version 10) — Added Agent-authored progress titles, rich provider-neutral task snapshots, Slack-native complete Plan lowering without streaming, and confirmed approval-control rejection classification.
 - **2026-07-23** (spec_version 8) — Removed summary-card progress chrome whenever Todo cards exist so the active Todo exclusively owns the circular indicator.
 - **2026-07-23** (spec_version 7) — Reconciled approval decisions with late control-message delivery so either completion order creates and consumes one idempotent delete intent without lock inversion.
 - **2026-07-23** (spec_version 6) — Separated the one-time Session-link message, switched the Tracker to native read-only task cards, limited work to 49 Todos, made successful final replies delete the Tracker, and restricted replacement to active desired work with race-safe cleanup reconciliation.

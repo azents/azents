@@ -17,36 +17,25 @@ import pprint
 import re  # noqa: F401
 import json
 
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus
-from azentspublicclient.models.managed_work_task import ManagedWorkTask
+from azentspublicclient.models.external_channel_work_task_status import ExternalChannelWorkTaskStatus
+from azentspublicclient.models.managed_work_source import ManagedWorkSource
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ManagedWork(BaseModel):
+class ManagedWorkTask(BaseModel):
     """
-    ManagedWork
+    ManagedWorkTask
     """ # noqa: E501
     id: StrictStr
-    status: ExternalChannelWorkStatus
-    title: Optional[StrictStr]
-    tasks: List[ManagedWorkTask]
-    state_revision: StrictInt
-    desired_progress_revision: StrictInt
-    progress_projected: StrictBool
-    projection_state: StrictStr
-    finished_at: Optional[datetime]
+    title: StrictStr
+    status: ExternalChannelWorkTaskStatus
+    details: Optional[StrictStr]
+    output: Optional[StrictStr]
+    sources: List[ManagedWorkSource]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "status", "title", "tasks", "state_revision", "desired_progress_revision", "progress_projected", "projection_state", "finished_at"]
-
-    @field_validator('projection_state')
-    def projection_state_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['synchronized', 'missing', 'stale', 'delete_failed', 'unknown', 'none']):
-            raise ValueError("must be one of enum values ('synchronized', 'missing', 'stale', 'delete_failed', 'unknown', 'none')")
-        return value
+    __properties: ClassVar[List[str]] = ["id", "title", "status", "details", "output", "sources"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -66,7 +55,7 @@ class ManagedWork(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ManagedWork from a JSON string"""
+        """Create an instance of ManagedWorkTask from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -89,33 +78,33 @@ class ManagedWork(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in tasks (list)
+        # override the default output from pydantic by calling `to_dict()` of each item in sources (list)
         _items = []
-        if self.tasks:
-            for _item_tasks in self.tasks:
-                if _item_tasks:
-                    _items.append(_item_tasks.to_dict())
-            _dict['tasks'] = _items
+        if self.sources:
+            for _item_sources in self.sources:
+                if _item_sources:
+                    _items.append(_item_sources.to_dict())
+            _dict['sources'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if title (nullable) is None
+        # set to None if details (nullable) is None
         # and model_fields_set contains the field
-        if self.title is None and "title" in self.model_fields_set:
-            _dict['title'] = None
+        if self.details is None and "details" in self.model_fields_set:
+            _dict['details'] = None
 
-        # set to None if finished_at (nullable) is None
+        # set to None if output (nullable) is None
         # and model_fields_set contains the field
-        if self.finished_at is None and "finished_at" in self.model_fields_set:
-            _dict['finished_at'] = None
+        if self.output is None and "output" in self.model_fields_set:
+            _dict['output'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ManagedWork from a dict"""
+        """Create an instance of ManagedWorkTask from a dict"""
         if obj is None:
             return None
 
@@ -124,14 +113,11 @@ class ManagedWork(BaseModel):
 
         _obj = cls.model_validate({
             "id": obj.get("id"),
-            "status": obj.get("status"),
             "title": obj.get("title"),
-            "tasks": [ManagedWorkTask.from_dict(_item) for _item in obj["tasks"]] if obj.get("tasks") is not None else None,
-            "state_revision": obj.get("state_revision"),
-            "desired_progress_revision": obj.get("desired_progress_revision"),
-            "progress_projected": obj.get("progress_projected"),
-            "projection_state": obj.get("projection_state"),
-            "finished_at": obj.get("finished_at")
+            "status": obj.get("status"),
+            "details": obj.get("details"),
+            "output": obj.get("output"),
+            "sources": [ManagedWorkSource.from_dict(_item) for _item in obj["sources"]] if obj.get("sources") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

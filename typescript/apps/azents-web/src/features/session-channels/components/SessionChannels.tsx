@@ -2,6 +2,7 @@
 
 import {
   Alert,
+  Anchor,
   Badge,
   Box,
   Button,
@@ -17,6 +18,7 @@ import {
 } from "@mantine/core";
 import { useModals } from "@mantine/modals";
 import {
+  IconAlertCircle,
   IconArchive,
   IconCheck,
   IconClock,
@@ -32,14 +34,8 @@ import type {
   ManagedDelivery,
   ManagedGrant,
   ManagedWork,
+  ManagedWorkTask,
 } from "@azents/public-client";
-
-type WorkTaskStatus = "pending" | "in_progress" | "completed";
-
-interface WorkTask {
-  title: string;
-  status: WorkTaskStatus;
-}
 
 function formatDate(value: string | null): string {
   return value === null ? "—" : new Date(value).toLocaleString();
@@ -61,18 +57,6 @@ function deliveryColor(status: ExternalChannelDeliveryStatus): string {
   }
 }
 
-function workTask(value: Record<string, unknown>): WorkTask | null {
-  const title = value.title;
-  const status = value.status;
-  if (
-    typeof title !== "string" ||
-    (status !== "pending" && status !== "in_progress" && status !== "completed")
-  ) {
-    return null;
-  }
-  return { title, status };
-}
-
 function projectionColor(state: ManagedWork["projection_state"]): string {
   switch (state) {
     case "synchronized":
@@ -86,6 +70,38 @@ function projectionColor(state: ManagedWork["projection_state"]): string {
       return "orange";
     case "none":
       return "gray";
+  }
+}
+
+function taskColor(status: ManagedWorkTask["status"]): string {
+  switch (status) {
+    case "completed":
+      return "green";
+    case "in_progress":
+      return "blue";
+    case "failed":
+      return "red";
+    case "pending":
+      return "gray";
+  }
+}
+
+function TaskIcon({
+  status,
+}: {
+  status: ManagedWorkTask["status"];
+}): React.ReactElement {
+  switch (status) {
+    case "completed":
+      return <IconCheck size={rem(14)} color="var(--mantine-color-green-6)" />;
+    case "in_progress":
+      return <IconLoader2 size={rem(14)} color="var(--mantine-color-blue-6)" />;
+    case "failed":
+      return (
+        <IconAlertCircle size={rem(14)} color="var(--mantine-color-red-6)" />
+      );
+    case "pending":
+      return <IconClock size={rem(14)} color="var(--mantine-color-gray-6)" />;
   }
 }
 
@@ -132,12 +148,15 @@ function WorkSection({
       </Text>
     );
   }
-  const tasks = binding.work.tasks
-    .map(workTask)
-    .filter((task): task is WorkTask => task !== null);
+  const tasks = binding.work.tasks;
 
   return (
     <Stack gap="xs">
+      {binding.work.title !== null && (
+        <Text fw={700} style={{ overflowWrap: "anywhere" }}>
+          {binding.work.title}
+        </Text>
+      )}
       <Group justify="space-between">
         <Group gap="xs">
           <Badge
@@ -159,38 +178,83 @@ function WorkSection({
       </Group>
       {tasks.length > 0 && (
         <Stack gap="xs">
-          {tasks.map((task, index) => (
-            <Group key={`${index}-${task.title}`} gap="xs" wrap="nowrap">
-              {task.status === "completed" ? (
-                <IconCheck
-                  size={rem(14)}
-                  color="var(--mantine-color-green-6)"
-                />
-              ) : task.status === "in_progress" ? (
-                <IconLoader2
-                  size={rem(14)}
-                  color="var(--mantine-color-blue-6)"
-                />
-              ) : (
-                <IconClock size={rem(14)} color="var(--mantine-color-gray-6)" />
-              )}
-              <Text size="sm" style={{ flex: 1, overflowWrap: "anywhere" }}>
-                {task.title}
-              </Text>
-              <Badge
-                size="xs"
-                variant="outline"
-                color={
-                  task.status === "completed"
-                    ? "green"
-                    : task.status === "in_progress"
-                      ? "blue"
-                      : "gray"
-                }
-              >
-                {t(`taskStatus.${task.status}`)}
-              </Badge>
-            </Group>
+          {tasks.map((task) => (
+            <Paper key={task.id} withBorder radius="md" p="sm">
+              <Stack gap="xs">
+                <Group gap="xs" wrap="nowrap" align="flex-start">
+                  <Box mt={rem(3)}>
+                    <TaskIcon status={task.status} />
+                  </Box>
+                  <Text
+                    size="sm"
+                    fw={600}
+                    style={{ flex: 1, overflowWrap: "anywhere" }}
+                  >
+                    {task.title}
+                  </Text>
+                  <Badge
+                    size="xs"
+                    variant="outline"
+                    color={taskColor(task.status)}
+                  >
+                    {t(`taskStatus.${task.status}`)}
+                  </Badge>
+                </Group>
+                {task.details !== null && (
+                  <Box>
+                    <Text size="xs" c="dimmed" fw={700}>
+                      {t("taskDetails")}
+                    </Text>
+                    <Text
+                      size="sm"
+                      style={{
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {task.details}
+                    </Text>
+                  </Box>
+                )}
+                {task.output !== null && (
+                  <Box>
+                    <Text size="xs" c="dimmed" fw={700}>
+                      {t("taskOutput")}
+                    </Text>
+                    <Text
+                      size="sm"
+                      style={{
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {task.output}
+                    </Text>
+                  </Box>
+                )}
+                {task.sources.length > 0 && (
+                  <Box>
+                    <Text size="xs" c="dimmed" fw={700}>
+                      {t("taskSources")}
+                    </Text>
+                    <Stack gap={0}>
+                      {task.sources.map((source) => (
+                        <Anchor
+                          key={`${source.url}-${source.label}`}
+                          href={source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          size="sm"
+                          style={{ overflowWrap: "anywhere" }}
+                        >
+                          {source.label}
+                        </Anchor>
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
+              </Stack>
+            </Paper>
           ))}
         </Stack>
       )}
