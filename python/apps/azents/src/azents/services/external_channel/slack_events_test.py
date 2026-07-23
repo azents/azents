@@ -199,6 +199,92 @@ def test_extracts_bounded_user_and_channel_reference_ids() -> None:
     assert channels == {"C1", "G2"}
 
 
+def test_normalizes_block_only_rich_text_and_reference_ids() -> None:
+    """Use supported rich-text elements when Slack fallback text is empty."""
+    normalized = normalize_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        envelope=_envelope(
+            {
+                "type": "message",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U1",
+                "ts": "1721600000.000100",
+                "text": "",
+                "blocks": [
+                    {
+                        "type": "rich_text",
+                        "elements": [
+                            {
+                                "type": "rich_text_section",
+                                "elements": [
+                                    {"type": "text", "text": "Ask "},
+                                    {"type": "user", "user_id": "U2"},
+                                    {"type": "text", "text": " in "},
+                                    {"type": "channel", "channel_id": "G2"},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+    )
+
+    assert isinstance(normalized, SlackNormalizedMessage)
+    assert normalized.normalized_body == "Ask <@U2> in <#G2>"
+    assert slack_message_reference_ids(normalized.normalized_body) == (
+        {"U2"},
+        {"G2"},
+    )
+
+
+def test_rich_text_edit_revision_identity_uses_normalized_body() -> None:
+    """Changing block-only content creates a distinct edit revision key."""
+
+    def edited(text: str) -> SlackNormalizedMessage:
+        normalized = normalize_slack_event(
+            event_type="message",
+            tenant_id="T1",
+            envelope=_envelope(
+                {
+                    "type": "message",
+                    "subtype": "message_changed",
+                    "channel": "C1",
+                    "channel_type": "channel",
+                    "event_ts": "1721600002.000100",
+                    "message": {
+                        "user": "U1",
+                        "ts": "1721600000.000100",
+                        "text": "",
+                        "edited": {"ts": "1721600002.000000"},
+                        "blocks": [
+                            {
+                                "type": "rich_text",
+                                "elements": [
+                                    {
+                                        "type": "rich_text_section",
+                                        "elements": [{"type": "text", "text": text}],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ),
+        )
+        assert isinstance(normalized, SlackNormalizedMessage)
+        return normalized
+
+    first = edited("First")
+    second = edited("Second")
+
+    assert first.normalized_body == "First"
+    assert second.normalized_body == "Second"
+    assert first.revision_key != second.revision_key
+
+
 async def test_conversation_access_requires_membership_and_exposes_connect() -> None:
     """First-mention validation distinguishes membership and Slack Connect."""
 

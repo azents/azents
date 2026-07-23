@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
 )
+from azents.services.external_channel.slack_blocks import slack_blocks_text
 from azents.services.external_channel.slack_endpoint import slack_api_base_url
 
 _MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
@@ -193,7 +194,7 @@ def normalize_slack_event(
     normalized_body = (
         None
         if revision_kind is ExternalChannelMessageRevisionKind.DELETE
-        else _bounded_text(message.get("text"))
+        else _normalized_message_body(message)
     )
     attachment_metadata = _attachment_metadata(message.get("blocks"))
     normalized_size = _normalized_size(normalized_body, attachment_metadata)
@@ -863,6 +864,14 @@ def _bounded_text(value: object) -> str:
         return value
     clipped = encoded[:_MAX_NORMALIZED_TEXT_BYTES].decode(errors="ignore")
     return f"{clipped}\n[Slack message truncated by Azents]"
+
+
+def _normalized_message_body(message: dict[str, object]) -> str:
+    """Prefer Slack fallback text and derive readable block-only content."""
+    fallback = _bounded_text(message.get("text"))
+    if fallback.strip():
+        return fallback
+    return _bounded_text(slack_blocks_text(message.get("blocks")))
 
 
 def _attachment_metadata(value: object) -> dict[str, object] | None:

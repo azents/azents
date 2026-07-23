@@ -20,6 +20,7 @@ from azents.services.external_channel.data import (
     ExternalChannelCapabilitySnapshot,
     ExternalChannelProviderIdentity,
 )
+from azents.services.external_channel.slack_blocks import projected_slack_blocks
 from azents.services.external_channel.slack_endpoint import slack_api_base_url
 
 MAX_SLACK_HTTP_BODY_BYTES = 256 * 1024
@@ -516,14 +517,5 @@ def _project_slack_message(message: dict[str, object]) -> dict[str, object]:
 
 
 def _project_slack_blocks(value: object) -> list[dict[str, str]]:
-    """Reduce Slack blocks to bounded attachment-type metadata."""
-    if not isinstance(value, list):
-        return []
-    projected: list[dict[str, str]] = []
-    for block in value[:32]:
-        if not isinstance(block, dict):
-            continue
-        block_type = block.get("type")
-        if isinstance(block_type, str) and block_type:
-            projected.append({"type": block_type})
-    return projected
+    """Reduce Slack blocks to bounded readable projection data."""
+    return projected_slack_blocks(value)
