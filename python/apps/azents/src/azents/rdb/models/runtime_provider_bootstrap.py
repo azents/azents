@@ -9,6 +9,7 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+import azents.rdb.models.user as _  # noqa: F401  # Register FK target metadata.
 from azents.core.enums import (
     RuntimeProviderAuditEventType,
     RuntimeProviderBootstrapAdapterKind,
