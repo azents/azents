@@ -21,7 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 4
+spec_version: 5
 ---
 
 # External Channel Delivery and Channel Work
@@ -68,7 +68,10 @@ for the replacement identity and latest desired revision.
 
 ## Approval Control Messages
 
-Authorization control messages use Block Kit with a URL button and accessible fallback text; they do not expose an approval URL as ordinary body text.
+Authorization control messages use Block Kit with a URL button and accessible
+fallback text; they do not expose an approval URL as ordinary body text. Provider
+participant labels and IDs are rendered in Slack plain-text objects so untrusted
+mrkdwn cannot create mentions, links, or formatting.
 
 Every compatible final approval decision creates a delete intent for a successfully
 delivered control message in the same transaction as the decision, then attempts
@@ -101,6 +104,7 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-23** (spec_version 5) — Rendered provider participant identity in approval controls as Slack plain text rather than untrusted mrkdwn.
 - **2026-07-23** (spec_version 4) — Added automatic pre-execution Activity Tracker creation, one-message checking/working/completed transitions, delivered-final-reply completion gating, retained normal completion, confirmed-deletion recreation, and latest-revision replacement reconciliation.
 - **2026-07-23** (spec_version 3) — Added post-decision approval-control deletion and delivery-derived Activity Tracker projection states with canonical task presentation.
 - **2026-07-23** (spec_version 2) — Added Slack Markdown reply payloads, provider-bound length validation, and Block Kit operational/approval delivery with accessible fallback text.
