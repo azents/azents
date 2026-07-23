@@ -70,7 +70,6 @@ async def _seed_activity_tracker(
     work.desired_progress_payload = {
         "state": "checking",
         "tasks": [],
-        "session_url": "https://azents.example/w/test/agents/agent/sessions/session",
     }
     work.progress_provider_message_key = "slack:T1:C1:2.000001"
     await session.flush()
@@ -268,7 +267,7 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
 async def test_delivery_identity_and_finish_are_recorded_without_retry(
     rdb_session: AsyncSession,
 ) -> None:
-    """Todo and completion update one retained Activity Tracker."""
+    """Todo updates the Tracker and successful finish schedules its deletion."""
     agent_id, binding_id = await _setup_binding(rdb_session)
     agent_session = await rdb_session.scalar(
         sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
@@ -327,20 +326,16 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
     assert finished.work_status is ExternalChannelWorkStatus.FINISHED
     assert [delivery.operation for delivery in finished.deliveries] == [
         ExternalChannelDeliveryOperation.REPLY,
-        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
     ]
-    completion_attempt = await rdb_session.get(
+    delete_attempt = await rdb_session.get(
         RDBExternalChannelDeliveryAttempt,
         finished.deliveries[1].id,
     )
-    assert completion_attempt is not None
-    assert completion_attempt.request_payload["text"] == "Answer complete"
+    assert delete_attempt is not None
+    assert "text" not in delete_attempt.request_payload
     assert work.progress_provider_message_key == "slack:T1:C1:2.000001"
-    assert work.desired_progress_payload == {
-        "state": "completed",
-        "tasks": [],
-        "session_url": "https://azents.example/w/test/agents/agent/sessions/session",
-    }
+    assert work.desired_progress_payload is None
 
     await repository.ensure_active_work(rdb_session, binding_id=binding_id)
     snapshots = await repository.list_active_work(
@@ -367,8 +362,13 @@ async def test_recreated_tracker_catches_up_to_latest_desired_revision(
     work.desired_progress_revision = 2
     work.desired_progress_payload = {
         "state": "working",
-        "tasks": [{"title": "Investigate", "status": "in_progress"}],
-        "session_url": "https://azents.example/w/test/agents/agent/sessions/session",
+        "tasks": [
+            {
+                "id": "investigate",
+                "title": "Investigate",
+                "status": "in_progress",
+            }
+        ],
     }
     create_attempt = RDBExternalChannelDeliveryAttempt(
         origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
@@ -418,6 +418,183 @@ async def test_recreated_tracker_catches_up_to_latest_desired_revision(
     assert followup.request_payload["provider_message_key"] == ("slack:T1:C1:3.000001")
     assert followup.request_payload["desired_progress_revision"] == 2
     assert followup.request_payload["text"] == "Agent is working\n◐ Investigate"
+    assert followup.request_payload["blocks"] == [
+        {
+            "type": "task_card",
+            "task_id": "activity-status",
+            "title": "Agent is working",
+            "status": "in_progress",
+        },
+        {
+            "type": "task_card",
+            "task_id": "investigate",
+            "title": "Investigate",
+            "status": "in_progress",
+        },
+    ]
+
+
+async def test_late_tracker_creation_after_delivered_finish_schedules_cleanup(
+    rdb_session: AsyncSession,
+) -> None:
+    """The later of final reply and Tracker creation owns cleanup reconciliation."""
+    agent_id, binding_id = await _setup_binding(rdb_session)
+    agent_session = await rdb_session.scalar(
+        sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+    )
+    assert agent_session is not None
+    repository = ExternalChannelWorkRepository()
+    await repository.ensure_active_work(rdb_session, binding_id=binding_id)
+    work = await _seed_activity_tracker(rdb_session, binding_id=binding_id)
+    work.progress_provider_message_key = None
+    finished = await repository.commit_action(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent_id,
+        run_id=None,
+        client_tool_call_id="call-finish-before-create",
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.FINISH,
+        message="Done.",
+        tasks=None,
+        now=_at(2),
+    )
+    assert [item.operation for item in finished.deliveries] == [
+        ExternalChannelDeliveryOperation.REPLY
+    ]
+    reply = finished.deliveries[0]
+    assert await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=reply.id,
+        now=_at(3),
+    )
+    assert (
+        await repository.finish_delivery(
+            rdb_session,
+            delivery_attempt_id=reply.id,
+            status=ExternalChannelDeliveryStatus.DELIVERED,
+            provider_message_key="slack:T1:C1:3.000001",
+            error_kind=None,
+            error_summary=None,
+            now=_at(4),
+        )
+        is None
+    )
+    late_create = RDBExternalChannelDeliveryAttempt(
+        origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+        origin_id="late-activity-create",
+        operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+        request_payload={
+            "work_id": work.id,
+            "channel_id": "C1",
+            "thread_ts": "1.000001",
+            "text": "Agent is checking your message",
+            "blocks": [],
+            "desired_progress_revision": 1,
+        },
+        status=ExternalChannelDeliveryStatus.PENDING,
+        channel_action_id=None,
+        binding_id=binding_id,
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
+        attempted_at=None,
+        completed_at=None,
+    )
+    rdb_session.add(late_create)
+    await rdb_session.flush()
+    assert await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=late_create.id,
+        now=_at(5),
+    )
+
+    cleanup_id = await repository.finish_delivery(
+        rdb_session,
+        delivery_attempt_id=late_create.id,
+        status=ExternalChannelDeliveryStatus.DELIVERED,
+        provider_message_key="slack:T1:C1:4.000001",
+        error_kind=None,
+        error_summary=None,
+        now=_at(6),
+    )
+
+    assert cleanup_id is not None
+    cleanup = await rdb_session.get(RDBExternalChannelDeliveryAttempt, cleanup_id)
+    assert cleanup is not None
+    assert cleanup.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE
+    assert cleanup.status is ExternalChannelDeliveryStatus.PENDING
+    assert cleanup.channel_action_id == finished.action_id
+    assert cleanup.request_payload["provider_message_key"] == ("slack:T1:C1:4.000001")
+
+
+async def test_missing_tracker_delete_is_reconciled_as_already_absent(
+    rdb_session: AsyncSession,
+) -> None:
+    """A missing delete target satisfies Tracker cleanup without recreation."""
+    agent_id, binding_id = await _setup_binding(rdb_session)
+    agent_session = await rdb_session.scalar(
+        sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+    )
+    assert agent_session is not None
+    repository = ExternalChannelWorkRepository()
+    await repository.ensure_active_work(rdb_session, binding_id=binding_id)
+    work = await _seed_activity_tracker(rdb_session, binding_id=binding_id)
+    finished = await repository.commit_action(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent_id,
+        run_id=None,
+        client_tool_call_id="call-finish-missing-delete",
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.FINISH,
+        message="Done.",
+        tasks=None,
+        now=_at(2),
+    )
+    reply, cleanup = finished.deliveries
+    assert await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=reply.id,
+        now=_at(3),
+    )
+    assert (
+        await repository.finish_delivery(
+            rdb_session,
+            delivery_attempt_id=reply.id,
+            status=ExternalChannelDeliveryStatus.DELIVERED,
+            provider_message_key="slack:T1:C1:3.000001",
+            error_kind=None,
+            error_summary=None,
+            now=_at(4),
+        )
+        == cleanup.id
+    )
+    assert await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=cleanup.id,
+        now=_at(5),
+    )
+
+    recovery_id = await repository.finish_delivery(
+        rdb_session,
+        delivery_attempt_id=cleanup.id,
+        status=ExternalChannelDeliveryStatus.FAILED,
+        provider_message_key=None,
+        error_kind="message_not_found",
+        error_summary="Slack no longer contains the Activity Tracker.",
+        now=_at(6),
+    )
+
+    persisted_cleanup = await rdb_session.get(
+        RDBExternalChannelDeliveryAttempt,
+        cleanup.id,
+    )
+    assert recovery_id is None
+    assert persisted_cleanup is not None
+    assert persisted_cleanup.status is ExternalChannelDeliveryStatus.DELIVERED
+    assert persisted_cleanup.error_kind == "message_already_absent"
+    assert work.progress_provider_message_key is None
 
 
 async def test_recovery_terminalizes_pending_and_attempting_without_execution(

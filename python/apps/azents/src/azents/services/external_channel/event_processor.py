@@ -41,6 +41,7 @@ from azents.core.external_channel_activity import (
     activity_tracker_payload,
     render_activity_tracker,
     render_persisted_activity_tracker,
+    render_session_link,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -147,6 +148,7 @@ class ExternalChannelReleasedInvocation:
     """Committed invocation batch and optional initial Tracker intent."""
 
     batch: ExternalChannelInvocationBatch
+    session_link_delivery_attempt_id: str | None
     activity_delivery_attempt_id: str | None
 
 
@@ -356,10 +358,29 @@ class ExternalChannelEventProcessorService:
             if released is None:
                 return False
             await session.commit()
-            if released.activity_delivery_attempt_id is not None:
+            credentials = None
+            if (
+                released.session_link_delivery_attempt_id is not None
+                or released.activity_delivery_attempt_id is not None
+            ):
                 credentials = self.credentials_codec.decrypt(
                     configuration.encrypted_credentials
                 )
+            if released.session_link_delivery_attempt_id is not None:
+                if credentials is None:
+                    raise RuntimeError(
+                        "External Channel delivery credentials are unavailable."
+                    )
+                await self._attempt_session_link_delivery(
+                    configuration=configuration,
+                    delivery_attempt_id=released.session_link_delivery_attempt_id,
+                    bot_token=credentials.bot_token,
+                )
+            if released.activity_delivery_attempt_id is not None:
+                if credentials is None:
+                    raise RuntimeError(
+                        "External Channel delivery credentials are unavailable."
+                    )
                 await self._attempt_activity_delivery(
                     configuration=configuration,
                     delivery_attempt_id=released.activity_delivery_attempt_id,
@@ -1248,7 +1269,6 @@ class ExternalChannelEventProcessorService:
         )
         if work is None:
             return None
-        presentation = _render_persisted_activity(work)
         cleared = await self.repository.clear_work_progress_provider_message_key(
             session,
             work_id=work.id,
@@ -1256,6 +1276,9 @@ class ExternalChannelEventProcessorService:
         )
         if not cleared:
             return None
+        if work.desired_progress_payload is None:
+            return None
+        presentation = _render_persisted_activity(work)
         attempt = await self.repository.create_delivery_attempt_idempotent(
             session,
             ExternalChannelDeliveryAttemptCreate(
@@ -1388,6 +1411,79 @@ class ExternalChannelEventProcessorService:
                 delivery_attempt_id=followup_delivery_id,
                 bot_token=bot_token,
             )
+
+    async def _attempt_session_link_delivery(
+        self,
+        *,
+        configuration: ExternalChannelConnectionConfiguration,
+        delivery_attempt_id: str,
+        bot_token: str,
+    ) -> None:
+        """Attempt the one-time Session link message for a new binding."""
+        async with self.session_manager() as session:
+            attempt = await self.repository.start_delivery_attempt(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+                attempted_at=_now(),
+            )
+            await session.commit()
+        if attempt is None:
+            return
+        payload = attempt.request_payload
+        tenant_id = payload.get("tenant_id")
+        channel_id = payload.get("channel_id")
+        thread_ts = payload.get("thread_ts")
+        text = payload.get("text")
+        blocks = payload.get("blocks")
+        if (
+            attempt.operation is not ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+            or not isinstance(tenant_id, str)
+            or not tenant_id
+            or not isinstance(channel_id, str)
+            or not channel_id
+            or not isinstance(thread_ts, str)
+            or not thread_ts
+            or not isinstance(text, str)
+            or not text
+            or not isinstance(blocks, list)
+            or not all(isinstance(block, dict) for block in blocks)
+        ):
+            result_status = ExternalChannelDeliveryStatus.FAILED
+            provider_message_key = None
+            error_kind = "session_link_payload_invalid"
+            error_summary = "The persisted Session link payload is invalid."
+        else:
+            result = await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+                blocks=[block for block in blocks if isinstance(block, dict)],
+            )
+            result_status = ExternalChannelDeliveryStatus(result.status)
+            provider_message_key = result.provider_message_key
+            error_kind = result.error_kind
+            error_summary = result.error_summary
+        async with self.session_manager() as session:
+            await self.repository.finish_delivery_attempt(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+                status=result_status,
+                provider_message_key=provider_message_key,
+                error_kind=error_kind,
+                error_summary=error_summary,
+                completed_at=_now(),
+            )
+            if error_kind in {"credentials_invalid", "missing_scope"}:
+                await self.repository.mark_connection_reconnect_required(
+                    session,
+                    connection_id=configuration.id,
+                    reason=error_kind,
+                    now=_now(),
+                    required_socket_lease_owner=None,
+                )
+            await session.commit()
 
     async def _attempt_control_delivery(
         self,
@@ -1730,6 +1826,7 @@ class ExternalChannelEventProcessorService:
                 if existing is None
                 else ExternalChannelReleasedInvocation(
                     batch=existing,
+                    session_link_delivery_attempt_id=None,
                     activity_delivery_attempt_id=None,
                 )
             )
@@ -1760,30 +1857,17 @@ class ExternalChannelEventProcessorService:
             binding=binding,
             batch=batch,
         )
-        workspace = await self.workspace_repository.get_by_id(session, workspace_id)
-        if workspace is None:
-            raise RuntimeError("External Channel Workspace disappeared.")
-        session_url = _session_url(
-            self.config.web_url,
-            workspace.handle,
-            agent_id,
-            binding.agent_session_id,
-        )
-        if session_url is None:
-            raise RuntimeError("External Channel Activity Tracker URL is unavailable.")
         work = await self.repository.ensure_active_work(
             session,
             binding_id=binding.id,
             desired_progress_payload=activity_tracker_payload(
                 state="checking",
                 tasks=(),
-                session_url=session_url,
             ),
         )
         presentation = render_activity_tracker(
             state="checking",
             tasks=(),
-            session_url=session_url,
         )
         resource = await self.repository.get_resource(
             session,
@@ -1791,6 +1875,50 @@ class ExternalChannelEventProcessorService:
         )
         if resource is None:
             raise RuntimeError("External Channel resource disappeared.")
+        session_link_attempt_id = None
+        if initial_activation:
+            workspace = await self.workspace_repository.get_by_id(
+                session,
+                workspace_id,
+            )
+            if workspace is None:
+                raise RuntimeError("External Channel Workspace disappeared.")
+            session_url = _session_url(
+                self.config.web_url,
+                workspace.handle,
+                agent_id,
+                binding.agent_session_id,
+            )
+            if session_url is None:
+                raise RuntimeError("External Channel Session URL is unavailable.")
+            session_link = render_session_link(session_url)
+            session_link_attempt = (
+                await self.repository.create_delivery_attempt_idempotent(
+                    session,
+                    ExternalChannelDeliveryAttemptCreate(
+                        origin_type=(
+                            ExternalChannelDeliveryOriginType.MANAGER_OPERATION
+                        ),
+                        origin_id=binding.id,
+                        channel_action_id=None,
+                        binding_id=binding.id,
+                        operation=(ExternalChannelDeliveryOperation.CONTROL_MESSAGE),
+                        request_payload={
+                            **_provider_thread_target(resource),
+                            "text": session_link.text,
+                            "blocks": session_link.blocks,
+                        },
+                        status=ExternalChannelDeliveryStatus.PENDING,
+                        provider_message_key=None,
+                        error_kind=None,
+                        error_summary=None,
+                        attempted_at=None,
+                        completed_at=None,
+                    ),
+                )
+            )
+            if session_link_attempt.status is ExternalChannelDeliveryStatus.PENDING:
+                session_link_attempt_id = session_link_attempt.id
         activity_attempt = await self.repository.create_delivery_attempt_idempotent(
             session,
             ExternalChannelDeliveryAttemptCreate(
@@ -1832,6 +1960,7 @@ class ExternalChannelEventProcessorService:
             )
         return ExternalChannelReleasedInvocation(
             batch=batch,
+            session_link_delivery_attempt_id=session_link_attempt_id,
             activity_delivery_attempt_id=(
                 activity_attempt.id
                 if activity_attempt.status is ExternalChannelDeliveryStatus.PENDING
@@ -2010,6 +2139,16 @@ def _activity_provider_target(
     work: ExternalChannelWork,
 ) -> dict[str, object]:
     """Build the persisted provider target for one Activity Tracker."""
+    return {
+        "work_id": work.id,
+        **_provider_thread_target(resource),
+    }
+
+
+def _provider_thread_target(
+    resource: ExternalChannelResource,
+) -> dict[str, object]:
+    """Build one persisted Slack thread target without credentials."""
     labels = resource.labels or {}
     tenant_id = labels.get("tenant_id")
     channel_id = labels.get("channel_id")
@@ -2024,7 +2163,6 @@ def _activity_provider_target(
     ):
         raise RuntimeError("External Channel Slack resource labels are invalid.")
     return {
-        "work_id": work.id,
         "tenant_id": tenant_id,
         "channel_id": channel_id,
         "thread_ts": thread_ts,

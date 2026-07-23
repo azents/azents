@@ -7,80 +7,109 @@ from azents.core.external_channel_activity import (
     activity_tracker_payload,
     render_activity_tracker,
     render_persisted_activity_tracker,
+    render_session_link,
 )
 
 _SESSION_URL = "https://azents.example/w/team/agents/agent-1/sessions/session-1"
 
 
-def test_checking_tracker_always_contains_session_button() -> None:
-    """A new work cycle is visible before any Todo exists."""
+def test_checking_tracker_has_no_title_or_session_link() -> None:
+    """A new work cycle shows its state with a native status indicator."""
     presentation = render_activity_tracker(
         state="checking",
         tasks=(),
-        session_url=_SESSION_URL,
     )
 
     assert presentation.text == "Agent is checking your message"
-    assert presentation.blocks[-1] == {
-        "type": "actions",
-        "elements": [
-            {
-                "type": "button",
-                "action_id": "open_azents_session",
-                "text": {"type": "plain_text", "text": "Open Azents session"},
-                "url": _SESSION_URL,
-            }
-        ],
-    }
+    assert presentation.blocks == [
+        {
+            "type": "task_card",
+            "task_id": "activity-status",
+            "title": "Agent is checking your message",
+            "status": "in_progress",
+        }
+    ]
+    assert "Agent activity" not in str(presentation.blocks)
+    assert "Open Azents session" not in str(presentation.blocks)
 
 
-def test_working_tracker_renders_tasks_as_plain_text() -> None:
-    """Task titles cannot inject Slack mrkdwn into operational presentation."""
+def test_working_tracker_marks_only_active_todo_with_circle_indicator() -> None:
+    """Native task cards omit status chrome for pending Todo items."""
     presentation = render_activity_tracker(
         state="working",
         tasks=(
             ActivityTrackerTask(
+                id="inspect",
                 title="Inspect <@U1> and *literal markup*",
                 status="in_progress",
             ),
+            ActivityTrackerTask(
+                id="publish",
+                title="Publish result",
+                status="pending",
+            ),
+            ActivityTrackerTask(
+                id="old-step",
+                title="Old step",
+                status="completed",
+            ),
         ),
-        session_url=_SESSION_URL,
     )
 
     assert presentation.text == (
-        "Agent is working\n◐ Inspect <@U1> and *literal markup*"
+        "Agent is working\n"
+        "◐ Inspect <@U1> and *literal markup*\n"
+        "○ Publish result\n"
+        "● Old step"
     )
-    assert presentation.blocks[2] == {
-        "type": "section",
-        "text": {
-            "type": "plain_text",
-            "text": "◐ Inspect <@U1> and *literal markup*",
+    assert presentation.blocks == [
+        {
+            "type": "task_card",
+            "task_id": "activity-status",
+            "title": "Agent is working",
+            "status": "in_progress",
         },
-    }
+        {
+            "type": "task_card",
+            "task_id": "inspect",
+            "title": "Inspect <@U1> and *literal markup*",
+            "status": "in_progress",
+        },
+        {
+            "type": "task_card",
+            "task_id": "publish",
+            "title": "Publish result",
+        },
+        {
+            "type": "task_card",
+            "task_id": "old-step",
+            "title": "Old step",
+            "status": "complete",
+        },
+    ]
 
 
-def test_completed_tracker_removes_tasks_and_retains_link() -> None:
-    """Normal completion updates rather than deletes the Tracker."""
-    presentation = render_activity_tracker(
-        state="completed",
-        tasks=(ActivityTrackerTask(title="Old task", status="completed"),),
-        session_url=_SESSION_URL,
-    )
-    payload = activity_tracker_payload(
-        state="completed",
-        tasks=(),
-        session_url=_SESSION_URL,
-    )
+def test_session_link_message_contains_only_button_block() -> None:
+    """Binding activation publishes a separate one-time navigation message."""
+    presentation = render_session_link(_SESSION_URL)
 
-    assert presentation.text == "Answer complete"
-    assert len(presentation.blocks) == 3
-    assert all("Old task" not in str(block) for block in presentation.blocks)
-    assert presentation.blocks[-1]["elements"][0]["url"] == _SESSION_URL  # type: ignore[index]
-    assert payload == {
-        "state": "completed",
-        "tasks": [],
-        "session_url": _SESSION_URL,
-    }
+    assert presentation.text == "Open Azents session"
+    assert presentation.blocks == [
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "action_id": "open_azents_session",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Open Azents session",
+                    },
+                    "url": _SESSION_URL,
+                }
+            ],
+        }
+    ]
 
 
 def test_persisted_tracker_projection_is_validated_before_rendering() -> None:
@@ -88,18 +117,48 @@ def test_persisted_tracker_projection_is_validated_before_rendering() -> None:
     presentation = render_persisted_activity_tracker(
         {
             "state": "working",
-            "tasks": [{"title": "Investigate", "status": "pending"}],
-            "session_url": _SESSION_URL,
+            "tasks": [
+                {
+                    "id": "investigate",
+                    "title": "Investigate",
+                    "status": "pending",
+                }
+            ],
         }
+    )
+    payload = activity_tracker_payload(
+        state="working",
+        tasks=(
+            ActivityTrackerTask(
+                id="investigate",
+                title="Investigate",
+                status="pending",
+            ),
+        ),
     )
 
     assert presentation.text == "Agent is working\n○ Investigate"
+    assert payload == {
+        "state": "working",
+        "tasks": [
+            {
+                "id": "investigate",
+                "title": "Investigate",
+                "status": "pending",
+            }
+        ],
+    }
 
     with pytest.raises(RuntimeError, match="task is invalid"):
         render_persisted_activity_tracker(
             {
                 "state": "working",
-                "tasks": [{"title": "Investigate", "status": "unexpected"}],
-                "session_url": _SESSION_URL,
+                "tasks": [
+                    {
+                        "id": "investigate",
+                        "title": "Investigate",
+                        "status": "unexpected",
+                    }
+                ],
             }
         )

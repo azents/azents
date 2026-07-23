@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelBindingActivationStatus,
+    ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
@@ -49,10 +50,13 @@ from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.external_channel.data import (
     ExternalChannelAccessRequestCreate,
     ExternalChannelAgentRoute,
     ExternalChannelAgentRouteCreate,
+    ExternalChannelBinding,
+    ExternalChannelBindingCreate,
     ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
     ExternalChannelEvent,
@@ -79,6 +83,7 @@ from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
     ExternalChannelPersistedMessage,
     ExternalChannelPersistedRevision,
+    ExternalChannelReleasedInvocation,
     connection_authored,
 )
 from azents.services.external_channel.slack_events import (
@@ -235,6 +240,28 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             now=now,
             original_url=None,
             reference_mappings={},
+        )
+
+    async def release_pending_context_for_test(
+        self,
+        session: AsyncSession,
+        *,
+        binding: ExternalChannelBinding,
+        trigger_message_id: str,
+        now: datetime.datetime,
+        initial_activation: bool,
+        workspace_id: str,
+        agent_id: str,
+    ) -> ExternalChannelReleasedInvocation | None:
+        """Expose binding release for focused delivery-intent tests."""
+        return await self._release_pending_context(
+            session,
+            binding=binding,
+            trigger_message_id=trigger_message_id,
+            now=now,
+            initial_activation=initial_activation,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
         )
 
 
@@ -643,6 +670,169 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
     assert revoked.grant.id == allowed.grant.id
     assert deleted_grant is None
     assert retained_source_message is not None
+
+
+async def test_initial_binding_release_creates_one_session_link_and_tracker(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Initial activation separates one Session link from the work-cycle Tracker."""
+    async with rdb_session_manager() as session:
+        connection_id, route_id, agent_id, repository = await _setup_route(session)
+        route = await repository.get_agent_route(session, route_id=route_id)
+        agent = await session.get(RDBAgent, agent_id)
+        assert route is not None
+        assert agent is not None
+        resource = await repository.create_resource_idempotent(
+            session,
+            ExternalChannelResourceCreate(
+                connection_id=connection_id,
+                resource_type=ExternalChannelResourceType.THREAD,
+                provider_resource_key="slack:T1:C1:1784678400.000100",
+                labels={
+                    "provider": "slack",
+                    "tenant_id": "T1",
+                    "channel_id": "C1",
+                    "thread_ts": "1784678400.000100",
+                },
+                status=ExternalChannelResourceStatus.ACTIVE,
+                hydration_status=ExternalChannelHydrationStatus.COMPLETE,
+                hydration_cursor=None,
+                hydration_high_watermark_position=None,
+                reconciliation_boundary_received_at=_at(1),
+                reconciliation_boundary_event_id="boundary-1",
+                hydration_error_kind=None,
+                hydration_error_summary=None,
+                hydration_started_at=_at(0),
+                hydration_completed_at=_at(1),
+                latest_activity_at=_at(1),
+                unavailable_at=None,
+                deleted_at=None,
+            ),
+        )
+        normalized = normalize_slack_event(
+            event_type="app_mention",
+            tenant_id="T1",
+            envelope={
+                "event": {
+                    "type": "app_mention",
+                    "channel": "C1",
+                    "channel_type": "channel",
+                    "user": "U1",
+                    "ts": "1784678400.000100",
+                    "text": "<@B1> investigate",
+                }
+            },
+        )
+        assert isinstance(normalized, SlackNormalizedMessage)
+        service = _service(rdb_session_manager, repository)
+        persisted = await service.persist_normalized_message_for_test(
+            session,
+            route=route,
+            resource=resource,
+            message=normalized,
+            now=_at(2),
+        )
+        agent_session = await AgentSessionRepository().create(
+            session,
+            AgentSessionCreate(
+                workspace_id=agent.workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        binding = await repository.create_binding_idempotent(
+            session,
+            ExternalChannelBindingCreate(
+                resource_id=resource.id,
+                route_id=route.id,
+                agent_session_id=agent_session.id,
+                status=ExternalChannelBindingStatus.ACTIVE,
+                activation_status=(
+                    ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+                ),
+                activation_trigger_message_id=persisted.message.id,
+                activated_at=None,
+                projected_through_position=None,
+                truncated_message_count=0,
+                truncated_size=0,
+                disconnected_at=None,
+                disconnect_reason=None,
+            ),
+        )
+        released = await service.release_pending_context_for_test(
+            session,
+            binding=binding,
+            trigger_message_id=persisted.message.id,
+            now=_at(3),
+            initial_activation=True,
+            workspace_id=agent.workspace_id,
+            agent_id=agent_id,
+        )
+        await session.commit()
+
+    assert released is not None
+    assert released.session_link_delivery_attempt_id is not None
+    assert released.activity_delivery_attempt_id is not None
+    async with rdb_session_manager() as session:
+        session_link = await session.get(
+            RDBExternalChannelDeliveryAttempt,
+            released.session_link_delivery_attempt_id,
+        )
+        activity = await session.get(
+            RDBExternalChannelDeliveryAttempt,
+            released.activity_delivery_attempt_id,
+        )
+        locked_binding = await repository.lock_binding(
+            session,
+            binding_id=binding.id,
+        )
+        assert locked_binding is not None
+        repeated = await service.release_pending_context_for_test(
+            session,
+            binding=locked_binding,
+            trigger_message_id=persisted.message.id,
+            now=_at(4),
+            initial_activation=True,
+            workspace_id=agent.workspace_id,
+            agent_id=agent_id,
+        )
+        await session.commit()
+
+    assert session_link is not None
+    assert session_link.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+    assert session_link.origin_id == binding.id
+    assert session_link.request_payload["blocks"] == [
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "action_id": "open_azents_session",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Open Azents session",
+                    },
+                    "url": (
+                        "https://azents.example/w/external-channel-processor-test/"
+                        f"agents/{agent_id}/sessions/{agent_session.id}"
+                    ),
+                }
+            ],
+        }
+    ]
+    assert activity is not None
+    assert activity.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+    assert activity.request_payload["blocks"] == [
+        {
+            "type": "task_card",
+            "task_id": "activity-status",
+            "title": "Agent is checking your message",
+            "status": "in_progress",
+        }
+    ]
+    assert repeated is not None
+    assert repeated.session_link_delivery_attempt_id is None
+    assert repeated.activity_delivery_attempt_id is None
 
 
 async def test_pending_context_is_trimmed_by_count_and_size(
