@@ -32,12 +32,13 @@ class ManagedGrant(BaseModel):
     agent_id: StrictStr
     principal_id: StrictStr
     principal_label: StrictStr
+    principal_provider_user_id: StrictStr
     scope: ExternalChannelAccessGrantScope
     agent_session_id: Optional[StrictStr]
     created_at: datetime
     revoked_at: Optional[datetime]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "principal_id", "principal_label", "scope", "agent_session_id", "created_at", "revoked_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "principal_id", "principal_label", "principal_provider_user_id", "scope", "agent_session_id", "created_at", "revoked_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -111,6 +112,7 @@ class ManagedGrant(BaseModel):
             "agent_id": obj.get("agent_id"),
             "principal_id": obj.get("principal_id"),
             "principal_label": obj.get("principal_label"),
+            "principal_provider_user_id": obj.get("principal_provider_user_id"),
             "scope": obj.get("scope"),
             "agent_session_id": obj.get("agent_session_id"),
             "created_at": obj.get("created_at"),

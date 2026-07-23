@@ -10,6 +10,7 @@ const baseSource = {
   resourceType: "thread",
   senderDisplayName: "Alice Chen",
   providerUserId: "U01ALICE",
+  providerMessageKey: "slack:T01:C01:1721600000.000100",
   authorType: "human",
   authorization: "authorized_invocation",
   lifecycle: "active",

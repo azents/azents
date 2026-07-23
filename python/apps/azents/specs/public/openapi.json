@@ -15366,6 +15366,10 @@
             "type": "string",
             "title": "Principal Label"
           },
+          "principal_provider_user_id": {
+            "type": "string",
+            "title": "Principal Provider User Id"
+          },
           "resource_label": {
             "type": "string",
             "title": "Resource Label"
@@ -15431,6 +15435,7 @@
           "status",
           "principal_id",
           "principal_label",
+          "principal_provider_user_id",
           "resource_label",
           "source_text",
           "original_url",
@@ -15595,6 +15600,10 @@
             "type": "string",
             "title": "Principal Label"
           },
+          "principal_provider_user_id": {
+            "type": "string",
+            "title": "Principal Provider User Id"
+          },
           "reason": {
             "anyOf": [
               {
@@ -15630,6 +15639,7 @@
           "agent_id",
           "principal_id",
           "principal_label",
+          "principal_provider_user_id",
           "reason",
           "created_at",
           "removed_at"
@@ -15912,6 +15922,10 @@
             "type": "string",
             "title": "Principal Label"
           },
+          "principal_provider_user_id": {
+            "type": "string",
+            "title": "Principal Provider User Id"
+          },
           "scope": {
             "$ref": "#/components/schemas/ExternalChannelAccessGrantScope"
           },
@@ -15950,6 +15964,7 @@
           "agent_id",
           "principal_id",
           "principal_label",
+          "principal_provider_user_id",
           "scope",
           "agent_session_id",
           "created_at",

@@ -391,6 +391,7 @@ class ExternalChannelManagementRepository:
                 RDBExternalChannelAccessGrant.scope
                 == ExternalChannelAccessGrantScope.AGENT
             )
+        predicates.append(RDBExternalChannelAccessGrant.revoked_at.is_(None))
         rows = (
             await session.execute(
                 sa.select(
@@ -531,6 +532,7 @@ class ExternalChannelManagementRepository:
             status=request.status,
             principal_id=principal.id,
             principal_label=(principal.display_name or principal.provider_user_id),
+            principal_provider_user_id=principal.provider_user_id,
             resource_label=_resource_label(resource.labels, resource.id),
             source_text=None if current is None else current.normalized_body,
             original_url=message.original_url,
@@ -688,6 +690,7 @@ def _grant(
         agent_id=grant.agent_id,
         principal_id=grant.principal_id,
         principal_label=principal.display_name or principal.provider_user_id,
+        principal_provider_user_id=principal.provider_user_id,
         scope=grant.scope,
         agent_session_id=grant.agent_session_id,
         created_at=grant.created_at,
@@ -704,6 +707,7 @@ def _block(
         agent_id=block.agent_id,
         principal_id=block.principal_id,
         principal_label=principal.display_name or principal.provider_user_id,
+        principal_provider_user_id=principal.provider_user_id,
         reason=block.reason,
         created_at=block.created_at,
         removed_at=block.removed_at,

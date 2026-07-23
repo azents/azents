@@ -106,6 +106,7 @@ const grant: ManagedGrant = {
   agent_id: agent.id,
   principal_id: "principal_01",
   principal_label: "Morgan Lee",
+  principal_provider_user_id: "U01MORGANLEE",
   scope: "session",
   agent_session_id: session.id,
   created_at: "2026-07-22T02:06:00Z",

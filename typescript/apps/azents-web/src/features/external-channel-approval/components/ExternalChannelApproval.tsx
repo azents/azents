@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Container,
+  CopyButton,
   Divider,
   Group,
   Loader,
@@ -21,6 +22,7 @@ import {
   IconBan,
   IconBrandSlack,
   IconCheck,
+  IconCopy,
   IconExternalLink,
   IconLock,
   IconRefresh,
@@ -251,6 +253,11 @@ function ReadyApproval({
               value={state.request.principal_label}
             />
             <DetailRow
+              label={t("participantId")}
+              value={state.request.principal_provider_user_id}
+              copyValue={state.request.principal_provider_user_id}
+            />
+            <DetailRow
               label={t("source")}
               value={state.request.resource_label}
             />
@@ -380,18 +387,50 @@ function ReadyApproval({
 function DetailRow({
   label,
   value,
+  copyValue,
 }: {
   label: string;
   value: string;
+  copyValue?: string;
 }): React.ReactElement {
+  const t = useTranslations("externalChannelApproval");
   return (
     <Group justify="space-between" align="flex-start" wrap="nowrap" gap="lg">
-      <Text size="sm" c="dimmed">
+      <Text size="sm" c="dimmed" style={{ flexShrink: 0 }}>
         {label}
       </Text>
-      <Text size="sm" fw={500} ta="right" style={{ overflowWrap: "anywhere" }}>
-        {value}
-      </Text>
+      <Group gap="xs" justify="flex-end" wrap="nowrap" style={{ minWidth: 0 }}>
+        <Text
+          size="sm"
+          fw={500}
+          ta="right"
+          style={{ minWidth: 0, overflowWrap: "anywhere" }}
+        >
+          {value}
+        </Text>
+        {typeof copyValue === "string" && (
+          <CopyButton value={copyValue} timeout={1600}>
+            {({ copied, copy }) => (
+              <Button
+                variant="subtle"
+                color="gray"
+                size="compact-xs"
+                leftSection={
+                  copied ? (
+                    <IconCheck size={rem(13)} />
+                  ) : (
+                    <IconCopy size={rem(13)} />
+                  )
+                }
+                onClick={copy}
+                style={{ flexShrink: 0 }}
+              >
+                {copied ? t("copied") : t("copy")}
+              </Button>
+            )}
+          </CopyButton>
+        )}
+      </Group>
     </Group>
   );
 }

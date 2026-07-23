@@ -6,6 +6,7 @@ export interface ExternalChannelMessagePresentation {
   resourceType: string;
   senderDisplayName: string;
   providerUserId: string | null;
+  providerMessageKey: string | null;
   authorType: string;
   authorization: string;
   lifecycle: string;
@@ -147,6 +148,7 @@ export function externalChannelMessagePresentation(
           : null)) ??
       "Unknown sender",
     providerUserId: metadata.provider_user_id ?? null,
+    providerMessageKey: metadata.provider_message_key ?? null,
     authorType: metadata.author_type ?? "unknown",
     authorization: metadata.authorization ?? "context_only",
     lifecycle,

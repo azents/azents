@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **agent_id** | **str** |  | 
 **principal_id** | **str** |  | 
 **principal_label** | **str** |  | 
+**principal_provider_user_id** | **str** |  | 
 **scope** | [**ExternalChannelAccessGrantScope**](ExternalChannelAccessGrantScope.md) |  | 
 **agent_session_id** | **str** |  | 
 **created_at** | **datetime** |  | 

@@ -14,6 +14,7 @@ const pendingRequest: ManagedApprovalRequest = {
   status: "pending",
   principal_id: "principal-1",
   principal_label: "Alice Chen",
+  principal_provider_user_id: "U01ALICECHEN",
   resource_label: "#incident-response / deployment thread",
   source_text:
     "Please let the Agent inspect the production rollout and summarize any blockers.",
