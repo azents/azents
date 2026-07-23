@@ -19,6 +19,8 @@ from azents.core.enums import (
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelDeliveryOperation,
+    ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
@@ -2158,15 +2160,13 @@ class ExternalChannelRepository:
         )
         return self._as(ExternalChannelAccessGrant, rdb)
 
-    async def revoke_access_grant(
+    async def delete_access_grant(
         self,
         session: AsyncSession,
         *,
         grant_id: str,
-        revoked_by_user_id: str,
-        revoked_at: datetime.datetime,
     ) -> ExternalChannelAccessGrant | None:
-        """Revoke one grant without deleting its authorization history."""
+        """Delete one participant grant while retaining external content."""
         rdb = await session.scalar(
             sa.select(RDBExternalChannelAccessGrant)
             .where(RDBExternalChannelAccessGrant.id == grant_id)
@@ -2174,12 +2174,59 @@ class ExternalChannelRepository:
         )
         if rdb is None:
             return None
-        if rdb.revoked_at is None:
-            rdb.revoked_by_user_id = revoked_by_user_id
-            rdb.revoked_at = revoked_at
-            await session.flush()
-        await session.refresh(rdb, attribute_names=["updated_at"])
-        return ExternalChannelAccessGrant.model_validate(rdb)
+        grant = ExternalChannelAccessGrant.model_validate(rdb)
+        await session.delete(rdb)
+        await session.flush()
+        return grant
+
+    async def create_access_request_control_delete_intent(
+        self,
+        session: AsyncSession,
+        *,
+        access_request_id: str,
+    ) -> ExternalChannelDeliveryAttempt | None:
+        """Create one idempotent delete intent for a delivered control message."""
+        control = await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt)
+            .where(
+                RDBExternalChannelDeliveryAttempt.origin_type
+                == ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
+                RDBExternalChannelDeliveryAttempt.origin_id == access_request_id,
+                RDBExternalChannelDeliveryAttempt.operation
+                == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                RDBExternalChannelDeliveryAttempt.status
+                == ExternalChannelDeliveryStatus.DELIVERED,
+                RDBExternalChannelDeliveryAttempt.provider_message_key.is_not(None),
+            )
+            .with_for_update()
+        )
+        if control is None or control.provider_message_key is None:
+            return None
+        channel_id = control.request_payload.get("channel_id")
+        thread_ts = control.request_payload.get("thread_ts")
+        if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+            return None
+        return await self.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                origin_type=ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
+                origin_id=access_request_id,
+                channel_action_id=None,
+                binding_id=None,
+                operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                request_payload={
+                    "channel_id": channel_id,
+                    "thread_ts": thread_ts,
+                    "provider_message_key": control.provider_message_key,
+                },
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=control.provider_message_key,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            ),
+        )
 
     async def create_block_idempotent(
         self,

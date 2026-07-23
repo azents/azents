@@ -823,6 +823,11 @@ class ExternalChannelEventProcessorService:
                             trim=trim,
                         )
                     elif grant is None:
+                        participant_provider_user_id = message.provider_user_id
+                        if participant_provider_user_id is None:
+                            raise RuntimeError(
+                                "Slack human participant identity is missing."
+                            )
                         control_delivery_attempt_id = (
                             await self._create_access_request_and_control_intent(
                                 session,
@@ -831,6 +836,15 @@ class ExternalChannelEventProcessorService:
                                 binding=binding,
                                 source_message=canonical_message,
                                 principal_id=principal_id,
+                                participant_provider_user_id=(
+                                    participant_provider_user_id
+                                ),
+                                participant_label=(
+                                    reference_mappings.get("users", {}).get(
+                                        participant_provider_user_id
+                                    )
+                                    or participant_provider_user_id
+                                ),
                                 message=message,
                                 trim=trim,
                                 now=now,
@@ -1059,6 +1073,8 @@ class ExternalChannelEventProcessorService:
         binding: ExternalChannelBinding | None,
         source_message: ExternalChannelMessage,
         principal_id: str,
+        participant_provider_user_id: str,
+        participant_label: str,
         message: SlackNormalizedMessage,
         trim: ExternalChannelPendingContextTrim,
         now: datetime.datetime,
@@ -1098,6 +1114,8 @@ class ExternalChannelEventProcessorService:
             "channel_id": message.channel_id,
             "thread_ts": message.root_thread_ts,
             "access_request_id": request.id,
+            "participant_provider_user_id": participant_provider_user_id,
+            "participant_label": participant_label,
         }
         if approval_url is not None:
             payload["approval_url"] = approval_url
@@ -1156,6 +1174,8 @@ class ExternalChannelEventProcessorService:
         channel_id = payload.get("channel_id")
         thread_ts = payload.get("thread_ts")
         approval_url = payload.get("approval_url")
+        participant_provider_user_id = payload.get("participant_provider_user_id")
+        participant_label = payload.get("participant_label")
         if (
             not isinstance(tenant_id, str)
             or not tenant_id
@@ -1165,6 +1185,10 @@ class ExternalChannelEventProcessorService:
             or not thread_ts
             or not isinstance(approval_url, str)
             or not approval_url
+            or not isinstance(participant_provider_user_id, str)
+            or not participant_provider_user_id
+            or not isinstance(participant_label, str)
+            or not participant_label
         ):
             result_status = ExternalChannelDeliveryStatus.FAILED
             provider_message_key = None
@@ -1177,6 +1201,8 @@ class ExternalChannelEventProcessorService:
                 channel_id=channel_id,
                 thread_ts=thread_ts,
                 approval_url=approval_url,
+                participant_label=participant_label,
+                participant_provider_user_id=participant_provider_user_id,
             )
             result_status = ExternalChannelDeliveryStatus(result.status)
             provider_message_key = result.provider_message_key

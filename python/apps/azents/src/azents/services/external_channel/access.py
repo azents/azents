@@ -59,6 +59,7 @@ class ExternalChannelAllowedAccess:
     request: ExternalChannelAccessRequest
     binding: ExternalChannelBinding
     grant: ExternalChannelAccessGrant
+    control_delete_delivery_id: str | None
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,7 @@ class ExternalChannelResolvedAccess:
     """Durable result of an idempotent Deny or Block decision."""
 
     request: ExternalChannelAccessRequest
+    control_delete_delivery_id: str | None
 
 
 @dataclass(frozen=True)
@@ -173,16 +175,25 @@ class ExternalChannelAccessService:
                         trigger_message_id=request.source_message_id,
                         now=now,
                     )
-                    await session.commit()
-                    if wake_required:
-                        await self._send_session_wake_up(
-                            agent_id=route.agent_id,
-                            session_id=binding.agent_session_id,
-                        )
+                delete_intent = (
+                    await self.repository.create_access_request_control_delete_intent(
+                        session,
+                        access_request_id=request.id,
+                    )
+                )
+                await session.commit()
+                if wake_required:
+                    await self._send_session_wake_up(
+                        agent_id=route.agent_id,
+                        session_id=binding.agent_session_id,
+                    )
                 return ExternalChannelAllowedAccess(
                     request=request,
                     binding=binding,
                     grant=grant,
+                    control_delete_delivery_id=(
+                        None if delete_intent is None else delete_intent.id
+                    ),
                 )
             self._require_pending(request, now=now)
             if (
@@ -298,6 +309,12 @@ class ExternalChannelAccessService:
                 )
                 wake_session_id = binding.agent_session_id
                 wake_agent_id = route.agent_id
+            delete_intent = (
+                await self.repository.create_access_request_control_delete_intent(
+                    session,
+                    access_request_id=request.id,
+                )
+            )
             await session.commit()
             if (
                 wake_required
@@ -312,6 +329,9 @@ class ExternalChannelAccessService:
                 request=decided,
                 binding=binding,
                 grant=grant,
+                control_delete_delivery_id=(
+                    None if delete_intent is None else delete_intent.id
+                ),
             )
 
     async def _release_allowed_request(
@@ -476,16 +496,12 @@ class ExternalChannelAccessService:
         self,
         *,
         grant_id: str,
-        revoked_by_user_id: str,
-        now: datetime.datetime,
     ) -> ExternalChannelRevokedAccess:
         """Revoke one Session- or Agent-scoped participant grant."""
         async with self.session_manager() as session:
-            grant = await self.repository.revoke_access_grant(
+            grant = await self.repository.delete_access_grant(
                 session,
                 grant_id=grant_id,
-                revoked_by_user_id=revoked_by_user_id,
-                revoked_at=now,
             )
             if grant is None:
                 raise ExternalChannelAccessDecisionError(
@@ -536,7 +552,19 @@ class ExternalChannelAccessService:
                 else ExternalChannelAccessRequestStatus.DENIED
             )
             if request.status is expected_status:
-                return ExternalChannelResolvedAccess(request=request)
+                delete_intent = (
+                    await self.repository.create_access_request_control_delete_intent(
+                        session,
+                        access_request_id=request.id,
+                    )
+                )
+                await session.commit()
+                return ExternalChannelResolvedAccess(
+                    request=request,
+                    control_delete_delivery_id=(
+                        None if delete_intent is None else delete_intent.id
+                    ),
+                )
             self._require_pending(request, now=now)
             route = await self.repository.get_agent_route(
                 session,
@@ -569,8 +597,19 @@ class ExternalChannelAccessService:
             )
             if decided is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
+            delete_intent = (
+                await self.repository.create_access_request_control_delete_intent(
+                    session,
+                    access_request_id=request.id,
+                )
+            )
             await session.commit()
-            return ExternalChannelResolvedAccess(request=decided)
+            return ExternalChannelResolvedAccess(
+                request=decided,
+                control_delete_delivery_id=(
+                    None if delete_intent is None else delete_intent.id
+                ),
+            )
 
     async def _locked_request(
         self,

@@ -502,6 +502,8 @@ async def test_control_message_reports_ambiguous_network_outcome_without_retry()
             channel_id="C1",
             thread_ts="1721600000.000100",
             approval_url="https://azents.example/access/request-1",
+            participant_label="Alice",
+            participant_provider_user_id="U1",
         )
 
     assert result.status == "unknown"
@@ -620,13 +622,17 @@ async def test_approval_control_message_uses_block_kit_button() -> None:
             channel_id="C1",
             thread_ts="1721600000.000100",
             approval_url="https://azents.example/access/request-1",
+            participant_label="Alice",
+            participant_provider_user_id="U1",
         )
 
     assert result.status == "delivered"
     payload = json.loads(requests[0].content)
     assert payload["text"] == (
-        "Approval is required before this participant can invoke the Agent."
+        "Approval is required before Alice (U1) can invoke the Agent."
     )
+    assert "Alice" in payload["blocks"][0]["text"]["text"]
+    assert "U1" in payload["blocks"][0]["text"]["text"]
     button = payload["blocks"][1]["elements"][0]
     assert button["type"] == "button"
     assert button["url"] == "https://azents.example/access/request-1"
