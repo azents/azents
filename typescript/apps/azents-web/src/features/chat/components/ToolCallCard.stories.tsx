@@ -327,6 +327,33 @@ export const KnownReadWithRawData = {
       canvas.getByRole("button", { name: "View raw data for Read" }),
     );
     await expect(within(document.body).getByText("Raw data")).toBeVisible();
+    await expect(within(document.body).getByText("Tool name")).toBeVisible();
+    await expect(within(document.body).getByText("read")).toBeVisible();
+  },
+} satisfies Story;
+
+export const GenericRawDataWithoutPayload = {
+  args: {
+    toolCall: {
+      id: "generic-raw-data-without-payload",
+      callId: "generic-raw-data-without-payload",
+      name: "custom_database_query",
+      arguments: "",
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", {
+        name: "View raw data for custom_database_query",
+      }),
+    );
+    await expect(within(document.body).getByText("Raw data")).toBeVisible();
+    await expect(within(document.body).getByText("Tool name")).toBeVisible();
+    await expect(
+      within(document.body).getByText("custom_database_query"),
+    ).toBeVisible();
   },
 } satisfies Story;
 

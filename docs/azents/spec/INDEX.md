@@ -13,7 +13,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-21 | 51 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-22 | 126 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-23 | 127 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-21 | 10 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-21 | 17 |

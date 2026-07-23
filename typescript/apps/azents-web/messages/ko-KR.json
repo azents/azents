@@ -1403,6 +1403,7 @@
       "result": "결과",
       "genericDetails": "일반 세부 정보",
       "rawData": "원본 데이터",
+      "toolName": "도구 이름",
       "viewRawDataFor": "{action} 원본 데이터 보기",
       "fromCharacter": "문자 {offset}부터",
       "filesChanged": "파일 {count}개 변경",

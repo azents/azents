@@ -1403,6 +1403,7 @@
       "result": "Résultat",
       "genericDetails": "Détails génériques",
       "rawData": "Données brutes",
+      "toolName": "Nom de l’outil",
       "viewRawDataFor": "Voir les données brutes pour {action}",
       "fromCharacter": "à partir du caractère {offset}",
       "filesChanged": "{count} fichier(s) modifié(s)",

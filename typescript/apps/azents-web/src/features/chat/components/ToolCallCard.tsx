@@ -629,16 +629,26 @@ function RawPayloadContent({
   argumentsText,
   formatJsonValues = true,
   outputText,
+  toolName,
 }: {
   argumentsText: string;
   formatJsonValues?: boolean;
   outputText: string;
+  toolName?: string;
 }): ReactElement {
   const t = useTranslations("chat.toolCall");
   const rawText = (value: string): string =>
     formatJsonValues ? formatJson(value) : value;
   return (
     <Stack gap="sm">
+      {typeof toolName === "string" ? (
+        <Box>
+          <Text size="xs" c="dimmed" mb="xs">
+            {t("toolName")}
+          </Text>
+          <Code block>{toolName}</Code>
+        </Box>
+      ) : null}
       {argumentsText.length > 0 ? (
         <Box>
           <Text size="xs" c="dimmed" mb="xs">
@@ -725,6 +735,7 @@ function GenericToolCallCard({
           argumentsText={toolCall.arguments}
           formatJsonValues={false}
           outputText={toolCall.result ?? ""}
+          toolName={toolCall.name}
         />
       </Modal>
     </>
@@ -795,6 +806,7 @@ function SpecializedToolCallCard({
           argumentsText={toolCall.arguments}
           formatJsonValues={false}
           outputText={toolCall.result ?? ""}
+          toolName={toolCall.name}
         />
       </Modal>
     </>
