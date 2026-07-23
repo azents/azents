@@ -37,7 +37,7 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-23 | 4 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-23 | 7 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-23 | 8 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 8 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-23 | 6 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-23 | 25 |
@@ -186,6 +186,7 @@ Design documents are accumulated records and are not listed individually in this
 | [nointern-web i18n Architecture Historical Requirements Reconstruction](requirements/i18n-260216-i18n.md) | i18n-260216 | 2026-02-16 | 2026-02-16 |
 | [Idempotent Sandbox Lifecycle State Historical Requirements Reconstruction](requirements/idempotent-260524-idempotent-sandbox-lifecycle.md) | idempotent-260524 | 2026-05-24 | - |
 | [Model-Specific Image Generation Execution Historical Requirements Reconstruction](requirements/image-260718-image-generation.md) | image-260718 | 2026-07-18 | 2026-07-18 |
+| [Todo-Owned Slack Activity Indicator Requirements](requirements/indicator-260723-todo-owned-progress.md) | indicator-260723 | 2026-07-23 | - |
 | [Store Requested Inference Profiles as Typed Durable Data Historical Requirements Reconstruction](requirements/inference-260710-inference-profile.md) | inference-260710 | 2026-07-10 | - |
 | [Keep Resolved Inference Provenance Run-Owned Historical Requirements Reconstruction](requirements/inference-260711-inference-provenance.md) | inference-260711 | 2026-07-11 | - |
 | [Use Session Current Inference State Per Turn Historical Requirements Reconstruction](requirements/inference-260712-inference-turn.md) | inference-260712 | 2026-07-12 | - |
@@ -507,6 +508,7 @@ Design documents are accumulated records and are not listed individually in this
 - [nointern-web i18n Architecture Historical Decision Reconstruction](adr/i18n-260216-i18n.md)
 - [Idempotent Sandbox Lifecycle State Historical Decision Reconstruction](adr/idempotent-260524-idempotent-sandbox-lifecycle.md)
 - [Model-Specific Image Generation Execution Historical Decision Reconstruction](adr/image-260718-image-generation.md)
+- [Todo-Owned Slack Activity Indicator](adr/indicator-260723-todo-owned-progress.md)
 - [Store Requested Inference Profiles as Typed Durable Data](adr/inference-260710-inference-profile.md)
 - [Keep Resolved Inference Provenance Run-Owned](adr/inference-260711-inference-provenance.md)
 - [Use Session Current Inference State Per Turn](adr/inference-260712-inference-turn.md)
