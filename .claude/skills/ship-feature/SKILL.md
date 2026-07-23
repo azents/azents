@@ -38,7 +38,7 @@ Recommended stack:
 | --- | --- | --- |
 | 1 | Design baseline | Approved Requirements, ADR, and design under the project-approved `docs/` locations |
 | 2 | Implementation plan | Multi-phase plan under the project-approved `plans/` location, including validation matrix and fixture prerequisites |
-| 3..N-3 | Phase implementation | Phase-specific plan, code, and tests. Include frontend work as one or more implementation phases when needed |
+| 3..N-3 | Phase implementation | Mandatory phase execution plan, code, and tests. Include frontend work as one or more implementation phases when needed |
 | N-2 | E2E/testenv validation | Run planned E2E and fixture/prerequisite validation, record commands/environment/evidence, compare implementation against current specs, and fix discovered issues |
 | N-1 | Spec promotion | Run `/spec-review`, mark design as implemented when appropriate, update specs, and propose ADRs if needed |
 | N | Cleanup | Remove stale implementation plan documents after the feature is implemented and specs are current |
@@ -65,6 +65,7 @@ Create a multi-phase implementation plan in the project-approved planning locati
 - Feature summary, Requirements short ID, ADR links, and design link
 - Phase list with explicit PR boundaries
 - Dependencies between phases
+- Dependency and parallelization map identifying sequential phases and independent workstreams
 - Data/API/runtime changes by phase
 - Test strategy by phase
 - E2E primary validation matrix for all added or changed user-facing behavior
@@ -73,7 +74,72 @@ Create a multi-phase implementation plan in the project-approved planning locati
 - Spec impact candidates
 - Rollout and cleanup notes
 
-Do not put file-by-file implementation details for every phase in the multi-phase plan. Each implementation PR can add its own phase-specific plan when needed.
+Do not put file-by-file implementation details for every phase in the multi-phase
+plan. Every implementation PR must add its own phase execution plan before code
+implementation begins.
+
+## Mandatory phase execution plan gate
+
+Before editing implementation code or delegating implementation work for a phase,
+create a phase execution plan in the implementation PR branch. Do not treat the
+phase summary in the multi-phase plan as a substitute.
+
+The phase execution plan must define:
+
+- Phase objective, branch, base branch, and intended PR boundary
+- Inputs and dependencies from previous phases
+- Deliverables and observable completion criteria
+- Explicit non-goals, including later-phase work that must not enter the PR
+- Data, API, runtime, and generated-artifact interfaces that the phase owns or
+  consumes
+- Workstreams with one owner, owned paths, inputs, outputs, and validation for
+  each task
+- Dependency order and which workstreams may run in parallel
+- Integration order and shared files reserved for the integrating agent
+- Required format, lint, type, unit, integration, migration, build, and other
+  phase-specific validation commands
+- Scope-drift check to run before commit and PR creation
+
+Use this concise structure:
+
+```markdown
+## Phase Execution Plan
+
+- Phase: `<number and name>`
+- Branch/base: `<branch>` → `<base>`
+- PR boundary: `<deliverable>`
+- Inputs: `<completed dependencies>`
+- Deliverables: `<observable outcomes>`
+- Non-goals: `<explicit exclusions>`
+- Interfaces: `<contracts fixed before parallel work>`
+
+| Workstream | Owner | Owned paths | Depends on | Output | Validation |
+| --- | --- | --- | --- | --- | --- |
+| ... | ... | ... | ... | ... | ... |
+
+- Integration order: `<sequence>`
+- Final validation: `<commands>`
+- Scope-drift check: `<diff and non-goal comparison>`
+```
+
+Report the plan when starting the phase, then begin implementation immediately
+unless it exposes a product decision that requires requester confirmation.
+
+### Parallel implementation rules
+
+- Use implementation subagents for concrete, bounded workstreams after the phase
+  plan fixes their contracts and ownership.
+- Run workstreams in parallel only when their dependencies are satisfied and
+  their owned paths do not overlap.
+- Assign each path to one owner at a time. Reserve shared integration files for
+  the integrating agent.
+- Put explicit inputs, outputs, non-goals, owned paths, and validation commands
+  from the phase plan into every implementation subagent task.
+- Do not let a subagent implement a later phase, broaden an interface, or edit an
+  unowned path. Stop and revise the phase plan first when scope must change.
+- Use the primary agent for planning, interface decisions, integration, and final
+  verification. Use implementation subagents for the bounded implementation
+  described by the plan.
 
 ## Phase 2: Implement phases as stacked PRs
 
@@ -81,10 +147,15 @@ For each implementation phase:
 
 1. Create a branch stacked on the previous phase branch.
 2. Read relevant project instructions and conventions.
-3. Implement only that phase's scope.
-4. Add or update tests for the phase.
-5. Update specs in the same PR only when the phase directly changes current behavior and cannot wait for the spec-promotion phase.
-6. Commit and open a PR with the agreed stack title prefix.
+3. Write and report the mandatory phase execution plan.
+4. Verify that interfaces and ownership are sufficient for safe parallel work.
+5. Delegate bounded workstreams and implement only that phase's scope.
+6. Add or update tests for the phase.
+7. Update specs in the same PR only when the phase directly changes current behavior and cannot wait for the spec-promotion phase.
+8. Compare the diff against the phase deliverables, owned paths, and non-goals.
+9. Move later-phase or unrelated work out of the branch before committing.
+10. Run the phase's final validation commands.
+11. Commit and open the PR before starting implementation for the next phase.
 
 Keep each phase reviewable. Do not mix unrelated refactors, cleanup, or future phases.
 
@@ -156,11 +227,17 @@ When starting the shipping workflow, report:
 - Known blockers: <none or list>
 ```
 
+When starting each implementation phase, report the complete `Phase Execution
+Plan` block before editing implementation code or assigning implementation
+subagents.
+
 For each completed phase, report:
 
 - PR URL
 - Branch/base
+- Phase plan path
 - Scope completed
+- Scope-drift result
 - Validation run or skipped reason
 - Next stacked branch
 
@@ -168,6 +245,9 @@ For each completed phase, report:
 
 - Do not inflate a simple fix or small self-contained change into a PR stack; use one focused PR.
 - Do not start implementation without confirmed Requirements, a design, or explicit user approval.
+- Do not edit phase implementation code or assign implementation subagents before
+  the mandatory phase execution plan is written and reported.
+- Do not start the next phase before the current phase PR is created.
 - Do not ship an Azents feature when its new-format Requirements, ADR, and primary Design use different basenames.
 - Do not collapse a large feature into one PR when phased delivery is expected.
 - Do not leave stale plan documents after implementation is complete.
