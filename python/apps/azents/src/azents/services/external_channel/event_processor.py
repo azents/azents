@@ -90,7 +90,7 @@ from azents.services.external_channel.slack_events import (
     SlackProviderRateLimited,
     SlackProviderResourceUnavailable,
     SlackProviderTemporaryError,
-    normalize_slack_event,
+    normalize_projected_slack_event,
     slack_message_reference_ids,
 )
 from azents.services.input_buffer import (
@@ -486,7 +486,7 @@ class ExternalChannelEventProcessorService:
         credentials = self.credentials_codec.decrypt(
             configuration.encrypted_credentials
         )
-        normalized = normalize_slack_event(
+        normalized = normalize_projected_slack_event(
             event_type=event.event_type,
             tenant_id=event.provider_tenant_id,
             envelope=event.envelope,
@@ -1536,6 +1536,95 @@ class ExternalChannelEventProcessorService:
                 approval_url=approval_url,
                 participant_label=participant_label,
                 participant_provider_user_id=participant_provider_user_id,
+            )
+            result_status = ExternalChannelDeliveryStatus(result.status)
+            provider_message_key = result.provider_message_key
+            error_kind = result.error_kind
+            error_summary = result.error_summary
+        async with self.session_manager() as session:
+            finished = await self.repository.finish_delivery_attempt(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+                status=result_status,
+                provider_message_key=provider_message_key,
+                error_kind=error_kind,
+                error_summary=error_summary,
+                completed_at=_now(),
+            )
+            if error_kind in {"credentials_invalid", "missing_scope"}:
+                await self.repository.mark_connection_reconnect_required(
+                    session,
+                    connection_id=configuration.id,
+                    reason=error_kind,
+                    now=_now(),
+                    required_socket_lease_owner=None,
+                )
+            await session.commit()
+        if (
+            finished is not None
+            and finished.origin_type is ExternalChannelDeliveryOriginType.ACCESS_REQUEST
+            and result_status is ExternalChannelDeliveryStatus.DELIVERED
+        ):
+            async with self.session_manager() as session:
+                delete_intent = (
+                    await self.repository.create_access_request_control_delete_intent(
+                        session,
+                        access_request_id=finished.origin_id,
+                    )
+                )
+                await session.commit()
+            if (
+                delete_intent is not None
+                and delete_intent.status is ExternalChannelDeliveryStatus.PENDING
+            ):
+                await self._attempt_access_request_control_delete_delivery(
+                    configuration=configuration,
+                    delivery_attempt_id=delete_intent.id,
+                    bot_token=bot_token,
+                )
+
+    async def _attempt_access_request_control_delete_delivery(
+        self,
+        *,
+        configuration: ExternalChannelConnectionConfiguration,
+        delivery_attempt_id: str,
+        bot_token: str,
+    ) -> None:
+        """Delete one approval control message created after a decision race."""
+        async with self.session_manager() as session:
+            attempt = await self.repository.start_delivery_attempt(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+                attempted_at=_now(),
+            )
+            await session.commit()
+        if attempt is None:
+            return
+        tenant_id = configuration.provider_tenant_id
+        channel_id = attempt.request_payload.get("channel_id")
+        target_provider_message_key = attempt.request_payload.get(
+            "provider_message_key"
+        )
+        message_ts = _provider_message_ts(target_provider_message_key)
+        if (
+            attempt.origin_type is not ExternalChannelDeliveryOriginType.ACCESS_REQUEST
+            or attempt.operation is not ExternalChannelDeliveryOperation.PROGRESS_DELETE
+            or not isinstance(tenant_id, str)
+            or not tenant_id
+            or not isinstance(channel_id, str)
+            or not channel_id
+            or message_ts is None
+        ):
+            result_status = ExternalChannelDeliveryStatus.FAILED
+            provider_message_key = None
+            error_kind = "control_delete_payload_invalid"
+            error_summary = "The persisted Slack control delete payload is invalid."
+        else:
+            result = await self.slack_client.delete_message(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                message_ts=message_ts,
             )
             result_status = ExternalChannelDeliveryStatus(result.status)
             provider_message_key = result.provider_message_key
