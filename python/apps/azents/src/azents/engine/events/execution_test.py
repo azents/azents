@@ -622,6 +622,11 @@ class _ProjectingOutputStream(_StaticOutputStream):
         )
 
 
+def _test_needs_follow_up(events: Sequence[Event]) -> bool:
+    """Compute the adapter contract used by test normalizers."""
+    return any(isinstance(event.payload, ClientToolCallPayload) for event in events)
+
+
 class _ProjectingNormalizer:
     """Create projecting streams with predefined durable output."""
 
@@ -633,7 +638,7 @@ class _ProjectingNormalizer:
         del session_id
         return _ProjectingOutputStream(
             NormalizedAdapterOutput(
-                needs_follow_up=False,
+                needs_follow_up=_test_needs_follow_up(self._events),
                 events=self._events,
                 usage=_usage(),
             )
@@ -667,7 +672,7 @@ class _Normalizer:
         del session_id
         return _StaticOutputStream(
             NormalizedAdapterOutput(
-                needs_follow_up=False,
+                needs_follow_up=_test_needs_follow_up(self._events),
                 events=self._events,
                 usage=self._usage,
             )
@@ -687,7 +692,7 @@ class _NoUsageNormalizer:
             NormalizedAdapterOutput(
                 events=self._events,
                 usage=None,
-                needs_follow_up=False,
+                needs_follow_up=_test_needs_follow_up(self._events),
             )
         )
 
@@ -806,7 +811,7 @@ class _SequenceNormalizer:
         self._index += 1
         return _StaticOutputStream(
             NormalizedAdapterOutput(
-                needs_follow_up=False,
+                needs_follow_up=_test_needs_follow_up(events),
                 events=events,
                 usage=_usage(),
             )
@@ -1177,8 +1182,8 @@ async def test_text_run_completes() -> None:
     assert streaming_started_at == waiting_started_at
 
 
-async def test_model_follow_up_continues_without_tool_call() -> None:
-    """Run another model step when completed output requests follow-up."""
+async def test_dialect_follow_up_continues_without_tool_call() -> None:
+    """Best-effort a provider dialect request for another model step."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     normalizer = _OutputSequenceNormalizer(
@@ -1504,9 +1509,11 @@ async def test_provider_output_cleans_up_after_event_admission_failure() -> None
     )
 
 
-async def test_provider_output_cleans_up_without_durable_event() -> None:
-    """Compensate prepared objects when normalization has no durable result."""
+async def test_provider_output_admits_terminal_turn_without_durable_event() -> None:
+    """Admit a successfully completed terminal turn with no durable model event."""
     materializer = _ProviderOutputMaterializer()
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
@@ -1518,23 +1525,29 @@ async def test_provider_output_cleans_up_without_durable_event() -> None:
         output_normalizer=_Normalizer([]),
         model_call_preparer=_model_call_preparer(),
         provider_output_materializer=materializer,
-        run_repo=_RunRepo(),
-        transcript_repo=_TranscriptRepo(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
     )
 
-    with pytest.raises(ModelCallError, match="without assistant output"):
-        await execution.run(
-            AgentRunExecutionRequest(
-                owner_generation=1,
-                tool_admission_barrier=_OpenToolAdmissionBarrier(),
-                run_id="run-1",
-                session_id="session-1",
-                model="gpt-5.1",
-            )
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
         )
+    )
 
+    assert status == AgentRunStatus.COMPLETED
+    assert run_repo.terminal == AgentRunStatus.COMPLETED
     assert materializer.prepared is not None
-    assert materializer.prepared.cleanup_calls == 1
+    assert materializer.prepared.admitted is True
+    assert materializer.prepared.cleanup_calls == 0
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.TURN_MARKER,
+        EventKind.RUN_MARKER,
+    ]
 
 
 async def test_output_without_usage_clears_retry_state_before_publish() -> None:
@@ -2062,6 +2075,63 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     assert any(
         event.kind == EventKind.CLIENT_TOOL_RESULT for event in transcript_repo.events
     )
+
+
+async def test_tool_run_completes_after_empty_terminal_model_turn() -> None:
+    """Complete after tool results when the next model turn ends without output."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    normalizer = _OutputSequenceNormalizer(
+        [
+            NormalizedAdapterOutput(
+                needs_follow_up=True,
+                events=[_tool_call_event()],
+                usage=_usage(),
+            ),
+            NormalizedAdapterOutput(
+                needs_follow_up=False,
+                events=[],
+                usage=_usage(),
+            ),
+        ]
+    )
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=normalizer,
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert normalizer.call_count == 2
+    assert run_repo.terminal == AgentRunStatus.COMPLETED
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.CLIENT_TOOL_CALL,
+        EventKind.TURN_MARKER,
+        EventKind.CLIENT_TOOL_RESULT,
+        EventKind.TURN_MARKER,
+        EventKind.RUN_MARKER,
+    ]
 
 
 async def test_client_tool_source_snapshot_is_shared_by_durable_and_active() -> None:
@@ -3446,8 +3516,8 @@ async def test_model_completion_error_propagates_for_retry() -> None:
     assert transcript_repo.events == []
 
 
-async def test_empty_model_output_propagates_for_retry() -> None:
-    """Empty model turn propagates without finalizing before retry."""
+async def test_empty_terminal_model_output_completes_run() -> None:
+    """Complete a successful terminal model turn without durable output."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
@@ -3466,23 +3536,28 @@ async def test_empty_model_output_propagates_for_retry() -> None:
         transcript_repo=transcript_repo,
     )
 
-    with pytest.raises(ModelCallError, match="without assistant output"):
-        await execution.run(
-            AgentRunExecutionRequest(
-                owner_generation=1,
-                tool_admission_barrier=_OpenToolAdmissionBarrier(),
-                run_id="run-1",
-                session_id="session-1",
-                model="gpt-5.1",
-            ),
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
         )
+    )
 
-    assert run_repo.terminal is None
-    assert transcript_repo.events == []
+    assert status == AgentRunStatus.COMPLETED
+    assert run_repo.terminal == AgentRunStatus.COMPLETED
+    assert run_repo.terminal_result_event_id is None
+    assert run_repo.terminal_result_message is None
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.TURN_MARKER,
+        EventKind.RUN_MARKER,
+    ]
 
 
-async def test_blank_assistant_message_propagates_for_retry() -> None:
-    """Blank assistant message propagates without finalizing before retry."""
+async def test_blank_terminal_assistant_message_completes_run() -> None:
+    """Complete terminal output whose canonical assistant text is blank."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     blank_message = _event(
@@ -3506,19 +3581,79 @@ async def test_blank_assistant_message_propagates_for_retry() -> None:
         transcript_repo=transcript_repo,
     )
 
-    with pytest.raises(ModelCallError, match="without assistant output"):
-        await execution.run(
-            AgentRunExecutionRequest(
-                owner_generation=1,
-                tool_admission_barrier=_OpenToolAdmissionBarrier(),
-                run_id="run-1",
-                session_id="session-1",
-                model="gpt-5.1",
-            ),
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
         )
+    )
 
-    assert run_repo.terminal is None
-    assert transcript_repo.events == []
+    assert status == AgentRunStatus.COMPLETED
+    assert run_repo.terminal == AgentRunStatus.COMPLETED
+    assert run_repo.terminal_result_event_id is None
+    assert run_repo.terminal_result_message is None
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.TURN_MARKER,
+        EventKind.RUN_MARKER,
+    ]
+
+
+async def test_empty_dialect_follow_up_continues_to_terminal_response() -> None:
+    """Continue an empty response carrying a provider dialect follow-up request."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    normalizer = _OutputSequenceNormalizer(
+        [
+            NormalizedAdapterOutput(
+                needs_follow_up=True,
+                events=[],
+                usage=_usage(),
+            ),
+            NormalizedAdapterOutput(
+                needs_follow_up=False,
+                events=[],
+                usage=_usage(),
+            ),
+        ]
+    )
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=normalizer,
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        )
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert normalizer.call_count == 2
+    assert run_repo.terminal == AgentRunStatus.COMPLETED
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.TURN_MARKER,
+        EventKind.TURN_MARKER,
+        EventKind.RUN_MARKER,
+    ]
 
 
 async def test_model_call_error_propagates_for_retry() -> None:

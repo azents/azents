@@ -1801,6 +1801,7 @@ def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
     assert input_done.projections == []
     assert item_done.projections == []
     completed = output.complete()
+    assert completed.needs_follow_up is True
     assert len(completed.events) == 1
     payload = completed.events[0].payload
     assert isinstance(payload, ClientToolCallPayload)
@@ -1844,6 +1845,23 @@ def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
             "output": "completed",
         },
     ]
+
+
+def test_typed_normalizer_maps_end_turn_false_to_follow_up() -> None:
+    """Preserve the OpenAI dialect continuation hint in normalized output."""
+    response = _response().model_copy(update={"end_turn": False, "output": []})
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+    ).start("session-1")
+
+    output.process_event(_completed_event(response))
+    completed = output.complete()
+
+    assert completed.needs_follow_up is True
+    assert completed.events == []
 
 
 def test_typed_normalizer_rejects_inconsistent_custom_tool_input() -> None:

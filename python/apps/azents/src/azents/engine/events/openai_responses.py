@@ -86,7 +86,10 @@ from azents.engine.events.responses_continuation import (
     ResponsesContinuationPlanner,
 )
 from azents.engine.events.responses_lowering import ResponsesRequestLowerer
-from azents.engine.events.responses_output import ResponsesOutputNormalizer
+from azents.engine.events.responses_output import (
+    ResponsesOutputNormalizer,
+    responses_need_follow_up,
+)
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
@@ -1317,7 +1320,10 @@ class _OpenAIResponsesOutputStream:
             else None
         )
         return NormalizedAdapterOutput(
-            needs_follow_up=response_dict.get("end_turn") is False,
+            needs_follow_up=responses_need_follow_up(
+                response_dict,
+                completed.events,
+            ),
             events=completed.events,
             usage=usage,
             pending_provider_files=completed.pending_provider_files,

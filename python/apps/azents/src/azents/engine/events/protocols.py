@@ -150,7 +150,10 @@ class NormalizedAdapterOutput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     needs_follow_up: bool = Field(
-        description="Whether the model explicitly requested another model step"
+        description=(
+            "Adapter-computed source of truth for whether execution requires "
+            "another model step"
+        )
     )
     events: list[Event] = Field(default_factory=list)
     projections: list[StreamProjection] = Field(default_factory=list)
