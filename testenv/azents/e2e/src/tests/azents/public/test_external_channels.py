@@ -190,6 +190,103 @@ def _plan_delivery(slack_provider_fake_url: str) -> dict[str, object] | None:
     return None
 
 
+def _progress_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]:
+    """Return sanitized model-request evidence for the progress journey."""
+    response = requests.get(
+        f"{openai_proxy_url}/v1/_external_channel_progress_requests",
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        return []
+    return [
+        cast(dict[str, object], item)
+        for item in cast(list[object], payload)
+        if isinstance(item, dict)
+    ]
+
+
+def _channel_action_tool_evidence(
+    public_server_url: str,
+    token: str,
+    session_id: str,
+) -> list[dict[str, object]]:
+    """Return sanitized Channel Action call and result evidence."""
+    response = requests.get(
+        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        return []
+    items = cast(dict[str, object], payload).get("items")
+    if not isinstance(items, list):
+        return []
+    evidence: list[dict[str, object]] = []
+    for raw_event in cast(list[object], items):
+        if not isinstance(raw_event, dict):
+            continue
+        event = cast(dict[str, object], raw_event)
+        kind = event.get("kind")
+        if kind not in {"client_tool_call", "client_tool_result"}:
+            continue
+        raw_payload = event.get("payload")
+        if not isinstance(raw_payload, dict):
+            continue
+        event_payload = cast(dict[str, object], raw_payload)
+        if (
+            event_payload.get("name") != "channel_action"
+            and event_payload.get("call_id") != "call_external_channel_progress"
+        ):
+            continue
+        item: dict[str, object] = {
+            "kind": kind,
+            "call_id": event_payload.get("call_id"),
+            "name": event_payload.get("name"),
+        }
+        status = event_payload.get("status")
+        if isinstance(status, str):
+            item["status"] = status
+        output = event_payload.get("output")
+        if isinstance(output, list):
+            texts = [
+                cast(dict[str, object], part).get("text")
+                for part in cast(list[object], output)
+                if isinstance(part, dict)
+                and isinstance(cast(dict[str, object], part).get("text"), str)
+            ]
+            if texts:
+                item["output"] = " ".join(cast(list[str], texts))[:1_000]
+        evidence.append(item)
+    return evidence
+
+
+def _matching_progress_request_evidence(
+    openai_proxy_url: str,
+    binding_id: str,
+) -> list[dict[str, object]]:
+    """Return request evidence after the exact progress stage is observed."""
+    expected = {
+        "binding": binding_id,
+        "marker_present": True,
+        "resolved_user_reference": True,
+        "resolved_channel_reference": True,
+        "progress_tool_available": True,
+        "path": "/v1/responses",
+        "matched": True,
+        "stage": "initial",
+    }
+    evidence = _progress_request_evidence(openai_proxy_url)
+    assert any(
+        all(item.get(key) == value for key, value in expected.items())
+        for item in evidence
+    ), evidence
+    return evidence
+
+
 def _login_main_web(
     driver: WebDriver,
     *,
@@ -540,16 +637,22 @@ def test_connection_update_and_repeated_disconnect(
 
 
 def test_provider_native_channel_work_progress_journey(
+    request: pytest.FixtureRequest,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
+    openai_proxy_url: str,
 ) -> None:
     """Render one rich canonical work snapshot through Slack's native Plan."""
     del azents_engine_worker_container
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.delete(
+        f"{openai_proxy_url}/v1/_external_channel_progress_requests",
         timeout=5,
     ).raise_for_status()
     root_timestamp = f"{int(time.time()) - 60}.000300"
@@ -593,6 +696,16 @@ def test_provider_native_channel_work_progress_journey(
         ),
         _headers=headers,
     )
+
+    def disconnect_connection() -> None:
+        external_api.external_channel_v1_disconnect_connection(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+
+    request.addfinalizer(disconnect_connection)
     validated = external_api.external_channel_v1_validate_connection(
         agent_id=agent_id,
         connection_id=setup.connection.id,
@@ -645,11 +758,108 @@ def test_provider_native_channel_work_progress_journey(
     assert decided.agent_session_id is not None
     session_id = decided.agent_session_id
 
+    def active_management_projection() -> object | None:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=session_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            len(projection.items) == 1
+            and projection.items[0].activation_status
+            is ExternalChannelBindingActivationStatus.ACTIVE
+            and projection.items[0].work is not None
+        ):
+            return projection
+        return None
+
+    active_projection = cast(
+        Any,
+        wait_until(
+            active_management_projection,
+            timeout=15,
+            interval=0.2,
+            message="Approved Channel Work binding was not activated",
+        ),
+    )
+    binding_id = active_projection.items[0].id
+
+    wait_until(
+        lambda: _matching_progress_request_evidence(
+            openai_proxy_url,
+            binding_id,
+        ),
+        timeout=90,
+        interval=0.2,
+        message="Channel Work model request did not reach the expected proxy stage",
+    )
+
+    def completed_channel_action() -> list[dict[str, object]]:
+        evidence = _channel_action_tool_evidence(
+            azents_public_server_url,
+            token,
+            session_id,
+        )
+        assert any(
+            item.get("kind") == "client_tool_call"
+            and item.get("call_id") == "call_external_channel_progress"
+            for item in evidence
+        ), f"Channel Action tool call was not recorded: {evidence!r}"
+        assert any(
+            item.get("kind") == "client_tool_result"
+            and item.get("call_id") == "call_external_channel_progress"
+            for item in evidence
+        ), f"Channel Action tool result was not recorded: {evidence!r}"
+        return evidence
+
+    tool_evidence = wait_until(
+        completed_channel_action,
+        timeout=90,
+        interval=0.2,
+        message="Channel Action tool execution did not complete",
+    )
+    progress_result = next(
+        item
+        for item in tool_evidence
+        if item.get("kind") == "client_tool_result"
+        and item.get("call_id") == "call_external_channel_progress"
+    )
+    assert progress_result.get("status") == "completed", tool_evidence
+
+    def rich_management_projection() -> object | None:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=session_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            len(projection.items) == 1
+            and projection.items[0].work is not None
+            and projection.items[0].work.title == "Investigating error logs…"
+            and len(projection.items[0].work.tasks) == 4
+        ):
+            return projection
+        return None
+
+    projection = cast(
+        Any,
+        wait_until(
+            rich_management_projection,
+            timeout=20,
+            interval=0.2,
+            message="Canonical Channel Work was not updated by the model action",
+        ),
+    )
+    work = projection.items[0].work
+    assert work is not None
+
     plan_delivery = cast(
         dict[str, object],
         wait_until(
             lambda: _plan_delivery(slack_provider_fake_url),
-            timeout=30,
+            timeout=20,
             interval=0.2,
             message="Slack Plan update was not delivered",
         ),
@@ -717,33 +927,6 @@ def test_provider_native_channel_work_progress_journey(
         ],
     }
 
-    def rich_management_projection() -> object | None:
-        projection = external_api.external_channel_v1_list_session_channels(
-            agent_id=agent_id,
-            session_id=session_id,
-            handle=handle,
-            _headers=headers,
-        )
-        if (
-            len(projection.items) == 1
-            and projection.items[0].work is not None
-            and projection.items[0].work.title == "Investigating error logs…"
-            and len(projection.items[0].work.tasks) == 4
-        ):
-            return projection
-        return None
-
-    projection = cast(
-        Any,
-        wait_until(
-            rich_management_projection,
-            timeout=15,
-            interval=0.2,
-            message="Typed Channel Work management projection was not available",
-        ),
-    )
-    work = projection.items[0].work
-    assert work is not None
     assert [task.status for task in work.tasks] == [
         ExternalChannelWorkTaskStatus.IN_PROGRESS,
         ExternalChannelWorkTaskStatus.COMPLETED,

@@ -16,6 +16,19 @@ const goalUpdatedEvent: ActivityEvent = {
   status: "complete",
 };
 
+const externalChannelContinuationEvent: ActivityEvent = {
+  id: "external-channel-continuation-story",
+  kind: "goal-control",
+  message: createChatMessage({
+    id: "external-channel-continuation-story-message",
+    role: "goal_continuation",
+    content: null,
+    metadata: { source: "external_channel" },
+  }),
+  category: { key: "organize", label: "organize" },
+  status: "complete",
+};
+
 const meta = {
   component: ActivityMessageRow,
   decorators: [
@@ -33,4 +46,8 @@ type Story = StoryObj<typeof meta>;
 
 export const GoalUpdated = {
   args: { event: goalUpdatedEvent },
+} satisfies Story;
+
+export const ExternalChannelContinuation = {
+  args: { event: externalChannelContinuationEvent },
 } satisfies Story;

@@ -1364,6 +1364,7 @@
     "thinkingLabel": "Thinking",
     "collapseThinking": "사고 과정 접기",
     "goalContinuationIndicator": "Goal continuation 입력됨",
+    "externalChannelContinuationIndicator": "채널 작업 후속 실행 입력됨",
     "interruptedIndicator": "사용자 요청으로 중단됨",
     "pendingInput": {
       "listTitle": "버퍼된 메시지 ({count})",

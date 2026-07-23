@@ -18,7 +18,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-22 | 53 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-23 | 129 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-23 | 12 |
-| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
+| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-23 | 11 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-23 | 2 |
@@ -31,7 +31,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-23 | 128 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-23 | 129 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-22 | 25 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-22 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-22 | 41 |
