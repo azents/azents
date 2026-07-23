@@ -57,14 +57,24 @@ def render_activity_tracker(
     }[state]
     task_lines = [_task_fallback_line(task) for task in tasks]
     fallback_lines = [status_text, *task_lines]
-    status_block: dict[str, object] = {
-        "type": "task_card",
-        "task_id": "activity-status",
-        "title": status_text,
-    }
-    if not tasks:
-        status_block["status"] = "in_progress"
-    blocks = [status_block, *[_task_card(task) for task in tasks]]
+    blocks: list[dict[str, object]]
+    if tasks:
+        blocks = [
+            {
+                "type": "plan",
+                "title": status_text,
+                "tasks": [_task_card(task) for task in tasks],
+            }
+        ]
+    else:
+        blocks = [
+            {
+                "type": "task_card",
+                "task_id": "activity-status",
+                "title": status_text,
+                "status": "in_progress",
+            }
+        ]
     return ActivityTrackerPresentation(
         text="\n".join(fallback_lines),
         blocks=blocks,
@@ -140,13 +150,13 @@ def _task_fallback_line(task: ActivityTrackerTask) -> str:
 
 def _task_card(task: ActivityTrackerTask) -> dict[str, object]:
     """Render one native Slack task card with meaningful status chrome."""
-    card: dict[str, object] = {
+    return {
         "type": "task_card",
         "task_id": task.id,
         "title": task.title,
+        "status": {
+            "pending": "pending",
+            "in_progress": "in_progress",
+            "completed": "complete",
+        }[task.status],
     }
-    if task.status == "in_progress":
-        card["status"] = "in_progress"
-    elif task.status == "completed":
-        card["status"] = "complete"
-    return card

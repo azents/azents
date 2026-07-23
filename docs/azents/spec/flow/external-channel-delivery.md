@@ -21,7 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 8
+spec_version: 9
 ---
 
 # External Channel Delivery and Channel Work
@@ -36,7 +36,7 @@ A tool call must identify a binding owned by the current Agent and Session. The 
 - `finish`: send one required final reply and finish Channel Work.
 
 Tasks use `pending`, `in_progress`, or `completed`, with at most 49 ordered
-tasks in one action so the Slack processing card and every Todo fit one message.
+tasks in one action so the Slack processing plan and every Todo fit one message.
 Each binding has independent work state even when several bindings share one
 AgentSession. The ordinary Session Todo toolkit is not the Channel Work source
 of truth.
@@ -51,7 +51,7 @@ Provider calls occur without an open database transaction. A delivery is claimed
 - `failed`: provider confirmed rejection or the committed payload/credentials are invalid;
 - `unknown`: cancellation, timeout, or ambiguous transport outcome prevents safe classification.
 
-Provider mutations are never automatically retried. Stale `attempting` recovery marks an ambiguous outcome conservatively instead of re-executing the call.
+Provider mutations are never automatically retried. Stale `attempting` recovery marks an ambiguous outcome conservatively instead of re-executing the call. An explicit Slack `ok: false` response not covered by a specialized provider error is a confirmed `failed` result with the bounded Slack error code retained in its sanitized summary; it is not classified as a transport-ambiguous `unknown` result.
 
 ## Activity Tracker Lifecycle
 
@@ -60,12 +60,13 @@ Provider mutations are never automatically retried. Stale `attempting` recovery 
 - Initial binding activation separately creates one button-only `Open Azents session`
   control message. Later invocations on the binding do not repeat it, and Activity
   Tracker desired state never contains the Session URL.
-- The initial Tracker states that the Agent is checking the message. When no Todo
-  card exists, the summary `task_card` carries the `in_progress` state. Once any
-  Todo exists, the summary card omits status so the current Todo exclusively owns
-  the circular `in_progress` indicator. Pending Todo cards omit status and completed
-  Todo cards use `complete`. The blocks are read-only and require no Slack
-  interaction callback.
+- The initial Tracker states that the Agent is checking the message with one
+  `task_card` carrying the `in_progress` state. Once any Todo exists, one `plan`
+  block carries the `Agent is working` title and contains the ordered Todo
+  `task_card` entries. Every nested task carries Slack's required status:
+  `pending`, `in_progress`, or `complete`. The plan title has no task indicator,
+  so the current Todo exclusively owns the circular progress indicator. The
+  blocks are read-only and require no Slack interaction callback.
 - Task changes update the retained provider message with the complete current Block
   Kit payload through `chat.update`. Task titles remain literal strings.
 - Finishing requires a final reply. The reply is attempted first; only a durable

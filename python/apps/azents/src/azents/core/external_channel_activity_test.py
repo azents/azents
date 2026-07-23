@@ -33,8 +33,8 @@ def test_checking_tracker_has_no_title_or_session_link() -> None:
     assert "Open Azents session" not in str(presentation.blocks)
 
 
-def test_working_tracker_marks_only_active_todo_with_circle_indicator() -> None:
-    """Todo cards own progress chrome once the Tracker has work items."""
+def test_working_tracker_renders_todos_in_one_native_plan() -> None:
+    """One plan owns the summary while every nested task has a valid status."""
     presentation = render_activity_tracker(
         state="working",
         tasks=(
@@ -64,26 +64,28 @@ def test_working_tracker_marks_only_active_todo_with_circle_indicator() -> None:
     )
     assert presentation.blocks == [
         {
-            "type": "task_card",
-            "task_id": "activity-status",
+            "type": "plan",
             "title": "Agent is working",
-        },
-        {
-            "type": "task_card",
-            "task_id": "inspect",
-            "title": "Inspect <@U1> and *literal markup*",
-            "status": "in_progress",
-        },
-        {
-            "type": "task_card",
-            "task_id": "publish",
-            "title": "Publish result",
-        },
-        {
-            "type": "task_card",
-            "task_id": "old-step",
-            "title": "Old step",
-            "status": "complete",
+            "tasks": [
+                {
+                    "type": "task_card",
+                    "task_id": "inspect",
+                    "title": "Inspect <@U1> and *literal markup*",
+                    "status": "in_progress",
+                },
+                {
+                    "type": "task_card",
+                    "task_id": "publish",
+                    "title": "Publish result",
+                    "status": "pending",
+                },
+                {
+                    "type": "task_card",
+                    "task_id": "old-step",
+                    "title": "Old step",
+                    "status": "complete",
+                },
+            ],
         },
     ]
 
@@ -156,14 +158,16 @@ def test_persisted_tracker_projection_is_validated_before_rendering() -> None:
     assert presentation.text == "Agent is working\nPending: Investigate"
     assert presentation.blocks == [
         {
-            "type": "task_card",
-            "task_id": "activity-status",
+            "type": "plan",
             "title": "Agent is working",
-        },
-        {
-            "type": "task_card",
-            "task_id": "investigate",
-            "title": "Investigate",
+            "tasks": [
+                {
+                    "type": "task_card",
+                    "task_id": "investigate",
+                    "title": "Investigate",
+                    "status": "pending",
+                }
+            ],
         },
     ]
     assert payload == {

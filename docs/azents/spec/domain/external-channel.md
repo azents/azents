@@ -34,7 +34,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-23
-spec_version: 10
+spec_version: 11
 ---
 
 # External Channel
@@ -81,10 +81,11 @@ Slack is the first provider. Each connection uses a manually configured dedicate
   Activity Tracker before Session wake-up. Checking and task progress update one
   retained provider message; a delivered final answer deletes it, and separate work
   cycles never share that identity.
-- The Tracker uses native read-only Slack task cards. Processing and in-progress
-  tasks carry the in-progress indicator, pending tasks omit status, and completed
-  tasks carry completed state. One status card leaves capacity for at most 49
-  Channel Work tasks.
+- The Tracker uses one native read-only Slack task card before Todo creation.
+  Once tasks exist, one native Slack plan carries the `Agent is working` title
+  and up to 49 ordered task cards. Every nested task carries its required
+  `pending`, `in_progress`, or `complete` provider status; only the active task
+  carries the circular in-progress indicator.
 - Confirmed deletion clears only the matching Tracker identity and creates one
   replacement from durable desired state while work remains active. A replacement
   that captured an older desired revision is updated once to the latest state after

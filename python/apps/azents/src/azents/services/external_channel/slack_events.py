@@ -54,6 +54,14 @@ class SlackProviderTemporaryError(SlackProviderError):
     """Slack or the network is temporarily unavailable."""
 
 
+class SlackProviderRequestRejected(SlackProviderTemporaryError):
+    """Slack returned a confirmed provider-specific request rejection."""
+
+    def __init__(self, error_code: str) -> None:
+        super().__init__("Slack rejected the provider request.")
+        self.error_code = error_code
+
+
 class SlackProviderCredentialsInvalid(SlackProviderError):
     """Slack rejected the configured connection credential."""
 
@@ -724,6 +732,15 @@ class SlackConversationClient:
                 error_kind="rate_limited",
                 error_summary="Slack rate limited the provider operation.",
             )
+        except SlackProviderRequestRejected as error:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="provider_rejected",
+                error_summary=(
+                    f"Slack rejected the provider operation ({error.error_code})."
+                ),
+            )
         except SlackProviderTemporaryError:
             return SlackControlMessageResult(
                 status="unknown",
@@ -818,7 +835,13 @@ class SlackConversationClient:
             raise SlackProviderMessageNotFound(
                 "Slack no longer contains the requested message."
             )
-        raise SlackProviderTemporaryError("Slack request failed.")
+        normalized_error_code = (
+            error_code
+            if isinstance(error_code, str)
+            and re.fullmatch(r"[a-z0-9_]{1,80}", error_code)
+            else "unknown_error"
+        )
+        raise SlackProviderRequestRejected(normalized_error_code)
 
 
 def _required_string(payload: dict[str, object], key: str) -> str:
