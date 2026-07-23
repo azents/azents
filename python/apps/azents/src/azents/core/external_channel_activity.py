@@ -55,7 +55,7 @@ def render_activity_tracker(
         "checking": "Agent is checking your message",
         "working": "Agent is working",
     }[state]
-    task_lines = [f"{_task_marker(task.status)} {task.title}" for task in tasks]
+    task_lines = [_task_fallback_line(task) for task in tasks]
     fallback_lines = [status_text, *task_lines]
     status_block: dict[str, object] = {
         "type": "task_card",
@@ -127,13 +127,14 @@ def render_persisted_activity_tracker(
     )
 
 
-def _task_marker(status: ActivityTrackerTaskStatus) -> str:
-    """Return the plain-text marker for one task state."""
-    return {
-        "pending": "○",
-        "in_progress": "◐",
-        "completed": "●",
-    }[status]
+def _task_fallback_line(task: ActivityTrackerTask) -> str:
+    """Render accessible task state without imitating native status chrome."""
+    status_label = {
+        "pending": "Pending",
+        "in_progress": "In progress",
+        "completed": "Completed",
+    }[task.status]
+    return f"{status_label}: {task.title}"
 
 
 def _task_card(task: ActivityTrackerTask) -> dict[str, object]:
