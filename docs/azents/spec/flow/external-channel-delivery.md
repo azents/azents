@@ -21,7 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 6
+spec_version: 7
 ---
 
 # External Channel Delivery and Channel Work
@@ -99,6 +99,14 @@ that provider delete after commit. Deny and block use the access request's route
 do not require a Session binding. Cleanup failure or ambiguity remains visible
 without changing the final decision.
 
+Control delivery and the access decision may complete in either order. A pending
+request never deletes its control message. After a delivered control result commits,
+a separate reconciliation transaction locks the request before the control delivery
+and creates the same idempotent delete intent if the request is already final. This
+lock order matches the decision transaction and avoids request/control lock
+inversion. Whichever path observes both prerequisites attempts the pending delete;
+the delivery claim preserves one provider mutation.
+
 The Activity Tracker identity and delivery state are durable management data.
 Session Channels renders the canonical ordered task snapshot and one derived
 projection state:
@@ -124,6 +132,7 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-23** (spec_version 7) — Reconciled approval decisions with late control-message delivery so either completion order creates and consumes one idempotent delete intent without lock inversion.
 - **2026-07-23** (spec_version 6) — Separated the one-time Session-link message, switched the Tracker to native read-only task cards, limited work to 49 Todos, made successful final replies delete the Tracker, and restricted replacement to active desired work with race-safe cleanup reconciliation.
 - **2026-07-23** (spec_version 5) — Rendered provider participant identity in approval controls as Slack plain text rather than untrusted mrkdwn.
 - **2026-07-23** (spec_version 4) — Added automatic pre-execution Activity Tracker creation, one-message checking/working/completed transitions, delivered-final-reply completion gating, retained normal completion, confirmed-deletion recreation, and latest-revision replacement reconciliation.

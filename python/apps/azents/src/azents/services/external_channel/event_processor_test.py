@@ -1,6 +1,8 @@
 """External Channel event processing domain tests."""
 
 import datetime
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -20,6 +22,7 @@ from azents.core.enums import (
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
+    ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
@@ -59,6 +62,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelBindingCreate,
     ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
+    ExternalChannelDeliveryAttempt,
     ExternalChannelEvent,
     ExternalChannelEventCreate,
     ExternalChannelMessageCreate,
@@ -87,6 +91,7 @@ from azents.services.external_channel.event_processor import (
     connection_authored,
 )
 from azents.services.external_channel.slack_events import (
+    SlackControlMessageResult,
     SlackConversationClient,
     SlackNormalizedMessage,
     normalize_slack_event,
@@ -264,6 +269,20 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             agent_id=agent_id,
         )
 
+    async def attempt_control_delivery_for_test(
+        self,
+        *,
+        configuration: ExternalChannelConnectionConfiguration,
+        delivery_attempt_id: str,
+        bot_token: str,
+    ) -> None:
+        """Expose approval control delivery for focused race tests."""
+        await self._attempt_control_delivery(
+            configuration=configuration,
+            delivery_attempt_id=delivery_attempt_id,
+            bot_token=bot_token,
+        )
+
 
 def _service(
     session_manager: SessionManager[AsyncSession],
@@ -300,6 +319,147 @@ def _service(
             external_channel_repository=repository,
         ),
         session_lifecycle=cast(SessionLifecycleService, session_lifecycle),
+    )
+
+
+def _delivery_attempt(
+    *,
+    delivery_id: str,
+    operation: ExternalChannelDeliveryOperation,
+    status: ExternalChannelDeliveryStatus,
+    request_payload: dict[str, object],
+    provider_message_key: str | None,
+) -> ExternalChannelDeliveryAttempt:
+    return ExternalChannelDeliveryAttempt(
+        id=delivery_id,
+        origin_type=ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
+        origin_id="request-1",
+        channel_action_id=None,
+        binding_id=None,
+        operation=operation,
+        request_payload=request_payload,
+        status=status,
+        provider_message_key=provider_message_key,
+        error_kind=None,
+        error_summary=None,
+        attempted_at=_at(1),
+        completed_at=None,
+        created_at=_at(1),
+        updated_at=_at(1),
+    )
+
+
+@asynccontextmanager
+async def _unit_session_manager() -> AsyncGenerator[AsyncSession]:
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    yield cast(AsyncSession, session)
+
+
+@pytest.mark.asyncio
+async def test_late_control_delivery_deletes_message_after_decision() -> None:
+    """Decision-first and delivery-second ordering converges on one delete."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    control_attempting = _delivery_attempt(
+        delivery_id="control-1",
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        status=ExternalChannelDeliveryStatus.ATTEMPTING,
+        request_payload={
+            "tenant_id": "T1",
+            "channel_id": "C1",
+            "thread_ts": "1.000001",
+            "approval_url": "https://azents.example/approval/request-1",
+            "participant_provider_user_id": "U1",
+            "participant_label": "Participant",
+        },
+        provider_message_key=None,
+    )
+    control_delivered = control_attempting.model_copy(
+        update={
+            "status": ExternalChannelDeliveryStatus.DELIVERED,
+            "provider_message_key": "slack:T1:C1:2.000001",
+            "completed_at": _at(2),
+        }
+    )
+    delete_pending = _delivery_attempt(
+        delivery_id="delete-1",
+        operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+        status=ExternalChannelDeliveryStatus.PENDING,
+        request_payload={
+            "channel_id": "C1",
+            "thread_ts": "1.000001",
+            "provider_message_key": "slack:T1:C1:2.000001",
+        },
+        provider_message_key="slack:T1:C1:2.000001",
+    )
+    delete_attempting = delete_pending.model_copy(
+        update={"status": ExternalChannelDeliveryStatus.ATTEMPTING}
+    )
+    repository.start_delivery_attempt = AsyncMock(
+        side_effect=[control_attempting, delete_attempting]
+    )
+    repository.finish_delivery_attempt = AsyncMock(
+        side_effect=[
+            control_delivered,
+            delete_attempting.model_copy(
+                update={
+                    "status": ExternalChannelDeliveryStatus.DELIVERED,
+                    "completed_at": _at(3),
+                }
+            ),
+        ]
+    )
+    repository.create_access_request_control_delete_intent = AsyncMock(
+        return_value=delete_pending
+    )
+    repository.mark_connection_reconnect_required = AsyncMock()
+    slack_client = MagicMock(spec=SlackConversationClient)
+    slack_client.post_approval_control_message = AsyncMock(
+        return_value=SlackControlMessageResult(
+            status="delivered",
+            provider_message_key="slack:T1:C1:2.000001",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    slack_client.delete_message = AsyncMock(
+        return_value=SlackControlMessageResult(
+            status="delivered",
+            provider_message_key="slack:T1:C1:2.000001",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    service = _service(
+        cast(SessionManager[AsyncSession], _unit_session_manager),
+        cast(ExternalChannelRepository, repository),
+    )
+    service.slack_client = cast(SlackConversationClient, slack_client)
+    configuration = cast(
+        ExternalChannelConnectionConfiguration,
+        SimpleNamespace(id="connection-1", provider_tenant_id="T1"),
+    )
+
+    await service.attempt_control_delivery_for_test(
+        configuration=configuration,
+        delivery_attempt_id="control-1",
+        bot_token="xoxb-test",
+    )
+
+    repository.create_access_request_control_delete_intent.assert_awaited_once()
+    assert (
+        repository.create_access_request_control_delete_intent.call_args.kwargs[
+            "access_request_id"
+        ]
+        == "request-1"
+    )
+    assert repository.start_delivery_attempt.await_count == 2
+    assert repository.finish_delivery_attempt.await_count == 2
+    slack_client.delete_message.assert_awaited_once_with(
+        bot_token="xoxb-test",
+        tenant_id="T1",
+        channel_id="C1",
+        message_ts="2.000001",
     )
 
 
@@ -413,6 +573,11 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
             completed_at=_at(2),
         )
         assert delivered is not None
+        premature_delete = await repository.create_access_request_control_delete_intent(
+            session,
+            access_request_id=requests[0].id,
+        )
+        assert premature_delete is None
         await session.commit()
 
     async with rdb_session_manager() as session:

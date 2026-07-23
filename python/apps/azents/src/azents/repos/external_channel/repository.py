@@ -2186,6 +2186,16 @@ class ExternalChannelRepository:
         access_request_id: str,
     ) -> ExternalChannelDeliveryAttempt | None:
         """Create one idempotent delete intent for a delivered control message."""
+        request = await session.scalar(
+            sa.select(RDBExternalChannelAccessRequest)
+            .where(RDBExternalChannelAccessRequest.id == access_request_id)
+            .with_for_update()
+        )
+        if (
+            request is None
+            or request.status is ExternalChannelAccessRequestStatus.PENDING
+        ):
+            return None
         control = await session.scalar(
             sa.select(RDBExternalChannelDeliveryAttempt)
             .where(
