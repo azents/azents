@@ -422,15 +422,16 @@ async def test_recreated_tracker_catches_up_to_latest_desired_revision(
     )
     assert followup.request_payload["blocks"] == [
         {
-            "type": "task_card",
-            "task_id": "activity-status",
+            "type": "plan",
             "title": "Agent is working",
-        },
-        {
-            "type": "task_card",
-            "task_id": "investigate",
-            "title": "Investigate",
-            "status": "in_progress",
+            "tasks": [
+                {
+                    "type": "task_card",
+                    "task_id": "investigate",
+                    "title": "Investigate",
+                    "status": "in_progress",
+                }
+            ],
         },
     ]
 
@@ -500,15 +501,16 @@ async def test_continue_after_finish_creates_a_new_activity_tracker(
     )
     assert create_attempt.request_payload["blocks"] == [
         {
-            "type": "task_card",
-            "task_id": "activity-status",
+            "type": "plan",
             "title": "Agent is working",
-        },
-        {
-            "type": "task_card",
-            "task_id": "next-task",
-            "title": "Start the next task",
-            "status": "in_progress",
+            "tasks": [
+                {
+                    "type": "task_card",
+                    "task_id": "next-task",
+                    "title": "Start the next task",
+                    "status": "in_progress",
+                }
+            ],
         },
     ]
     active_work = await rdb_session.scalar(

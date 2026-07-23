@@ -50,7 +50,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-23
-spec_version: 71
+spec_version: 72
 ---
 
 # Toolkit
@@ -676,7 +676,7 @@ and every call must target a binding owned by the current Agent and Session.
 Ingress creates the current work cycle and its initial Slack Activity Tracker before
 Agent execution. The tool atomically commits an optional conversational reply and
 the complete ordered task replacement before any provider call. One update supports
-at most 49 tasks so the Slack processing card and every native Todo card fit the
+at most 49 tasks so one native Slack plan and its required-status Todo cards fit the
 provider message. `continue` preserves unfinished Channel Work and updates the
 retained Tracker. `finish` requires a final reply, ends the work cycle, and deletes
 the Tracker only after the reply is durably delivered. Ordinary Session Todo state
@@ -684,6 +684,7 @@ remains separate and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 72) — Rendered Channel Work tasks inside one Slack plan with an explicit status on every Todo card.
 - **2026-07-23** (spec_version 71) — Limited Channel Work to 49 tasks and changed delivered `finish` actions from retained completion updates to Activity Tracker deletion.
 - **2026-07-23** (spec_version 70) — Added pre-execution Activity Tracker creation, same-message task updates, required final replies, and delivered-reply completion gating to the External Channel Action contract.
 - **2026-07-22** (spec_version 69) — Added the conditional direct `channel_action` tool, binding-scoped work snapshot, atomic action boundary, and separation from Session Todo state.
