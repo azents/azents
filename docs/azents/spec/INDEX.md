@@ -14,7 +14,7 @@ Details of all living specs. Synchronized from frontmatter.
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-22 | 52 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-23 | 129 |
-| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-23 | 8 |
+| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-23 | 9 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-21 | 10 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-21 | 17 |

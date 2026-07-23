@@ -14,12 +14,29 @@ class _TraversalBudget:
 
 
 def slack_blocks_text(value: object) -> str:
-    """Return bounded readable text from supported Slack blocks."""
+    """Return bounded readable text from untrusted provider Slack blocks."""
+    return _slack_blocks_text(value, trusted_projection=False)
+
+
+def projected_slack_blocks_text(value: object) -> str:
+    """Return text from a bounded projection created by Azents admission."""
+    return _slack_blocks_text(value, trusted_projection=True)
+
+
+def _slack_blocks_text(
+    value: object,
+    *,
+    trusted_projection: bool,
+) -> str:
     if not isinstance(value, list):
         return ""
     budget = _TraversalBudget()
     parts = [
-        _block_text(block, budget)
+        _block_text(
+            block,
+            budget,
+            trusted_projection=trusted_projection,
+        )
         for block in value[:_MAX_BLOCKS]
         if isinstance(block, dict)
     ]
@@ -47,10 +64,16 @@ def projected_slack_blocks(value: object) -> list[dict[str, str]]:
     return projected
 
 
-def _block_text(block: dict[str, object], budget: _TraversalBudget) -> str:
-    projected = block.get("normalized_text")
-    if isinstance(projected, str):
-        return projected
+def _block_text(
+    block: dict[str, object],
+    budget: _TraversalBudget,
+    *,
+    trusted_projection: bool,
+) -> str:
+    if trusted_projection:
+        projected = block.get("normalized_text")
+        if isinstance(projected, str):
+            return projected
     block_type = block.get("type")
     if block_type == "rich_text":
         return _container_text(block.get("elements"), budget, depth=0)
