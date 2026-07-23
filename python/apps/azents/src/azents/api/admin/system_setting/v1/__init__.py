@@ -25,9 +25,12 @@ from azents.services.github_platform_system_setting.service import (
 from azents.services.system_setting.data import (
     SystemSettingMutation,
 )
+from azents.services.system_setting.service import SystemSettingsService
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    ExternalChannelFilesDetailResponse,
+    ExternalChannelFilesPatchRequest,
     PlatformGitHubAppConfirmRequest,
     PlatformGitHubAppDetailResponse,
     PlatformGitHubAppPatchRequest,
@@ -35,9 +38,16 @@ from .data import (
     SystemSettingAuditEventResponse,
     SystemSettingInventoryItemResponse,
     SystemSettingInventoryResponse,
+    SystemSettingVersionConflictResponse,
 )
 
 router = APIRouter()
+
+_EXTERNAL_CHANNEL_FILE_LIMIT_FIELDS = (
+    "inbound_max_file_bytes",
+    "outbound_max_file_bytes",
+    "outbound_max_action_bytes",
+)
 
 
 def _raise_system_setting_error(error: Exception) -> Never:
@@ -124,6 +134,75 @@ async def list_system_setting_sections(
     return SystemSettingInventoryResponse(
         items=[SystemSettingInventoryItemResponse.from_domain(item) for item in items]
     )
+
+
+@router.get("/sections/external-channel-files")
+async def get_external_channel_files_setting(
+    service: Annotated[SystemSettingsService, Depends()],
+) -> ExternalChannelFilesDetailResponse:
+    """Return the effective External Channel file policy."""
+    resolved = await service.resolve(SystemSettingSection.EXTERNAL_CHANNEL_FILES)
+    return ExternalChannelFilesDetailResponse.from_domain(resolved)
+
+
+@router.patch(
+    "/sections/external-channel-files",
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": SystemSettingVersionConflictResponse,
+            "description": "The expected System Settings version is stale.",
+        }
+    },
+)
+async def patch_external_channel_files_setting(
+    request: ExternalChannelFilesPatchRequest,
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[SystemSettingsService, Depends()],
+) -> ExternalChannelFilesDetailResponse:
+    """Directly activate an optimistic External Channel file policy patch."""
+    config_patch: dict[str, int] = {}
+    for field_name in _EXTERNAL_CHANNEL_FILE_LIMIT_FIELDS:
+        if field_name not in request.model_fields_set:
+            continue
+        value = getattr(request, field_name)
+        if value is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "invalid_system_setting_payload",
+                    "message": "External Channel file limits cannot be null.",
+                },
+            )
+        config_patch[field_name] = value
+    if not config_patch:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "empty_system_setting_patch",
+                "message": "At least one External Channel file limit is required.",
+            },
+        )
+    try:
+        result = await service.mutate(
+            SystemSettingMutation(
+                section=SystemSettingSection.EXTERNAL_CHANNEL_FILES,
+                expected_version=request.expected_version,
+                config_patch=config_patch,
+                secret_actions={},
+                actor_user_id=system_admin.user_id,
+            )
+        )
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_system_setting_payload",
+                "message": "The External Channel file policy is invalid.",
+            },
+        ) from error
+    except SystemSettingVersionConflict as error:
+        _raise_system_setting_error(error)
+    return ExternalChannelFilesDetailResponse.from_domain(result.resolved)
 
 
 @router.get("/sections/platform-github-app")

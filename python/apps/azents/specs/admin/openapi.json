@@ -1847,6 +1847,88 @@
         ]
       }
     },
+    "/system-setting/v1/sections/external-channel-files": {
+      "get": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Get External Channel Files Setting",
+        "description": "Return the effective External Channel file policy.",
+        "operationId": "system_settings_v1_get_external_channel_files_setting",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelFilesDetailResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Patch External Channel Files Setting",
+        "description": "Directly activate an optimistic External Channel file policy patch.",
+        "operationId": "system_settings_v1_patch_external_channel_files_setting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalChannelFilesPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelFilesDetailResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The expected System Settings version is stale.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemSettingVersionConflictResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/system-setting/v1/sections/platform-github-app": {
       "get": {
         "tags": [
@@ -3451,6 +3533,99 @@
         ],
         "title": "ErrorLevel",
         "description": "Test error level."
+      },
+      "ExternalChannelFilesDetailResponse": {
+        "properties": {
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "admin_version": {
+            "type": "integer",
+            "title": "Admin Version"
+          },
+          "inbound_max_file_bytes": {
+            "type": "integer",
+            "title": "Inbound Max File Bytes"
+          },
+          "outbound_max_file_bytes": {
+            "type": "integer",
+            "title": "Outbound Max File Bytes"
+          },
+          "outbound_max_action_bytes": {
+            "type": "integer",
+            "title": "Outbound Max Action Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section",
+          "schema_version",
+          "admin_version",
+          "inbound_max_file_bytes",
+          "outbound_max_file_bytes",
+          "outbound_max_action_bytes"
+        ],
+        "title": "ExternalChannelFilesDetailResponse",
+        "description": "Effective External Channel file policy without internal generation data."
+      },
+      "ExternalChannelFilesPatchRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "inbound_max_file_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 104857600.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbound Max File Bytes"
+          },
+          "outbound_max_file_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 104857600.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outbound Max File Bytes"
+          },
+          "outbound_max_action_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2097152000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outbound Max Action Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "ExternalChannelFilesPatchRequest",
+        "description": "Optimistic partial update for External Channel file limits."
       },
       "FileLifecycleSettingsResponse": {
         "properties": {
@@ -5657,6 +5832,44 @@
         ],
         "title": "SystemSettingValidationStatus",
         "description": "Persisted candidate or activation validation state."
+      },
+      "SystemSettingVersionConflictDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "stale_system_setting_version",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "current_version": {
+            "type": "integer",
+            "title": "Current Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "current_version"
+        ],
+        "title": "SystemSettingVersionConflictDetail",
+        "description": "Stable optimistic-mutation conflict detail."
+      },
+      "SystemSettingVersionConflictResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/SystemSettingVersionConflictDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "SystemSettingVersionConflictResponse",
+        "description": "FastAPI error envelope for an optimistic System Settings conflict."
       },
       "SystemUserRole": {
         "type": "string",

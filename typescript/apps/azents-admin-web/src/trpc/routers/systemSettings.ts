@@ -2,15 +2,20 @@ import {
   systemSettingsV1CancelPlatformGithubAppCandidate,
   systemSettingsV1CheckPlatformGithubAppHealth,
   systemSettingsV1ConfirmPlatformGithubAppCandidate,
+  systemSettingsV1GetExternalChannelFilesSetting,
   systemSettingsV1GetPlatformGithubAppSetting,
   systemSettingsV1ListSystemSettingAuditEvents,
+  systemSettingsV1PatchExternalChannelFilesSetting,
   systemSettingsV1PatchPlatformGithubAppSetting,
   systemSettingsV1ValidatePlatformGithubAppCandidate,
 } from "@azents/admin-client";
 import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
 import { protectedProcedure, router } from "../init";
-import type { PlatformGitHubAppPatchRequest } from "@azents/admin-client";
+import type {
+  ExternalChannelFilesPatchRequest,
+  PlatformGitHubAppPatchRequest,
+} from "@azents/admin-client";
 
 const secretActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("replace"), value: z.string().min(1) }),
@@ -18,6 +23,47 @@ const secretActionSchema = z.discriminatedUnion("action", [
 ]);
 
 export const systemSettingsRouter = router({
+  getExternalChannelFiles: protectedProcedure.query(async ({ ctx }) => {
+    const { data } = await systemSettingsV1GetExternalChannelFilesSetting({
+      client: ctx.adminApiClient,
+      throwOnError: true,
+    });
+    return data;
+  }),
+
+  patchExternalChannelFiles: protectedProcedure
+    .input(
+      z.object({
+        expectedVersion: z.number().int().nonnegative(),
+        inboundMaxFileBytes: z.number().int().positive(),
+        outboundMaxFileBytes: z.number().int().positive(),
+        outboundMaxActionBytes: z.number().int().positive(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const body: ExternalChannelFilesPatchRequest = {
+          expected_version: input.expectedVersion,
+          inbound_max_file_bytes: input.inboundMaxFileBytes,
+          outbound_max_file_bytes: input.outboundMaxFileBytes,
+          outbound_max_action_bytes: input.outboundMaxActionBytes,
+        };
+        const { data } = await systemSettingsV1PatchExternalChannelFilesSetting(
+          {
+            client: ctx.adminApiClient,
+            body,
+            throwOnError: true,
+          },
+        );
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
   getPlatformGitHubApp: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await systemSettingsV1GetPlatformGithubAppSetting({
       client: ctx.adminApiClient,

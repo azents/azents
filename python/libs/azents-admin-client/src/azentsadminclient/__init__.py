@@ -53,6 +53,8 @@ __all__ = [
     "EmailVerificationListResponse",
     "EmailVerificationResponse",
     "ErrorLevel",
+    "ExternalChannelFilesDetailResponse",
+    "ExternalChannelFilesPatchRequest",
     "FileLifecycleSettingsResponse",
     "FileLifecycleSettingsUpdateRequest",
     "FileLifecycleSettingsUpdateResponse",
@@ -114,6 +116,8 @@ __all__ = [
     "SystemSettingSecretActionRequest",
     "SystemSettingSecretActionType",
     "SystemSettingValidationStatus",
+    "SystemSettingVersionConflictDetail",
+    "SystemSettingVersionConflictResponse",
     "SystemUserRole",
     "SystemUserRoleAssignmentListResponse",
     "SystemUserRoleAssignmentResponse",
@@ -176,6 +180,8 @@ from azentsadminclient.models.debug_exception_response import DebugExceptionResp
 from azentsadminclient.models.email_verification_list_response import EmailVerificationListResponse as EmailVerificationListResponse
 from azentsadminclient.models.email_verification_response import EmailVerificationResponse as EmailVerificationResponse
 from azentsadminclient.models.error_level import ErrorLevel as ErrorLevel
+from azentsadminclient.models.external_channel_files_detail_response import ExternalChannelFilesDetailResponse as ExternalChannelFilesDetailResponse
+from azentsadminclient.models.external_channel_files_patch_request import ExternalChannelFilesPatchRequest as ExternalChannelFilesPatchRequest
 from azentsadminclient.models.file_lifecycle_settings_response import FileLifecycleSettingsResponse as FileLifecycleSettingsResponse
 from azentsadminclient.models.file_lifecycle_settings_update_request import FileLifecycleSettingsUpdateRequest as FileLifecycleSettingsUpdateRequest
 from azentsadminclient.models.file_lifecycle_settings_update_response import FileLifecycleSettingsUpdateResponse as FileLifecycleSettingsUpdateResponse
@@ -237,6 +243,8 @@ from azentsadminclient.models.system_setting_inventory_response import SystemSet
 from azentsadminclient.models.system_setting_secret_action_request import SystemSettingSecretActionRequest as SystemSettingSecretActionRequest
 from azentsadminclient.models.system_setting_secret_action_type import SystemSettingSecretActionType as SystemSettingSecretActionType
 from azentsadminclient.models.system_setting_validation_status import SystemSettingValidationStatus as SystemSettingValidationStatus
+from azentsadminclient.models.system_setting_version_conflict_detail import SystemSettingVersionConflictDetail as SystemSettingVersionConflictDetail
+from azentsadminclient.models.system_setting_version_conflict_response import SystemSettingVersionConflictResponse as SystemSettingVersionConflictResponse
 from azentsadminclient.models.system_user_role import SystemUserRole as SystemUserRole
 from azentsadminclient.models.system_user_role_assignment_list_response import SystemUserRoleAssignmentListResponse as SystemUserRoleAssignmentListResponse
 from azentsadminclient.models.system_user_role_assignment_response import SystemUserRoleAssignmentResponse as SystemUserRoleAssignmentResponse

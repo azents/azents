@@ -11,6 +11,7 @@ import pytest
 from azents.core.enums import ExternalChannelTransport
 from azents.services.external_channel.slack_endpoint import (
     slack_api_base_url,
+    slack_file_url_allowed,
     slack_insecure_websocket_allowed,
 )
 from azents.services.external_channel.slack_http import (
@@ -52,6 +53,21 @@ def test_testenv_endpoint_overrides_are_explicit(
     )
     assert slack_api_base_url() == "http://slack-fake:8083/api"
     assert slack_insecure_websocket_allowed() is True
+
+
+def test_slack_file_url_allows_https_and_exact_test_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Insecure file URLs remain limited to the explicit deterministic origin."""
+    monkeypatch.setenv(
+        "AZ_TESTENV_SLACK_API_BASE_URL",
+        "http://slack-fake:8083/api",
+    )
+
+    assert slack_file_url_allowed("https://files.slack.com/files/F1")
+    assert slack_file_url_allowed("http://slack-fake:8083/files/F1")
+    assert not slack_file_url_allowed("http://other-fake:8083/files/F1")
+    assert not slack_file_url_allowed("file:///tmp/F1")
 
 
 def _signature(body: bytes, timestamp: int | None = None) -> tuple[str, str]:

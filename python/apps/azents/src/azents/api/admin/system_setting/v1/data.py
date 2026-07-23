@@ -1,11 +1,19 @@
 """System Settings Admin API v1 schemas."""
 
 import datetime
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from azents.core.external_channel_file import (
+    MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
+    MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
+)
+from azents.core.external_channel_file_system_setting import (
+    ExternalChannelFilesConfig,
+)
 from azents.core.system_setting import (
+    ResolvedSystemSetting,
     SystemSettingAuditEventType,
     SystemSettingAuditSource,
     SystemSettingFieldSource,
@@ -42,6 +50,67 @@ class SystemSettingSecretActionRequest(BaseModel):
         ):
             raise ValueError("Secret clear cannot include a value.")
         return self
+
+
+class ExternalChannelFilesPatchRequest(BaseModel):
+    """Optimistic partial update for External Channel file limits."""
+
+    expected_version: int = Field(ge=0)
+    inbound_max_file_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
+    )
+    outbound_max_file_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
+    )
+    outbound_max_action_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
+    )
+
+
+class ExternalChannelFilesDetailResponse(BaseModel):
+    """Effective External Channel file policy without internal generation data."""
+
+    section: str
+    schema_version: int
+    admin_version: int
+    inbound_max_file_bytes: int
+    outbound_max_file_bytes: int
+    outbound_max_action_bytes: int
+
+    @classmethod
+    def from_domain(cls, resolved: ResolvedSystemSetting) -> Self:
+        """Convert one effective typed file policy."""
+        config = resolved.config
+        if not isinstance(config, ExternalChannelFilesConfig):
+            raise TypeError("Unexpected External Channel files config model.")
+        return cls(
+            section=resolved.section.value,
+            schema_version=resolved.schema_version,
+            admin_version=resolved.admin_version,
+            inbound_max_file_bytes=config.inbound_max_file_bytes,
+            outbound_max_file_bytes=config.outbound_max_file_bytes,
+            outbound_max_action_bytes=config.outbound_max_action_bytes,
+        )
+
+
+class SystemSettingVersionConflictDetail(BaseModel):
+    """Stable optimistic-mutation conflict detail."""
+
+    code: Literal["stale_system_setting_version"]
+    message: str
+    current_version: int
+
+
+class SystemSettingVersionConflictResponse(BaseModel):
+    """FastAPI error envelope for an optimistic System Settings conflict."""
+
+    detail: SystemSettingVersionConflictDetail
 
 
 class PlatformGitHubAppPatchRequest(BaseModel):

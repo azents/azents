@@ -1,5 +1,6 @@
 """External Channel deterministic provider and management E2E journeys."""
 
+import base64
 import hashlib
 import hmac
 import json
@@ -77,6 +78,9 @@ def _create_agent(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     public_server_url: str,
+    *,
+    runtime_provider_id: str | None,
+    shell_enabled: bool,
 ) -> tuple[str, str, str, str]:
     """Create an authenticated workspace administrator and one active Agent."""
     suffix = unique()
@@ -121,6 +125,8 @@ def _create_agent(
             model_selection=model_selection,
             lightweight_model_selection=model_selection,
             type=AgentType.PUBLIC,
+            runtime_provider_id=runtime_provider_id,
+            shell_enabled=shell_enabled,
         ),
         _headers=headers,
     )
@@ -205,6 +211,69 @@ def _progress_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]
         for item in cast(list[object], payload)
         if isinstance(item, dict)
     ]
+
+
+def _file_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]:
+    """Return sanitized model-request evidence for the file-transfer journey."""
+    response = requests.get(
+        f"{openai_proxy_url}/v1/_external_channel_file_requests",
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        return []
+    return [
+        cast(dict[str, object], item)
+        for item in cast(list[object], payload)
+        if isinstance(item, dict)
+    ]
+
+
+def _selected_tool_evidence(
+    public_server_url: str,
+    token: str,
+    session_id: str,
+    call_ids: set[str],
+) -> list[dict[str, object]]:
+    """Return bounded call/result evidence for selected deterministic tools."""
+    response = requests.get(
+        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        return []
+    items = cast(dict[str, object], payload).get("items")
+    if not isinstance(items, list):
+        return []
+    evidence: list[dict[str, object]] = []
+    for raw_event in cast(list[object], items):
+        if not isinstance(raw_event, dict):
+            continue
+        event = cast(dict[str, object], raw_event)
+        kind = event.get("kind")
+        if kind not in {"client_tool_call", "client_tool_result"}:
+            continue
+        raw_payload = event.get("payload")
+        if not isinstance(raw_payload, dict):
+            continue
+        event_payload = cast(dict[str, object], raw_payload)
+        call_id = event_payload.get("call_id")
+        if not isinstance(call_id, str) or call_id not in call_ids:
+            continue
+        item: dict[str, object] = {
+            "kind": kind,
+            "call_id": call_id,
+            "name": event_payload.get("name"),
+        }
+        status = event_payload.get("status")
+        if isinstance(status, str):
+            item["status"] = status
+        evidence.append(item)
+    return evidence
 
 
 def _channel_action_tool_evidence(
@@ -338,6 +407,8 @@ def test_http_admission_unknown_participant_and_approval_journey(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
+        runtime_provider_id=None,
+        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -571,6 +642,8 @@ def test_connection_update_and_repeated_disconnect(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
+        runtime_provider_id=None,
+        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -681,6 +754,8 @@ def test_provider_native_channel_work_progress_journey(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
+        runtime_provider_id=None,
+        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -947,6 +1022,298 @@ def test_provider_native_channel_work_progress_journey(
     assert _SIGNING_SECRET not in str(provider_state)
 
 
+@pytest.mark.runtime_provider
+def test_external_channel_file_transfer_journey(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_engine_worker_container: Container,
+    azents_runtime_provider_docker_container: Container,
+    slack_provider_fake_url: str,
+    openai_proxy_url: str,
+) -> None:
+    """Download one selected Slack file and publish two processed Runtime files."""
+    del azents_engine_worker_container, azents_runtime_provider_docker_container
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.delete(
+        f"{openai_proxy_url}/v1/_external_channel_file_requests",
+        timeout=5,
+    ).raise_for_status()
+    root_timestamp = f"{int(time.time()) - 60}.000400"
+    message_text = (
+        "<@B-E2E> External Channel file transfer E2E. "
+        "Process only the first attached file and return two results."
+    )
+    selected_content = b"alpha beta"
+    ignored_content = b"unused input"
+    event_files = [
+        {
+            "id": "F-IN-SELECTED",
+            "name": "selected-input.txt",
+            "title": "Selected input",
+            "mimetype": "text/plain",
+            "size": len(selected_content),
+            "mode": "hosted",
+            "is_external": False,
+            "file_access": "visible",
+        },
+        {
+            "id": "F-IN-IGNORED",
+            "name": "ignored-input.txt",
+            "title": "Ignored input",
+            "mimetype": "text/plain",
+            "size": len(ignored_content),
+            "mode": "hosted",
+            "is_external": False,
+            "file_access": "visible",
+        },
+    ]
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "files": [
+                {
+                    **event_files[0],
+                    "content_base64": base64.b64encode(selected_content).decode(),
+                },
+                {
+                    **event_files[1],
+                    "content_base64": base64.b64encode(ignored_content).decode(),
+                },
+            ],
+            "history_pages": [
+                [
+                    {
+                        "user": "U-FILES",
+                        "ts": root_timestamp,
+                        "text": message_text,
+                        "files": event_files,
+                    }
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_provider_id="system-docker",
+        shell_enabled=True,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_slack_connection(
+        agent_id=agent_id,
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id=_APP_ID,
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=headers,
+    )
+
+    def disconnect_connection() -> None:
+        external_api.external_channel_v1_disconnect_connection(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+
+    request.addfinalizer(disconnect_connection)
+    validated = external_api.external_channel_v1_validate_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert validated.status is ExternalChannelConnectionStatus.ACTIVE
+    assert validated.capabilities is not None
+    assert validated.capabilities.download_files is True
+    assert validated.capabilities.upload_files is True
+
+    event_body = json.dumps(
+        {
+            "type": "event_callback",
+            "event_id": f"Ev-{unique()}",
+            "event_time": int(time.time()),
+            "api_app_id": _APP_ID,
+            "team_id": _TEAM_ID,
+            "event": {
+                "type": "app_mention",
+                "channel": _CHANNEL_ID,
+                "channel_type": "channel",
+                "user": "U-FILES",
+                "text": message_text,
+                "ts": root_timestamp,
+                "files": event_files,
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    response = requests.post(
+        f"{azents_public_server_url}/external-channel/v1/slack/events",
+        data=event_body,
+        headers=_signed_headers(event_body),
+        timeout=5,
+    )
+    assert response.status_code == 200
+
+    request_id = wait_until(
+        lambda: _approval_request_id(slack_provider_fake_url),
+        timeout=15,
+        interval=0.2,
+        message="File-transfer approval control message was not delivered",
+    )
+    decided = external_api.external_channel_v1_decide_approval_request(
+        access_request_id=request_id,
+        external_channel_decision_input=ExternalChannelDecisionInput(
+            decision="allow_agent",
+            summary="External Channel file transfer E2E approval",
+        ),
+        _headers=headers,
+    )
+    assert decided.agent_session_id is not None
+    session_id = decided.agent_session_id
+
+    def active_binding_id() -> str:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=session_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            len(projection.items) == 1
+            and projection.items[0].activation_status
+            is ExternalChannelBindingActivationStatus.ACTIVE
+        ):
+            return projection.items[0].id
+        return ""
+
+    binding_id = wait_until(
+        active_binding_id,
+        timeout=20,
+        interval=0.2,
+        message="Approved file-transfer binding was not activated",
+    )
+
+    def initial_file_model_request() -> list[dict[str, object]]:
+        evidence = _file_request_evidence(openai_proxy_url)
+        assert any(
+            item.get("binding") == binding_id
+            and item.get("marker_present") is True
+            and item.get("locator_count") == 2
+            and item.get("download_tool_available") is True
+            and item.get("process_tool_available") is True
+            and item.get("channel_action_tool_available") is True
+            and item.get("stage") == "initial"
+            for item in evidence
+        ), evidence
+        return evidence
+
+    wait_until(
+        initial_file_model_request,
+        timeout=90,
+        interval=0.2,
+        message="File-transfer model request did not expose the expected tools",
+    )
+
+    expected_call_ids = {
+        "call_external_channel_file_download",
+        "call_external_channel_file_process",
+        "call_external_channel_file_finish",
+    }
+
+    def completed_file_tools() -> list[dict[str, object]]:
+        evidence = _selected_tool_evidence(
+            azents_public_server_url,
+            token,
+            session_id,
+            expected_call_ids,
+        )
+        for call_id in expected_call_ids:
+            assert any(
+                item.get("kind") == "client_tool_call"
+                and item.get("call_id") == call_id
+                for item in evidence
+            ), evidence
+            assert any(
+                item.get("kind") == "client_tool_result"
+                and item.get("call_id") == call_id
+                and item.get("status") == "completed"
+                for item in evidence
+            ), evidence
+        return evidence
+
+    tool_evidence = wait_until(
+        completed_file_tools,
+        timeout=120,
+        interval=0.2,
+        message="File-transfer Tool sequence did not complete",
+    )
+
+    def file_completion_delivery() -> dict[str, object]:
+        deliveries = _provider_state(slack_provider_fake_url).get("deliveries")
+        if not isinstance(deliveries, list):
+            return {}
+        for raw_delivery in reversed(cast(list[object], deliveries)):
+            if not isinstance(raw_delivery, dict):
+                continue
+            delivery = cast(dict[str, object], raw_delivery)
+            if delivery.get("operation") == "files.completeUploadExternal":
+                return delivery
+        return {}
+
+    completion = wait_until(
+        file_completion_delivery,
+        timeout=30,
+        interval=0.2,
+        message="Slack file completion was not delivered",
+    )
+    assert completion["channel"] == _CHANNEL_ID
+    assert completion["thread_ts"] == root_timestamp
+    assert completion["file_count"] == 2
+    assert completion["total_bytes"] == 36
+    assert completion["has_initial_comment"] is True
+
+    provider_state = _provider_state(slack_provider_fake_url)
+    request_counts = cast(dict[str, int], provider_state["request_counts"])
+    assert request_counts["files.info"] == 1
+    assert request_counts["file.download"] == 1
+    assert request_counts["files.getUploadURLExternal"] == 2
+    assert request_counts["file.upload"] == 2
+    assert request_counts["files.completeUploadExternal"] == 1
+    file_requests = [
+        cast(dict[str, object], item)
+        for item in cast(list[object], provider_state["requests"])
+        if isinstance(item, dict)
+        and cast(dict[str, object], item).get("operation")
+        in {"files.info", "file.download"}
+    ]
+    assert [item.get("file") for item in file_requests] == [
+        "F-IN-SELECTED",
+        "F-IN-SELECTED",
+    ]
+    assert all(item.get("call_id") in expected_call_ids for item in tool_evidence)
+    rendered_provider_state = str(provider_state)
+    assert _BOT_TOKEN not in rendered_provider_state
+    assert _SIGNING_SECRET not in rendered_provider_state
+    assert selected_content.decode() not in rendered_provider_state
+    assert ignored_content.decode() not in rendered_provider_state
+    assert "selected-input.txt" not in rendered_provider_state
+
+
 def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
@@ -1004,6 +1371,8 @@ def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
+        runtime_provider_id=None,
+        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -1095,6 +1464,8 @@ def test_connection_management_web_surface_uses_redacted_operational_state(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
+        runtime_provider_id=None,
+        shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import type {
+  ExternalChannelFilesDraft,
+  ExternalChannelFilesPageState,
   PlatformGitHubAppDraft,
   PlatformGitHubAppPageState,
   SystemSettingAuditState,
@@ -21,6 +23,12 @@ interface SecretActionClear {
 type SecretAction = SecretActionReplace | SecretActionClear;
 
 export interface SystemSettingsPageContentProps {
+  externalFilesState: ExternalChannelFilesPageState;
+  externalFilesDraft: ExternalChannelFilesDraft;
+  externalFilesSaving: boolean;
+  externalFilesDraftDirty: boolean;
+  externalFilesSaveDisabled: boolean;
+  externalFilesMutationError: string | null;
   state: PlatformGitHubAppPageState;
   auditState: SystemSettingAuditState;
   draft: PlatformGitHubAppDraft;
@@ -33,6 +41,10 @@ export interface SystemSettingsPageContentProps {
   checkingHealth: boolean;
   saveDisabled: boolean;
   mutationError: string | null;
+  onInboundMaxFileMiBChange: (value: number | string) => void;
+  onOutboundMaxFileMiBChange: (value: number | string) => void;
+  onOutboundMaxActionMiBChange: (value: number | string) => void;
+  onSaveExternalFiles: () => void;
   onAppIdChange: (value: string) => void;
   onClientIdChange: (value: string) => void;
   onPrivateKeyChange: (value: string) => void;
@@ -47,6 +59,16 @@ export interface SystemSettingsPageContentProps {
   onCheckHealth: () => void;
 }
 
+const BYTES_PER_MIB = 1024 * 1024;
+const MAX_FILE_MIB = 100;
+const MAX_ACTION_MIB = 2_000;
+
+const EMPTY_EXTERNAL_FILES_DRAFT: ExternalChannelFilesDraft = {
+  inboundMaxFileMiB: "",
+  outboundMaxFileMiB: "",
+  outboundMaxActionMiB: "",
+};
+
 const EMPTY_DRAFT: PlatformGitHubAppDraft = {
   appId: "",
   clientId: "",
@@ -57,6 +79,26 @@ const EMPTY_DRAFT: PlatformGitHubAppDraft = {
   clearPrivateKey: false,
   clearClientSecret: false,
 };
+
+function bytesToMiB(value: number): number {
+  return value / BYTES_PER_MIB;
+}
+
+function draftMiBToBytes(
+  value: number | string,
+  maximumMiB: number,
+): number | null {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value <= 0 ||
+    value > maximumMiB
+  ) {
+    return null;
+  }
+  return value * BYTES_PER_MIB;
+}
 
 function fieldValue(
   detail: PlatformGitHubAppDetailResponse,
@@ -87,16 +129,37 @@ function secretAction(clear: boolean, value: string): SecretAction | null {
 
 export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps {
   const utils = trpc.useUtils();
+  const externalFilesQuery =
+    trpc.systemSettings.getExternalChannelFiles.useQuery();
   const detailQuery = trpc.systemSettings.getPlatformGitHubApp.useQuery();
   const auditQuery = trpc.systemSettings.listAuditEvents.useQuery({
     offset: 0,
     limit: 20,
   });
+  const [externalFilesDraft, setExternalFilesDraft] =
+    useState<ExternalChannelFilesDraft>(EMPTY_EXTERNAL_FILES_DRAFT);
   const [draft, setDraft] = useState<PlatformGitHubAppDraft>(EMPTY_DRAFT);
   const [confirmationAction, setConfirmationAction] = useState<string | null>(
     null,
   );
+  const initializedExternalFilesVersion = useRef<number | null>(null);
   const initializedVersion = useRef<number | null>(null);
+
+  useEffect(() => {
+    const detail = externalFilesQuery.data;
+    if (
+      !detail ||
+      initializedExternalFilesVersion.current === detail.admin_version
+    ) {
+      return;
+    }
+    initializedExternalFilesVersion.current = detail.admin_version;
+    setExternalFilesDraft({
+      inboundMaxFileMiB: bytesToMiB(detail.inbound_max_file_bytes),
+      outboundMaxFileMiB: bytesToMiB(detail.outbound_max_file_bytes),
+      outboundMaxActionMiB: bytesToMiB(detail.outbound_max_action_bytes),
+    });
+  }, [externalFilesQuery.data]);
 
   useEffect(() => {
     const detail = detailQuery.data;
@@ -134,6 +197,17 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     ]);
   }, [utils.systemSettings]);
 
+  const invalidateExternalFiles = useCallback(async (): Promise<void> => {
+    await Promise.all([
+      utils.systemSettings.getExternalChannelFiles.invalidate(),
+      utils.systemSettings.listAuditEvents.invalidate(),
+    ]);
+  }, [utils.systemSettings]);
+
+  const externalFilesPatchMutation =
+    trpc.systemSettings.patchExternalChannelFiles.useMutation({
+      onSuccess: invalidateExternalFiles,
+    });
   const patchMutation = trpc.systemSettings.patchPlatformGitHubApp.useMutation({
     onSuccess: async () => {
       setDraft((current) => ({
@@ -164,6 +238,21 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     trpc.systemSettings.checkPlatformGitHubAppHealth.useMutation({
       onSuccess: invalidate,
     });
+
+  const externalFilesState = useMemo<ExternalChannelFilesPageState>(() => {
+    if (externalFilesQuery.isPending) {
+      return { type: "LOADING" };
+    }
+    if (externalFilesQuery.isError) {
+      return { type: "ERROR", message: externalFilesQuery.error.message };
+    }
+    return { type: "LOADED", detail: externalFilesQuery.data };
+  }, [
+    externalFilesQuery.data,
+    externalFilesQuery.error?.message,
+    externalFilesQuery.isError,
+    externalFilesQuery.isPending,
+  ]);
 
   const state = useMemo<PlatformGitHubAppPageState>(() => {
     if (detailQuery.isPending) {
@@ -207,6 +296,36 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     draft.clearClientSecret,
     draft.clientSecret,
   );
+  const inboundMaxFileBytes = draftMiBToBytes(
+    externalFilesDraft.inboundMaxFileMiB,
+    MAX_FILE_MIB,
+  );
+  const outboundMaxFileBytes = draftMiBToBytes(
+    externalFilesDraft.outboundMaxFileMiB,
+    MAX_FILE_MIB,
+  );
+  const outboundMaxActionBytes = draftMiBToBytes(
+    externalFilesDraft.outboundMaxActionMiB,
+    MAX_ACTION_MIB,
+  );
+  const externalFilesDraftValid =
+    inboundMaxFileBytes !== null &&
+    outboundMaxFileBytes !== null &&
+    outboundMaxActionBytes !== null &&
+    outboundMaxActionBytes >= outboundMaxFileBytes;
+  const externalFilesDraftDirty =
+    externalFilesState.type === "LOADED" &&
+    (externalFilesDraft.inboundMaxFileMiB !==
+      bytesToMiB(externalFilesState.detail.inbound_max_file_bytes) ||
+      externalFilesDraft.outboundMaxFileMiB !==
+        bytesToMiB(externalFilesState.detail.outbound_max_file_bytes) ||
+      externalFilesDraft.outboundMaxActionMiB !==
+        bytesToMiB(externalFilesState.detail.outbound_max_action_bytes));
+  const externalFilesSaveDisabled =
+    externalFilesState.type !== "LOADED" ||
+    !externalFilesDraftValid ||
+    !externalFilesDraftDirty ||
+    externalFilesPatchMutation.isPending;
   const saveDisabled =
     state.type !== "LOADED" ||
     (!draft.appIdTouched &&
@@ -214,6 +333,30 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
       privateKeyAction === null &&
       clientSecretAction === null) ||
     patchMutation.isPending;
+
+  const onSaveExternalFiles = useCallback((): void => {
+    if (
+      externalFilesState.type !== "LOADED" ||
+      inboundMaxFileBytes === null ||
+      outboundMaxFileBytes === null ||
+      outboundMaxActionBytes === null ||
+      outboundMaxActionBytes < outboundMaxFileBytes
+    ) {
+      return;
+    }
+    externalFilesPatchMutation.mutate({
+      expectedVersion: externalFilesState.detail.admin_version,
+      inboundMaxFileBytes,
+      outboundMaxFileBytes,
+      outboundMaxActionBytes,
+    });
+  }, [
+    externalFilesPatchMutation,
+    externalFilesState,
+    inboundMaxFileBytes,
+    outboundMaxActionBytes,
+    outboundMaxFileBytes,
+  ]);
 
   const onSaveCandidate = useCallback((): void => {
     if (state.type !== "LOADED" || saveDisabled) {
@@ -282,6 +425,13 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     null;
 
   return {
+    externalFilesState,
+    externalFilesDraft,
+    externalFilesSaving: externalFilesPatchMutation.isPending,
+    externalFilesDraftDirty,
+    externalFilesSaveDisabled,
+    externalFilesMutationError:
+      externalFilesPatchMutation.error?.message ?? null,
     state,
     auditState,
     draft,
@@ -294,6 +444,22 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     checkingHealth: healthMutation.isPending,
     saveDisabled,
     mutationError,
+    onInboundMaxFileMiBChange: (value) =>
+      setExternalFilesDraft((current) => ({
+        ...current,
+        inboundMaxFileMiB: value,
+      })),
+    onOutboundMaxFileMiBChange: (value) =>
+      setExternalFilesDraft((current) => ({
+        ...current,
+        outboundMaxFileMiB: value,
+      })),
+    onOutboundMaxActionMiBChange: (value) =>
+      setExternalFilesDraft((current) => ({
+        ...current,
+        outboundMaxActionMiB: value,
+      })),
+    onSaveExternalFiles,
     onAppIdChange: (value) =>
       setDraft((current) => ({
         ...current,
