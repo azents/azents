@@ -197,6 +197,7 @@ def external_channel_progress_evidence(
     serialized = json.dumps(request, ensure_ascii=False)
     return {
         "binding": external_channel_binding(request),
+        "marker_present": _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized,
         "resolved_user_reference": "@User UREVIEWER" in serialized,
         "resolved_channel_reference": "#e2e" in serialized,
         "progress_tool_available": _request_has_named_tool(
@@ -308,7 +309,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._write_image_generation_response(request)
             return
         serialized = json.dumps(request, ensure_ascii=False)
-        if _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized:
+        if (
+            _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized
+            or external_channel_binding(request) is not None
+            or _request_has_named_tool(request, "channel_action")
+        ):
             evidence = external_channel_progress_evidence(request)
             evidence["path"] = self.path
             evidence["matched"] = is_external_channel_progress_request(request)
