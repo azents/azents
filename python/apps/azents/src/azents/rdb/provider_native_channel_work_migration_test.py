@@ -110,7 +110,16 @@ def _seed_legacy_binding_graph(
                 'Migration test Agent',
                 '{}'::jsonb,
                 '{}'::jsonb,
-                '[]'::jsonb,
+                '[
+                    {
+                        "label": "migration-main",
+                        "model_selection": {}
+                    },
+                    {
+                        "label": "migration-lightweight",
+                        "model_selection": {}
+                    }
+                ]'::jsonb,
                 'migration-main',
                 'migration-lightweight'
             )
