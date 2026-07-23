@@ -223,16 +223,17 @@ def upgrade() -> None:
                 END
             ),
             enrollment.provider_id,
-            'azents_issued_token',
+            CAST('azents_issued_token' AS runtime_provider_auth_method),
             'provider:' || enrollment.provider_id
                 || CASE
                     WHEN enrollment.issued_by_source_id IS NULL THEN ':' || 'admin'
                     ELSE ':' || 'bootstrap' || ':' || enrollment.issued_by_source_id
                 END,
-            'active',
+            CAST('active' AS runtime_provider_binding_state),
             CASE
-                WHEN enrollment.issued_by_source_id IS NULL THEN 'admin'
-                ELSE 'bootstrap'
+                WHEN enrollment.issued_by_source_id IS NULL
+                    THEN CAST('admin' AS runtime_provider_binding_owner)
+                ELSE CAST('bootstrap' AS runtime_provider_binding_owner)
             END,
             declaration.id,
             jsonb_build_object(
@@ -298,7 +299,7 @@ def upgrade() -> None:
         SELECT
             md5(binding.id || ':' || 'created'),
             binding.id,
-            'created',
+            CAST('created' AS runtime_provider_binding_audit_event_type),
             NULL,
             NULL,
             binding.admin_version,
