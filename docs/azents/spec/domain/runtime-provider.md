@@ -10,20 +10,23 @@ code_paths:
   - python/apps/azents/src/azents/repos/runtime_provider/**
   - python/apps/azents/src/azents/repos/runtime_provider_policy/**
   - python/apps/azents/src/azents/services/runtime_provider_admin/**
+  - python/apps/azents/src/azents/services/runtime_provider_bootstrap/**
+  - python/apps/azents/src/azents/services/runtime_provider_control/**
   - python/apps/azents/src/azents/services/runtime_provider_public/**
   - python/apps/azents/src/azents/services/runtime_provider_selection/**
   - python/apps/azents/src/azents/api/admin/runtime_provider/**
   - python/apps/azents/src/azents/api/public/runtime_provider/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents-runtime-provider-kubernetes/src/azents_runtime_provider_kubernetes/main.py
   - infra/charts/azents/templates/runtime-provider-kubernetes/**
   - infra/charts/azents/values.yaml
   - infra/charts/azents/values.schema.json
   - typescript/apps/azents-admin-web/src/app/runtime-providers/**
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
-last_verified_at: 2026-07-22
-spec_version: 1
+last_verified_at: 2026-07-23
+spec_version: 2
 ---
 
 # Runtime Provider
@@ -72,8 +75,22 @@ unavailable outcome instead of creating a partial Runtime or selecting a deploym
 
 ## Deployment boundary
 
-The Kubernetes Provider remains disabled by default. When enabled, its Provider credential is read only
-from an operator-managed Secret reference and is distinct from Runtime Control authentication. The Helm
-bootstrap source renders an authoritative declaration file, including an explicit empty provider list
-when the adapter is disabled. Admin Provider policy cannot mutate cluster RBAC, NetworkPolicy,
-RuntimeClass, Secret contents, or other deployment-owned security controls.
+The Kubernetes Provider remains disabled by default. When enabled, its Provider credential is distinct
+from Runtime Control Runner authentication. The Helm bootstrap source renders an authoritative
+declaration file, including an explicit empty provider list when the adapter is disabled.
+
+An optional short-lived bootstrap Job authenticates the staged credential if one exists or exchanges a
+source-bound one-time enrollment grant for a new credential. Its ServiceAccount may only get, patch, and
+update the configured staging Secret; it cannot create Secrets. External deployment automation may
+persist that staged value and materialize a separate final Secret for the long-running Provider. The
+Provider workload reads only the final Secret through a projected file and its ServiceAccount has no
+Secret-write permission.
+
+The Provider watches the projected credential file and reconnects when its value changes. Issuing and
+staging a replacement credential does not revoke the current credential. After the replacement
+credential establishes an authenticated Provider connection, Control revokes only older active
+credentials issued by the same bootstrap source and disconnects their durable connection authority.
+An older credential reconnecting during propagation cannot revoke a newer credential.
+
+Admin Provider policy cannot mutate cluster RBAC, NetworkPolicy, RuntimeClass, Secret contents, or
+other deployment-owned security controls.

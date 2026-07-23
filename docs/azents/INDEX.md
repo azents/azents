@@ -21,7 +21,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-22 | 1 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-23 | 2 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-22 | 3 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-23 | 73 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
