@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Literal, cast
@@ -185,6 +186,22 @@ class _RuntimeRepository(AgentRuntimeRepository):
         return runtime
 
 
+class _UnavailableRuntimeRepository(_RuntimeRepository):
+    """Runtime repository double returning a disconnected Runner."""
+
+    async def get_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> AgentRuntime | None:
+        """Return a Runtime whose Runner cannot accept cleanup."""
+        runtime = await super().get_by_agent_id(session, agent_id)
+        assert runtime is not None
+        return runtime.model_copy(
+            update={"runner_state": RuntimeRunnerState.DISCONNECTED}
+        )
+
+
 class _RunnerOperations:
     """Runner operation double for Git worktree operations."""
 
@@ -192,11 +209,13 @@ class _RunnerOperations:
         self,
         failures: list[str] | None = None,
         cleanup_failures: list[str] | None = None,
+        unexpected_cleanup_failures: list[Exception] | None = None,
         cleanup_failure_code: str | None = None,
         parent_delete_canceled: bool = False,
     ) -> None:
         self.failures = list(failures or [])
         self.cleanup_failures = list(cleanup_failures or [])
+        self.unexpected_cleanup_failures = list(unexpected_cleanup_failures or [])
         self.cleanup_failure_code = cleanup_failure_code
         self.parent_delete_canceled = parent_delete_canceled
         self.calls: list[dict[str, object]] = []
@@ -334,6 +353,8 @@ class _RunnerOperations:
                 "force": force,
             }
         )
+        if self.unexpected_cleanup_failures:
+            raise self.unexpected_cleanup_failures.pop(0)
         if self.cleanup_failures:
             raise RuntimeRunnerOperationFailedError(
                 self.cleanup_failures.pop(0),
@@ -1374,99 +1395,6 @@ class TestSessionGitWorktreeService:
             for event_value in event_values
         )
 
-    async def test_archive_integrity_accepts_registered_dirty_worktree(
-        self,
-        rdb_session_manager: SessionManager[AsyncSession],
-    ) -> None:
-        """Dirty state is observed but does not block reversible archive."""
-        runner = _RunnerOperations()
-        (
-            worktree_service,
-            _,
-            agent_id,
-            session_id,
-        ) = await _create_ready_worktree_session(
-            rdb_session_manager,
-            slug="archive-dirty",
-            runner=runner,
-        )
-        async with rdb_session_manager() as session:
-            allocations = await SessionGitWorktreeRepository().lock_by_session_id(
-                session,
-                session_id=session_id,
-            )
-
-        failure = await worktree_service.validate_archive_integrity(
-            agent_id=agent_id,
-            root_session_id=session_id,
-            subtree_session_ids=[session_id],
-            allocations=allocations,
-        )
-
-        assert failure is None
-        assert runner.calls[-1]["operation"] == "inspect_git_worktree"
-
-    @pytest.mark.parametrize(
-        ("registered", "registered_branch_name", "target_kind", "reason_code"),
-        [
-            (True, "azents/session", "missing", "target_missing"),
-            (False, None, "directory", "registration_missing"),
-            (True, "azents/other", "directory", "branch_mismatch"),
-            (True, "azents/session", "other", "target_kind_invalid"),
-        ],
-    )
-    async def test_archive_integrity_rejects_unrestorable_worktree_state(
-        self,
-        rdb_session_manager: SessionManager[AsyncSession],
-        registered: bool,
-        registered_branch_name: str | None,
-        target_kind: Literal["directory", "missing", "other"],
-        reason_code: str,
-    ) -> None:
-        """Archive returns a bounded allocation-specific integrity failure."""
-        runner = _RunnerOperations()
-        (
-            worktree_service,
-            _,
-            agent_id,
-            session_id,
-        ) = await _create_ready_worktree_session(
-            rdb_session_manager,
-            slug=f"archive-{reason_code}",
-            runner=runner,
-        )
-        async with rdb_session_manager() as session:
-            allocations = await SessionGitWorktreeRepository().lock_by_session_id(
-                session,
-                session_id=session_id,
-            )
-        allocation = allocations[0]
-        branch_name = (
-            allocation.branch_name
-            if registered_branch_name == "azents/session"
-            else registered_branch_name
-        )
-        runner.inspect_result = RuntimeGitInspectWorktreeResult(
-            worktree_path=allocation.worktree_path,
-            registered=registered,
-            registered_branch_name=branch_name,
-            target_kind=target_kind,
-            dirty=None,
-            final_cursor="cursor-inspect",
-        )
-
-        failure = await worktree_service.validate_archive_integrity(
-            agent_id=agent_id,
-            root_session_id=session_id,
-            subtree_session_ids=[session_id],
-            allocations=allocations,
-        )
-
-        assert failure is not None
-        assert failure.allocation_id == allocation.id
-        assert failure.reason_code == reason_code
-        assert allocation.worktree_path not in failure.summary
-
     async def test_archive_cleanup_request_only_marks_pending(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -1551,12 +1479,64 @@ class TestSessionGitWorktreeService:
         remove_call = runner.calls[1]
         assert remove_call["force"] is False
 
-    async def test_root_tree_cleanup_uses_each_allocation_creator(
+    async def test_archive_root_tree_cleanup_records_unavailable_runner(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Purge cleanup preserves child worktree ownership validation."""
+        """Unavailable Runner state is recorded without raising to archive."""
         runner = _RunnerOperations()
+        (
+            worktree_service,
+            _,
+            agent_id,
+            session_id,
+        ) = await _create_ready_worktree_session(
+            rdb_session_manager,
+            slug="archive-runner-unavailable",
+            runner=runner,
+        )
+        worktree_service.agent_runtime_repository = _UnavailableRuntimeRepository()
+
+        with caplog.at_level(
+            logging.WARNING,
+            logger="azents.services.session_git_worktree",
+        ):
+            count = await worktree_service.run_archive_cleanup_for_root_tree(
+                agent_id=agent_id,
+                root_session_id=session_id,
+                subtree_session_ids=[session_id],
+            )
+
+        async with rdb_session_manager() as session:
+            allocation = await SessionGitWorktreeRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        assert count == 1
+        assert allocation is not None
+        assert allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
+        assert allocation.cleanup_summary == "Runtime runner is not ready."
+        failure_record = next(
+            record
+            for record in caplog.records
+            if record.message
+            == "Archived Session Git worktree cleanup did not complete"
+        )
+        assert failure_record.__dict__["worktree_id"] == allocation.id
+        assert failure_record.__dict__["root_session_id"] == session_id
+        assert failure_record.__dict__["reason_code"] == "runtime_unavailable"
+        assert [call["operation"] for call in runner.calls] == ["create_git_worktree"]
+
+    async def test_archive_root_tree_cleanup_continues_after_unexpected_failure(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """One unexpected allocation failure does not skip the next allocation."""
+        runner = _RunnerOperations(
+            unexpected_cleanup_failures=[RuntimeError("unexpected cleanup failure")]
+        )
         (
             worktree_service,
             _,
@@ -1617,11 +1597,15 @@ class TestSessionGitWorktreeService:
                 ),
             )
 
-        count = await worktree_service.run_cleanup_for_root_tree(
-            agent_id=agent_id,
-            root_session_id=root_session_id,
-            subtree_session_ids=[root_session_id, child_session.id],
-        )
+        with caplog.at_level(
+            logging.ERROR,
+            logger="azents.services.session_git_worktree",
+        ):
+            count = await worktree_service.run_archive_cleanup_for_root_tree(
+                agent_id=agent_id,
+                root_session_id=root_session_id,
+                subtree_session_ids=[root_session_id, child_session.id],
+            )
 
         async with rdb_session_manager() as session:
             allocations = await SessionGitWorktreeRepository().list_by_session_id(
@@ -1629,32 +1613,43 @@ class TestSessionGitWorktreeService:
                 session_id=root_session_id,
             )
         assert count == 2
-        assert {
-            allocation.created_by_agent_session_id for allocation in allocations
-        } == {
-            root_session_id,
-            child_session.id,
-        }
-        assert all(
-            allocation.status is SessionGitWorktreeStatus.CLEANED
-            for allocation in allocations
-        )
         remove_calls = [
             call for call in runner.calls if call["operation"] == "remove_git_worktree"
         ]
-        assert remove_calls
+        assert len(remove_calls) == 2
         assert all(call["force"] is True for call in remove_calls)
-        assert all(
-            allocation.cleanup_summary
-            == "Git worktree cleanup completed: removed_force."
+        first_allocation = next(
+            allocation
             for allocation in allocations
+            if allocation.worktree_path == remove_calls[0]["worktree_path"]
         )
+        second_allocation = next(
+            allocation
+            for allocation in allocations
+            if allocation.worktree_path == remove_calls[1]["worktree_path"]
+        )
+        assert first_allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
+        assert first_allocation.cleanup_summary == (
+            "Git worktree cleanup failed: unexpected_error."
+        )
+        assert second_allocation.status is SessionGitWorktreeStatus.CLEANED
+        assert second_allocation.cleanup_summary == (
+            "Git worktree cleanup completed: removed_force."
+        )
+        failure_record = next(
+            record
+            for record in caplog.records
+            if record.message
+            == "Archived Session Git worktree cleanup failed unexpectedly"
+        )
+        assert failure_record.__dict__["worktree_id"] == first_allocation.id
+        assert failure_record.__dict__["root_session_id"] == root_session_id
 
-    async def test_root_tree_cleanup_converges_when_target_is_already_absent(
+    async def test_archive_root_tree_cleanup_accepts_already_absent_target(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Retention purge treats confirmed worktree absence as terminal."""
+        """Archive cleanup treats confirmed worktree absence as terminal."""
         runner = _RunnerOperations()
         runner.remove_outcome = "already_absent"
         (
@@ -1668,7 +1663,7 @@ class TestSessionGitWorktreeService:
             runner=runner,
         )
 
-        count = await worktree_service.run_cleanup_for_root_tree(
+        count = await worktree_service.run_archive_cleanup_for_root_tree(
             agent_id=agent_id,
             root_session_id=session_id,
             subtree_session_ids=[session_id],
@@ -1686,9 +1681,10 @@ class TestSessionGitWorktreeService:
             "Git worktree cleanup completed: confirmed_absent."
         )
 
-    async def test_root_tree_cleanup_ignores_canceled_empty_parent_cleanup(
+    async def test_archive_root_tree_cleanup_ignores_canceled_empty_parent_cleanup(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Canceled best-effort parent cleanup does not block durable convergence."""
         runner = _RunnerOperations(parent_delete_canceled=True)
@@ -1704,11 +1700,15 @@ class TestSessionGitWorktreeService:
             runner=runner,
         )
 
-        count = await worktree_service.run_cleanup_for_root_tree(
-            agent_id=agent_id,
-            root_session_id=session_id,
-            subtree_session_ids=[session_id],
-        )
+        with caplog.at_level(
+            logging.INFO,
+            logger="azents.services.session_git_worktree",
+        ):
+            count = await worktree_service.run_archive_cleanup_for_root_tree(
+                agent_id=agent_id,
+                root_session_id=session_id,
+                subtree_session_ids=[session_id],
+            )
 
         async with rdb_session_manager() as session:
             allocation = await SessionGitWorktreeRepository().get_by_session_id(
@@ -1728,6 +1728,15 @@ class TestSessionGitWorktreeService:
             "list_files",
             "delete_file",
         ]
+        skipped_parent_record = next(
+            record
+            for record in caplog.records
+            if record.message == "Skipped empty session worktree directory cleanup"
+        )
+        assert skipped_parent_record.__dict__["session_id"] == session_id
+        assert skipped_parent_record.__dict__["worktree_id"] == allocation.id
+        assert "parent_path" not in skipped_parent_record.__dict__
+        assert "/workspace/" not in skipped_parent_record.getMessage()
 
     async def test_manual_cleanup_rejects_ordinary_project_target(
         self,

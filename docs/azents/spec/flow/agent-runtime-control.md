@@ -22,7 +22,7 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-07-22
+last_verified_at: 2026-07-23
 spec_version: 25
 ---
 
@@ -192,6 +192,13 @@ non-directory target return `worktree_ownership_ambiguous` without deletion.
 for non-Git paths, invalid refs, collisions, ownership ambiguity, and Git command failures so product
 services can persist bounded setup or cleanup classifications.
 
+Session archive is the only automatic Session lifecycle boundary that invokes these typed Git
+removal operations. It commits the database archive first and then makes one forced best-effort
+root-tree cleanup attempt. Cleanup failure is logged and recorded without changing archive success or
+creating retention retry work. Retention purge has no Runtime operation client or provider dependency:
+it checkpoints the database-only `session.git-worktrees@1` compatibility participant and deletes
+allocation rows through database finalization without inspecting physical Git state.
+
 Runner registration and state reports include a mounted workspace path. Control compares it with the provider-reported path and records an explicit failure if they differ. A Runner `busy` report means it is healthy and actively executing an operation, so Control persists it as `ready` rather than treating it as a Runtime failure. Operation routing uses runner generation fencing so stale runner streams cannot complete newer operations.
 
 Every ordinary Runner operation carries common nullable `owner_session_id` scheduling context in the operation request and domain envelope. Server-side clients require callers to pass the nullable value explicitly. Session-scoped process, file, Skill projection, Project registration, and worktree operations pass the invoking Agent Session ID. This includes internal file stat/list/read operations performed after a successful visible `read` to discover AGENTS.md and Claude Rules appendices. Subagents use their own Agent Session ID for both visible and appendix-internal work while resolving files against their parent Agent Runtime. Agent Workspace management, Agent Project catalog work, pre-Session Git preview, and other Agent-level operations pass `None` and use the system owner. Ownership is trusted scheduling and operator-diagnostic context, not authorization proof, and it is not exposed in model-visible tool output.
@@ -256,6 +263,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-23** (spec_version 25) — Restricted automatic Session lifecycle Git cleanup to one post-commit best-effort archive attempt and removed Runtime access from retention purge.
 - **2026-07-22** (spec_version 24) — Added content-free Git worktree inspection, branch-fenced removal, terminal missing-target and missing-branch outcomes, and non-destructive ambiguous-target rejection.
 - **2026-07-21** (spec_version 23) — Added generation-fenced internal Provider terminal deletion and durable acknowledgement for Agent decommission finalization.
 - **2026-07-20** (spec_version 22) — Added strict Runner-owned V4A `file.apply_patch`, ordered cancellation and terminal settlement, bounded path and content safety, staged revalidation, deterministic commit ordering, and exact no-rollback partial-failure reporting.

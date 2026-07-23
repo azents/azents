@@ -85,7 +85,6 @@ from .data import (
     AgentNotFound,
     ArchiveSessionError,
     ArchiveSessionResult,
-    ArchiveWorktreeIntegrityBlocked,
     ChatLiveRunOperation,
     ChatLiveRunRetryAttempt,
     ChatLiveRunRetryState,
@@ -1006,30 +1005,6 @@ class ChatSessionService:
                 session_ids=session_ids,
             ):
                 return Failure(RunningSessionArchiveBlocked())
-            worktree_allocations = (
-                await self.session_git_worktree_repository.lock_by_session_id(
-                    session,
-                    session_id=session_id,
-                )
-            )
-            if worktree_allocations:
-                integrity_failure = (
-                    await self.session_git_worktree_service.validate_archive_integrity(
-                        agent_id=agent_id,
-                        root_session_id=session_id,
-                        subtree_session_ids=session_ids,
-                        allocations=worktree_allocations,
-                    )
-                )
-                if integrity_failure is not None:
-                    return Failure(
-                        ArchiveWorktreeIntegrityBlocked(
-                            allocation_id=integrity_failure.allocation_id,
-                            reason_code=integrity_failure.reason_code,
-                            stage="archive_preflight",
-                            summary=integrity_failure.summary,
-                        )
-                    )
             settings = await self.archived_session_retention_repository.lock_settings(
                 session
             )
@@ -1087,6 +1062,23 @@ class ChatSessionService:
                     now=archived_at,
                 )
             await session.commit()
+            try:
+                run_archive_cleanup = (
+                    self.session_git_worktree_service.run_archive_cleanup_for_root_tree
+                )
+                await run_archive_cleanup(
+                    agent_id=agent_id,
+                    root_session_id=session_id,
+                    subtree_session_ids=session_ids,
+                )
+            except Exception:
+                logger.exception(
+                    "Archived Session Git worktree cleanup failed",
+                    extra={
+                        "agent_id": agent_id,
+                        "root_session_id": session_id,
+                    },
+                )
             cleanup_requested = (
                 await self.external_channel_lifecycle_service.consume_archive_cleanup(
                     archive_cleanup_ids

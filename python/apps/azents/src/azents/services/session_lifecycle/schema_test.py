@@ -129,10 +129,10 @@ def test_external_channel_manifest_excludes_canonical_provider_state() -> None:
     }
 
 
-async def test_installed_catalog_reader_exposes_current_worktree_risk(
+async def test_installed_catalog_reader_exposes_worktree_finalizer_boundary(
     rdb_session: AsyncSession,
 ) -> None:
-    """Fresh migrated PostgreSQL exposes trigger-backed unsafe worktree paths."""
+    """Installed worktree FKs retain the explicit database finalizer boundary."""
     foreign_keys = await PostgreSQLSessionLifecycleGraphReader().read_foreign_keys(
         rdb_session
     )
@@ -144,6 +144,16 @@ async def test_installed_catalog_reader_exposes_current_worktree_risk(
 
     assert worktree_foreign_keys
     assert all(foreign_key.triggers for foreign_key in worktree_foreign_keys)
+    context_foreign_key = next(
+        foreign_key
+        for foreign_key in worktree_foreign_keys
+        if foreign_key.constraint_name
+        == "session_agent_ctx_git_worktrees_context_id_fkey"
+    )
+    assert context_foreign_key.target_table == "public.session_agent_contexts"
+    assert (
+        context_foreign_key.delete_action is PostgreSQLForeignKeyDeleteAction.RESTRICT
+    )
 
     result = SessionLifecycleSchemaValidator().validate(
         foreign_keys=foreign_keys,
@@ -155,13 +165,10 @@ async def test_installed_catalog_reader_exposes_current_worktree_risk(
         for violation in result.violations
         if violation.table_name == "public.session_agent_context_git_worktrees"
     ]
-    assert any(
-        violation.code == "lifecycle_root_mutated_by_parent_delete"
-        for violation in worktree_violations
-    )
-    assert any(
-        violation.code == "multiple_mutating_paths" for violation in worktree_violations
-    )
+    assert {violation.code for violation in worktree_violations} == {
+        "multiple_mutating_paths",
+        "pure_database_child_requires_one_cascade",
+    }
 
 
 async def test_installed_catalog_restricts_agent_decommission_lifecycle_roots(
