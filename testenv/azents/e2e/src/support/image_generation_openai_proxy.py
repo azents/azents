@@ -55,6 +55,7 @@ _IMAGE_PATH = Path(
     )
 )
 _JOURNAL_PATH = "/v1/_image_generation_requests"
+_EXTERNAL_CHANNEL_PROGRESS_JOURNAL_PATH = "/v1/_external_channel_progress_requests"
 _XAI_IMAGINE_JOURNAL_PATH = "/v1/_xai_imagine_requests"
 _XAI_OAUTH_JOURNAL_PATH = "/v1/_xai_oauth_requests"
 _SUBSCRIPTION_USAGE_JOURNAL_PATH = "/v1/_subscription_usage_requests"
@@ -180,14 +181,29 @@ def external_channel_binding(request: dict[str, object]) -> str | None:
 
 
 def is_external_channel_progress_request(request: dict[str, object]) -> bool:
-    """Recognize the deterministic progress journey after display resolution."""
+    """Recognize the deterministic progress journey by stable request markers."""
     serialized = json.dumps(request, ensure_ascii=False)
     return (
         _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized
-        and "@User UREVIEWER" in serialized
-        and "#e2e" in serialized
+        and external_channel_binding(request) is not None
         and _request_has_named_tool(request, "channel_action")
     )
+
+
+def external_channel_progress_evidence(
+    request: dict[str, object],
+) -> dict[str, object]:
+    """Return sanitized evidence about one deterministic progress request."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    return {
+        "binding": external_channel_binding(request),
+        "resolved_user_reference": "@User UREVIEWER" in serialized,
+        "resolved_channel_reference": "#e2e" in serialized,
+        "progress_tool_available": _request_has_named_tool(
+            request,
+            "channel_action",
+        ),
+    }
 
 
 def _is_semantic_compaction_request(request: dict[str, object]) -> bool:
@@ -206,6 +222,7 @@ def _is_semantic_compaction_request(request: dict[str, object]) -> bool:
 
 class _State:
     requests: ClassVar[list[dict[str, object]]] = []
+    external_channel_progress_requests: ClassVar[list[dict[str, object]]] = []
     imagine_requests: ClassVar[list[dict[str, object]]] = []
     oauth_requests: ClassVar[list[dict[str, object]]] = []
     subscription_usage_requests: ClassVar[list[dict[str, object]]] = []
@@ -293,6 +310,10 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/responses" and is_external_channel_progress_request(
             request
         ):
+            with _State.lock:
+                _State.external_channel_progress_requests.append(
+                    external_channel_progress_evidence(request)
+                )
             binding = external_channel_binding(request)
             if binding is not None:
                 if request_has_tool_output(
@@ -385,6 +406,8 @@ class _Handler(BaseHTTPRequestHandler):
         """Return the journal selected by the current request path."""
         if self.path == _JOURNAL_PATH:
             return _State.requests
+        if self.path == _EXTERNAL_CHANNEL_PROGRESS_JOURNAL_PATH:
+            return _State.external_channel_progress_requests
         if self.path == _XAI_IMAGINE_JOURNAL_PATH:
             return _State.imagine_requests
         if self.path == _XAI_OAUTH_JOURNAL_PATH:

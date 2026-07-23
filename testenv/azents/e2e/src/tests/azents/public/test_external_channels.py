@@ -190,6 +190,23 @@ def _plan_delivery(slack_provider_fake_url: str) -> dict[str, object] | None:
     return None
 
 
+def _progress_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]:
+    """Return sanitized model-request evidence for the progress journey."""
+    response = requests.get(
+        f"{openai_proxy_url}/v1/_external_channel_progress_requests",
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        return []
+    return [
+        cast(dict[str, object], item)
+        for item in cast(list[object], payload)
+        if isinstance(item, dict)
+    ]
+
+
 def _login_main_web(
     driver: WebDriver,
     *,
@@ -540,16 +557,22 @@ def test_connection_update_and_repeated_disconnect(
 
 
 def test_provider_native_channel_work_progress_journey(
+    request: pytest.FixtureRequest,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
+    openai_proxy_url: str,
 ) -> None:
     """Render one rich canonical work snapshot through Slack's native Plan."""
     del azents_engine_worker_container
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.delete(
+        f"{openai_proxy_url}/v1/_external_channel_progress_requests",
         timeout=5,
     ).raise_for_status()
     root_timestamp = f"{int(time.time()) - 60}.000300"
@@ -593,6 +616,16 @@ def test_provider_native_channel_work_progress_journey(
         ),
         _headers=headers,
     )
+
+    def disconnect_connection() -> None:
+        external_api.external_channel_v1_disconnect_connection(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+
+    request.addfinalizer(disconnect_connection)
     validated = external_api.external_channel_v1_validate_connection(
         agent_id=agent_id,
         connection_id=setup.connection.id,
@@ -744,6 +777,13 @@ def test_provider_native_channel_work_progress_journey(
     )
     work = projection.items[0].work
     assert work is not None
+    request_evidence = _progress_request_evidence(openai_proxy_url)
+    assert {
+        "binding": projection.items[0].id,
+        "resolved_user_reference": True,
+        "resolved_channel_reference": True,
+        "progress_tool_available": True,
+    } in request_evidence
     assert [task.status for task in work.tasks] == [
         ExternalChannelWorkTaskStatus.IN_PROGRESS,
         ExternalChannelWorkTaskStatus.COMPLETED,

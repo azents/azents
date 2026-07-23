@@ -35,6 +35,12 @@ def test_progress_proxy_recognizes_resolved_external_turn_and_dynamic_binding() 
 
     assert proxy.is_external_channel_progress_request(request) is True
     assert proxy.external_channel_binding(request) == "binding-dynamic-123"
+    assert proxy.external_channel_progress_evidence(request) == {
+        "binding": "binding-dynamic-123",
+        "resolved_user_reference": True,
+        "resolved_channel_reference": True,
+        "progress_tool_available": True,
+    }
 
 
 def test_progress_proxy_distinguishes_continue_and_finish_tool_outputs() -> None:
@@ -73,8 +79,8 @@ def test_progress_proxy_distinguishes_continue_and_finish_tool_outputs() -> None
     assert proxy.request_has_tool_output(request, "call_missing") is False
 
 
-def test_progress_proxy_requires_provider_resolved_names() -> None:
-    """Raw provider IDs do not activate the name-resolution E2E response."""
+def test_progress_proxy_records_unresolved_provider_references() -> None:
+    """Raw provider IDs remain visible as precise projection evidence."""
     request = _request()
     request["input"] = [
         {
@@ -86,4 +92,10 @@ def test_progress_proxy_requires_provider_resolved_names() -> None:
         }
     ]
 
-    assert proxy.is_external_channel_progress_request(request) is False
+    assert proxy.is_external_channel_progress_request(request) is True
+    assert proxy.external_channel_progress_evidence(request) == {
+        "binding": "binding-dynamic-123",
+        "resolved_user_reference": False,
+        "resolved_channel_reference": False,
+        "progress_tool_available": True,
+    }
