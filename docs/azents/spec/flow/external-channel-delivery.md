@@ -21,7 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-23
-spec_version: 7
+spec_version: 8
 ---
 
 # External Channel Delivery and Channel Work
@@ -60,11 +60,12 @@ Provider mutations are never automatically retried. Stale `attempting` recovery 
 - Initial binding activation separately creates one button-only `Open Azents session`
   control message. Later invocations on the binding do not repeat it, and Activity
   Tracker desired state never contains the Session URL.
-- The initial Tracker states that the Agent is checking the message. Checking and
-  working presentation starts with a native Slack `task_card` carrying the
-  `in_progress` state. Ordered Todo task cards omit status for pending tasks, use
-  `in_progress` for current tasks, and use `complete` for completed tasks. The
-  blocks are read-only and require no Slack interaction callback.
+- The initial Tracker states that the Agent is checking the message. When no Todo
+  card exists, the summary `task_card` carries the `in_progress` state. Once any
+  Todo exists, the summary card omits status so the current Todo exclusively owns
+  the circular `in_progress` indicator. Pending Todo cards omit status and completed
+  Todo cards use `complete`. The blocks are read-only and require no Slack
+  interaction callback.
 - Task changes update the retained provider message with the complete current Block
   Kit payload through `chat.update`. Task titles remain literal strings.
 - Finishing requires a final reply. The reply is attempted first; only a durable
@@ -132,6 +133,7 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-23** (spec_version 8) — Removed summary-card progress chrome whenever Todo cards exist so the active Todo exclusively owns the circular indicator.
 - **2026-07-23** (spec_version 7) — Reconciled approval decisions with late control-message delivery so either completion order creates and consumes one idempotent delete intent without lock inversion.
 - **2026-07-23** (spec_version 6) — Separated the one-time Session-link message, switched the Tracker to native read-only task cards, limited work to 49 Todos, made successful final replies delete the Tracker, and restricted replacement to active desired work with race-safe cleanup reconciliation.
 - **2026-07-23** (spec_version 5) — Rendered provider participant identity in approval controls as Slack plain text rather than untrusted mrkdwn.

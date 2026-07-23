@@ -34,7 +34,7 @@ def test_checking_tracker_has_no_title_or_session_link() -> None:
 
 
 def test_working_tracker_marks_only_active_todo_with_circle_indicator() -> None:
-    """Native task cards omit status chrome for pending Todo items."""
+    """Todo cards own progress chrome once the Tracker has work items."""
     presentation = render_activity_tracker(
         state="working",
         tasks=(
@@ -67,7 +67,6 @@ def test_working_tracker_marks_only_active_todo_with_circle_indicator() -> None:
             "type": "task_card",
             "task_id": "activity-status",
             "title": "Agent is working",
-            "status": "in_progress",
         },
         {
             "type": "task_card",
@@ -86,6 +85,23 @@ def test_working_tracker_marks_only_active_todo_with_circle_indicator() -> None:
             "title": "Old step",
             "status": "complete",
         },
+    ]
+
+
+def test_working_tracker_without_todos_keeps_summary_indicator() -> None:
+    """The summary card owns progress until the Agent publishes a Todo."""
+    presentation = render_activity_tracker(
+        state="working",
+        tasks=(),
+    )
+
+    assert presentation.blocks == [
+        {
+            "type": "task_card",
+            "task_id": "activity-status",
+            "title": "Agent is working",
+            "status": "in_progress",
+        }
     ]
 
 
@@ -138,6 +154,18 @@ def test_persisted_tracker_projection_is_validated_before_rendering() -> None:
     )
 
     assert presentation.text == "Agent is working\nPending: Investigate"
+    assert presentation.blocks == [
+        {
+            "type": "task_card",
+            "task_id": "activity-status",
+            "title": "Agent is working",
+        },
+        {
+            "type": "task_card",
+            "task_id": "investigate",
+            "title": "Investigate",
+        },
+    ]
     assert payload == {
         "state": "working",
         "tasks": [

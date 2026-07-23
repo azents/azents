@@ -61,8 +61,9 @@ def render_activity_tracker(
         "type": "task_card",
         "task_id": "activity-status",
         "title": status_text,
-        "status": "in_progress",
     }
+    if not tasks:
+        status_block["status"] = "in_progress"
     blocks = [status_block, *[_task_card(task) for task in tasks]]
     return ActivityTrackerPresentation(
         text="\n".join(fallback_lines),
