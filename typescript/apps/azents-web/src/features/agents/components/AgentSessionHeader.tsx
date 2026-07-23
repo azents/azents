@@ -36,6 +36,7 @@ import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { AgentAvatar } from "./AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "./AgentFocusedShell";
+import classes from "./AgentSessionHeader.module.css";
 import type {
   AgentResponse,
   AgentSessionResponse,
@@ -332,6 +333,7 @@ export function AgentSessionHeader({
           px="sm"
         >
           <Tabs.List
+            className={classes.scrollableTabs}
             style={{
               flexWrap: "nowrap",
               overflowX: "auto",

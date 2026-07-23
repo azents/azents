@@ -215,8 +215,8 @@ function ReadyApproval({
     <Container size="sm" py={{ base: "lg", sm: "xl" }}>
       <Paper withBorder radius="lg" p={{ base: "md", sm: "xl" }}>
         <Stack gap="lg">
-          <Group justify="space-between" align="flex-start" wrap="nowrap">
-            <Group gap="sm" wrap="nowrap">
+          <Group justify="space-between" align="flex-start" wrap="wrap">
+            <Group gap="sm" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
               <ThemeIcon variant="light" size="lg" radius="md">
                 <IconBrandSlack aria-hidden="true" size={20} />
               </ThemeIcon>
@@ -229,7 +229,11 @@ function ReadyApproval({
                 </Text>
               </Stack>
             </Group>
-            <Badge color={status.color} variant="light">
+            <Badge
+              color={status.color}
+              variant="light"
+              style={{ flexShrink: 0 }}
+            >
               {status.label}
             </Badge>
           </Group>
