@@ -733,9 +733,10 @@ async def test_routable_route_waits_for_disconnect_transition(
     """Connection locking prevents selection across a disconnect transition."""
     async with rdb_session_manager() as transition_session:
         connection_id, _, _, repository = await _setup_route(transition_session)
-        connection = await repository.lock_connection(
-            transition_session,
-            connection_id=connection_id,
+        connection = await transition_session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == connection_id)
+            .with_for_update()
         )
         assert connection is not None
         connection.status = ExternalChannelConnectionStatus.DISCONNECTING
@@ -761,7 +762,7 @@ async def test_pending_allow_requires_routable_connection(
 ) -> None:
     """Pending approval cannot create state while disconnect is in progress."""
     async with rdb_session_manager() as session:
-        connection_id, route_id, _, repository = await _setup_route(session)
+        connection_id, route_id, agent_id, repository = await _setup_route(session)
         resource = await repository.create_resource_idempotent(
             session,
             ExternalChannelResourceCreate(
@@ -862,9 +863,29 @@ async def test_pending_allow_requires_routable_connection(
             RDBExternalChannelAccessRequest,
             request.id,
         )
-        bindings = list(await session.scalars(sa.select(RDBExternalChannelBinding)))
-        grants = list(await session.scalars(sa.select(RDBExternalChannelAccessGrant)))
-        agent_sessions = list(await session.scalars(sa.select(RDBAgentSession)))
+        bindings = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelBinding).where(
+                    RDBExternalChannelBinding.resource_id == resource.id,
+                    RDBExternalChannelBinding.route_id == route_id,
+                )
+            )
+        )
+        grants = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelAccessGrant).where(
+                    RDBExternalChannelAccessGrant.agent_id == agent_id,
+                    RDBExternalChannelAccessGrant.principal_id == principal.id,
+                )
+            )
+        )
+        agent_sessions = list(
+            await session.scalars(
+                sa.select(RDBAgentSession).where(
+                    RDBAgentSession.agent_id == agent_id,
+                )
+            )
+        )
 
     assert persisted_request is not None
     assert persisted_request.status is ExternalChannelAccessRequestStatus.PENDING
