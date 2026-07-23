@@ -46,7 +46,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-07-20
+last_verified_at: 2026-07-22
 spec_version: 3
 ---
 
@@ -58,7 +58,9 @@ System Settings owns instance-wide, administrator-managed product configuration 
 independent setting families currently use this domain:
 
 - the provider-neutral Section lifecycle, whose first compiled Section is the Platform GitHub App;
-- archived-session retention under the file-lifecycle API.
+- archived-session retention under the file-lifecycle API; and
+- the confirmed `platform_runtime` Section, whose typed non-secret configuration stores the
+  Platform default Provider logical ID used only by exact Runtime selection.
 
 Only a user with a live database-backed `system_admin` assignment may read or mutate either family.
 Public API users, Workspace roles, environment configuration, and UI visibility never grant System

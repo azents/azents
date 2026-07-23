@@ -21,7 +21,8 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
-| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-23 | 2 |
+| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-22 | 3 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-23 | 73 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-23 | 45 |
@@ -32,7 +33,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-23 | 128 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-22 | 24 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-22 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-22 | 41 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |

@@ -17,7 +17,7 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
-last_verified_at: 2026-07-03
+last_verified_at: 2026-07-22
 spec_version: 3
 ---
 
@@ -29,6 +29,18 @@ Agent Workspace durability is owned by the Runtime Provider backend, not by the 
 process and not by S3 checkpoint/restore as a event path. The Provider reports the Agent
 Workspace absolute path as Runtime metadata. Server file APIs and prompts consume that reported
 path instead of hardcoding `/home/sandbox`.
+
+## Provider selection and immutable binding
+
+When the first logical Runtime row is created, Agent Runtime service delegates Provider selection to
+`RuntimeProviderSelectionService`. The exact Agent preference or typed Platform default is resolved in
+one transaction. Selection does not use environment defaults or fallback after an explicit Provider is
+ineligible. The selected durable Provider resource, binding origin, accepted contract/configuration
+revision IDs, and an immutable policy snapshot are stored before lifecycle commands are dispatched.
+
+A later availability, default, contract, or configuration change does not reassign an existing logical
+Runtime. If no Provider can satisfy the request, the lifecycle API returns an explicit unavailable
+conflict and no partial Runtime is persisted.
 
 ## Event Persistence
 
