@@ -17,19 +17,20 @@ import pprint
 import re  # noqa: F401
 import json
 
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
-class RuntimeProviderEnrollmentGrantIssueRequest(BaseModel):
+class RuntimeProviderAuthenticationBindingRevokeRequest(BaseModel):
     """
-    System Admin enrollment grant issuance input.
+    Revoke a binding using optimistic concurrency.
     """ # noqa: E501
-    expires_at: datetime
+    expected_admin_version: Annotated[int, Field(strict=True, ge=1)]
+    reason: Optional[Annotated[str, Field(strict=True, max_length=255)]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["expires_at"]
+    __properties: ClassVar[List[str]] = ["expected_admin_version", "reason"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -49,7 +50,7 @@ class RuntimeProviderEnrollmentGrantIssueRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of RuntimeProviderEnrollmentGrantIssueRequest from a JSON string"""
+        """Create an instance of RuntimeProviderAuthenticationBindingRevokeRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -77,11 +78,16 @@ class RuntimeProviderEnrollmentGrantIssueRequest(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if reason (nullable) is None
+        # and model_fields_set contains the field
+        if self.reason is None and "reason" in self.model_fields_set:
+            _dict['reason'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of RuntimeProviderEnrollmentGrantIssueRequest from a dict"""
+        """Create an instance of RuntimeProviderAuthenticationBindingRevokeRequest from a dict"""
         if obj is None:
             return None
 
@@ -89,7 +95,8 @@ class RuntimeProviderEnrollmentGrantIssueRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "expires_at": obj.get("expires_at")
+            "expected_admin_version": obj.get("expected_admin_version"),
+            "reason": obj.get("reason")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

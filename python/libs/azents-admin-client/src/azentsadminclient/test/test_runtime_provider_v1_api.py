@@ -26,10 +26,38 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_runtime_provider_v1_create_auth_binding(self) -> None:
+        """Test case for runtime_provider_v1_create_auth_binding
+
+        Create Auth Binding
+        """
+        pass
+
+    def test_runtime_provider_v1_get_auth_binding(self) -> None:
+        """Test case for runtime_provider_v1_get_auth_binding
+
+        Get Auth Binding
+        """
+        pass
+
     def test_runtime_provider_v1_get_runtime_provider(self) -> None:
         """Test case for runtime_provider_v1_get_runtime_provider
 
         Get Runtime Provider
+        """
+        pass
+
+    def test_runtime_provider_v1_list_auth_binding_audit_events(self) -> None:
+        """Test case for runtime_provider_v1_list_auth_binding_audit_events
+
+        List Auth Binding Audit Events
+        """
+        pass
+
+    def test_runtime_provider_v1_list_auth_bindings(self) -> None:
+        """Test case for runtime_provider_v1_list_auth_bindings
+
+        List Auth Bindings
         """
         pass
 
@@ -44,6 +72,20 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """Test case for runtime_provider_v1_replace_runtime_provider_availability
 
         Replace Runtime Provider Availability
+        """
+        pass
+
+    def test_runtime_provider_v1_revoke_auth_binding(self) -> None:
+        """Test case for runtime_provider_v1_revoke_auth_binding
+
+        Revoke Auth Binding
+        """
+        pass
+
+    def test_runtime_provider_v1_rotate_auth_binding(self) -> None:
+        """Test case for runtime_provider_v1_rotate_auth_binding
+
+        Rotate Auth Binding
         """
         pass
 

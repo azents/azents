@@ -18,21 +18,20 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
-class RuntimeProviderEnrollmentGrantIssueResponse(BaseModel):
+class RuntimeProviderAuthenticationBindingRotateRequest(BaseModel):
     """
-    One-time enrollment grant returned only to a System Admin.
+    Rotate issued-token enrollment authority.
     """ # noqa: E501
-    grant_id: StrictStr
-    provider_id: StrictStr
-    secret: StrictStr
+    expected_admin_version: Annotated[int, Field(strict=True, ge=1)]
     expires_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["grant_id", "provider_id", "secret", "expires_at"]
+    __properties: ClassVar[List[str]] = ["expected_admin_version", "expires_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -52,7 +51,7 @@ class RuntimeProviderEnrollmentGrantIssueResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of RuntimeProviderEnrollmentGrantIssueResponse from a JSON string"""
+        """Create an instance of RuntimeProviderAuthenticationBindingRotateRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -84,7 +83,7 @@ class RuntimeProviderEnrollmentGrantIssueResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of RuntimeProviderEnrollmentGrantIssueResponse from a dict"""
+        """Create an instance of RuntimeProviderAuthenticationBindingRotateRequest from a dict"""
         if obj is None:
             return None
 
@@ -92,9 +91,7 @@ class RuntimeProviderEnrollmentGrantIssueResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "grant_id": obj.get("grant_id"),
-            "provider_id": obj.get("provider_id"),
-            "secret": obj.get("secret"),
+            "expected_admin_version": obj.get("expected_admin_version"),
             "expires_at": obj.get("expires_at")
         })
         # store additional fields in additional_properties

@@ -92,11 +92,15 @@ Class | Method | HTTP request | Description
 *ModelCatalogV1Api* | [**model_catalog_v1_list_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_list_system_model_catalogs) | **GET** /model-catalog/v1/system-catalogs | List System Model Catalogs
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalog**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalog) | **POST** /model-catalog/v1/system-catalogs/{provider}/refresh | Refresh System Model Catalog
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
-*RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_issue_enrollment_grant**](azentsadminclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_issue_enrollment_grant) | **POST** /runtime-provider-enrollment/v1/runtime-providers/{provider_id}/enrollment-grants | Issue Enrollment Grant
-*RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_revoke_credential**](azentsadminclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_revoke_credential) | **DELETE** /runtime-provider-enrollment/v1/runtime-provider-credentials/{credential_id} | Revoke Credential
+*RuntimeProviderV1Api* | [**runtime_provider_v1_create_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_auth_binding) | **POST** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | Create Auth Binding
+*RuntimeProviderV1Api* | [**runtime_provider_v1_get_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_auth_binding) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id} | Get Auth Binding
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_runtime_provider**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
+*RuntimeProviderV1Api* | [**runtime_provider_v1_list_auth_binding_audit_events**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_binding_audit_events) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id}/audit-events | List Auth Binding Audit Events
+*RuntimeProviderV1Api* | [**runtime_provider_v1_list_auth_bindings**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_bindings) | **GET** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | List Auth Bindings
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_runtime_providers**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_runtime_providers) | **GET** /runtime-provider/v1/providers | List Runtime Providers
 *RuntimeProviderV1Api* | [**runtime_provider_v1_replace_runtime_provider_availability**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_replace_runtime_provider_availability) | **PUT** /runtime-provider/v1/providers/{provider_id}/availability | Replace Runtime Provider Availability
+*RuntimeProviderV1Api* | [**runtime_provider_v1_revoke_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_revoke_auth_binding) | **POST** /runtime-provider/v1/authentication-bindings/{binding_id}/revoke | Revoke Auth Binding
+*RuntimeProviderV1Api* | [**runtime_provider_v1_rotate_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_rotate_auth_binding) | **POST** /runtime-provider/v1/authentication-bindings/{binding_id}/rotate | Rotate Auth Binding
 *RuntimeProviderV1Api* | [**runtime_provider_v1_update_runtime_provider_policy**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_update_runtime_provider_policy) | **PATCH** /runtime-provider/v1/providers/{provider_id}/policy | Update Runtime Provider Policy
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_bootstrap_first_system_admin**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_bootstrap_first_system_admin) | **POST** /system/v1/bootstrap/first-admin | Bootstrap First System Admin
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_get_system_bootstrap_status**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_get_system_bootstrap_status) | **GET** /system/v1/bootstrap/status | Get System Bootstrap Status
@@ -168,11 +172,20 @@ Class | Method | HTTP request | Description
  - [PlatformGitHubAppFieldResponse](azentsadminclient/docs/PlatformGitHubAppFieldResponse.md)
  - [PlatformGitHubAppHealthResponse](azentsadminclient/docs/PlatformGitHubAppHealthResponse.md)
  - [PlatformGitHubAppPatchRequest](azentsadminclient/docs/PlatformGitHubAppPatchRequest.md)
+ - [RuntimeProviderAuthMethod](azentsadminclient/docs/RuntimeProviderAuthMethod.md)
+ - [RuntimeProviderAuthenticationBindingAuditEventResponse](azentsadminclient/docs/RuntimeProviderAuthenticationBindingAuditEventResponse.md)
+ - [RuntimeProviderAuthenticationBindingAuditListResponse](azentsadminclient/docs/RuntimeProviderAuthenticationBindingAuditListResponse.md)
+ - [RuntimeProviderAuthenticationBindingCreateRequest](azentsadminclient/docs/RuntimeProviderAuthenticationBindingCreateRequest.md)
+ - [RuntimeProviderAuthenticationBindingListResponse](azentsadminclient/docs/RuntimeProviderAuthenticationBindingListResponse.md)
+ - [RuntimeProviderAuthenticationBindingResponse](azentsadminclient/docs/RuntimeProviderAuthenticationBindingResponse.md)
+ - [RuntimeProviderAuthenticationBindingRevokeRequest](azentsadminclient/docs/RuntimeProviderAuthenticationBindingRevokeRequest.md)
+ - [RuntimeProviderAuthenticationBindingRotateRequest](azentsadminclient/docs/RuntimeProviderAuthenticationBindingRotateRequest.md)
+ - [RuntimeProviderAuthenticationBindingRotateResponse](azentsadminclient/docs/RuntimeProviderAuthenticationBindingRotateResponse.md)
  - [RuntimeProviderAvailabilityMode](azentsadminclient/docs/RuntimeProviderAvailabilityMode.md)
  - [RuntimeProviderAvailabilityRequest](azentsadminclient/docs/RuntimeProviderAvailabilityRequest.md)
- - [RuntimeProviderCredentialRevokeResponse](azentsadminclient/docs/RuntimeProviderCredentialRevokeResponse.md)
- - [RuntimeProviderEnrollmentGrantIssueRequest](azentsadminclient/docs/RuntimeProviderEnrollmentGrantIssueRequest.md)
- - [RuntimeProviderEnrollmentGrantIssueResponse](azentsadminclient/docs/RuntimeProviderEnrollmentGrantIssueResponse.md)
+ - [RuntimeProviderBindingAuditEventType](azentsadminclient/docs/RuntimeProviderBindingAuditEventType.md)
+ - [RuntimeProviderBindingOwner](azentsadminclient/docs/RuntimeProviderBindingOwner.md)
+ - [RuntimeProviderBindingState](azentsadminclient/docs/RuntimeProviderBindingState.md)
  - [RuntimeProviderLifecycleState](azentsadminclient/docs/RuntimeProviderLifecycleState.md)
  - [RuntimeProviderListResponse](azentsadminclient/docs/RuntimeProviderListResponse.md)
  - [RuntimeProviderPolicyUpdateRequest](azentsadminclient/docs/RuntimeProviderPolicyUpdateRequest.md)
