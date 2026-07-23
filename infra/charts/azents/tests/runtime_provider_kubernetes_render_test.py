@@ -23,6 +23,8 @@ def _helm_template(*values: str) -> str:
         "adminWeb.image.repository=repo/admin-web",
         "adminWeb.image.tag=sha",
         "secrets.existingSecrets.redis=azents-redis",
+        "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
+        "runtimeProviderKubernetes.credential.existingSecret=azents-provider-credential",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])
@@ -37,10 +39,17 @@ def _helm_template(*values: str) -> str:
 
 
 def test_runtime_provider_kubernetes_default_off_render_contract() -> None:
-    """Default values do not render the Runtime Provider Deployment."""
+    """Default values render an authoritative empty Provider source."""
     rendered = _helm_template()
 
     assert "azents-runtime-provider-kubernetes" not in rendered
+    assert "azents-runtime-provider-bootstrap" in rendered
+    assert 'key: "helm/default/azents"' in rendered
+    assert "providers:\n      []" in rendered
+    assert "AZ_RUNTIME_DEFAULT_PROVIDER_ID" not in rendered
+    assert "AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY" in rendered
+    assert "AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_PATH" in rendered
+    assert "mountPath: /var/run/azents/runtime-provider-bootstrap" in rendered
 
 
 def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
@@ -54,10 +63,27 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     )
 
     assert "azents-runtime-provider-kubernetes" in rendered
+    assert "azents-runtime-provider-bootstrap" in rendered
+    assert "declarationKey: runtime-provider-kubernetes" in rendered
+    assert "providerId: system-kubernetes" in rendered
+    assert "availabilityMode: platform_wide" in rendered
+    assert "AZ_RUNTIME_DEFAULT_PROVIDER_ID" not in rendered
+    assert "mountPath: /var/run/azents/runtime-provider-bootstrap" in rendered
     assert "repo/provider:sha" in rendered
     assert "repo/runner:sha" in rendered
     assert "AZ_RUNTIME_CONTROL_ENDPOINT" in rendered
     assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
+    assert "AZ_RUNTIME_CONTROL_ALLOW_INSECURE" in rendered
+    assert "AZ_RUNTIME_CONTROL_TLS_CA_FILE" in rendered
+    assert "azents-runtime-control-tls" in rendered
+    assert "AZ_RUNTIME_PROVIDER_READINESS_FILE" in rendered
+    assert "readinessProbe:" in rendered
+    assert "AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE" in rendered
+    assert "- name: AZ_RUNTIME_PROVIDER_CREDENTIAL\n" not in rendered
+    assert "azents-provider-credential" in rendered
+    assert "provider-credential" in rendered
+    assert "mountPath: /var/run/secrets/azents/runtime-provider-credential" in rendered
+    assert "path: credential" in rendered
     assert "AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_STORAGE_CLASS" in rendered
@@ -91,8 +117,8 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert 'namespace: "azents-runtime"' in rendered
 
 
-def test_runtime_provider_kubernetes_auth_enabled_render_contract() -> None:
-    """auth enabled values render the Runtime Control auth token Secret ref."""
+def test_runtime_provider_kubernetes_does_not_receive_runner_auth_token() -> None:
+    """Provider credentials remain separate from Runner transport auth."""
     rendered = _helm_template(
         "runtimeProviderKubernetes.enabled=true",
         "runtimeProviderKubernetes.image.repository=repo/provider",
@@ -103,9 +129,7 @@ def test_runtime_provider_kubernetes_auth_enabled_render_contract() -> None:
         "server.runtimeControl.auth.existingSecret=azents-runtime-control-auth",
     )
 
-    assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" in rendered
-    assert "azents-runtime-control-auth" in rendered
-    assert "runtime-control-token" in rendered
+    assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
 
 
 def test_runtime_provider_kubernetes_network_policy_allows_runtime_control() -> None:
@@ -265,6 +289,33 @@ def test_runtime_provider_kubernetes_digest_pinning_render_contract() -> None:
 
     assert "repo/provider:sha@sha256:providerdigest" in rendered
     assert "repo/runner:sha@sha256:runnerdigest" in rendered
+
+
+def test_runtime_provider_kubernetes_credential_bootstrap_render_contract() -> None:
+    """Credential bootstrap uses one narrow short-lived Secret writer Job."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "secrets.existingSecrets.auth=azents-auth",
+        "runtimeProviderKubernetes.credential.bootstrap.enabled=true",
+        "runtimeProviderKubernetes.credential.bootstrap.secretName=azents-provider-credential-bootstrap",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+    )
+
+    assert "kind: Job" in rendered
+    assert "runtime-provider-bootstrap-" in rendered
+    assert 'resources: ["secrets"]' in rendered
+    assert 'resourceNames: ["azents-provider-credential-bootstrap"]' in rendered
+    assert "ttlSecondsAfterFinished: 86400" in rendered
+    assert "azents-provider-credential" in rendered
+    assert 'verbs: ["get", "patch", "update"]' in rendered
+    assert 'verbs: ["create"' not in rendered
+    assert "src/cli/runtime_provider_bootstrap.py" in rendered
+    assert "AZ_CREDENTIAL_ENCRYPTION_KEY" in rendered
+    assert "kind: Secret" in rendered
+    assert 'azents.io/runtime-provider-id: "system-kubernetes"' in rendered
 
 
 def test_release_namespace_render_contract() -> None:

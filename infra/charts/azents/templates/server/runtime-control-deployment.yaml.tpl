@@ -51,6 +51,14 @@ spec:
               value: {{ .Values.server.runtimeControl.startTimeoutSeconds | quote }}
             - name: AZ_RUNTIME_CONTROL_AUTH_ENABLED
               value: {{ .Values.server.runtimeControl.auth.enabled | quote }}
+            - name: AZ_RUNTIME_CONTROL_ALLOW_INSECURE
+              value: "false"
+            - name: AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE
+              value: "/var/run/secrets/azents/runtime-control-tls/tls.crt"
+            - name: AZ_RUNTIME_CONTROL_TLS_PRIVATE_KEY_FILE
+              value: "/var/run/secrets/azents/runtime-control-tls/tls.key"
+            - name: AZ_RUNTIME_CONTROL_TLS_CA_FILE
+              value: "/var/run/secrets/azents/runtime-control-tls/ca.crt"
             {{- if .Values.server.runtimeControl.auth.enabled }}
             - name: AZ_RUNTIME_CONTROL_AUTH_TOKEN
               valueFrom:
@@ -62,7 +70,12 @@ spec:
               value: {{ include "azents.serverRuntimeRunnerImage" . | quote }}
             - name: AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT
               value: {{ include "azents.runtimeControlEndpoint" . | quote }}
+            {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: runtime-control-tls
+              mountPath: /var/run/secrets/azents/runtime-control-tls
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: grpc
@@ -79,4 +92,15 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      volumes:
+        - name: runtime-control-tls
+          secret:
+            secretName: {{ required "server.runtimeControl.tls.existingSecret is required when Runtime Control is enabled" .Values.server.runtimeControl.tls.existingSecret | quote }}
+            items:
+              - key: {{ .Values.server.runtimeControl.tls.certificateKey | quote }}
+                path: tls.crt
+              - key: {{ .Values.server.runtimeControl.tls.privateKeyKey | quote }}
+                path: tls.key
+              - key: {{ .Values.server.runtimeControl.tls.caKey | quote }}
+                path: ca.crt
 {{- end }}

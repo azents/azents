@@ -17,6 +17,9 @@ data:
   AZ_RDB_USE_IAM_AUTH: {{ .Values.database.external.useIamAuth | quote }}
   AZ_RDB_REGION: {{ .Values.database.external.region | quote }}
   AZ_RDB_SSL_MODE: {{ .Values.database.external.sslMode | quote }}
+  AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY: {{ printf "helm/%s/%s" .Release.Namespace .Release.Name | quote }}
+  AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_PATH: "/var/run/azents/runtime-provider-bootstrap/providers.yaml"
+  AZ_RUNTIME_PROVIDER_BOOTSTRAP_POLL_INTERVAL_SECONDS: "30"
   {{- $redisUrl := include "azents.redisConfigUrl" . }}
   {{- if $redisUrl }}
   AZ_REDIS_URL: {{ $redisUrl | quote }}
@@ -30,7 +33,6 @@ data:
   AZ_WORKSPACE_S3_BUCKET: {{ $objectStorageBucket | quote }}
   {{- end }}
   {{- if .Values.runtimeProviderKubernetes.enabled }}
-  AZ_RUNTIME_DEFAULT_PROVIDER_ID: {{ .Values.runtimeProviderKubernetes.providerId | quote }}
   AZ_RUNTIME_RUNNER_IMAGE: {{ include "azents.runtimeRunnerImage" . | quote }}
   AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT: {{ include "azents.runtimeControlEndpoint" . | quote }}
   {{- end }}

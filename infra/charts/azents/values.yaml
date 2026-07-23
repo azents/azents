@@ -78,6 +78,11 @@ server:
       enabled: false
       existingSecret: ""
       tokenKey: runtime-control-token
+    tls:
+      existingSecret: ""
+      certificateKey: tls.crt
+      privateKeyKey: tls.key
+      caKey: ca.crt
     runnerImage:
       repository: ""
       tag: ""
@@ -169,6 +174,12 @@ runtimeProviderKubernetes:
     name: azents-runtime
   replicas: 0
   providerId: system-kubernetes
+  credential:
+    existingSecret: ""
+    key: provider-credential
+    bootstrap:
+      enabled: false
+      secretName: ""
   image:
     repository: ""
     tag: ""

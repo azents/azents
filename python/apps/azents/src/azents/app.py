@@ -14,6 +14,9 @@ from azents.api import admin, internal, public, testenv
 from azents.consts import PROJECT_ROOT
 from azents.core.config import Config
 from azents.core.deps import get_appctx
+from azents.services.runtime_provider_bootstrap.runner import (
+    RuntimeProviderBootstrapRunner,
+)
 from azents.services.system_bootstrap.service import SystemBootstrapService
 from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import as_route_mounter, generate_short_operation_id
@@ -79,6 +82,7 @@ def create_public_api_app(config: Config) -> FastAPI:
         title="Azents Public API",
         description="Public read-only API server for Azents",
         initialize_system_bootstrap=False,
+        initialize_runtime_provider_bootstrap=False,
     )
     public.mount(as_route_mounter(app))
     internal_app = _create_internal_sub_app(app)
@@ -117,6 +121,7 @@ def create_admin_api_app(config: Config) -> FastAPI:
         title="Azents Admin API",
         description="Admin CRUD API server for Azents",
         initialize_system_bootstrap=True,
+        initialize_runtime_provider_bootstrap=True,
     )
     admin.mount(as_route_mounter(app))
     return app
@@ -136,6 +141,7 @@ def create_testenv_api_app(config: Config) -> FastAPI:
         title="Azents Testenv API",
         description="Testenv-only devtools API for Azents",
         initialize_system_bootstrap=False,
+        initialize_runtime_provider_bootstrap=False,
     )
     testenv.mount(as_route_mounter(app))
     return app
@@ -147,6 +153,7 @@ def _create_fastapi_instance(
     title: str = "Azents API",
     description: str = "Azents API Server",
     initialize_system_bootstrap: bool,
+    initialize_runtime_provider_bootstrap: bool,
 ) -> FastAPI:
     """Create a FastAPI instance.
 
@@ -161,6 +168,7 @@ def _create_fastapi_instance(
         appctx,
         container,
         initialize_system_bootstrap=initialize_system_bootstrap,
+        initialize_runtime_provider_bootstrap=(initialize_runtime_provider_bootstrap),
     )
 
     app = FastAPI(
@@ -196,6 +204,7 @@ def _create_fastapi_lifespan(
     container: di.Container,
     *,
     initialize_system_bootstrap: bool,
+    initialize_runtime_provider_bootstrap: bool,
 ) -> Lifespan[FastAPI]:
     """Create a lifespan function that binds the app context lifecycle to FastAPI."""
 
@@ -205,7 +214,12 @@ def _create_fastapi_lifespan(
             if initialize_system_bootstrap:
                 service = await container.solve(SystemBootstrapService)
                 await service.initialize()
-            yield
+            if initialize_runtime_provider_bootstrap:
+                bootstrap_runner = await container.solve(RuntimeProviderBootstrapRunner)
+                async with bootstrap_runner.run():
+                    yield
+            else:
+                yield
 
     return lifespan
 

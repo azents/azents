@@ -18,6 +18,7 @@ class SystemSettingSection(enum.StrEnum):
     """Compiled instance System Settings sections."""
 
     PLATFORM_GITHUB_APP = "platform_github_app"
+    PLATFORM_RUNTIME = "platform_runtime"
 
 
 class SystemSettingActivationMode(enum.StrEnum):

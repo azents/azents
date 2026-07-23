@@ -206,6 +206,8 @@ def _command(
             control_endpoint="runtime-control:8020",
             runner_auth_token="runtime-runner:runtime-1:1",
             control_token="control-token",
+            control_tls_ca_pem=None,
+            allow_insecure_control=True,
         ),
         reset_final_desired_state=final_desired_state,
     )
@@ -228,6 +230,8 @@ def _control_command(
             control_endpoint="runtime-control:8020",
             runner_auth_token="runtime-runner:runtime-1:1",
             control_token="control-token",
+            control_tls_ca_pem=None,
+            allow_insecure_control=True,
         ),
     )
 
@@ -825,6 +829,8 @@ async def test_observe_known_runtimes_reports_pod_and_pvc() -> None:
             control_endpoint="runtime-control:8020",
             runner_auth_token="runtime-runner:runtime-2:1",
             control_token="control-token",
+            control_tls_ca_pem=None,
+            allow_insecure_control=True,
         ),
     )
     await provider.start(command_2)

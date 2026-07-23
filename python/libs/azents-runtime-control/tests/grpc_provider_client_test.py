@@ -69,7 +69,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
         completion = await anext(requests)
         sent.append(completion)
 
-    client = GrpcProviderControlClient(stream)
+    client = GrpcProviderControlClient(stream, provider_credential="provider-secret")
     accepted = await client.register_provider(
         _registration(),
         connection_id="connection-1",
@@ -139,7 +139,7 @@ async def test_grpc_client_close_suppresses_completed_stream_failure() -> None:
         closed.set()
         raise RuntimeProviderControlStreamClosed("stream closed")
 
-    client = GrpcProviderControlClient(stream)
+    client = GrpcProviderControlClient(stream, provider_credential="provider-secret")
     await client.register_provider(
         _registration(),
         connection_id="connection-1",
@@ -173,7 +173,7 @@ async def test_grpc_client_sends_control_token_metadata() -> None:
             ),
         )
 
-    client = GrpcProviderControlClient(stream, control_auth_token="control-token")
+    client = GrpcProviderControlClient(stream, provider_credential="provider-secret")
     await client.register_provider(
         _registration(),
         connection_id="connection-1",
@@ -181,7 +181,7 @@ async def test_grpc_client_sends_control_token_metadata() -> None:
     )
     await client.close()
 
-    assert ("authorization", "Bearer control-token") in observed_metadata
+    assert ("authorization", "Bearer provider-secret") in observed_metadata
 
 
 def _registration() -> ProviderRegistration:
@@ -194,7 +194,6 @@ def _registration() -> ProviderRegistration:
         capabilities=("lifecycle", "observe"),
         config_schema_version="v1",
         metadata={"workspace_path_source": "provider"},
-        auth_credential_id="credential-1",
     )
 
 

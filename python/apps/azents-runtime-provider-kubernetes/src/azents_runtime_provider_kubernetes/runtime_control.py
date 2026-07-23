@@ -110,6 +110,8 @@ def _command(command: ControlRuntimeLifecycleCommand) -> RuntimeLifecycleCommand
             control_endpoint=command.auth.control_endpoint,
             runner_auth_token=command.auth.runner_auth_token,
             control_token=command.auth.control_token,
+            control_tls_ca_pem=command.auth.control_tls_ca_pem,
+            allow_insecure_control=command.auth.allow_insecure_control,
         ),
         reset_final_desired_state=_desired_state(command.reset_final_desired_state),
     )

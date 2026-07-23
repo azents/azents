@@ -12,6 +12,10 @@ from typing import Protocol, cast
 import grpc
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
 
+from azents_runtime_control.grpc_tls import (
+    GrpcClientTlsConfig,
+    create_grpc_aio_channel,
+)
 from azents_runtime_control.proto import (
     runtime_provider_control_pb2,
     runtime_provider_control_pb2_grpc,
@@ -60,13 +64,13 @@ class GrpcProviderControlClient(ProviderControlClient):
         *,
         channel: grpc.aio.Channel | None = None,
         heartbeat_ack_timeout_seconds: float = 10.0,
-        control_auth_token: str | None = None,
+        provider_credential: str,
     ) -> None:
         """Initialize the gRPC client with a stream callable."""
         self._stream = stream
         self._channel = channel
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
-        self._metadata = _auth_metadata(control_auth_token)
+        self._metadata = _provider_credential_metadata(provider_credential)
         self._outbound: asyncio.Queue[runtime_provider_control_pb2.ProviderMessage] = (
             asyncio.Queue()
         )
@@ -84,16 +88,22 @@ class GrpcProviderControlClient(ProviderControlClient):
         endpoint: str,
         *,
         heartbeat_ack_timeout_seconds: float = 10.0,
-        control_auth_token: str | None = None,
+        provider_credential: str,
+        tls: GrpcClientTlsConfig | None,
+        allow_insecure: bool,
     ) -> "GrpcProviderControlClient":
-        """Create a client using an insecure gRPC channel."""
-        channel = grpc.aio.insecure_channel(endpoint)
+        """Create a client using authenticated TLS or explicit insecure mode."""
+        channel = create_grpc_aio_channel(
+            endpoint,
+            tls=tls,
+            allow_insecure=allow_insecure,
+        )
         stub = runtime_provider_control_pb2_grpc.RuntimeProviderControlStub(channel)
         return cls(
             stub.ConnectProvider,
             channel=channel,
             heartbeat_ack_timeout_seconds=heartbeat_ack_timeout_seconds,
-            control_auth_token=control_auth_token,
+            provider_credential=provider_credential,
         )
 
     async def register_provider(
@@ -115,10 +125,7 @@ class GrpcProviderControlClient(ProviderControlClient):
                 request_id="register",
             )
         )
-        if self._metadata is None:
-            responses = self._stream(outbound)
-        else:
-            responses = self._stream(outbound, metadata=self._metadata)
+        responses = self._stream(outbound, metadata=self._metadata)
         self._receiver_task = asyncio.create_task(self._receive(responses))
         return await self._accepted
 
@@ -300,10 +307,14 @@ class GrpcProviderControlClient(ProviderControlClient):
         return self._connection_id
 
 
-def _auth_metadata(token: str | None) -> tuple[tuple[str, str], ...] | None:
-    if token is None or not token:
-        return None
-    return (("authorization", f"Bearer {token}"),)
+def _provider_credential_metadata(
+    provider_credential: str,
+) -> tuple[tuple[str, str], ...]:
+    """Create required Provider credential metadata for Control."""
+    credential = provider_credential.strip()
+    if not credential:
+        raise ValueError("provider_credential must not be empty")
+    return (("authorization", f"Bearer {credential}"),)
 
 
 def _register_message(
@@ -324,7 +335,6 @@ def _register_message(
             capabilities=list(registration.capabilities),
             config_schema_version=registration.config_schema_version,
             metadata=_struct(registration.metadata),
-            auth_credential_id=registration.auth_credential_id,
         ),
     )
 
@@ -358,6 +368,8 @@ def _command(
             control_endpoint=message.control_endpoint,
             runner_auth_token=message.runner_auth_token,
             control_token=_optional_control_token(payload),
+            control_tls_ca_pem=_optional_control_tls_ca_pem(payload),
+            allow_insecure_control=_allow_insecure_control(payload),
         ),
         reset_final_desired_state=_optional_desired_state(
             message.reset_final_desired_state
@@ -380,6 +392,25 @@ def _optional_control_token(payload: dict[str, JsonValue]) -> str | None:
         return None
     normalized = token.strip()
     return normalized or None
+
+
+def _optional_control_tls_ca_pem(payload: dict[str, JsonValue]) -> str | None:
+    auth = payload.get("auth")
+    if not isinstance(auth, dict):
+        return None
+    value = auth.get("control_tls_ca_pem")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _allow_insecure_control(payload: dict[str, JsonValue]) -> bool:
+    auth = payload.get("auth")
+    if not isinstance(auth, dict):
+        return False
+    value = auth.get("allow_insecure_control")
+    return value if isinstance(value, bool) else False
 
 
 def _report_message(

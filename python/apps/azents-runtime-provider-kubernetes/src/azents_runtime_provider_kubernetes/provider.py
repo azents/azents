@@ -54,6 +54,8 @@ _LABEL_IMAGE_GENERATION = "azents/image-generation"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
 _ENV_CONTROL_AUTH_TOKEN = "AZ_RUNTIME_CONTROL_AUTH_TOKEN"
+_ENV_CONTROL_TLS_CA_PEM = "AZ_RUNTIME_CONTROL_TLS_CA_PEM"
+_ENV_CONTROL_ALLOW_INSECURE = "AZ_RUNTIME_CONTROL_ALLOW_INSECURE"
 _ENV_RUNTIME_ID = "AZ_RUNTIME_ID"
 _ENV_AGENT_ID = "AZ_AGENT_ID"
 _ENV_WORKSPACE_ID = "AZ_WORKSPACE_ID"
@@ -524,6 +526,11 @@ class KubernetesRuntimeProvider:
         }
         if command.auth.control_token is not None:
             env[_ENV_CONTROL_AUTH_TOKEN] = command.auth.control_token
+        if command.auth.control_tls_ca_pem is not None:
+            env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
+        env[_ENV_CONTROL_ALLOW_INSECURE] = str(
+            command.auth.allow_insecure_control
+        ).lower()
         return env
 
     def _report(

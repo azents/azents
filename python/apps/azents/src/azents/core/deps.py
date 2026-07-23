@@ -12,6 +12,7 @@ from .config import (
     Config,
     CredentialEncryptionConfig,
     EmailConfig,
+    RuntimeProviderBootstrapConfig,
     SystemBootstrapConfig,
 )
 
@@ -39,6 +40,13 @@ def get_system_bootstrap_config(
 ) -> SystemBootstrapConfig:
     """Return initial system bootstrap configuration."""
     return config.system_bootstrap
+
+
+def get_runtime_provider_bootstrap_config(
+    config: Annotated[Config, Depends(get_config)],
+) -> RuntimeProviderBootstrapConfig:
+    """Return trusted Runtime Provider bootstrap source configuration."""
+    return config.runtime_provider_bootstrap
 
 
 def get_email_config(

@@ -461,6 +461,82 @@ class RuntimeProviderKind(enum.StrEnum):
     DOCKER = "docker"
 
 
+class RuntimeProviderRegistrationMethod(enum.StrEnum):
+    """Origin that first established a Runtime Provider."""
+
+    ADMIN = "admin"
+    BOOTSTRAP = "bootstrap"
+
+
+class RuntimeProviderLifecycleState(enum.StrEnum):
+    """Permanent administrative lifecycle for a Runtime Provider."""
+
+    ACTIVE = "active"
+    DECOMMISSIONING = "decommissioning"
+    DECOMMISSIONED = "decommissioned"
+    FORCE_RETIRED = "force_retired"
+
+
+class RuntimeProviderAvailabilityMode(enum.StrEnum):
+    """Workspace availability policy for a Runtime Provider."""
+
+    PLATFORM_WIDE = "platform_wide"
+    SELECTED_WORKSPACES = "selected_workspaces"
+
+
+class RuntimeProviderBootstrapAdapterKind(enum.StrEnum):
+    """Trusted adapter that supplies authoritative Provider declarations."""
+
+    HELM_FILE = "helm_file"
+
+
+class RuntimeProviderBootstrapDeclarationState(enum.StrEnum):
+    """Current reconciliation state of one bootstrap declaration."""
+
+    PRESENT = "present"
+    ABSENT = "absent"
+    CONFLICT = "conflict"
+
+
+class RuntimeProviderAuditEventType(enum.StrEnum):
+    """Metadata-only Provider aggregate audit event."""
+
+    REGISTERED = "registered"
+    BOOTSTRAP_RECONCILED = "bootstrap_reconciled"
+    BOOTSTRAP_WITHDRAWN = "bootstrap_withdrawn"
+    BOOTSTRAP_CONFLICT = "bootstrap_conflict"
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+    AVAILABILITY_CHANGED = "availability_changed"
+    ENROLLMENT_GRANT_ISSUED = "enrollment_grant_issued"
+    CREDENTIAL_ISSUED = "credential_issued"
+    CREDENTIAL_REVOKED = "credential_revoked"
+    CONNECTION_OPENED = "connection_opened"
+    CONNECTION_CLOSED = "connection_closed"
+
+
+class RuntimeProviderEnrollmentGrantState(enum.StrEnum):
+    """One-time Provider enrollment grant lifecycle."""
+
+    ISSUED = "issued"
+    CONSUMED = "consumed"
+    REVOKED = "revoked"
+
+
+class RuntimeProviderCredentialState(enum.StrEnum):
+    """Provider credential lifecycle."""
+
+    ACTIVE = "active"
+    REVOKED = "revoked"
+
+
+class RuntimeProviderConnectionStatus(enum.StrEnum):
+    """Durable Provider Control connection projection state."""
+
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
+
+
 class SnapshotKind(enum.StrEnum):
     """Snapshot creation reason.
 

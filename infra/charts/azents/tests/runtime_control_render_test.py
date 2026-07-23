@@ -23,6 +23,7 @@ def _helm_template(*values: str) -> str:
         "adminWeb.image.repository=repo/admin-web",
         "adminWeb.image.tag=sha",
         "secrets.existingSecrets.redis=azents-redis",
+        "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])
@@ -71,6 +72,9 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert "initialDelaySeconds: 5" in rendered
     assert "AZ_RUNTIME_CONTROL_AUTH_ENABLED" in rendered
     assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
+    assert "AZ_RUNTIME_CONTROL_ALLOW_INSECURE" in rendered
+    assert "AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE" in rendered
+    assert "azents-runtime-control-tls" in rendered
     assert "AZ_RUNTIME_RUNNER_IMAGE" in rendered
     assert "repo/runner:sha@sha256:runnerdigest" in rendered
 

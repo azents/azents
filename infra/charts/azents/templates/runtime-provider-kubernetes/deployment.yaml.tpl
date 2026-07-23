@@ -45,15 +45,14 @@ spec:
           env:
             - name: AZ_RUNTIME_CONTROL_ENDPOINT
               value: {{ include "azents.runtimeControlEndpoint" . | quote }}
-            {{- if .Values.server.runtimeControl.auth.enabled }}
-            - name: AZ_RUNTIME_CONTROL_AUTH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "server.runtimeControl.auth.existingSecret is required when Runtime Control auth is enabled" .Values.server.runtimeControl.auth.existingSecret | quote }}
-                  key: {{ required "server.runtimeControl.auth.tokenKey is required when Runtime Control auth is enabled" .Values.server.runtimeControl.auth.tokenKey | quote }}
-            {{- end }}
-            - name: AZ_RUNTIME_PROVIDER_AUTH_CREDENTIAL_ID
-              value: {{ .Values.runtimeProviderKubernetes.providerId | quote }}
+            - name: AZ_RUNTIME_CONTROL_ALLOW_INSECURE
+              value: "false"
+            - name: AZ_RUNTIME_CONTROL_TLS_CA_FILE
+              value: "/var/run/secrets/azents/runtime-control-tls/ca.crt"
+            - name: AZ_RUNTIME_PROVIDER_READINESS_FILE
+              value: "/tmp/azents-runtime-provider-ready"
+            - name: AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE
+              value: "/var/run/secrets/azents/runtime-provider-credential/credential"
             - name: AZ_RUNTIME_ENV
               value: {{ .Values.server.env.AZ_RUNTIME_ENV | quote }}
             - name: AZ_RUNTIME_PROVIDER_ID
@@ -96,8 +95,37 @@ spec:
               value: {{ .Values.runtimeProviderKubernetes.runtimePod.tolerations | toJson | quote }}
             - name: AZ_RUNTIME_RUNNER_IMAGE
               value: {{ include "azents.runtimeRunnerImage" . | quote }}
+          volumeMounts:
+            - name: runtime-control-tls
+              mountPath: /var/run/secrets/azents/runtime-control-tls
+              readOnly: true
+            - name: runtime-provider-credential
+              mountPath: /var/run/secrets/azents/runtime-provider-credential
+              readOnly: true
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "from pathlib import Path; raise SystemExit(not Path('/tmp/azents-runtime-provider-ready').is_file())"
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
           {{- with .Values.runtimeProviderKubernetes.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      volumes:
+        - name: runtime-provider-credential
+          secret:
+            secretName: {{ required "runtimeProviderKubernetes.credential.existingSecret is required when the Kubernetes Provider is enabled" .Values.runtimeProviderKubernetes.credential.existingSecret | quote }}
+            items:
+              - key: {{ required "runtimeProviderKubernetes.credential.key is required when the Kubernetes Provider is enabled" .Values.runtimeProviderKubernetes.credential.key | quote }}
+                path: credential
+        - name: runtime-control-tls
+          secret:
+            secretName: {{ required "server.runtimeControl.tls.existingSecret is required when the Kubernetes Provider is enabled" .Values.server.runtimeControl.tls.existingSecret | quote }}
+            items:
+              - key: {{ .Values.server.runtimeControl.tls.caKey | quote }}
+                path: ca.crt
 {{- end }}

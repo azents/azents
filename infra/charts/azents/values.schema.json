@@ -718,6 +718,38 @@
         "providerId": {
           "type": "string"
         },
+        "credential": {
+          "type": "object",
+          "required": [
+            "existingSecret",
+            "key",
+            "bootstrap"
+          ],
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "bootstrap": {
+              "type": "object",
+              "required": [
+                "enabled",
+                "secretName"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "secretName": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
         "image": {
           "$ref": "#/definitions/image"
         },
@@ -977,6 +1009,9 @@
             "auth": {
               "$ref": "#/definitions/runtimeControlAuth"
             },
+            "tls": {
+              "$ref": "#/definitions/runtimeControlTls"
+            },
             "runnerImage": {
               "$ref": "#/definitions/image"
             },
@@ -1176,6 +1211,32 @@
         },
         "tokenKey": {
           "type": "string"
+        }
+      }
+    },
+    "runtimeControlTls": {
+      "type": "object",
+      "required": [
+        "existingSecret",
+        "certificateKey",
+        "privateKeyKey",
+        "caKey"
+      ],
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        },
+        "certificateKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "privateKeyKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "caKey": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

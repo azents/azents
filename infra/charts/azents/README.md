@@ -30,7 +30,7 @@ Default-off optional components:
 
 ## Secret Policy
 
-The chart does not put secret literals in default values and does not render secret delivery CRDs. Consumers create Kubernetes Secrets through their own platform layer and reference those names through `secrets.existingSecrets.*`.
+The chart does not put secret literals in values and does not render external secret-store CRDs. Consumers normally create Kubernetes Secrets through their own platform layer and reference those names through existing-Secret values. The optional Kubernetes Runtime Provider credential bootstrap is the narrow exception: it renders an empty staging Secret and a bounded one-shot Job that exchanges bootstrap-source enrollment authority, then patches only the configured credential key.
 
 ### Existing Secret Contract
 
@@ -41,9 +41,15 @@ Chart consumers create Kubernetes Secrets with the keys below and reference thei
 | `secrets.existingSecrets.auth` | `jwt-secret-key`, `credential-encryption-key`, `sentry-dsn`, `oauth-secret-key` | `apiserver`, `adminserver`, `worker`, `scheduler` |
 | `server.systemBootstrap.existingSecret` | `setup-token`, or the key selected by `server.systemBootstrap.tokenKey` | `adminserver` during zero-user bootstrap |
 | `server.platformGitHubApp.existingSecret` | `github-platform-app-id`, `github-platform-private-key`, `github-platform-client-id`, `github-platform-client-secret`, or the keys selected by the four `server.platformGitHubApp.*Key` values | `apiserver`, `adminserver`, `worker`; never `scheduler` |
-| `server.runtimeControl.auth.existingSecret` | `runtime-control-token`, or the key selected by `server.runtimeControl.auth.tokenKey` | `server.runtimeControl`, `runtimeProviderKubernetes` when Runtime Control auth is enabled |
+| `server.runtimeControl.auth.existingSecret` | `runtime-control-token`, or the key selected by `server.runtimeControl.auth.tokenKey` | `server.runtimeControl` and Runtime Runner transport auth; never the Provider controller |
+| `server.runtimeControl.tls.existingSecret` | `tls.crt`, `tls.key`, `ca.crt`, or the keys selected by `server.runtimeControl.tls.*Key` | Runtime Control server identity and Provider/Runner server trust |
+| `runtimeProviderKubernetes.credential.existingSecret` | `provider-credential`, or the key selected by `runtimeProviderKubernetes.credential.key` | `runtimeProviderKubernetes` Provider Control identity |
 
 The bootstrap Secret is optional. Without it, a zero-user installation generates a setup token and logs the plaintext once after persisting only its hash. With it, the configured token is never logged. The Platform GitHub App Secret is also optional; when configured, each referenced field permanently overrides the Admin-managed database fallback, including empty Secret values, and is intentionally not injected into `scheduler`. Omit `server.platformGitHubApp.existingSecret` to let all four fields come from Admin-managed System Settings. For mixed ownership, set the corresponding `server.platformGitHubApp.*Key` value to an empty string and restart `apiserver`, `adminserver`, and `worker`; the stored database fallback is never copied from the Secret. Runtime Control auth is disabled by default; installations that enable it must provide an existing Secret reference through `server.runtimeControl.auth.existingSecret`.
+
+Runtime Control requires an operator-owned TLS Secret whenever the component or Kubernetes Provider is enabled. The certificate must authenticate the configured `server.runtimeControl.endpoint`; the default endpoint requires a DNS SAN for `runtime-control.<server namespace>.svc.cluster.local`. The Kubernetes Provider credential is distinct from Runtime Control transport and Runner auth. Operators may supply it directly through `runtimeProviderKubernetes.credential.existingSecret`, or enable `runtimeProviderKubernetes.credential.bootstrap.enabled`. Bootstrap requires `secrets.existingSecrets.auth` because the one-shot Job uses the deployment credential-encryption root while issuing a Provider-bound credential. The Job ServiceAccount can only get, patch, and update `runtimeProviderKubernetes.credential.bootstrap.secretName` (or the Provider credential Secret when the staging name is empty); the long-running Provider ServiceAccount receives no Secret write permission.
+
+For secret-store persistence, set a separate staging Secret name and let the consumer deployment layer push that staging key to its external store and materialize `runtimeProviderKubernetes.credential.existingSecret`. The bootstrap Job reuses a valid staged credential and replaces it only when Azents no longer recognizes it, such as after a database restore.
 
 ## External Service Policy
 
@@ -58,7 +64,7 @@ The chart currently renders:
 - `apiserver`, `adminserver`, and `runtime-control` Services
 - `web` ServiceAccount, Role/RoleBinding, ConfigMap, Deployment, Service, and opt-in Ingress
 - `adminWeb` ServiceAccount, Role/RoleBinding, ConfigMap, Deployment, Service, and opt-in Ingress
-- `runtimeProviderKubernetes` Deployment, ServiceAccount, PDB, workload namespace, and split leader/workload RBAC
+- `runtimeProviderKubernetes` Deployment, ServiceAccount, PDB, workload namespace, split leader/workload RBAC, and optional credential bootstrap Job/RBAC
 - Opt-in `server.mcpEgressProxy`
 
 Ingress is disabled by default. Use `server.apiserver.ingress`, `web.ingress`, and `adminWeb.ingress` for component-specific host, class, and TLS settings.
@@ -85,7 +91,9 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 
 `runtimeProviderKubernetes` is default-off. When enabled, the provider Pod runs in the server namespace and creates Runtime Pods and PVCs in `runtimeProviderKubernetes.workloadNamespace.name`.
 
-- Server ConfigMap: `AZ_RUNTIME_DEFAULT_PROVIDER_ID`, `AZ_RUNTIME_RUNNER_IMAGE`, `AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT`
+- Server bootstrap source: the chart always renders a non-secret authoritative Provider declaration document and mounts it into `adminserver` for startup and periodic reconciliation
+- Server ConfigMap: `AZ_RUNTIME_RUNNER_IMAGE`, `AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT`
+- Provider credential: `AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE` points to the projected `runtimeProviderKubernetes.credential.existingSecret`; the Provider watches this file and reconnects after rotation. It is not the Runner or shared Runtime Control token
 - Provider Deployment: `AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKSPACE_PATH`, `AZ_RUNTIME_PROVIDER_STORAGE_CLASS`, `AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS`
 - Provider RBAC: leader election Lease permissions are scoped to the provider namespace, while Runtime Pod/PVC permissions are scoped to the workload namespace
 - Runtime Pod image pulls: by default, Runtime Pods inherit `global.imagePullSecrets`. Consumers may override with `runtimeProviderKubernetes.runtimePod.imagePullSecrets`. Referenced pull secrets must already exist in the workload namespace.
@@ -107,12 +115,12 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 - `external`: use consumer-provided endpoints and Secrets.
 - `objectStorage.external.credentialMode=ambientAws`: do not inject explicit S3 credential env vars. EKS Pod Identity, IAM Roles, or another ambient credential provider must be configured outside this chart.
 
-Secret delivery is outside this chart. External Secrets Operator, Infisical, SOPS, Sealed Secrets, cloud secret managers, and manual Secrets must be wired by the consumer-owned deployment layer.
+External secret-store delivery remains outside this chart. External Secrets Operator, Infisical, SOPS, Sealed Secrets, cloud secret managers, and manual Secrets must be wired by the consumer-owned deployment layer. The optional Provider credential bootstrap Job may write only its staging Secret; external persistence and final Provider Secret materialization remain consumer-owned.
 
 ## Optional Component Prerequisites
 
 - `server.mcpEgressProxy.enabled=true`: renders the Squid proxy Deployment/Service/NetworkPolicy in the server namespace and injects `AZ_MCP_PROXY_URL` into the server ConfigMap.
-- `runtimeProviderKubernetes.enabled=true`: requires `runtimeProviderKubernetes.image.*`, `runtimeProviderKubernetes.runnerImage.*`, and `server.runtimeControl.enabled=true`. If `server.runtimeControl.auth.enabled=true`, it also requires `server.runtimeControl.auth.existingSecret`.
+- `runtimeProviderKubernetes.enabled=true`: requires `runtimeProviderKubernetes.image.*`, `runtimeProviderKubernetes.runnerImage.*`, `runtimeProviderKubernetes.credential.existingSecret`, and `server.runtimeControl.enabled=true`. If `runtimeProviderKubernetes.credential.bootstrap.enabled=true`, it also requires `secrets.existingSecrets.auth`. If `server.runtimeControl.auth.enabled=true`, it requires `server.runtimeControl.auth.existingSecret`.
 
 ## Kustomize Label Differences
 

@@ -52,6 +52,8 @@ class RuntimeContainerAuth:
     control_endpoint: str
     runner_auth_token: str
     control_token: str | None
+    control_tls_ca_pem: str | None
+    allow_insecure_control: bool
 
 
 @dataclasses.dataclass(frozen=True)

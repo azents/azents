@@ -2,14 +2,32 @@
 
 import hmac
 from collections.abc import Iterable
+from typing import Protocol
 
 import grpc
+
+from azents.services.runtime_provider_control.data import (
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialUnavailable,
+)
 
 _AUTHORIZATION_HEADER = "authorization"
 _BEARER_PREFIX = "bearer "
 _TOKEN_HEADER = "x-azents-runtime-control-token"
 
 GrpcMetadata = grpc.aio.Metadata | Iterable[tuple[str, str | bytes]] | None
+
+
+class RuntimeProviderCredentialAuthenticator(Protocol):
+    """Authenticate Provider credentials independently of Runner transport auth."""
+
+    async def authenticate_credential(
+        self,
+        *,
+        secret: str,
+    ) -> RuntimeProviderCredentialAuthentication:
+        """Resolve a Provider credential to its durable identity."""
+        ...
 
 
 class RuntimeControlGrpcAuth:
@@ -38,6 +56,35 @@ class RuntimeControlGrpcAuth:
         raise AssertionError("unreachable")
 
 
+class RuntimeProviderCredentialGrpcAuth:
+    """Authenticate a Provider stream with its Provider-bound credential."""
+
+    def __init__(self, authenticator: RuntimeProviderCredentialAuthenticator) -> None:
+        """Initialize Provider credential authentication."""
+        self._authenticator = authenticator
+
+    async def authenticate(
+        self,
+        context: grpc.aio.ServicerContext[object, object],
+    ) -> RuntimeProviderCredentialAuthentication:
+        """Resolve metadata bearer credentials or abort the Provider stream."""
+        secret = _provider_metadata_credential(context.invocation_metadata())
+        if secret is None:
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "Provider credential is missing",
+            )
+            raise AssertionError("unreachable")
+        try:
+            return await self._authenticator.authenticate_credential(secret=secret)
+        except RuntimeProviderCredentialUnavailable:
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "Provider credential is invalid or unavailable",
+            )
+            raise AssertionError("unreachable") from None
+
+
 def _normalized_token(value: str | None) -> str | None:
     if value is None:
         return None
@@ -61,6 +108,17 @@ def _metadata_token(metadata: GrpcMetadata) -> str | None:
             authorization_token = _bearer_token(value)
             if authorization_token is not None:
                 return authorization_token
+    return None
+
+
+def _provider_metadata_credential(metadata: GrpcMetadata) -> str | None:
+    """Read a Provider credential from standard bearer metadata only."""
+    if metadata is None:
+        return None
+    entries = metadata.items() if isinstance(metadata, grpc.aio.Metadata) else metadata
+    for raw_key, raw_value in entries:
+        if raw_key.lower() == _AUTHORIZATION_HEADER:
+            return _bearer_token(_metadata_value(raw_value))
     return None
 
 
