@@ -1,11 +1,15 @@
 """ExternalChannelRepository tests."""
 
 import datetime
+from typing import cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from azcommon.result import Success
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
     ExternalChannelConnectionStatus,
@@ -91,6 +95,26 @@ def _event_create(connection_id: str) -> ExternalChannelEventCreate:
         provider_occurred_at=_at(1),
         received_at=_at(2),
     )
+
+
+async def test_invocation_projection_query_preserves_inner_revision_from() -> None:
+    """The original-revision subquery retains an independent FROM clause."""
+    session = MagicMock(spec=AsyncSession)
+
+    async def compile_statement(statement: ClauseElement) -> MagicMock:
+        statement.compile(dialect=postgresql.dialect())
+        result = MagicMock()
+        result.mappings.return_value = []
+        return result
+
+    session.execute = AsyncMock(side_effect=compile_statement)
+
+    items = await ExternalChannelRepository().list_invocation_projection_items(
+        cast(AsyncSession, session),
+        batch_id="batch-1",
+    )
+
+    assert items == []
 
 
 class TestExternalChannelRepository:

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -1807,6 +1808,7 @@ class ExternalChannelRepository:
         batch_id: str,
     ) -> list[ExternalChannelInvocationProjectionItem]:
         """Load one invocation batch in immutable provider order."""
+        original_revision = aliased(RDBExternalChannelMessageRevision)
         rows = await session.execute(
             sa.select(
                 RDBExternalChannelInvocationBatch.id.label("batch_id"),
@@ -1842,16 +1844,16 @@ class ExternalChannelRepository:
                     (
                         RDBExternalChannelMessageRevision.revision_kind
                         != ExternalChannelMessageRevisionKind.ORIGINAL,
-                        sa.select(RDBExternalChannelMessageRevision.id)
+                        sa.select(original_revision.id)
                         .where(
-                            RDBExternalChannelMessageRevision.message_id
+                            original_revision.message_id
                             == RDBExternalChannelMessage.id,
-                            RDBExternalChannelMessageRevision.revision_kind
+                            original_revision.revision_kind
                             == ExternalChannelMessageRevisionKind.ORIGINAL,
                         )
                         .order_by(
-                            RDBExternalChannelMessageRevision.created_at,
-                            RDBExternalChannelMessageRevision.id,
+                            original_revision.created_at,
+                            original_revision.id,
                         )
                         .limit(1)
                         .scalar_subquery(),
