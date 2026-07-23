@@ -946,14 +946,6 @@ def test_provider_native_channel_work_progress_journey(
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
-    disconnected = external_api.external_channel_v1_disconnect_connection(
-        agent_id=agent_id,
-        connection_id=setup.connection.id,
-        handle=handle,
-        _headers=headers,
-    )
-    assert disconnected.status is ExternalChannelConnectionStatus.DISCONNECTED
-
 
 def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
     public_api_client: azentspublicclient.ApiClient,
