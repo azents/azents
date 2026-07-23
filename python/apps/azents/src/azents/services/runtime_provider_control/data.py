@@ -3,7 +3,11 @@
 import datetime
 from dataclasses import dataclass
 
-from azents.core.enums import RuntimeProviderKind, RuntimeProviderScope
+from azents.core.enums import (
+    RuntimeProviderAuthMethod,
+    RuntimeProviderKind,
+    RuntimeProviderScope,
+)
 
 
 @dataclass(frozen=True)
@@ -28,13 +32,17 @@ class RuntimeProviderCredentialIssued:
 
 @dataclass(frozen=True)
 class RuntimeProviderCredentialAuthentication:
-    """Credential identity bound to a durable Provider."""
+    """Authenticated identity bound to a durable Provider."""
 
-    credential_id: str
+    binding_id: str
+    credential_id: str | None
     provider_id: str
     provider_kind: RuntimeProviderKind
     provider_scope: RuntimeProviderScope
     provider_workspace_id: str | None
+    auth_method: RuntimeProviderAuthMethod
+    auth_subject: str
+    evidence_expires_at: datetime.datetime | None
 
 
 @dataclass

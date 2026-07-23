@@ -7,12 +7,14 @@ from typing import Any
 import yaml
 
 from azents.core.enums import (
+    RuntimeProviderAuthMethod,
     RuntimeProviderAvailabilityMode,
     RuntimeProviderBootstrapAdapterKind,
     RuntimeProviderKind,
 )
 
 from .data import (
+    RuntimeProviderBootstrapAuthenticationInput,
     RuntimeProviderBootstrapDeclarationInput,
     RuntimeProviderBootstrapSnapshot,
 )
@@ -20,7 +22,13 @@ from .data import (
 _API_VERSION = "azents.io/v1"
 _DOCUMENT_KEYS = frozenset({"apiVersion", "source", "providers"})
 _SOURCE_KEYS = frozenset({"key", "revision", "digest"})
-_PROVIDER_KEYS = frozenset({"declarationKey", "providerId", "kind", "initial"})
+_PROVIDER_KEYS = frozenset(
+    {"declarationKey", "providerId", "kind", "initial", "authentication"}
+)
+_PROVIDER_REQUIRED_KEYS = frozenset({"declarationKey", "providerId", "kind", "initial"})
+_AUTHENTICATION_KEYS = frozenset(
+    {"method", "subject", "namespace", "serviceAccountName", "audience"}
+)
 _INITIAL_KEYS = frozenset(
     {
         "displayName",
@@ -118,7 +126,12 @@ class HelmFileRuntimeProviderBootstrapAdapter:
     ) -> RuntimeProviderBootstrapDeclarationInput:
         """Convert one strict non-secret declaration."""
         provider = _mapping(raw_provider, f"providers[{index}]")
-        _assert_exact_keys(provider, _PROVIDER_KEYS, f"providers[{index}]")
+        _assert_required_keys(
+            provider,
+            _PROVIDER_REQUIRED_KEYS,
+            _PROVIDER_KEYS,
+            f"providers[{index}]",
+        )
         initial = _mapping(provider["initial"], f"providers[{index}].initial")
         _assert_allowed_keys(initial, _INITIAL_KEYS, f"providers[{index}].initial")
         return RuntimeProviderBootstrapDeclarationInput(
@@ -158,6 +171,52 @@ class HelmFileRuntimeProviderBootstrapAdapter:
                     "setAsPlatformDefaultWhenUnset",
                 )
             },
+            authentication=self._parse_authentication(
+                provider.get("authentication"),
+                index,
+            ),
+        )
+
+    def _parse_authentication(
+        self,
+        raw_authentication: object,
+        index: int,
+    ) -> RuntimeProviderBootstrapAuthenticationInput | None:
+        """Parse one strict typed authentication declaration."""
+        if raw_authentication is None:
+            return None
+        authentication = _mapping(
+            raw_authentication,
+            f"providers[{index}].authentication",
+        )
+        _assert_exact_keys(
+            authentication,
+            _AUTHENTICATION_KEYS,
+            f"providers[{index}].authentication",
+        )
+        return RuntimeProviderBootstrapAuthenticationInput(
+            method=RuntimeProviderAuthMethod(
+                _string(
+                    authentication["method"],
+                    f"providers[{index}].authentication.method",
+                )
+            ),
+            subject=_string(
+                authentication["subject"],
+                f"providers[{index}].authentication.subject",
+            ),
+            namespace=_string(
+                authentication["namespace"],
+                f"providers[{index}].authentication.namespace",
+            ),
+            serviceAccountName=_string(
+                authentication["serviceAccountName"],
+                f"providers[{index}].authentication.serviceAccountName",
+            ),
+            audience=_string(
+                authentication["audience"],
+                f"providers[{index}].authentication.audience",
+            ),
         )
 
 
@@ -216,3 +275,16 @@ def _assert_allowed_keys(
     """Reject unknown initial fields, including secret-like content."""
     if any(key not in allowed_keys for key in value):
         raise ValueError(f"{field_name} has unsupported fields.")
+
+
+def _assert_required_keys(
+    value: dict[str, Any],
+    required_keys: frozenset[str],
+    allowed_keys: frozenset[str],
+    field_name: str,
+) -> None:
+    """Require mandatory keys while allowing explicitly optional fields."""
+    if any(key not in value for key in required_keys) or any(
+        key not in allowed_keys for key in value
+    ):
+        raise ValueError(f"{field_name} has unsupported or missing fields.")

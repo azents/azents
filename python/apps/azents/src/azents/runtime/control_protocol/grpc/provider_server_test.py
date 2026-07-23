@@ -17,7 +17,11 @@ from azents_runtime_control.provider import (
 from azents_runtime_control.provider import RuntimeProviderReport
 from google.protobuf import timestamp_pb2
 
-from azents.core.enums import RuntimeProviderKind, RuntimeProviderScope
+from azents.core.enums import (
+    RuntimeProviderAuthMethod,
+    RuntimeProviderKind,
+    RuntimeProviderScope,
+)
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProviderCommand,
@@ -56,11 +60,15 @@ class FakeProviderCredentialBridge:
     expected_secret: str = "provider-secret"
     authentication: RuntimeProviderCredentialAuthentication = dataclasses.field(
         default_factory=lambda: RuntimeProviderCredentialAuthentication(
+            binding_id="binding-1",
             credential_id="credential-1",
             provider_id="provider-1",
             provider_kind=RuntimeProviderKind.DOCKER,
             provider_scope=RuntimeProviderScope.SYSTEM,
             provider_workspace_id=None,
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject="admin:provider-1",
+            evidence_expires_at=None,
         )
     )
 

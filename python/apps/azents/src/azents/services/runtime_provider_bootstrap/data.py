@@ -6,10 +6,47 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from azents.core.enums import (
+    RuntimeProviderAuthMethod,
     RuntimeProviderAvailabilityMode,
     RuntimeProviderBootstrapAdapterKind,
     RuntimeProviderKind,
 )
+
+
+class RuntimeProviderBootstrapAuthenticationInput(BaseModel):
+    """Typed non-secret authentication binding declaration."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    method: RuntimeProviderAuthMethod
+    subject: str = Field(min_length=1, max_length=255)
+    namespace: str = Field(min_length=1, max_length=253)
+    service_account_name: str = Field(
+        min_length=1,
+        max_length=253,
+        alias="serviceAccountName",
+    )
+    audience: str = Field(min_length=1, max_length=255)
+
+    @model_validator(mode="after")
+    def validate_service_account_identity(
+        self,
+    ) -> "RuntimeProviderBootstrapAuthenticationInput":
+        """Require an exact Kubernetes ServiceAccount identity declaration."""
+        if self.method != RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT:
+            raise ValueError("Bootstrap authentication method is unsupported.")
+        if ":" in self.namespace or ":" in self.service_account_name:
+            raise ValueError(
+                "Bootstrap ServiceAccount identity components cannot contain colons."
+            )
+        expected_subject = (
+            f"system:serviceaccount:{self.namespace}:{self.service_account_name}"
+        )
+        if self.subject != expected_subject:
+            raise ValueError(
+                "Bootstrap authentication subject does not match identity."
+            )
+        return self
 
 
 class RuntimeProviderBootstrapDeclarationInput(BaseModel):
@@ -27,6 +64,16 @@ class RuntimeProviderBootstrapDeclarationInput(BaseModel):
     config_schema: dict[str, Any] | None
     metadata: dict[str, Any] | None
     creation_seeds: dict[str, Any] | None
+    authentication: RuntimeProviderBootstrapAuthenticationInput | None = None
+
+    @model_validator(mode="after")
+    def validate_authentication(self) -> "RuntimeProviderBootstrapDeclarationInput":
+        """Require typed authentication for Kubernetes Provider declarations."""
+        if self.kind == RuntimeProviderKind.KUBERNETES and self.authentication is None:
+            raise ValueError(
+                "Kubernetes bootstrap declarations require authentication."
+            )
+        return self
 
 
 class RuntimeProviderBootstrapSnapshot(BaseModel):

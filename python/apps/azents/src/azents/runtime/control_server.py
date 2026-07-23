@@ -23,6 +23,9 @@ from azents.core.runtime_provider_credential import RuntimeProviderCredentialVer
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.repository import (
+    RuntimeProviderAuthBindingRepository,
+)
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
 )
@@ -125,6 +128,7 @@ async def runtime_control_server_lifespan(
         session_manager=session_manager,
         repository=RuntimeProviderControlRepository(),
         provider_repository=RuntimeProviderRepository(),
+        binding_repository=RuntimeProviderAuthBindingRepository(),
         verifier=RuntimeProviderCredentialVerifier(settings.credential_encryption_key),
     )
     provider_sink = RuntimeProviderReportRepositorySink(

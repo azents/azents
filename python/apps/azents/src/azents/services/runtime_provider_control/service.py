@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuditEventType,
+    RuntimeProviderAuthMethod,
+    RuntimeProviderBindingState,
     RuntimeProviderBootstrapDeclarationState,
     RuntimeProviderEnrollmentGrantState,
     RuntimeProviderLifecycleState,
@@ -16,6 +18,9 @@ from azents.core.runtime_provider_credential import RuntimeProviderCredentialVer
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import RuntimeProviderAuditEventCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.repository import (
+    RuntimeProviderAuthBindingRepository,
+)
 from azents.repos.runtime_provider_control.data import (
     RuntimeProviderConnection,
     RuntimeProviderConnectionCreate,
@@ -49,6 +54,7 @@ class RuntimeProviderEnrollmentService:
     session_manager: SessionManager[AsyncSession]
     repository: RuntimeProviderControlRepository
     provider_repository: RuntimeProviderRepository
+    binding_repository: RuntimeProviderAuthBindingRepository
     verifier: RuntimeProviderCredentialVerifier
 
     async def issue_grant(
@@ -73,6 +79,22 @@ class RuntimeProviderEnrollmentService:
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
                 raise RuntimeProviderEnrollmentUnavailable("provider_unavailable")
+            bindings = await self.binding_repository.list_for_provider(
+                session,
+                provider_id=provider.id,
+            )
+            binding = next(
+                (
+                    candidate
+                    for candidate in bindings
+                    if candidate.auth_method
+                    is RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN
+                    and candidate.state is RuntimeProviderBindingState.ACTIVE
+                ),
+                None,
+            )
+            if binding is None:
+                raise RuntimeProviderEnrollmentUnavailable("binding_unavailable")
             if issued_by_source_id is not None:
                 get_declaration = (
                     self.provider_repository.get_bootstrap_declaration_by_provider_id
@@ -95,6 +117,7 @@ class RuntimeProviderEnrollmentService:
                 session,
                 create=RuntimeProviderEnrollmentGrantCreate(
                     provider_id=provider_id,
+                    binding_id=binding.id,
                     verifier=self.verifier.verifier_for(secret),
                     expires_at=expires_at,
                     issued_by_user_id=issued_by_user_id,
@@ -155,11 +178,25 @@ class RuntimeProviderEnrollmentService:
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
                 raise RuntimeProviderEnrollmentUnavailable("provider_unavailable")
+            binding = await self.binding_repository.get_by_id(
+                session,
+                binding_id=grant.binding_id,
+                for_update=False,
+            )
+            if (
+                binding is None
+                or binding.provider_id != provider.id
+                or binding.auth_method
+                is not RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN
+                or binding.state is not RuntimeProviderBindingState.ACTIVE
+            ):
+                raise RuntimeProviderEnrollmentUnavailable("binding_unavailable")
             credential = await self.repository.create_credential_and_consume_grant(
                 session,
                 grant_id=grant.id,
                 credential=RuntimeProviderCredentialCreate(
                     provider_id=grant.provider_id,
+                    binding_id=grant.binding_id,
                     verifier=self.verifier.verifier_for(credential_secret),
                     expires_at=credential_expires_at,
                     issued_grant_id=grant.id,
@@ -194,7 +231,7 @@ class RuntimeProviderEnrollmentService:
         *,
         secret: str,
     ) -> RuntimeProviderCredentialAuthentication:
-        """Resolve active credential plaintext to its credential and Provider IDs."""
+        """Resolve active issued evidence through its durable binding."""
         now = tznow()
         async with self.session_manager() as session:
             credential = await self.repository.get_active_credential_by_verifier(
@@ -207,9 +244,22 @@ class RuntimeProviderEnrollmentService:
                 credential.verifier,
             ):
                 raise RuntimeProviderCredentialUnavailable("credential_unavailable")
+            binding = await self.binding_repository.get_by_id(
+                session,
+                binding_id=credential.binding_id,
+                for_update=False,
+            )
+            if (
+                binding is None
+                or binding.provider_id != credential.provider_id
+                or binding.auth_method
+                is not RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN
+                or binding.state is not RuntimeProviderBindingState.ACTIVE
+            ):
+                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
             provider = await self.provider_repository.get_by_id(
                 session,
-                provider_id=credential.provider_id,
+                provider_id=binding.provider_id,
                 for_update=False,
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
@@ -220,12 +270,22 @@ class RuntimeProviderEnrollmentService:
                 used_at=now,
             ):
                 raise RuntimeProviderCredentialUnavailable("credential_unavailable")
+            if not await self.binding_repository.mark_authenticated(
+                session,
+                binding_id=binding.id,
+                authenticated_at=now,
+            ):
+                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
         return RuntimeProviderCredentialAuthentication(
+            binding_id=binding.id,
             credential_id=credential.id,
-            provider_id=credential.provider_id,
+            provider_id=provider.id,
             provider_kind=provider.kind,
             provider_scope=provider.scope,
             provider_workspace_id=provider.workspace_id,
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject=binding.subject,
+            evidence_expires_at=credential.expires_at,
         )
 
     async def revoke_credential(
@@ -276,17 +336,46 @@ class RuntimeProviderEnrollmentService:
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
                 raise RuntimeProviderCredentialUnavailable("provider_unavailable")
-            if not await self.repository.mark_credential_used(
+            binding = await self.binding_repository.get_by_id(
                 session,
-                credential_id=authentication.credential_id,
-                used_at=connected_at,
+                binding_id=authentication.binding_id,
+                for_update=True,
+            )
+            if (
+                binding is None
+                or binding.provider_id != authentication.provider_id
+                or binding.auth_method is not authentication.auth_method
+                or binding.subject != authentication.auth_subject
+                or binding.state is not RuntimeProviderBindingState.ACTIVE
             ):
-                raise RuntimeProviderCredentialUnavailable("credential_unavailable")
+                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
+            if (
+                authentication.evidence_expires_at is not None
+                and authentication.evidence_expires_at <= connected_at
+            ):
+                raise RuntimeProviderCredentialUnavailable("evidence_expired")
+            if authentication.credential_id is not None:
+                if not await self.repository.mark_credential_used(
+                    session,
+                    credential_id=authentication.credential_id,
+                    used_at=connected_at,
+                ):
+                    raise RuntimeProviderCredentialUnavailable("credential_unavailable")
+            if not await self.binding_repository.mark_connected(
+                session,
+                binding_id=binding.id,
+                connected_at=connected_at,
+            ):
+                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
             connection = await self.repository.create_connection(
                 session,
                 create=RuntimeProviderConnectionCreate(
                     provider_id=authentication.provider_id,
+                    binding_id=authentication.binding_id,
                     credential_id=authentication.credential_id,
+                    auth_method=authentication.auth_method,
+                    auth_subject=authentication.auth_subject,
+                    evidence_expires_at=authentication.evidence_expires_at,
                     connection_id=connection_id,
                     generation=generation,
                     reported_provider_type=reported_provider_type,
@@ -294,14 +383,16 @@ class RuntimeProviderEnrollmentService:
                     connected_at=connected_at,
                 ),
             )
-            revoked_credentials = (
-                await self.repository.revoke_older_bootstrap_credentials(
-                    session,
-                    provider_id=authentication.provider_id,
-                    current_credential_id=authentication.credential_id,
-                    revoked_at=connected_at,
+            revoked_credentials = ()
+            if authentication.credential_id is not None:
+                revoked_credentials = (
+                    await self.repository.revoke_older_bootstrap_credentials(
+                        session,
+                        provider_id=authentication.provider_id,
+                        current_credential_id=authentication.credential_id,
+                        revoked_at=connected_at,
+                    )
                 )
-            )
             await self.provider_repository.append_audit_event(
                 session,
                 create=RuntimeProviderAuditEventCreate(
@@ -341,7 +432,10 @@ class RuntimeProviderEnrollmentService:
             return await self.repository.heartbeat_connection(
                 session,
                 provider_id=authentication.provider_id,
+                binding_id=authentication.binding_id,
                 credential_id=authentication.credential_id,
+                auth_method=authentication.auth_method,
+                auth_subject=authentication.auth_subject,
                 generation=generation,
                 heartbeat_at=heartbeat_at,
             )
@@ -358,7 +452,10 @@ class RuntimeProviderEnrollmentService:
             return await self.repository.connection_active(
                 session,
                 provider_id=authentication.provider_id,
+                binding_id=authentication.binding_id,
                 credential_id=authentication.credential_id,
+                auth_method=authentication.auth_method,
+                auth_subject=authentication.auth_subject,
                 generation=generation,
                 now=now,
             )
@@ -375,7 +472,10 @@ class RuntimeProviderEnrollmentService:
             disconnected = await self.repository.disconnect_connection(
                 session,
                 provider_id=authentication.provider_id,
+                binding_id=authentication.binding_id,
                 credential_id=authentication.credential_id,
+                auth_method=authentication.auth_method,
+                auth_subject=authentication.auth_subject,
                 generation=generation,
                 disconnected_at=disconnected_at,
             )

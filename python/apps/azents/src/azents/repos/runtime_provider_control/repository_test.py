@@ -6,7 +6,9 @@ from azcommon.datetime import tznow
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    RuntimeProviderAuthMethod,
     RuntimeProviderAvailabilityMode,
+    RuntimeProviderBindingOwner,
     RuntimeProviderBootstrapAdapterKind,
     RuntimeProviderKind,
     RuntimeProviderLifecycleState,
@@ -18,6 +20,12 @@ from azents.repos.runtime_provider.data import (
     RuntimeProviderCreate,
 )
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.data import (
+    RuntimeProviderAuthBindingCreate,
+)
+from azents.repos.runtime_provider_binding.repository import (
+    RuntimeProviderAuthBindingRepository,
+)
 
 from .data import (
     RuntimeProviderConnectionCreate,
@@ -27,10 +35,10 @@ from .data import (
 from .repository import RuntimeProviderControlRepository
 
 
-async def _provider_and_source(
+async def _provider_source_and_binding(
     session: AsyncSession,
-) -> tuple[str, str]:
-    """Create a durable Provider and authorized bootstrap grant issuer."""
+) -> tuple[str, str, str]:
+    """Create a durable Provider, bootstrap source, and issued-token binding."""
     provider_repository = RuntimeProviderRepository()
     provider = await provider_repository.create(
         session,
@@ -56,7 +64,18 @@ async def _provider_and_source(
             adapter_kind=RuntimeProviderBootstrapAdapterKind.HELM_FILE,
         ),
     )
-    return provider.id, source.id
+    binding = await RuntimeProviderAuthBindingRepository().create(
+        session,
+        create=RuntimeProviderAuthBindingCreate(
+            provider_id=provider.id,
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            subject=f"admin:{provider.id}",
+            owner=RuntimeProviderBindingOwner.ADMIN,
+            bootstrap_declaration_id=None,
+            config=None,
+        ),
+    )
+    return provider.id, source.id, binding.id
 
 
 class TestRuntimeProviderControlRepository:
@@ -68,12 +87,15 @@ class TestRuntimeProviderControlRepository:
     ) -> None:
         """A grant creates exactly one credential even after replay."""
         repository = RuntimeProviderControlRepository()
-        provider_id, source_id = await _provider_and_source(rdb_session)
+        provider_id, source_id, binding_id = await _provider_source_and_binding(
+            rdb_session
+        )
         now = tznow()
         grant = await repository.create_enrollment_grant(
             rdb_session,
             create=RuntimeProviderEnrollmentGrantCreate(
                 provider_id=provider_id,
+                binding_id=binding_id,
                 verifier="grant-verifier",
                 expires_at=now + datetime.timedelta(minutes=5),
                 issued_by_user_id=None,
@@ -86,6 +108,7 @@ class TestRuntimeProviderControlRepository:
             grant_id=grant.id,
             credential=RuntimeProviderCredentialCreate(
                 provider_id=provider_id,
+                binding_id=binding_id,
                 verifier="credential-verifier",
                 expires_at=None,
                 issued_grant_id=grant.id,
@@ -97,6 +120,7 @@ class TestRuntimeProviderControlRepository:
             grant_id=grant.id,
             credential=RuntimeProviderCredentialCreate(
                 provider_id=provider_id,
+                binding_id=binding_id,
                 verifier="replay-verifier",
                 expires_at=None,
                 issued_grant_id=grant.id,
@@ -120,12 +144,16 @@ class TestRuntimeProviderControlRepository:
     ) -> None:
         """Credential revocation immediately prevents connection heartbeat."""
         repository = RuntimeProviderControlRepository()
-        provider_id, source_id = await _provider_and_source(rdb_session)
+        provider_id, source_id, binding_id = await _provider_source_and_binding(
+            rdb_session
+        )
+        auth_subject = f"admin:{provider_id}"
         now = tznow()
         grant = await repository.create_enrollment_grant(
             rdb_session,
             create=RuntimeProviderEnrollmentGrantCreate(
                 provider_id=provider_id,
+                binding_id=binding_id,
                 verifier="grant-verifier",
                 expires_at=now + datetime.timedelta(minutes=5),
                 issued_by_user_id=None,
@@ -137,6 +165,7 @@ class TestRuntimeProviderControlRepository:
             grant_id=grant.id,
             credential=RuntimeProviderCredentialCreate(
                 provider_id=provider_id,
+                binding_id=binding_id,
                 verifier="credential-verifier",
                 expires_at=None,
                 issued_grant_id=grant.id,
@@ -148,7 +177,11 @@ class TestRuntimeProviderControlRepository:
             rdb_session,
             create=RuntimeProviderConnectionCreate(
                 provider_id=provider_id,
+                binding_id=binding_id,
                 credential_id=credential.id,
+                auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+                auth_subject=auth_subject,
+                evidence_expires_at=None,
                 connection_id="provider-control-test-connection",
                 generation=1,
                 reported_provider_type="docker",
@@ -160,16 +193,22 @@ class TestRuntimeProviderControlRepository:
         assert await repository.heartbeat_connection(
             rdb_session,
             provider_id=provider_id,
+            binding_id=binding_id,
             credential_id=credential.id,
             generation=connection.generation,
             heartbeat_at=now + datetime.timedelta(seconds=1),
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject=auth_subject,
         )
         assert await repository.connection_active(
             rdb_session,
             provider_id=provider_id,
+            binding_id=binding_id,
             credential_id=credential.id,
             generation=connection.generation,
             now=now + datetime.timedelta(seconds=1),
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject=auth_subject,
         )
         assert await repository.revoke_credential(
             rdb_session,
@@ -180,21 +219,30 @@ class TestRuntimeProviderControlRepository:
         assert not await repository.heartbeat_connection(
             rdb_session,
             provider_id=provider_id,
+            binding_id=binding_id,
             credential_id=credential.id,
             generation=connection.generation,
             heartbeat_at=now + datetime.timedelta(seconds=3),
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject=auth_subject,
         )
         assert not await repository.connection_active(
             rdb_session,
             provider_id=provider_id,
+            binding_id=binding_id,
             credential_id=credential.id,
             generation=connection.generation,
             now=now + datetime.timedelta(seconds=3),
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject=auth_subject,
         )
         assert not await repository.disconnect_connection(
             rdb_session,
             provider_id=provider_id,
+            binding_id=binding_id,
             credential_id=credential.id,
             generation=connection.generation,
             disconnected_at=now + datetime.timedelta(seconds=4),
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject=auth_subject,
         )

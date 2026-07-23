@@ -17,6 +17,9 @@ from azents.core.runtime_provider_credential import RuntimeProviderCredentialVer
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.repository import (
+    RuntimeProviderAuthBindingRepository,
+)
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
 )
@@ -41,6 +44,7 @@ def get_runtime_provider_enrollment_service(
         session_manager=session_manager,
         repository=RuntimeProviderControlRepository(),
         provider_repository=RuntimeProviderRepository(),
+        binding_repository=RuntimeProviderAuthBindingRepository(),
         verifier=RuntimeProviderCredentialVerifier(credential_encryption.key),
     )
 
