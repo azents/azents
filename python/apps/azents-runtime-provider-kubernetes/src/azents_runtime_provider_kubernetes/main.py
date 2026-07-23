@@ -47,6 +47,7 @@ _PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v1"
 _CONFIG_SCHEMA_VERSION = "agent-runtime-provider-kubernetes-v1"
 _DEFAULT_COMMAND_BLOCK_MS = 5_000
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
+_CREDENTIAL_POLL_INTERVAL_SECONDS = 1.0
 _LEADERSHIP_WAIT_LOG_INTERVAL_SECONDS = 60.0
 _LOGGER = logging.getLogger(__name__)
 
@@ -134,9 +135,12 @@ async def _run_control_loop(
     )
     while not stop.is_set():
         _set_readiness(settings.readiness_file, ready=False)
+        provider_credential = read_provider_credential(
+            settings.provider_credential_file
+        )
         control_client = GrpcProviderControlClient.from_endpoint(
             settings.control_endpoint,
-            provider_credential=settings.provider_credential,
+            provider_credential=provider_credential,
             tls=settings.control_tls,
             allow_insecure=settings.allow_insecure_control,
         )
@@ -174,9 +178,17 @@ async def _run_control_loop(
                 ),
                 name="runtime-provider-command-loop",
             )
+            credential_task = asyncio.create_task(
+                wait_for_provider_credential_change(
+                    settings.provider_credential_file,
+                    current=provider_credential,
+                    stop=stop,
+                ),
+                name="runtime-provider-credential-watch",
+            )
             done, pending = await asyncio.wait(
-                {watch_task, command_task},
-                return_when=asyncio.FIRST_EXCEPTION,
+                {watch_task, command_task, credential_task},
+                return_when=asyncio.FIRST_COMPLETED,
             )
             for task in pending:
                 task.cancel()
@@ -262,6 +274,26 @@ async def _wait_for_reconnect(stop: asyncio.Event) -> None:
         )
     except TimeoutError:
         return
+
+
+async def wait_for_provider_credential_change(
+    path: Path,
+    *,
+    current: str,
+    stop: asyncio.Event,
+) -> None:
+    """Return when the projected Provider credential changes."""
+    while not stop.is_set():
+        if read_provider_credential(path) != current:
+            _LOGGER.info("Runtime Provider credential changed; reconnecting")
+            return
+        try:
+            await asyncio.wait_for(
+                stop.wait(),
+                timeout=_CREDENTIAL_POLL_INTERVAL_SECONDS,
+            )
+        except TimeoutError:
+            continue
 
 
 async def _wait_for_leadership(
@@ -400,7 +432,9 @@ class ProviderSettings:
             "AZ_RUNTIME_PROVIDER_CONNECTION_ID",
             f"{self.provider_id}:{uuid.uuid4().hex}",
         )
-        self.provider_credential: str = _required_env("AZ_RUNTIME_PROVIDER_CREDENTIAL")
+        self.provider_credential_file = Path(
+            _required_env("AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE")
+        )
 
 
 def _settings_from_env() -> ProviderSettings:
@@ -421,6 +455,18 @@ def _required_bool_env(name: str) -> bool:
     if value == "false":
         return False
     raise RuntimeError(f"{name} must be true or false")
+
+
+def read_provider_credential(path: Path) -> str:
+    try:
+        credential = path.read_text().strip()
+    except OSError as exc:
+        raise RuntimeError(
+            f"Runtime Provider credential file cannot be read: {path}"
+        ) from exc
+    if not credential:
+        raise RuntimeError("Runtime Provider credential file is empty")
+    return credential
 
 
 def _control_tls_from_env() -> GrpcClientTlsConfig | None:

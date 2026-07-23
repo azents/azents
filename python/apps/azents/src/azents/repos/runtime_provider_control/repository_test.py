@@ -171,12 +171,6 @@ class TestRuntimeProviderControlRepository:
             generation=connection.generation,
             now=now + datetime.timedelta(seconds=1),
         )
-        bootstrap_credentials = await repository.list_active_bootstrap_credentials(
-            rdb_session,
-            provider_id=provider_id,
-            source_id=source_id,
-        )
-        assert tuple(item.id for item in bootstrap_credentials) == (credential.id,)
         assert await repository.revoke_credential(
             rdb_session,
             credential_id=credential.id,

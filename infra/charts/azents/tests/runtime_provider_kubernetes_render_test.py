@@ -78,9 +78,12 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "azents-runtime-control-tls" in rendered
     assert "AZ_RUNTIME_PROVIDER_READINESS_FILE" in rendered
     assert "readinessProbe:" in rendered
-    assert "AZ_RUNTIME_PROVIDER_CREDENTIAL" in rendered
+    assert "AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE" in rendered
+    assert "- name: AZ_RUNTIME_PROVIDER_CREDENTIAL\n" not in rendered
     assert "azents-provider-credential" in rendered
     assert "provider-credential" in rendered
+    assert "mountPath: /var/run/secrets/azents/runtime-provider-credential" in rendered
+    assert "path: credential" in rendered
     assert "AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_STORAGE_CLASS" in rendered

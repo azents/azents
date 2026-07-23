@@ -93,7 +93,7 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 
 - Server bootstrap source: the chart always renders a non-secret authoritative Provider declaration document and mounts it into `adminserver` for startup and periodic reconciliation
 - Server ConfigMap: `AZ_RUNTIME_RUNNER_IMAGE`, `AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT`
-- Provider credential: `AZ_RUNTIME_PROVIDER_CREDENTIAL` is read from `runtimeProviderKubernetes.credential.existingSecret`; it is not the Runner or shared Runtime Control token
+- Provider credential: `AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE` points to the projected `runtimeProviderKubernetes.credential.existingSecret`; the Provider watches this file and reconnects after rotation. It is not the Runner or shared Runtime Control token
 - Provider Deployment: `AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKSPACE_PATH`, `AZ_RUNTIME_PROVIDER_STORAGE_CLASS`, `AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS`
 - Provider RBAC: leader election Lease permissions are scoped to the provider namespace, while Runtime Pod/PVC permissions are scoped to the workload namespace
 - Runtime Pod image pulls: by default, Runtime Pods inherit `global.imagePullSecrets`. Consumers may override with `runtimeProviderKubernetes.runtimePod.imagePullSecrets`. Referenced pull secrets must already exist in the workload namespace.
