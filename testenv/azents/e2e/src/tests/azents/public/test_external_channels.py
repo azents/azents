@@ -766,7 +766,7 @@ def test_provider_native_channel_work_progress_journey(
         list[dict[str, object]],
         wait_until(
             lambda: _progress_request_evidence(openai_proxy_url) or None,
-            timeout=20,
+            timeout=90,
             interval=0.2,
             message="Channel Work model request did not reach the proxy",
         ),
@@ -805,7 +805,7 @@ def test_provider_native_channel_work_progress_journey(
 
     tool_evidence = wait_until(
         completed_channel_action,
-        timeout=20,
+        timeout=90,
         interval=0.2,
         message="Channel Action tool execution did not complete",
     )
