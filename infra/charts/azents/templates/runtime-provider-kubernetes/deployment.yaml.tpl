@@ -51,8 +51,8 @@ spec:
               value: "/var/run/secrets/azents/runtime-control-tls/ca.crt"
             - name: AZ_RUNTIME_PROVIDER_READINESS_FILE
               value: "/tmp/azents-runtime-provider-ready"
-            - name: AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE
-              value: "/var/run/secrets/azents/runtime-provider-credential/credential"
+            - name: AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE
+              value: "/var/run/secrets/azents/runtime-provider-service-account-token/token"
             - name: AZ_RUNTIME_ENV
               value: {{ .Values.server.env.AZ_RUNTIME_ENV | quote }}
             - name: AZ_RUNTIME_PROVIDER_ID
@@ -99,8 +99,8 @@ spec:
             - name: runtime-control-tls
               mountPath: /var/run/secrets/azents/runtime-control-tls
               readOnly: true
-            - name: runtime-provider-credential
-              mountPath: /var/run/secrets/azents/runtime-provider-credential
+            - name: runtime-provider-service-account-token
+              mountPath: /var/run/secrets/azents/runtime-provider-service-account-token
               readOnly: true
           readinessProbe:
             exec:
@@ -116,12 +116,12 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
-        - name: runtime-provider-credential
-          secret:
-            secretName: {{ required "runtimeProviderKubernetes.credential.existingSecret is required when the Kubernetes Provider is enabled" .Values.runtimeProviderKubernetes.credential.existingSecret | quote }}
-            items:
-              - key: {{ required "runtimeProviderKubernetes.credential.key is required when the Kubernetes Provider is enabled" .Values.runtimeProviderKubernetes.credential.key | quote }}
-                path: credential
+        - name: runtime-provider-service-account-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: azents-runtime-control
+                  path: token
         - name: runtime-control-tls
           secret:
             secretName: {{ required "server.runtimeControl.tls.existingSecret is required when the Kubernetes Provider is enabled" .Values.server.runtimeControl.tls.existingSecret | quote }}

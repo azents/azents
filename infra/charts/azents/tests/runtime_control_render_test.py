@@ -71,7 +71,6 @@ def test_runtime_control_enabled_render_contract() -> None:
 
     assert "src/cli/runtime_control_server.py" in rendered
     assert "initialDelaySeconds: 5" in rendered
-    assert "AZ_RUNTIME_CONTROL_AUTH_ENABLED" in rendered
     assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
     assert "AZ_RUNTIME_CONTROL_ALLOW_INSECURE" in rendered
     assert "AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE" in rendered
@@ -80,6 +79,15 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert "AZ_CREDENTIAL_ENCRYPTION_KEY" in rendered
     assert "azents-auth" in rendered
     assert "repo/runner:sha@sha256:runnerdigest" in rendered
+    assert "kind: ClusterRole" in rendered
+    assert 'resources: ["tokenreviews"]' in rendered
+    assert 'verbs: ["create"]' in rendered
+    assert "azents-runtime-control-tokenreview" in rendered
+    tokenreview_binding = rendered[rendered.index("kind: ClusterRoleBinding") :]
+    tokenreview_binding = tokenreview_binding[: tokenreview_binding.index("---\n", 4)]
+    assert 'name: "azents-server"' in tokenreview_binding
+    assert 'namespace: "default"' in tokenreview_binding
+    assert "azents-runtime-provider-kubernetes" not in tokenreview_binding
 
 
 def test_runtime_control_allows_single_replica_configuration() -> None:
@@ -96,17 +104,15 @@ def test_runtime_control_allows_single_replica_configuration() -> None:
     assert "maxUnavailable: 1" in rendered
 
 
-def test_runtime_control_auth_enabled_render_contract() -> None:
-    """auth enabled values render the Runtime Control auth token Secret ref."""
-    rendered = _helm_template(
-        "server.runtimeControl.enabled=true",
-        "server.runtimeControl.auth.enabled=true",
-        "server.runtimeControl.auth.existingSecret=azents-runtime-control-auth",
-        "server.runtimeControl.runnerImage.repository=repo/runner",
-        "server.runtimeControl.runnerImage.tag=sha",
-    )
+def test_runtime_control_rejects_removed_shared_auth_values() -> None:
+    """Removed shared-token values fail chart schema validation."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.auth.enabled=true",
+            "server.runtimeControl.auth.existingSecret=azents-runtime-control-auth",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+        )
 
-    assert "AZ_RUNTIME_CONTROL_AUTH_ENABLED" in rendered
-    assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" in rendered
-    assert "azents-runtime-control-auth" in rendered
-    assert "runtime-control-token" in rendered
+    assert "Additional property auth is not allowed" in raised.value.stderr

@@ -361,151 +361,6 @@
           }
         }
       }
-    },
-    {
-      "if": {
-        "properties": {
-          "server": {
-            "properties": {
-              "runtimeControl": {
-                "properties": {
-                  "enabled": {
-                    "const": true
-                  },
-                  "auth": {
-                    "properties": {
-                      "enabled": {
-                        "const": true
-                      }
-                    },
-                    "required": [
-                      "enabled"
-                    ]
-                  }
-                },
-                "required": [
-                  "enabled",
-                  "auth"
-                ]
-              }
-            },
-            "required": [
-              "runtimeControl"
-            ]
-          }
-        },
-        "required": [
-          "server"
-        ]
-      },
-      "then": {
-        "properties": {
-          "server": {
-            "properties": {
-              "runtimeControl": {
-                "properties": {
-                  "auth": {
-                    "properties": {
-                      "existingSecret": {
-                        "minLength": 1
-                      },
-                      "tokenKey": {
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "existingSecret",
-                      "tokenKey"
-                    ]
-                  }
-                },
-                "required": [
-                  "auth"
-                ]
-              }
-            }
-          }
-        },
-        "required": [
-          "server"
-        ]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "runtimeProviderKubernetes": {
-            "properties": {
-              "enabled": {
-                "const": true
-              }
-            },
-            "required": [
-              "enabled"
-            ]
-          },
-          "server": {
-            "properties": {
-              "runtimeControl": {
-                "properties": {
-                  "auth": {
-                    "properties": {
-                      "enabled": {
-                        "const": true
-                      }
-                    },
-                    "required": [
-                      "enabled"
-                    ]
-                  }
-                },
-                "required": [
-                  "auth"
-                ]
-              }
-            },
-            "required": [
-              "runtimeControl"
-            ]
-          }
-        },
-        "required": [
-          "runtimeProviderKubernetes",
-          "server"
-        ]
-      },
-      "then": {
-        "properties": {
-          "server": {
-            "properties": {
-              "runtimeControl": {
-                "properties": {
-                  "auth": {
-                    "properties": {
-                      "existingSecret": {
-                        "minLength": 1
-                      },
-                      "tokenKey": {
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "existingSecret",
-                      "tokenKey"
-                    ]
-                  }
-                },
-                "required": [
-                  "auth"
-                ]
-              }
-            }
-          }
-        },
-        "required": [
-          "server"
-        ]
-      }
     }
   ],
   "properties": {
@@ -702,6 +557,7 @@
     },
     "runtimeProviderKubernetes": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -717,38 +573,6 @@
         },
         "providerId": {
           "type": "string"
-        },
-        "credential": {
-          "type": "object",
-          "required": [
-            "existingSecret",
-            "key",
-            "bootstrap"
-          ],
-          "properties": {
-            "existingSecret": {
-              "type": "string"
-            },
-            "key": {
-              "type": "string",
-              "minLength": 1
-            },
-            "bootstrap": {
-              "type": "object",
-              "required": [
-                "enabled",
-                "secretName"
-              ],
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                },
-                "secretName": {
-                  "type": "string"
-                }
-              }
-            }
-          }
         },
         "image": {
           "$ref": "#/definitions/image"
@@ -987,6 +811,7 @@
         },
         "runtimeControl": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -1005,9 +830,6 @@
             },
             "startTimeoutSeconds": {
               "type": "number"
-            },
-            "auth": {
-              "$ref": "#/definitions/runtimeControlAuth"
             },
             "tls": {
               "$ref": "#/definitions/runtimeControlTls"
@@ -1196,20 +1018,6 @@
           "type": "string"
         },
         "clientSecretKey": {
-          "type": "string"
-        }
-      }
-    },
-    "runtimeControlAuth": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "existingSecret": {
-          "type": "string"
-        },
-        "tokenKey": {
           "type": "string"
         }
       }

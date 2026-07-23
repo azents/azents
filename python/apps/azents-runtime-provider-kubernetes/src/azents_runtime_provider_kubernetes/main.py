@@ -299,7 +299,7 @@ async def wait_for_provider_credential_change(
     """Return when the projected Provider credential changes."""
     while not stop.is_set():
         try:
-            candidate = read_provider_credential(path)
+            candidate = read_service_account_token(path)
         except RuntimeError:
             candidate = None
         if candidate is not None and candidate != current:
@@ -475,21 +475,17 @@ def _required_bool_env(name: str) -> bool:
     raise RuntimeError(f"{name} must be true or false")
 
 
-def read_provider_credential(path: Path) -> str:
-    try:
-        credential = path.read_text().strip()
-    except OSError as exc:
-        raise RuntimeError(
-            f"Runtime Provider credential file cannot be read: {path}"
-        ) from exc
-    if not credential:
-        raise RuntimeError("Runtime Provider credential file is empty")
-    return credential
-
-
 def read_service_account_token(path: Path) -> str:
     """Read the projected Kubernetes ServiceAccount token."""
-    return read_provider_credential(path)
+    try:
+        token = path.read_text().strip()
+    except OSError as exc:
+        raise RuntimeError(
+            f"Runtime Provider ServiceAccount token file cannot be read: {path}"
+        ) from exc
+    if not token:
+        raise RuntimeError("Runtime Provider ServiceAccount token file is empty")
+    return token
 
 
 def _control_tls_from_env() -> GrpcClientTlsConfig | None:

@@ -15,7 +15,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
 from azents_runtime_provider_kubernetes.main import (
     ProviderSettings,
     create_provider_control_client,
-    read_provider_credential,
+    read_service_account_token,
     wait_for_provider_credential_change,
 )
 from azents_runtime_provider_kubernetes.provider import RUNNER_LIMIT_ENV_NAMES
@@ -63,7 +63,7 @@ def test_provider_settings_defaults_runner_resources_to_none(
     assert settings.runner_env == {}
     assert settings.image_pull_secrets == ()
     assert settings.service_account_token_file == provider_env
-    assert read_provider_credential(provider_env) == "test-provider-credential"
+    assert read_service_account_token(provider_env) == "test-provider-credential"
 
 
 @pytest.mark.asyncio
@@ -103,11 +103,27 @@ async def test_provider_tolerates_transient_empty_projected_token(
     await asyncio.wait_for(watcher, timeout=1)
 
 
-def test_provider_rejects_empty_credential_file(provider_env: Path) -> None:
+def test_provider_rejects_empty_service_account_token_file(
+    provider_env: Path,
+) -> None:
     provider_env.write_text("\n")
 
-    with pytest.raises(RuntimeError, match="credential file is empty"):
-        read_provider_credential(provider_env)
+    with pytest.raises(RuntimeError, match="ServiceAccount token file is empty"):
+        read_service_account_token(provider_env)
+
+
+def test_provider_requires_service_account_token_file_without_legacy_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.delenv("AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE", str(provider_env))
+
+    with pytest.raises(
+        RuntimeError,
+        match="AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE",
+    ):
+        ProviderSettings()
 
 
 def test_control_client_uses_explicit_service_account_method(
