@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import sqlalchemy as sa
@@ -44,6 +44,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelEvent,
     RDBExternalChannelInvocationBatch,
     RDBExternalChannelPendingContext,
 )
@@ -83,6 +84,7 @@ from azents.services.external_channel.access import (
     ExternalChannelAccessService,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
+from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
     ExternalChannelPersistedMessage,
@@ -209,6 +211,13 @@ async def _setup_route(
 
 class _TestEventProcessorService(ExternalChannelEventProcessorService):
     """Expose transaction helpers only to focused database tests."""
+
+    async def process_claimed_event_safely_for_test(
+        self,
+        event: ExternalChannelEvent,
+    ) -> None:
+        """Expose claimed-event handling for deferral regression coverage."""
+        await self._process_claimed_event_safely(event)
 
     async def persist_message_event_for_test(
         self,
@@ -460,6 +469,83 @@ async def test_late_control_delivery_deletes_message_after_decision() -> None:
         tenant_id="T1",
         channel_id="C1",
         message_ts="2.000001",
+    )
+
+
+async def test_unlinked_message_defers_across_session_context(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Controlled deferral survives async session exception propagation."""
+    async with rdb_session_manager() as session:
+        connection_id, _, _, repository = await _setup_route(session)
+        admitted = await repository.admit_event(
+            session,
+            ExternalChannelEventCreate(
+                connection_id=connection_id,
+                provider_event_id="Ev-deferred",
+                transport_envelope_id="Ev-deferred",
+                event_type="message",
+                provider_app_id="A1",
+                provider_tenant_id="T1",
+                provider_enterprise_id=None,
+                resource_correlation_key="C1:1784678400.000100",
+                eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+                envelope={
+                    "event": {
+                        "type": "message",
+                        "channel": "C1",
+                        "channel_type": "channel",
+                        "user": "U1",
+                        "ts": "1784678400.000100",
+                        "text": "Context before the Agent mention.",
+                    }
+                },
+                status=ExternalChannelEventStatus.ACCEPTED,
+                provider_occurred_at=_at(1),
+                received_at=_at(1),
+            ),
+        )
+        await session.commit()
+
+    service = _service(rdb_session_manager, repository)
+    cast(
+        MagicMock, service.credentials_codec.decrypt
+    ).return_value = SlackConnectionCredentials(
+        bot_token="xoxb-test",
+        signing_secret="test-signing-secret",
+        app_token=None,
+    )
+    service.slack_client.fetch_user_display_name = AsyncMock(return_value=None)
+    service.slack_client.fetch_channel_display_name = AsyncMock(return_value=None)
+
+    async with rdb_session_manager() as session:
+        claimed = await repository.claim_events(
+            session,
+            claim_owner=service.claim_owner,
+            now=_at(2),
+            claim_until=_at(12),
+            limit=1,
+        )
+        await session.commit()
+    assert [event.id for event in claimed] == [admitted.event.id]
+
+    with patch(
+        "azents.services.external_channel.event_processor._now",
+        return_value=_at(2),
+    ):
+        await service.process_claimed_event_safely_for_test(claimed[0])
+
+    async with rdb_session_manager() as session:
+        deferred = await session.get(RDBExternalChannelEvent, admitted.event.id)
+
+    assert deferred is not None
+    assert deferred.status is ExternalChannelEventStatus.ACCEPTED
+    assert deferred.attempt_count == 1
+    assert deferred.claim_owner is None
+    assert deferred.claim_until == _at(7)
+    assert deferred.error_kind == "awaiting_thread_mention"
+    assert deferred.error_summary == (
+        "Waiting for a correlated Slack mention or binding."
     )
 
 

@@ -161,7 +161,7 @@ class ExternalChannelPersistedRevision:
     applied: bool
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class _DeferredEvent(Exception):
     """Controlled event deferral with a stable retry reason."""
 
@@ -170,7 +170,7 @@ class _DeferredEvent(Exception):
     error_summary: str
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class _ConnectionUnavailable(Exception):
     """Provider processing cannot continue until connection health recovers."""
 
