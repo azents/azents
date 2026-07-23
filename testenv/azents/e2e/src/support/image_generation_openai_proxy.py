@@ -307,13 +307,15 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/responses" and user_text == _PROMPT:
             self._write_image_generation_response(request)
             return
-        if self.path == "/v1/responses" and is_external_channel_progress_request(
-            request
-        ):
+        serialized = json.dumps(request, ensure_ascii=False)
+        if _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized:
             with _State.lock:
                 _State.external_channel_progress_requests.append(
                     external_channel_progress_evidence(request)
                 )
+        if self.path == "/v1/responses" and is_external_channel_progress_request(
+            request
+        ):
             binding = external_channel_binding(request)
             if binding is not None:
                 if request_has_tool_output(

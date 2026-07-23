@@ -678,11 +678,82 @@ def test_provider_native_channel_work_progress_journey(
     assert decided.agent_session_id is not None
     session_id = decided.agent_session_id
 
+    def active_management_projection() -> object | None:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=session_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            len(projection.items) == 1
+            and projection.items[0].activation_status
+            is ExternalChannelBindingActivationStatus.ACTIVE
+            and projection.items[0].work is not None
+        ):
+            return projection
+        return None
+
+    active_projection = cast(
+        Any,
+        wait_until(
+            active_management_projection,
+            timeout=15,
+            interval=0.2,
+            message="Approved Channel Work binding was not activated",
+        ),
+    )
+    binding_id = active_projection.items[0].id
+
+    request_evidence = cast(
+        list[dict[str, object]],
+        wait_until(
+            lambda: _progress_request_evidence(openai_proxy_url) or None,
+            timeout=20,
+            interval=0.2,
+            message="Channel Work model request did not reach the proxy",
+        ),
+    )
+    assert {
+        "binding": binding_id,
+        "resolved_user_reference": True,
+        "resolved_channel_reference": True,
+        "progress_tool_available": True,
+    } in request_evidence
+
+    def rich_management_projection() -> object | None:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=session_id,
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            len(projection.items) == 1
+            and projection.items[0].work is not None
+            and projection.items[0].work.title == "Investigating error logs…"
+            and len(projection.items[0].work.tasks) == 4
+        ):
+            return projection
+        return None
+
+    projection = cast(
+        Any,
+        wait_until(
+            rich_management_projection,
+            timeout=20,
+            interval=0.2,
+            message="Canonical Channel Work was not updated by the model action",
+        ),
+    )
+    work = projection.items[0].work
+    assert work is not None
+
     plan_delivery = cast(
         dict[str, object],
         wait_until(
             lambda: _plan_delivery(slack_provider_fake_url),
-            timeout=30,
+            timeout=20,
             interval=0.2,
             message="Slack Plan update was not delivered",
         ),
@@ -750,40 +821,6 @@ def test_provider_native_channel_work_progress_journey(
         ],
     }
 
-    def rich_management_projection() -> object | None:
-        projection = external_api.external_channel_v1_list_session_channels(
-            agent_id=agent_id,
-            session_id=session_id,
-            handle=handle,
-            _headers=headers,
-        )
-        if (
-            len(projection.items) == 1
-            and projection.items[0].work is not None
-            and projection.items[0].work.title == "Investigating error logs…"
-            and len(projection.items[0].work.tasks) == 4
-        ):
-            return projection
-        return None
-
-    projection = cast(
-        Any,
-        wait_until(
-            rich_management_projection,
-            timeout=15,
-            interval=0.2,
-            message="Typed Channel Work management projection was not available",
-        ),
-    )
-    work = projection.items[0].work
-    assert work is not None
-    request_evidence = _progress_request_evidence(openai_proxy_url)
-    assert {
-        "binding": projection.items[0].id,
-        "resolved_user_reference": True,
-        "resolved_channel_reference": True,
-        "progress_tool_available": True,
-    } in request_evidence
     assert [task.status for task in work.tasks] == [
         ExternalChannelWorkTaskStatus.IN_PROGRESS,
         ExternalChannelWorkTaskStatus.COMPLETED,
