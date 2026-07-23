@@ -6,7 +6,11 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    RuntimeProviderAuthMethod,
     RuntimeProviderAvailabilityMode,
+    RuntimeProviderBindingAuditEventType,
+    RuntimeProviderBindingOwner,
+    RuntimeProviderBindingState,
     RuntimeProviderBootstrapAdapterKind,
     RuntimeProviderBootstrapDeclarationState,
     RuntimeProviderKind,
@@ -19,9 +23,16 @@ from azents.core.system_setting import SystemSettingSection
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.data import (
+    RuntimeProviderAuthBindingCreate,
+)
+from azents.repos.runtime_provider_binding.repository import (
+    RuntimeProviderAuthBindingRepository,
+)
 from azents.repos.system_setting.repository import SystemSettingRepository
 
 from .data import (
+    RuntimeProviderBootstrapAuthenticationInput,
     RuntimeProviderBootstrapDeclarationInput,
     RuntimeProviderBootstrapSnapshot,
 )
@@ -55,6 +66,13 @@ def _snapshot(
                     config_schema=None,
                     metadata=None,
                     creation_seeds={"set_as_platform_default_when_unset": True},
+                    authentication=RuntimeProviderBootstrapAuthenticationInput(
+                        method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+                        subject="system:serviceaccount:azents:azents-runtime-provider",
+                        namespace="azents",
+                        serviceAccountName="azents-runtime-provider",
+                        audience="azents-runtime-control",
+                    ),
                 ),
             )
         ),
@@ -87,6 +105,7 @@ class TestRuntimeProviderBootstrapService:
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
             system_setting_repository=SystemSettingRepository(),
+            binding_repository=RuntimeProviderAuthBindingRepository(),
         )
 
         first = await service.reconcile(_snapshot())
@@ -114,6 +133,30 @@ class TestRuntimeProviderBootstrapService:
         assert (
             provider.registration_method == RuntimeProviderRegistrationMethod.BOOTSTRAP
         )
+        binding_repository = RuntimeProviderAuthBindingRepository()
+        bindings = await binding_repository.list_for_provider(
+            rdb_session,
+            provider_id=provider.id,
+        )
+        assert len(bindings) == 1
+        assert bindings[0].subject == (
+            "system:serviceaccount:azents:azents-runtime-provider"
+        )
+        assert bindings[0].config == {
+            "namespace": "azents",
+            "service_account_name": "azents-runtime-provider",
+            "audience": "azents-runtime-control",
+        }
+        audit_events = await binding_repository.list_audit_events(
+            rdb_session,
+            binding_id=bindings[0].id,
+            offset=0,
+            limit=10,
+        )
+        assert [event.event_type for event in audit_events] == [
+            RuntimeProviderBindingAuditEventType.RECONCILED,
+            RuntimeProviderBindingAuditEventType.CREATED,
+        ]
         platform_runtime = await SystemSettingRepository().get_current(
             rdb_session,
             section=SystemSettingSection.PLATFORM_RUNTIME,
@@ -153,6 +196,7 @@ class TestRuntimeProviderBootstrapService:
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
             system_setting_repository=SystemSettingRepository(),
+            binding_repository=RuntimeProviderAuthBindingRepository(),
         )
 
         result = await service.reconcile(
@@ -171,6 +215,13 @@ class TestRuntimeProviderBootstrapService:
                         config_schema=None,
                         metadata=None,
                         creation_seeds=None,
+                        authentication=RuntimeProviderBootstrapAuthenticationInput(
+                            method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+                            subject="system:serviceaccount:azents:admin-provider",
+                            namespace="azents",
+                            serviceAccountName="admin-provider",
+                            audience="azents-runtime-control",
+                        ),
                     ),
                 )
             )
@@ -189,6 +240,108 @@ class TestRuntimeProviderBootstrapService:
         assert declaration.state == RuntimeProviderBootstrapDeclarationState.CONFLICT
         assert declaration.conflict_code == "provider_owned_by_admin"
 
+    async def test_auth_subject_conflict_does_not_create_provider(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A pre-owned auth subject cannot leave a new orphan Provider."""
+        repository = RuntimeProviderRepository()
+        existing_provider = await repository.create(
+            rdb_session,
+            RuntimeProviderCreate(
+                provider_id="existing-auth-owner",
+                scope=RuntimeProviderScope.SYSTEM,
+                workspace_id=None,
+                kind=RuntimeProviderKind.KUBERNETES,
+                display_name="Existing Auth Owner",
+                registration_method=RuntimeProviderRegistrationMethod.ADMIN,
+                enabled=True,
+                lifecycle_state=RuntimeProviderLifecycleState.ACTIVE,
+                availability_mode=RuntimeProviderAvailabilityMode.PLATFORM_WIDE,
+                capabilities={},
+                config_schema=None,
+                metadata=None,
+            ),
+        )
+        binding_repository = RuntimeProviderAuthBindingRepository()
+        await binding_repository.create(
+            rdb_session,
+            create=RuntimeProviderAuthBindingCreate(
+                provider_id=existing_provider.id,
+                auth_method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+                subject="system:serviceaccount:azents:azents-runtime-provider",
+                owner=RuntimeProviderBindingOwner.ADMIN,
+                bootstrap_declaration_id=None,
+                config={
+                    "namespace": "azents",
+                    "service_account_name": "azents-runtime-provider",
+                    "audience": "azents-runtime-control",
+                },
+            ),
+        )
+        service = RuntimeProviderBootstrapService(
+            session_manager=_single_session_manager(rdb_session),
+            repository=repository,
+            system_setting_repository=SystemSettingRepository(),
+            binding_repository=binding_repository,
+        )
+
+        result = await service.reconcile(_snapshot())
+
+        assert result.created_provider_ids == ()
+        assert result.conflicted_declaration_keys == ("runtime-provider-kubernetes",)
+        assert (
+            await repository.get_by_provider_id(
+                rdb_session,
+                provider_logical_id="system-kubernetes",
+                for_update=False,
+            )
+            is None
+        )
+
+    async def test_conflicts_when_authentication_config_changes(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A declaration cannot silently replace its bound authentication config."""
+        repository = RuntimeProviderRepository()
+        binding_repository = RuntimeProviderAuthBindingRepository()
+        service = RuntimeProviderBootstrapService(
+            session_manager=_single_session_manager(rdb_session),
+            repository=repository,
+            system_setting_repository=SystemSettingRepository(),
+            binding_repository=binding_repository,
+        )
+        initial_snapshot = _snapshot()
+        initial = await service.reconcile(initial_snapshot)
+        declaration = initial_snapshot.declarations[0]
+        assert declaration.authentication is not None
+        changed = declaration.model_copy(
+            update={
+                "authentication": declaration.authentication.model_copy(
+                    update={"audience": "different-audience"}
+                )
+            }
+        )
+
+        result = await service.reconcile(
+            _snapshot(source_revision="revision-2", declarations=(changed,))
+        )
+
+        assert result.conflicted_declaration_keys == ("runtime-provider-kubernetes",)
+        binding = (
+            await binding_repository.list_for_provider(
+                rdb_session,
+                provider_id=initial.created_provider_ids[0],
+            )
+        )[0]
+        assert binding.state is RuntimeProviderBindingState.ACTIVE
+        assert binding.config == {
+            "namespace": "azents",
+            "service_account_name": "azents-runtime-provider",
+            "audience": "azents-runtime-control",
+        }
+
     async def test_conflicts_without_adopting_other_source_provider(
         self,
         rdb_session: AsyncSession,
@@ -199,6 +352,7 @@ class TestRuntimeProviderBootstrapService:
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
             system_setting_repository=SystemSettingRepository(),
+            binding_repository=RuntimeProviderAuthBindingRepository(),
         )
         first = await service.reconcile(_snapshot(source_key="helm/one/azents"))
         second = await service.reconcile(_snapshot(source_key="helm/two/azents"))
@@ -226,6 +380,7 @@ class TestRuntimeProviderBootstrapService:
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
             system_setting_repository=SystemSettingRepository(),
+            binding_repository=RuntimeProviderAuthBindingRepository(),
         )
         initial = await service.reconcile(_snapshot())
 
@@ -250,6 +405,13 @@ class TestRuntimeProviderBootstrapService:
         assert declaration.provider_id == provider.id
         assert declaration.state == RuntimeProviderBootstrapDeclarationState.ABSENT
         assert declaration.withdrawn_at is not None
+        binding = (
+            await RuntimeProviderAuthBindingRepository().list_for_provider(
+                rdb_session,
+                provider_id=provider.id,
+            )
+        )[0]
+        assert binding.state is RuntimeProviderBindingState.REVOKED
 
     async def test_terminal_provider_is_not_restored_by_bootstrap(
         self,
@@ -261,6 +423,7 @@ class TestRuntimeProviderBootstrapService:
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
             system_setting_repository=SystemSettingRepository(),
+            binding_repository=RuntimeProviderAuthBindingRepository(),
         )
         initial = await service.reconcile(_snapshot())
         provider_id = initial.created_provider_ids[0]

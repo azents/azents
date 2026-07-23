@@ -46,6 +46,12 @@ async def test_reads_enabled_kubernetes_declaration(tmp_path: Path) -> None:
       enabled: true
       availabilityMode: platform_wide
       setAsPlatformDefaultWhenUnset: true
+    authentication:
+      method: kubernetes_service_account
+      subject: system:serviceaccount:azents:azents-runtime-provider
+      namespace: azents
+      serviceAccountName: azents-runtime-provider
+      audience: azents-runtime-control
 """,
     )
 
@@ -64,6 +70,11 @@ async def test_reads_enabled_kubernetes_declaration(tmp_path: Path) -> None:
         declaration.availability_mode == RuntimeProviderAvailabilityMode.PLATFORM_WIDE
     )
     assert declaration.creation_seeds == {"set_as_platform_default_when_unset": True}
+    assert declaration.authentication is not None
+    assert declaration.authentication.subject == (
+        "system:serviceaccount:azents:azents-runtime-provider"
+    )
+    assert declaration.authentication.audience == "azents-runtime-control"
 
 
 async def test_reads_authoritative_empty_source(tmp_path: Path) -> None:
@@ -77,6 +88,36 @@ async def test_reads_authoritative_empty_source(tmp_path: Path) -> None:
     ).read_snapshot()
 
     assert snapshot.declarations == ()
+
+
+async def test_rejects_mismatched_service_account_subject(tmp_path: Path) -> None:
+    """A typed authentication declaration must match its namespace and name."""
+    source_path = tmp_path / "providers.yaml"
+    _write_source(
+        source_path,
+        """  - declarationKey: runtime-provider-kubernetes
+    providerId: system-kubernetes
+    kind: kubernetes
+    initial:
+      displayName: Kubernetes
+      enabled: true
+      availabilityMode: platform_wide
+    authentication:
+      method: kubernetes_service_account
+      subject: system:serviceaccount:wrong:subject
+      namespace: azents
+      serviceAccountName: azents-runtime-provider
+      audience: azents-runtime-control
+""",
+    )
+
+    with pytest.raises(RuntimeProviderBootstrapSourceDocumentError) as raised:
+        await HelmFileRuntimeProviderBootstrapAdapter(
+            source_key=_SOURCE_KEY,
+            path=source_path,
+        ).read_snapshot()
+
+    assert raised.value.code == "source_file_invalid"
 
 
 @pytest.mark.parametrize(

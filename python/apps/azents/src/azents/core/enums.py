@@ -537,6 +537,39 @@ class RuntimeProviderConnectionStatus(enum.StrEnum):
     DISCONNECTED = "disconnected"
 
 
+class RuntimeProviderAuthMethod(enum.StrEnum):
+    """Authentication method used by a Provider Control connection."""
+
+    AZENTS_ISSUED_TOKEN = "azents_issued_token"
+    KUBERNETES_SERVICE_ACCOUNT = "kubernetes_service_account"
+
+
+class RuntimeProviderBindingState(enum.StrEnum):
+    """Lifecycle state of a durable Provider authentication binding."""
+
+    ACTIVE = "active"
+    REVOKED = "revoked"
+
+
+class RuntimeProviderBindingOwner(enum.StrEnum):
+    """Authority that owns a durable Provider authentication binding."""
+
+    ADMIN = "admin"
+    BOOTSTRAP = "bootstrap"
+
+
+class RuntimeProviderBindingAuditEventType(enum.StrEnum):
+    """Metadata-only authentication binding audit event."""
+
+    CREATED = "created"
+    RECONCILED = "reconciled"
+    AUTHENTICATED = "authenticated"
+    CONNECTED = "connected"
+    ROTATED = "rotated"
+    REVOKED = "revoked"
+    CONFLICT = "conflict"
+
+
 class RuntimeProviderContractStatus(enum.StrEnum):
     """Administrative state of an immutable Provider capability contract."""
 

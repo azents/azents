@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuditEventType,
+    RuntimeProviderBindingAuditEventType,
+    RuntimeProviderBindingOwner,
+    RuntimeProviderBindingState,
     RuntimeProviderBootstrapDeclarationState,
     RuntimeProviderLifecycleState,
     RuntimeProviderRegistrationMethod,
@@ -36,6 +39,14 @@ from azents.repos.runtime_provider.data import (
     RuntimeProviderCreate,
 )
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.data import (
+    RuntimeProviderAuthBindingAuditEventCreate,
+    RuntimeProviderAuthBindingCreate,
+    RuntimeProviderAuthBindingRevoke,
+)
+from azents.repos.runtime_provider_binding.repository import (
+    RuntimeProviderAuthBindingRepository,
+)
 from azents.repos.system_setting.data import (
     SystemSettingAuditEventCreate,
     SystemSettingCurrentWrite,
@@ -66,6 +77,14 @@ class _DeclarationReconcileOutcome:
     conflicted_declaration_key: str | None
 
 
+@dataclasses.dataclass
+class _AuthenticationBindingConflict(Exception):
+    """Bootstrap declaration conflicts with an existing authentication binding."""
+
+    code: str
+    message: str
+
+
 @dataclasses.dataclass(frozen=True)
 class RuntimeProviderBootstrapService:
     """Reconcile successful authoritative bootstrap source snapshots."""
@@ -76,6 +95,10 @@ class RuntimeProviderBootstrapService:
     repository: Annotated[RuntimeProviderRepository, Depends(RuntimeProviderRepository)]
     system_setting_repository: Annotated[
         SystemSettingRepository, Depends(SystemSettingRepository)
+    ]
+    binding_repository: Annotated[
+        RuntimeProviderAuthBindingRepository,
+        Depends(RuntimeProviderAuthBindingRepository),
     ]
 
     async def reconcile(
@@ -132,6 +155,11 @@ class RuntimeProviderBootstrapService:
                 if declaration.provider_id is None:
                     continue
                 withdrawn_provider_ids.append(declaration.provider_id)
+                await self._revoke_withdrawn_binding(
+                    session=session,
+                    declaration=declaration,
+                    revoked_at=now,
+                )
                 await self.repository.append_audit_event(
                     session,
                     create=RuntimeProviderAuditEventCreate(
@@ -277,6 +305,43 @@ class RuntimeProviderBootstrapService:
                 conflicted_declaration_key=declaration.declaration_key,
             )
 
+        authentication = declaration.authentication
+        if authentication is not None:
+            conflicting_binding = await self.binding_repository.get_active_by_subject(
+                session,
+                auth_method=authentication.method,
+                subject=authentication.subject,
+            )
+            if conflicting_binding is not None:
+                await self._append_binding_audit_event(
+                    session=session,
+                    binding_id=conflicting_binding.id,
+                    event_type=RuntimeProviderBindingAuditEventType.CONFLICT,
+                    metadata={
+                        "reason": "subject_owned_before_provider_registration",
+                        "declaration_key": declaration.declaration_key,
+                    },
+                    previous_admin_version=conflicting_binding.admin_version,
+                    new_admin_version=conflicting_binding.admin_version,
+                    created_at=now,
+                )
+                await self._record_conflict(
+                    session=session,
+                    source=source,
+                    snapshot=snapshot,
+                    declaration=declaration,
+                    existing=existing,
+                    provider_id=conflicting_binding.provider_id,
+                    code="authentication_binding_conflict",
+                    message="Authentication subject is owned by another binding.",
+                    now=now,
+                )
+                return _DeclarationReconcileOutcome(
+                    created_provider_id=None,
+                    reconciled_provider_id=None,
+                    conflicted_declaration_key=declaration.declaration_key,
+                )
+
         created = await self.repository.create(
             session,
             RuntimeProviderCreate(
@@ -295,7 +360,7 @@ class RuntimeProviderBootstrapService:
             ),
         )
         if existing is None:
-            await self.repository.create_bootstrap_declaration(
+            created_declaration = await self.repository.create_bootstrap_declaration(
                 session,
                 create=RuntimeProviderBootstrapDeclarationCreate(
                     source_id=source.id,
@@ -331,6 +396,32 @@ class RuntimeProviderBootstrapService:
                 last_seen_at=now,
                 withdrawn_at=None,
                 updated_at=now,
+            )
+            created_declaration = existing
+        try:
+            await self._reconcile_authentication_binding(
+                session=session,
+                declaration=declaration,
+                declaration_id=created_declaration.id,
+                provider_id=created.id,
+                now=now,
+            )
+        except _AuthenticationBindingConflict as conflict:
+            await self._record_conflict(
+                session=session,
+                source=source,
+                snapshot=snapshot,
+                declaration=declaration,
+                existing=created_declaration,
+                provider_id=created.id,
+                code=conflict.code,
+                message=conflict.message,
+                now=now,
+            )
+            return _DeclarationReconcileOutcome(
+                created_provider_id=created.id,
+                reconciled_provider_id=None,
+                conflicted_declaration_key=declaration.declaration_key,
             )
         await self._seed_platform_default_when_unset(
             session=session,
@@ -372,6 +463,183 @@ class RuntimeProviderBootstrapService:
             reconciled_provider_id=created.id,
             conflicted_declaration_key=None,
         )
+
+    async def _reconcile_authentication_binding(
+        self,
+        *,
+        session: AsyncSession,
+        declaration: RuntimeProviderBootstrapDeclarationInput,
+        declaration_id: str,
+        provider_id: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Create or verify the declaration's bootstrap-owned auth binding."""
+        authentication = declaration.authentication
+        if authentication is None:
+            return
+        declaration_binding = (
+            await self.binding_repository.get_by_bootstrap_declaration_id(
+                session,
+                bootstrap_declaration_id=declaration_id,
+                for_update=True,
+            )
+        )
+        if declaration_binding is not None:
+            expected_config = self._binding_config(declaration)
+            if (
+                declaration_binding.provider_id != provider_id
+                or declaration_binding.auth_method != authentication.method
+                or declaration_binding.subject != authentication.subject
+                or declaration_binding.config != expected_config
+            ):
+                await self._append_binding_audit_event(
+                    session=session,
+                    binding_id=declaration_binding.id,
+                    event_type=RuntimeProviderBindingAuditEventType.CONFLICT,
+                    metadata={"reason": "declaration_identity_changed"},
+                    previous_admin_version=declaration_binding.admin_version,
+                    new_admin_version=declaration_binding.admin_version,
+                    created_at=now,
+                )
+                raise _AuthenticationBindingConflict(
+                    code="authentication_binding_identity_changed",
+                    message="Bootstrap authentication identity cannot change.",
+                )
+            if declaration_binding.state == RuntimeProviderBindingState.ACTIVE:
+                await self._append_binding_audit_event(
+                    session=session,
+                    binding_id=declaration_binding.id,
+                    event_type=RuntimeProviderBindingAuditEventType.RECONCILED,
+                    metadata={"declaration_id": declaration_id},
+                    previous_admin_version=declaration_binding.admin_version,
+                    new_admin_version=declaration_binding.admin_version,
+                    created_at=now,
+                )
+                return
+        binding = await self.binding_repository.get_active_by_subject(
+            session,
+            auth_method=authentication.method,
+            subject=authentication.subject,
+        )
+        if binding is not None:
+            if (
+                binding.owner != RuntimeProviderBindingOwner.BOOTSTRAP
+                or binding.bootstrap_declaration_id != declaration_id
+                or binding.provider_id != provider_id
+            ):
+                await self._append_binding_audit_event(
+                    session=session,
+                    binding_id=binding.id,
+                    event_type=RuntimeProviderBindingAuditEventType.CONFLICT,
+                    metadata={"reason": "subject_owned_by_another_binding"},
+                    previous_admin_version=binding.admin_version,
+                    new_admin_version=binding.admin_version,
+                    created_at=now,
+                )
+                raise _AuthenticationBindingConflict(
+                    code="authentication_binding_conflict",
+                    message="Authentication subject is owned by another binding.",
+                )
+            return
+        created_binding = await self.binding_repository.create(
+            session,
+            create=RuntimeProviderAuthBindingCreate(
+                provider_id=provider_id,
+                auth_method=authentication.method,
+                subject=authentication.subject,
+                owner=RuntimeProviderBindingOwner.BOOTSTRAP,
+                bootstrap_declaration_id=declaration_id,
+                config=self._binding_config(declaration),
+            ),
+        )
+        await self._append_binding_audit_event(
+            session=session,
+            binding_id=created_binding.id,
+            event_type=RuntimeProviderBindingAuditEventType.CREATED,
+            metadata={"declaration_id": declaration_id},
+            previous_admin_version=None,
+            new_admin_version=created_binding.admin_version,
+            created_at=now,
+        )
+
+    async def _append_binding_audit_event(
+        self,
+        *,
+        session: AsyncSession,
+        binding_id: str,
+        event_type: RuntimeProviderBindingAuditEventType,
+        metadata: dict[str, object],
+        previous_admin_version: int | None,
+        new_admin_version: int | None,
+        created_at: datetime.datetime,
+    ) -> None:
+        """Append one metadata-only authentication binding audit event."""
+        await self.binding_repository.append_audit_event(
+            session,
+            create=RuntimeProviderAuthBindingAuditEventCreate(
+                binding_id=binding_id,
+                event_type=event_type,
+                actor_user_id=None,
+                previous_admin_version=previous_admin_version,
+                new_admin_version=new_admin_version,
+                metadata=metadata,
+                created_at=created_at,
+            ),
+        )
+
+    async def _revoke_withdrawn_binding(
+        self,
+        *,
+        session: AsyncSession,
+        declaration: RuntimeProviderBootstrapDeclaration,
+        revoked_at: datetime.datetime,
+    ) -> None:
+        """Revoke only the bootstrap-owned binding represented by a declaration."""
+        binding = await self.binding_repository.get_by_bootstrap_declaration_id(
+            session,
+            bootstrap_declaration_id=declaration.id,
+            for_update=True,
+        )
+        if (
+            binding is None
+            or binding.state != RuntimeProviderBindingState.ACTIVE
+            or binding.owner != RuntimeProviderBindingOwner.BOOTSTRAP
+            or binding.bootstrap_declaration_id != declaration.id
+        ):
+            return
+        await self.binding_repository.revoke(
+            session,
+            revoke=RuntimeProviderAuthBindingRevoke(
+                binding_id=binding.id,
+                expected_admin_version=binding.admin_version,
+                revoked_at=revoked_at,
+                revoked_by_user_id=None,
+                reason="bootstrap_declaration_withdrawn",
+            ),
+        )
+        await self._append_binding_audit_event(
+            session=session,
+            binding_id=binding.id,
+            event_type=RuntimeProviderBindingAuditEventType.REVOKED,
+            metadata={"reason": "bootstrap_declaration_withdrawn"},
+            previous_admin_version=binding.admin_version,
+            new_admin_version=binding.admin_version + 1,
+            created_at=revoked_at,
+        )
+
+    @staticmethod
+    def _binding_config(
+        declaration: RuntimeProviderBootstrapDeclarationInput,
+    ) -> dict[str, object]:
+        """Build the immutable non-secret authentication method configuration."""
+        authentication = declaration.authentication
+        if authentication is None:
+            return {}
+        return {
+            "namespace": authentication.namespace,
+            "service_account_name": authentication.service_account_name,
+            "audience": authentication.audience,
+        }
 
     async def _seed_platform_default_when_unset(
         self,
@@ -516,6 +784,31 @@ class RuntimeProviderBootstrapService:
             withdrawn_at=None,
             updated_at=now,
         )
+        try:
+            await self._reconcile_authentication_binding(
+                session=session,
+                declaration=declaration,
+                declaration_id=existing.id,
+                provider_id=provider.id,
+                now=now,
+            )
+        except _AuthenticationBindingConflict as conflict:
+            await self._record_conflict(
+                session=session,
+                source=source,
+                snapshot=snapshot,
+                declaration=declaration,
+                existing=existing,
+                provider_id=provider.id,
+                code=conflict.code,
+                message=conflict.message,
+                now=now,
+            )
+            return _DeclarationReconcileOutcome(
+                created_provider_id=None,
+                reconciled_provider_id=None,
+                conflicted_declaration_key=declaration.declaration_key,
+            )
         await self._append_reconciled_audit_event(
             session=session,
             provider_id=provider.id,

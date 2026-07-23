@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import (
+    RuntimeProviderAuthMethod,
     RuntimeProviderConnectionStatus,
     RuntimeProviderCredentialState,
     RuntimeProviderEnrollmentGrantState,
@@ -37,6 +38,12 @@ provider_credential_state_enum = ENUM(
 provider_connection_status_enum = ENUM(
     RuntimeProviderConnectionStatus,
     name="runtime_provider_connection_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+provider_auth_method_enum = ENUM(
+    RuntimeProviderAuthMethod,
+    name="runtime_provider_auth_method",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -71,6 +78,11 @@ class RDBRuntimeProviderEnrollmentGrant(RDBModel):
     provider_id: Mapped[str] = mapped_column(
         sa.String(32),
         sa.ForeignKey("runtime_providers.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    binding_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("runtime_provider_auth_bindings.id", ondelete="RESTRICT"),
         nullable=False,
     )
     verifier: Mapped[str] = mapped_column(sa.String(64), nullable=False)
@@ -151,6 +163,11 @@ class RDBRuntimeProviderCredential(RDBModel):
         sa.ForeignKey("runtime_providers.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    binding_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("runtime_provider_auth_bindings.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     verifier: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     state: Mapped[RuntimeProviderCredentialState] = mapped_column(
         provider_credential_state_enum,
@@ -215,6 +232,18 @@ class RDBRuntimeProviderConnection(RDBModel):
         "credential_id",
         "status",
     )
+    IX_AUTHENTICATION = sa.Index(
+        "ix_runtime_provider_connections_authentication",
+        "binding_id",
+        "auth_method",
+        "auth_subject",
+        "status",
+    )
+    IX_BINDING_STATUS = sa.Index(
+        "ix_runtime_provider_connections_binding_status",
+        "binding_id",
+        "status",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -227,10 +256,24 @@ class RDBRuntimeProviderConnection(RDBModel):
         sa.ForeignKey("runtime_providers.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    credential_id: Mapped[str] = mapped_column(
+    binding_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("runtime_provider_auth_bindings.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    credential_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("runtime_provider_credentials.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    auth_method: Mapped[RuntimeProviderAuthMethod] = mapped_column(
+        provider_auth_method_enum,
         nullable=False,
+    )
+    auth_subject: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    evidence_expires_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
     )
     connection_id: Mapped[str] = mapped_column(sa.String(120), nullable=False)
     generation: Mapped[int] = mapped_column(sa.Integer, nullable=False)
@@ -268,4 +311,6 @@ class RDBRuntimeProviderConnection(RDBModel):
         UQ_PROVIDER_GENERATION,
         IX_PROVIDER_STATUS,
         IX_CREDENTIAL_STATUS,
+        IX_AUTHENTICATION,
+        IX_BINDING_STATUS,
     )

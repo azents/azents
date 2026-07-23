@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    RuntimeProviderAuthMethod,
     RuntimeProviderConnectionStatus,
     RuntimeProviderCredentialState,
     RuntimeProviderEnrollmentGrantState,
@@ -38,6 +39,7 @@ class RuntimeProviderControlRepository:
         """Issue one verifier-backed enrollment grant."""
         grant = RDBRuntimeProviderEnrollmentGrant(
             provider_id=create.provider_id,
+            binding_id=create.binding_id,
             verifier=create.verifier,
             state=RuntimeProviderEnrollmentGrantState.ISSUED,
             expires_at=create.expires_at,
@@ -91,6 +93,7 @@ class RuntimeProviderControlRepository:
             return None
         rdb = RDBRuntimeProviderCredential(
             provider_id=credential.provider_id,
+            binding_id=credential.binding_id,
             verifier=credential.verifier,
             state=RuntimeProviderCredentialState.ACTIVE,
             expires_at=credential.expires_at,
@@ -280,7 +283,11 @@ class RuntimeProviderControlRepository:
         )
         rdb = RDBRuntimeProviderConnection(
             provider_id=create.provider_id,
+            binding_id=create.binding_id,
             credential_id=create.credential_id,
+            auth_method=create.auth_method,
+            auth_subject=create.auth_subject,
+            evidence_expires_at=create.evidence_expires_at,
             connection_id=create.connection_id,
             generation=create.generation,
             status=RuntimeProviderConnectionStatus.CONNECTED,
@@ -298,30 +305,43 @@ class RuntimeProviderControlRepository:
         session: AsyncSession,
         *,
         provider_id: str,
-        credential_id: str,
+        binding_id: str,
+        credential_id: str | None,
         generation: int,
         heartbeat_at: datetime.datetime,
+        auth_method: RuntimeProviderAuthMethod,
+        auth_subject: str,
     ) -> bool:
         """Refresh one current authenticated connection heartbeat."""
         result = await session.execute(
             sa.update(RDBRuntimeProviderConnection)
             .where(
                 RDBRuntimeProviderConnection.provider_id == provider_id,
+                RDBRuntimeProviderConnection.binding_id == binding_id,
                 RDBRuntimeProviderConnection.credential_id == credential_id,
+                RDBRuntimeProviderConnection.auth_method == auth_method,
+                RDBRuntimeProviderConnection.auth_subject == auth_subject,
                 RDBRuntimeProviderConnection.generation == generation,
                 RDBRuntimeProviderConnection.status
                 == RuntimeProviderConnectionStatus.CONNECTED,
-                sa.exists(
-                    sa.select(RDBRuntimeProviderCredential.id).where(
-                        RDBRuntimeProviderCredential.id
-                        == RDBRuntimeProviderConnection.credential_id,
-                        RDBRuntimeProviderCredential.state
-                        == RuntimeProviderCredentialState.ACTIVE,
-                        sa.or_(
-                            RDBRuntimeProviderCredential.expires_at.is_(None),
-                            RDBRuntimeProviderCredential.expires_at > heartbeat_at,
-                        ),
-                    )
+                sa.or_(
+                    RDBRuntimeProviderConnection.evidence_expires_at.is_(None),
+                    RDBRuntimeProviderConnection.evidence_expires_at > heartbeat_at,
+                ),
+                sa.or_(
+                    RDBRuntimeProviderConnection.credential_id.is_(None),
+                    sa.exists(
+                        sa.select(RDBRuntimeProviderCredential.id).where(
+                            RDBRuntimeProviderCredential.id
+                            == RDBRuntimeProviderConnection.credential_id,
+                            RDBRuntimeProviderCredential.state
+                            == RuntimeProviderCredentialState.ACTIVE,
+                            sa.or_(
+                                RDBRuntimeProviderCredential.expires_at.is_(None),
+                                RDBRuntimeProviderCredential.expires_at > heartbeat_at,
+                            ),
+                        )
+                    ),
                 ),
             )
             .values(last_heartbeat_at=heartbeat_at)
@@ -334,16 +354,22 @@ class RuntimeProviderControlRepository:
         session: AsyncSession,
         *,
         provider_id: str,
-        credential_id: str,
+        binding_id: str,
+        credential_id: str | None,
         generation: int,
         disconnected_at: datetime.datetime,
+        auth_method: RuntimeProviderAuthMethod,
+        auth_subject: str,
     ) -> bool:
         """Disconnect only the authenticated current connection generation."""
         result = await session.execute(
             sa.update(RDBRuntimeProviderConnection)
             .where(
                 RDBRuntimeProviderConnection.provider_id == provider_id,
+                RDBRuntimeProviderConnection.binding_id == binding_id,
                 RDBRuntimeProviderConnection.credential_id == credential_id,
+                RDBRuntimeProviderConnection.auth_method == auth_method,
+                RDBRuntimeProviderConnection.auth_subject == auth_subject,
                 RDBRuntimeProviderConnection.generation == generation,
                 RDBRuntimeProviderConnection.status
                 == RuntimeProviderConnectionStatus.CONNECTED,
@@ -361,28 +387,41 @@ class RuntimeProviderControlRepository:
         session: AsyncSession,
         *,
         provider_id: str,
-        credential_id: str,
+        binding_id: str,
+        credential_id: str | None,
         generation: int,
         now: datetime.datetime,
+        auth_method: RuntimeProviderAuthMethod,
+        auth_subject: str,
     ) -> bool:
         """Return whether a connection and its credential remain active."""
         result = await session.execute(
             sa.select(RDBRuntimeProviderConnection.id).where(
                 RDBRuntimeProviderConnection.provider_id == provider_id,
+                RDBRuntimeProviderConnection.binding_id == binding_id,
                 RDBRuntimeProviderConnection.credential_id == credential_id,
+                RDBRuntimeProviderConnection.auth_method == auth_method,
+                RDBRuntimeProviderConnection.auth_subject == auth_subject,
                 RDBRuntimeProviderConnection.generation == generation,
                 RDBRuntimeProviderConnection.status
                 == RuntimeProviderConnectionStatus.CONNECTED,
-                sa.exists(
-                    sa.select(RDBRuntimeProviderCredential.id).where(
-                        RDBRuntimeProviderCredential.id == credential_id,
-                        RDBRuntimeProviderCredential.state
-                        == RuntimeProviderCredentialState.ACTIVE,
-                        sa.or_(
-                            RDBRuntimeProviderCredential.expires_at.is_(None),
-                            RDBRuntimeProviderCredential.expires_at > now,
-                        ),
-                    )
+                sa.or_(
+                    RDBRuntimeProviderConnection.evidence_expires_at.is_(None),
+                    RDBRuntimeProviderConnection.evidence_expires_at > now,
+                ),
+                sa.or_(
+                    RDBRuntimeProviderConnection.credential_id.is_(None),
+                    sa.exists(
+                        sa.select(RDBRuntimeProviderCredential.id).where(
+                            RDBRuntimeProviderCredential.id == credential_id,
+                            RDBRuntimeProviderCredential.state
+                            == RuntimeProviderCredentialState.ACTIVE,
+                            sa.or_(
+                                RDBRuntimeProviderCredential.expires_at.is_(None),
+                                RDBRuntimeProviderCredential.expires_at > now,
+                            ),
+                        )
+                    ),
                 ),
             )
         )
@@ -421,6 +460,7 @@ class RuntimeProviderControlRepository:
             revoked_at=rdb.revoked_at,
             revoked_by_user_id=rdb.revoked_by_user_id,
             created_at=rdb.created_at,
+            binding_id=rdb.binding_id,
         )
 
     @staticmethod
@@ -438,6 +478,7 @@ class RuntimeProviderControlRepository:
             revoked_at=rdb.revoked_at,
             revoked_by_user_id=rdb.revoked_by_user_id,
             created_at=rdb.created_at,
+            binding_id=rdb.binding_id,
         )
 
     @staticmethod
@@ -447,7 +488,11 @@ class RuntimeProviderControlRepository:
         return RuntimeProviderConnection(
             id=rdb.id,
             provider_id=rdb.provider_id,
+            binding_id=rdb.binding_id,
             credential_id=rdb.credential_id,
+            auth_method=rdb.auth_method,
+            auth_subject=rdb.auth_subject,
+            evidence_expires_at=rdb.evidence_expires_at,
             connection_id=rdb.connection_id,
             generation=rdb.generation,
             status=rdb.status,

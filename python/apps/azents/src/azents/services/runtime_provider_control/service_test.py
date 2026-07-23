@@ -10,7 +10,9 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    RuntimeProviderAuthMethod,
     RuntimeProviderAvailabilityMode,
+    RuntimeProviderBindingOwner,
     RuntimeProviderBootstrapAdapterKind,
     RuntimeProviderKind,
 )
@@ -18,6 +20,12 @@ from azents.core.runtime_provider_credential import RuntimeProviderCredentialVer
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import RuntimeProviderBootstrapSourceCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.data import (
+    RuntimeProviderAuthBindingCreate,
+)
+from azents.repos.runtime_provider_binding.repository import (
+    RuntimeProviderAuthBindingRepository,
+)
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
 )
@@ -51,6 +59,33 @@ def _session_manager(session: AsyncSession) -> SessionManager[AsyncSession]:
     return lambda: _session_context(session)
 
 
+async def _create_bootstrap_issued_token_binding(
+    *,
+    session: AsyncSession,
+    provider_repository: RuntimeProviderRepository,
+    binding_repository: RuntimeProviderAuthBindingRepository,
+    provider_id: str,
+) -> None:
+    """Attach an issued-token binding to one bootstrap-owned Provider."""
+    declaration = await provider_repository.get_bootstrap_declaration_by_provider_id(
+        session,
+        provider_id=provider_id,
+        for_update=False,
+    )
+    assert declaration is not None
+    await binding_repository.create(
+        session,
+        create=RuntimeProviderAuthBindingCreate(
+            provider_id=provider_id,
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            subject=f"bootstrap:{declaration.source_id}:{provider_id}",
+            owner=RuntimeProviderBindingOwner.BOOTSTRAP,
+            bootstrap_declaration_id=declaration.id,
+            config=None,
+        ),
+    )
+
+
 class TestRuntimeProviderEnrollmentService:
     """Verify bootstrap enrollment authority remains source-bound."""
 
@@ -61,10 +96,12 @@ class TestRuntimeProviderEnrollmentService:
         """Another trusted source cannot enroll a Provider it does not own."""
         session_manager = _session_manager(rdb_session)
         provider_repository = RuntimeProviderRepository()
+        binding_repository = RuntimeProviderAuthBindingRepository()
         bootstrap_result = await RuntimeProviderBootstrapService(
             session_manager=session_manager,
             repository=provider_repository,
             system_setting_repository=SystemSettingRepository(),
+            binding_repository=binding_repository,
         ).reconcile(
             RuntimeProviderBootstrapSnapshot(
                 source_key="helm/default/azents",
@@ -73,10 +110,10 @@ class TestRuntimeProviderEnrollmentService:
                 source_digest="digest-1",
                 declarations=(
                     RuntimeProviderBootstrapDeclarationInput(
-                        declaration_key="runtime-provider-kubernetes",
-                        provider_logical_id="system-kubernetes",
-                        kind=RuntimeProviderKind.KUBERNETES,
-                        display_name="Kubernetes",
+                        declaration_key="runtime-provider-docker",
+                        provider_logical_id="system-docker",
+                        kind=RuntimeProviderKind.DOCKER,
+                        display_name="Docker",
                         enabled=True,
                         availability_mode=(
                             RuntimeProviderAvailabilityMode.PLATFORM_WIDE
@@ -90,6 +127,12 @@ class TestRuntimeProviderEnrollmentService:
             )
         )
         provider_id = bootstrap_result.created_provider_ids[0]
+        await _create_bootstrap_issued_token_binding(
+            session=rdb_session,
+            provider_repository=provider_repository,
+            binding_repository=binding_repository,
+            provider_id=provider_id,
+        )
         other_source = await provider_repository.get_or_create_bootstrap_source(
             rdb_session,
             create=RuntimeProviderBootstrapSourceCreate(
@@ -102,6 +145,7 @@ class TestRuntimeProviderEnrollmentService:
             repository=RuntimeProviderControlRepository(),
             provider_repository=provider_repository,
             verifier=RuntimeProviderCredentialVerifier(Fernet.generate_key().decode()),
+            binding_repository=binding_repository,
         )
 
         with pytest.raises(
@@ -130,10 +174,12 @@ class TestRuntimeProviderEnrollmentService:
         """Credential rotation keeps the old credential until the new one connects."""
         session_manager = _session_manager(rdb_session)
         provider_repository = RuntimeProviderRepository()
+        binding_repository = RuntimeProviderAuthBindingRepository()
         bootstrap_result = await RuntimeProviderBootstrapService(
             session_manager=session_manager,
             repository=provider_repository,
             system_setting_repository=SystemSettingRepository(),
+            binding_repository=binding_repository,
         ).reconcile(
             RuntimeProviderBootstrapSnapshot(
                 source_key="helm/default/azents",
@@ -142,10 +188,10 @@ class TestRuntimeProviderEnrollmentService:
                 source_digest="digest-1",
                 declarations=(
                     RuntimeProviderBootstrapDeclarationInput(
-                        declaration_key="runtime-provider-kubernetes",
-                        provider_logical_id="system-kubernetes",
-                        kind=RuntimeProviderKind.KUBERNETES,
-                        display_name="Kubernetes",
+                        declaration_key="runtime-provider-docker",
+                        provider_logical_id="system-docker",
+                        kind=RuntimeProviderKind.DOCKER,
+                        display_name="Docker",
                         enabled=True,
                         availability_mode=(
                             RuntimeProviderAvailabilityMode.PLATFORM_WIDE
@@ -159,11 +205,18 @@ class TestRuntimeProviderEnrollmentService:
             )
         )
         provider_id = bootstrap_result.created_provider_ids[0]
+        await _create_bootstrap_issued_token_binding(
+            session=rdb_session,
+            provider_repository=provider_repository,
+            binding_repository=binding_repository,
+            provider_id=provider_id,
+        )
         service = RuntimeProviderEnrollmentService(
             session_manager=session_manager,
             repository=RuntimeProviderControlRepository(),
             provider_repository=provider_repository,
             verifier=RuntimeProviderCredentialVerifier(Fernet.generate_key().decode()),
+            binding_repository=binding_repository,
         )
         now = tznow()
 

@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
     RuntimeProviderBootstrapDeclarationState,
+    RuntimeProviderKind,
     RuntimeProviderLifecycleState,
+    RuntimeProviderRegistrationMethod,
+    RuntimeProviderScope,
 )
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.runtime_provider_bootstrap import (
@@ -130,6 +133,46 @@ class RuntimeProviderRepository:
         result = await session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_provider(rdb) if rdb is not None else None
+
+    async def get_bootstrap_kubernetes_provider_by_service_account(
+        self,
+        session: AsyncSession,
+        *,
+        namespace: str,
+        name: str,
+        audience: str,
+    ) -> RuntimeProvider | None:
+        """Resolve one active bootstrap Provider from its trusted SA metadata."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProvider).where(
+                RDBRuntimeProvider.registration_method
+                == RuntimeProviderRegistrationMethod.BOOTSTRAP,
+                RDBRuntimeProvider.scope == RuntimeProviderScope.SYSTEM,
+                RDBRuntimeProvider.kind == RuntimeProviderKind.KUBERNETES,
+                RDBRuntimeProvider.lifecycle_state.not_in(
+                    (
+                        RuntimeProviderLifecycleState.DECOMMISSIONED,
+                        RuntimeProviderLifecycleState.FORCE_RETIRED,
+                    )
+                ),
+                RDBRuntimeProvider.metadata_["kubernetesServiceAccount"][
+                    "namespace"
+                ].as_string()
+                == namespace,
+                RDBRuntimeProvider.metadata_["kubernetesServiceAccount"][
+                    "name"
+                ].as_string()
+                == name,
+                RDBRuntimeProvider.metadata_["kubernetesServiceAccount"][
+                    "audience"
+                ].as_string()
+                == audience,
+            )
+        )
+        providers = [self._build_provider(rdb) for rdb in result.scalars()]
+        if len(providers) != 1:
+            return None
+        return providers[0]
 
     async def list_available(
         self,

@@ -4,6 +4,7 @@ import datetime
 from dataclasses import dataclass
 
 from azents.core.enums import (
+    RuntimeProviderAuthMethod,
     RuntimeProviderConnectionStatus,
     RuntimeProviderCredentialState,
     RuntimeProviderEnrollmentGrantState,
@@ -16,6 +17,7 @@ class RuntimeProviderEnrollmentGrant:
 
     id: str
     provider_id: str
+    binding_id: str
     verifier: str
     state: RuntimeProviderEnrollmentGrantState
     expires_at: datetime.datetime
@@ -33,6 +35,7 @@ class RuntimeProviderEnrollmentGrantCreate:
     """Complete values for issuing one enrollment grant."""
 
     provider_id: str
+    binding_id: str
     verifier: str
     expires_at: datetime.datetime
     issued_by_user_id: str | None
@@ -45,6 +48,7 @@ class RuntimeProviderCredential:
 
     id: str
     provider_id: str
+    binding_id: str
     verifier: str
     state: RuntimeProviderCredentialState
     expires_at: datetime.datetime | None
@@ -60,6 +64,7 @@ class RuntimeProviderCredentialCreate:
     """Complete values for issuing one Provider credential."""
 
     provider_id: str
+    binding_id: str
     verifier: str
     expires_at: datetime.datetime | None
     issued_grant_id: str
@@ -71,7 +76,11 @@ class RuntimeProviderConnection:
 
     id: str
     provider_id: str
-    credential_id: str
+    binding_id: str
+    credential_id: str | None
+    auth_method: RuntimeProviderAuthMethod
+    auth_subject: str
+    evidence_expires_at: datetime.datetime | None
     connection_id: str
     generation: int
     status: RuntimeProviderConnectionStatus
@@ -88,7 +97,11 @@ class RuntimeProviderConnectionCreate:
     """Complete values for persisting one authenticated connection."""
 
     provider_id: str
-    credential_id: str
+    binding_id: str
+    credential_id: str | None
+    auth_method: RuntimeProviderAuthMethod
+    auth_subject: str
+    evidence_expires_at: datetime.datetime | None
     connection_id: str
     generation: int
     reported_provider_type: str
