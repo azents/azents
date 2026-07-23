@@ -48,7 +48,6 @@ _LABEL_WORKSPACE_PATH = "azents/workspace-path"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
-_ENV_CONTROL_AUTH_TOKEN = "AZ_RUNTIME_CONTROL_AUTH_TOKEN"
 _ENV_CONTROL_TLS_CA_PEM = "AZ_RUNTIME_CONTROL_TLS_CA_PEM"
 _ENV_CONTROL_ALLOW_INSECURE = "AZ_RUNTIME_CONTROL_ALLOW_INSECURE"
 _ENV_RUNTIME_ID = "AZ_RUNTIME_ID"
@@ -57,6 +56,7 @@ _ENV_WORKSPACE_ID = "AZ_WORKSPACE_ID"
 _ENV_PROVIDER_ID = "AZ_RUNTIME_PROVIDER_ID"
 _ENV_PROVIDER_GENERATION = "AZ_RUNTIME_PROVIDER_GENERATION"
 _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
+_ENV_RUNNER_AUTH_TOKEN = "AZ_RUNTIME_RUNNER_AUTH_TOKEN"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
 _ENV_WORKSPACE_PATH = "AZ_AGENT_WORKSPACE_PATH"
 RUNNER_LIMIT_ENV_NAMES = (
@@ -317,6 +317,9 @@ class DockerRuntimeProvider:
         for key, value in self._stable_env(command).items():
             if env.get(key) != value:
                 return False
+        for key, value in self._runner_auth_env(command).items():
+            if env.get(key) != value:
+                return False
         managed_runner_env = {
             key: env[key] for key in RUNNER_LIMIT_ENV_NAMES if key in env
         }
@@ -346,9 +349,15 @@ class DockerRuntimeProvider:
     def _env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
         return {
             **self._stable_env(command),
+            **self._runner_auth_env(command),
             _ENV_PROVIDER_GENERATION: str(command.provider_generation),
+        }
+
+    def _runner_auth_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
+        return {
             _ENV_DESIRED_GENERATION: str(command.desired_generation),
-            _ENV_RUNNER_AUTH_CREDENTIAL_ID: command.auth.runner_auth_token,
+            _ENV_RUNNER_AUTH_TOKEN: command.auth.runner_auth_token,
+            _ENV_RUNNER_AUTH_CREDENTIAL_ID: command.auth.runner_auth_credential_id,
         }
 
     def _stable_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
@@ -362,8 +371,6 @@ class DockerRuntimeProvider:
             _ENV_PROVIDER_ID: self._config.provider_id,
             _ENV_WORKSPACE_PATH: self._workspace_mount_path,
         }
-        if command.auth.control_token is not None:
-            env[_ENV_CONTROL_AUTH_TOKEN] = command.auth.control_token
         if command.auth.control_tls_ca_pem is not None:
             env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
         env[_ENV_CONTROL_ALLOW_INSECURE] = str(

@@ -191,6 +191,8 @@ def _command(
     desired_generation: int = 1,
     provider_generation: int = 7,
     runner_image: str = "runner:latest",
+    runner_auth_token: str = "runner-token-1",
+    runner_auth_credential_id: str = "runner-credential-1",
 ) -> RuntimeLifecycleCommand:
     return RuntimeLifecycleCommand(
         command_type=command_type,
@@ -204,8 +206,8 @@ def _command(
         runner_image=runner_image,
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runtime-runner:runtime-1:1",
-            control_token="control-token",
+            runner_auth_token=runner_auth_token,
+            runner_auth_credential_id=runner_auth_credential_id,
             control_tls_ca_pem=None,
             allow_insecure_control=True,
         ),
@@ -228,8 +230,8 @@ def _control_command(
         runner_image="runner:latest",
         auth=ControlRuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runtime-runner:runtime-1:1",
-            control_token="control-token",
+            runner_auth_token="runner-token-1",
+            runner_auth_credential_id="runner-credential-1",
             control_tls_ca_pem=None,
             allow_insecure_control=True,
         ),
@@ -257,8 +259,8 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
         claims=None,
     )
     assert env["AZ_AGENT_WORKSPACE_PATH"] == "/workspace/agent"
-    assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runtime-runner:runtime-1:1"
-    assert env["AZ_RUNTIME_CONTROL_AUTH_TOKEN"] == "control-token"
+    assert env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-1"
+    assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runner-credential-1"
     assert pod.metadata.annotations == {
         "azents/workspace-path": "/workspace/agent",
     }
@@ -775,22 +777,32 @@ async def test_terminal_delete_removes_pod_and_pvc_idempotently() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_reuses_current_pod_across_generation_changes() -> None:
+async def test_start_replaces_pod_for_new_runner_credential_and_preserves_pvc() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
     await provider.start(_command(RuntimeLifecycleCommandType.START))
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+    pvc_name = api.pvcs[pvc_key].metadata.name
 
     await provider.start(
         _command(
             RuntimeLifecycleCommandType.START,
             desired_generation=2,
             provider_generation=8,
+            runner_auth_token="runner-token-2",
+            runner_auth_credential_id="runner-credential-2",
         )
     )
 
-    assert api.deleted_pods == []
+    assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    assert api.deleted_pvcs == []
+    assert api.pvcs[pvc_key].metadata.name == pvc_name
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
-    assert pod.metadata.labels["azents/desired-generation"] == "1"
+    env = {item.name: item.value for item in pod.spec.containers[0].env}
+    assert pod.metadata.labels["azents/desired-generation"] == "2"
+    assert env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-2"
+    assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runner-credential-2"
+    assert pod.spec.volumes[0].claim_name == pvc_name
 
 
 @pytest.mark.asyncio
@@ -827,8 +839,8 @@ async def test_observe_known_runtimes_reports_pod_and_pvc() -> None:
         runner_image="runner:latest",
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runtime-runner:runtime-2:1",
-            control_token="control-token",
+            runner_auth_token="runner-token-2",
+            runner_auth_credential_id="runner-credential-2",
             control_tls_ca_pem=None,
             allow_insecure_control=True,
         ),

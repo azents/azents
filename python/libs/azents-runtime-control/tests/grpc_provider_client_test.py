@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 
 import pytest
+from google.protobuf import struct_pb2
 
 from azents_runtime_control.grpc_provider_client import (
     PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
@@ -46,6 +47,10 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                 heartbeat_interval_seconds=20,
             ),
         )
+        command_payload = struct_pb2.Struct()
+        command_payload.update(
+            {"auth": {"runner_auth_credential_id": "runner-credential-1"}}
+        )
         yield runtime_provider_control_pb2.ControlMessage(
             request_id="req-1",
             provider_command=runtime_provider_control_pb2.ProviderCommand(
@@ -58,6 +63,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                 runner_image="runner:latest",
                 control_endpoint="runtime-control:8020",
                 runner_auth_token="runner-token",
+                payload=command_payload,
             ),
         )
         heartbeat = await anext(requests)
@@ -92,6 +98,8 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
     assert command is not None
     assert command.command.identity.runtime_id == "runtime-1"
     assert command.command.auth.control_endpoint == "runtime-control:8020"
+    assert command.command.auth.runner_auth_token == "runner-token"
+    assert command.command.auth.runner_auth_credential_id == "runner-credential-1"
     assert await client.heartbeat_provider(
         provider_id="provider-1",
         generation=accepted.generation,

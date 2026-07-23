@@ -7,7 +7,7 @@ import asyncio
 import contextlib
 import dataclasses
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -24,12 +24,16 @@ from azents_runtime_control.runner import RunnerStateReport as SharedRunnerState
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
 from google.protobuf import timestamp_pb2
 
+from azents.core.runtime_runner_credential import RuntimeRunnerCredential
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeRunnerRegistration,
     RuntimeRunnerRegistrationAccepted,
 )
-from azents.runtime.control_protocol.grpc.auth import RuntimeControlGrpcAuth
+from azents.runtime.control_protocol.grpc.auth import (
+    RuntimeRunnerCredentialAuthenticator,
+    RuntimeRunnerCredentialGrpcAuth,
+)
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
@@ -86,7 +90,7 @@ class RuntimeRunnerControlGrpcServicer(
         state_sink: RuntimeRunnerStateSink,
         owner_replica_id: str,
         consumer_id: str,
-        control_auth_token: str | None,
+        runner_authenticator: RuntimeRunnerCredentialAuthenticator,
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
         """Initialize the Runner Control gRPC servicer."""
@@ -95,7 +99,8 @@ class RuntimeRunnerControlGrpcServicer(
         self._state_sink = state_sink
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
-        self._auth = RuntimeControlGrpcAuth(control_auth_token)
+        self._runner_authenticator = runner_authenticator
+        self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
         self._operation_block_ms = operation_block_ms
 
     async def ConnectRunner(
@@ -107,11 +112,28 @@ class RuntimeRunnerControlGrpcServicer(
         ],
     ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
         """Register a Runner, then bridge heartbeat/state/operation messages."""
-        await self._auth.authorize(context, subject="Runner")
+        authentication = await self._auth.authenticate(context)
         first_message = await _first_register_message(request_iterator, context)
+        if (
+            first_message.register.runtime_id != authentication.runtime_id
+            or first_message.register.auth_credential_id != authentication.credential_id
+        ):
+            await context.abort(
+                grpc.StatusCode.PERMISSION_DENIED,
+                "Runner registration identity does not match its credential",
+            )
+            raise AssertionError("unreachable")
+        if not await self._runner_authenticator.authorize_runner(authentication):
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "Runner credential is no longer authorized",
+            )
+            raise AssertionError("unreachable")
         registration = _registration(
             first_message,
             owner_replica_id=self._owner_replica_id,
+            runtime_id=authentication.runtime_id,
+            credential_id=authentication.credential_id,
         )
         accepted = await self._control_protocol.register_runner(
             registration,
@@ -132,6 +154,7 @@ class RuntimeRunnerControlGrpcServicer(
             self._consume_runner_messages(
                 request_iterator,
                 outbound,
+                authentication=authentication,
                 runtime_id=accepted.runtime_id,
                 generation=accepted.generation,
             )
@@ -139,6 +162,7 @@ class RuntimeRunnerControlGrpcServicer(
         operation_task = asyncio.create_task(
             self._relay_runner_operations(
                 outbound,
+                authentication=authentication,
                 runtime_id=accepted.runtime_id,
                 generation=accepted.generation,
             )
@@ -159,6 +183,9 @@ class RuntimeRunnerControlGrpcServicer(
                 inbound_task,
                 operation_task,
                 control_protocol=self._control_protocol,
+                authorize=lambda: self._runner_authenticator.authorize_runner(
+                    authentication
+                ),
             ):
                 yield message
         finally:
@@ -231,10 +258,14 @@ class RuntimeRunnerControlGrpcServicer(
         request_iterator: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
         outbound: asyncio.Queue[_RunnerOutbound],
         *,
+        authentication: RuntimeRunnerCredential,
         runtime_id: str,
         generation: int,
     ) -> None:
         async for message in request_iterator:
+            if not await self._runner_authenticator.authorize_runner(authentication):
+                await outbound.put(_error(message.request_id, "STALE_RUNNER_AUTHORITY"))
+                return
             payload = message.WhichOneof("payload")
             if message.generation != generation:
                 _LOGGER.warning(
@@ -279,6 +310,11 @@ class RuntimeRunnerControlGrpcServicer(
                 )
                 continue
             if payload == "state_report":
+                if message.state_report.runtime_id != runtime_id:
+                    await outbound.put(
+                        _error(message.request_id, "RUNNER_IDENTITY_MISMATCH")
+                    )
+                    return
                 if message.state_report.runner_generation != generation:
                     await outbound.put(
                         _error(message.request_id, "STALE_RUNNER_GENERATION")
@@ -305,6 +341,11 @@ class RuntimeRunnerControlGrpcServicer(
                 )
                 continue
             if payload == "operation_event":
+                if message.operation_event.runtime_id != runtime_id:
+                    await outbound.put(
+                        _error(message.request_id, "RUNNER_IDENTITY_MISMATCH")
+                    )
+                    return
                 if message.operation_event.generation != generation:
                     await outbound.put(
                         _error(message.request_id, "STALE_RUNNER_GENERATION")
@@ -320,6 +361,11 @@ class RuntimeRunnerControlGrpcServicer(
                 await self._append_runner_event(message)
                 continue
             if payload == "operation_start":
+                if message.operation_start.runtime_id != runtime_id:
+                    await outbound.put(
+                        _error(message.request_id, "RUNNER_IDENTITY_MISMATCH")
+                    )
+                    return
                 operation = await self._coordination_store.get_operation(
                     message.operation_start.operation_id
                 )
@@ -369,10 +415,13 @@ class RuntimeRunnerControlGrpcServicer(
         self,
         outbound: asyncio.Queue[_RunnerOutbound],
         *,
+        authentication: RuntimeRunnerCredential,
         runtime_id: str,
         generation: int,
     ) -> None:
         while True:
+            if not await self._runner_authenticator.authorize_runner(authentication):
+                return
             envelope = await self._control_protocol.claim_next_runner_request(
                 runtime_id=runtime_id,
                 generation=generation,
@@ -382,6 +431,8 @@ class RuntimeRunnerControlGrpcServicer(
             if envelope is None:
                 await asyncio.sleep(max(self._operation_block_ms, 1) / 1000)
                 continue
+            if not await self._runner_authenticator.authorize_runner(authentication):
+                return
             if envelope.operation_type == "operation.cancel":
                 operation_id = envelope.payload.get("operation_id")
                 if not isinstance(operation_id, str):
@@ -552,7 +603,7 @@ def add_runtime_runner_control_servicer(
     state_sink: RuntimeRunnerStateSink,
     owner_replica_id: str,
     consumer_id: str,
-    control_auth_token: str | None,
+    runner_authenticator: RuntimeRunnerCredentialAuthenticator,
     operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Runner Control servicer to a gRPC server."""
@@ -563,7 +614,7 @@ def add_runtime_runner_control_servicer(
             state_sink=state_sink,
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
-            control_auth_token=control_auth_token,
+            runner_authenticator=runner_authenticator,
             operation_block_ms=operation_block_ms,
         ),
         server,
@@ -600,6 +651,7 @@ async def _outbound_messages(
     operation_task: asyncio.Task[None],
     *,
     control_protocol: RuntimeControlProtocolService,
+    authorize: Callable[[], Awaitable[bool]],
 ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
     get_task = asyncio.create_task(outbound.get())
     try:
@@ -610,6 +662,8 @@ async def _outbound_messages(
             )
             if get_task in done:
                 item = get_task.result()
+                if not await authorize():
+                    return
                 if isinstance(item, _RunnerOutboundItem):
                     try:
                         yield item.message
@@ -642,17 +696,19 @@ def _registration(
     message: runtime_runner_control_pb2.RunnerMessage,
     *,
     owner_replica_id: str,
+    runtime_id: str,
+    credential_id: str,
 ) -> RuntimeRunnerRegistration:
     register = message.register
     return RuntimeRunnerRegistration(
-        runtime_id=register.runtime_id,
+        runtime_id=runtime_id,
         runner_id=register.runner_id,
         protocol_version=register.protocol_version,
         capabilities=RuntimeProtocolCapabilities(tuple(register.capabilities)),
         health=register.health,
         workspace_path=register.workspace_path,
         metadata=dict(register.metadata),
-        auth_credential_id=register.auth_credential_id,
+        auth_credential_id=credential_id,
         connection_id=message.connection_id,
         owner_replica_id=owner_replica_id,
     )

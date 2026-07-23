@@ -331,7 +331,7 @@ def _command(command_type: RuntimeLifecycleCommandType) -> RuntimeLifecycleComma
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
             runner_auth_token="runner-token",
-            control_token="control-token",
+            runner_auth_credential_id="runner-credential-1",
             control_tls_ca_pem=None,
             allow_insecure_control=True,
         ),

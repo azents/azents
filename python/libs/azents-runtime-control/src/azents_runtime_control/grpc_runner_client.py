@@ -62,15 +62,15 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self,
         stream: RunnerControlStream,
         *,
+        runner_auth_token: str,
         channel: grpc.aio.Channel | None = None,
         heartbeat_ack_timeout_seconds: float = 10.0,
-        control_auth_token: str | None = None,
     ) -> None:
         """Initialize the gRPC client with a stream callable."""
         self._stream = stream
         self._channel = channel
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
-        self._metadata = _auth_metadata(control_auth_token)
+        self._metadata = _auth_metadata(runner_auth_token)
         self._outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerMessage] = (
             asyncio.Queue()
         )
@@ -88,8 +88,8 @@ class GrpcRunnerControlClient(RunnerControlClient):
         cls,
         endpoint: str,
         *,
+        runner_auth_token: str,
         heartbeat_ack_timeout_seconds: float = 10.0,
-        control_auth_token: str | None = None,
         tls: GrpcClientTlsConfig | None,
         allow_insecure: bool,
     ) -> "GrpcRunnerControlClient":
@@ -104,7 +104,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
             stub.ConnectRunner,
             channel=channel,
             heartbeat_ack_timeout_seconds=heartbeat_ack_timeout_seconds,
-            control_auth_token=control_auth_token,
+            runner_auth_token=runner_auth_token,
         )
 
     def set_operation_handler(self, handler: RunnerOperationHandler) -> None:
@@ -138,10 +138,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
                 request_id="register",
             )
         )
-        if self._metadata is None:
-            responses = self._stream(outbound)
-        else:
-            responses = self._stream(outbound, metadata=self._metadata)
+        responses = self._stream(outbound, metadata=self._metadata)
         self._receiver_task = asyncio.create_task(self._receive(responses))
         return await self._accepted
 
@@ -334,9 +331,9 @@ class GrpcRunnerControlClient(RunnerControlClient):
         return self._connection_id
 
 
-def _auth_metadata(token: str | None) -> tuple[tuple[str, str], ...] | None:
-    if token is None or not token:
-        return None
+def _auth_metadata(token: str) -> tuple[tuple[str, str], ...]:
+    if not token:
+        raise ValueError("Runner authentication token must not be empty")
     return (("authorization", f"Bearer {token}"),)
 
 

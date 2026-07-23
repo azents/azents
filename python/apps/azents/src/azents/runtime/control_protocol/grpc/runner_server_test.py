@@ -16,6 +16,10 @@ from azents_runtime_control.runner import RunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
 from google.protobuf import timestamp_pb2
 
+from azents.core.runtime_runner_credential import (
+    RuntimeRunnerCredential,
+    RuntimeRunnerCredentialInvalid,
+)
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
@@ -29,6 +33,7 @@ from azents.runtime.control_protocol.service import (
 )
 from azents.runtime.coordination.data import (
     RuntimeBodyChunk,
+    RuntimeConnectionKind,
     RuntimeCoordinationTarget,
     RuntimeOperationStatus,
     RuntimeReplyEvent,
@@ -83,7 +88,9 @@ class FakeGrpcContext:
 
     def __init__(
         self,
-        metadata: tuple[tuple[str, str], ...] = (),
+        metadata: tuple[tuple[str, str], ...] = (
+            ("authorization", "Bearer runner-token"),
+        ),
     ) -> None:
         self._metadata = metadata
 
@@ -98,6 +105,35 @@ class FakeGrpcContext:
     ) -> NoReturn:
         """Raise a RuntimeError instead of aborting a real RPC."""
         raise RuntimeError(f"{code.name}: {details}")
+
+
+@dataclasses.dataclass
+class FakeRunnerAuthenticator:
+    """Authenticate one deterministic Runtime-bound test credential."""
+
+    token: str = "runner-token"
+    credential: RuntimeRunnerCredential = RuntimeRunnerCredential(
+        credential_id="credential-1",
+        runtime_id="runtime-1",
+        desired_generation=1,
+    )
+    authorized: bool = True
+
+    async def authenticate_runner(
+        self,
+        secret: str,
+    ) -> RuntimeRunnerCredential:
+        """Return authenticated claims for the configured test token."""
+        if secret != self.token:
+            raise RuntimeRunnerCredentialInvalid("invalid test credential")
+        return self.credential
+
+    async def authorize_runner(
+        self,
+        credential: RuntimeRunnerCredential,
+    ) -> bool:
+        """Return current durable authority for the configured claims."""
+        return self.authorized and credential == self.credential
 
 
 class CountingRelayControlProtocol:
@@ -528,7 +564,7 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
         operation_block_ms=1,
-        control_auth_token=None,
+        runner_authenticator=FakeRunnerAuthenticator(),
     )
     outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage] = (
         asyncio.Queue(maxsize=1)
@@ -537,6 +573,11 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
     task = asyncio.create_task(
         servicer._relay_runner_operations(  # pyright: ignore[reportPrivateUsage]  # Exercise relay backpressure directly.
             outbound,
+            authentication=RuntimeRunnerCredential(
+                credential_id="credential-1",
+                runtime_id="runtime-1",
+                desired_generation=1,
+            ),
             runtime_id="runtime-1",
             generation=1,
         )
@@ -552,6 +593,30 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+@pytest.mark.asyncio
+async def test_runner_operation_relay_checks_authority_before_claim() -> None:
+    control = CountingRelayControlProtocol([])
+    authenticator = FakeRunnerAuthenticator(authorized=False)
+    servicer = RuntimeRunnerControlGrpcServicer(
+        control_protocol=control,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        state_sink=FakeStateSink(),
+        owner_replica_id="control-a",
+        consumer_id="runner-consumer-a",
+        operation_block_ms=1,
+        runner_authenticator=authenticator,
+    )
+
+    await servicer._relay_runner_operations(  # pyright: ignore[reportPrivateUsage]  # Verify auth precedes durable claim.
+        asyncio.Queue(maxsize=1),
+        authentication=authenticator.credential,
+        runtime_id="runtime-1",
+        generation=1,
+    )
+
+    assert control.claim_count == 0
 
 
 @pytest.mark.asyncio
@@ -941,32 +1006,22 @@ async def test_runner_grpc_relays_file_edit_and_replacement_count() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_grpc_rejects_missing_control_token() -> None:
+async def test_runner_grpc_rejects_missing_runner_credential() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(
-        RuntimeControlProtocolService(store),
-        store,
-        FakeStateSink(),
-        control_auth_token="control-token",
-    )
+    servicer = _servicer(RuntimeControlProtocolService(store), store, FakeStateSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
-    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext(()))
 
     with pytest.raises(RuntimeError, match="UNAUTHENTICATED"):
         await anext(stream)
 
 
 @pytest.mark.asyncio
-async def test_runner_grpc_rejects_wrong_control_token() -> None:
+async def test_runner_grpc_rejects_wrong_runner_credential() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(
-        RuntimeControlProtocolService(store),
-        store,
-        FakeStateSink(),
-        control_auth_token="control-token",
-    )
+    servicer = _servicer(RuntimeControlProtocolService(store), store, FakeStateSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
@@ -980,25 +1035,116 @@ async def test_runner_grpc_rejects_wrong_control_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_grpc_accepts_bearer_control_token() -> None:
+async def test_runner_grpc_accepts_runtime_bound_bearer_credential() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(
-        RuntimeControlProtocolService(store),
-        store,
-        FakeStateSink(),
-        control_auth_token="control-token",
-    )
+    servicer = _servicer(RuntimeControlProtocolService(store), store, FakeStateSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
     stream = servicer.ConnectRunner(
         inbound,
-        FakeGrpcContext((("authorization", "Bearer control-token"),)),
+        FakeGrpcContext((("authorization", "Bearer runner-token"),)),
     )
     accepted = await anext(stream)
+    connection = await store.get_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+    )
     await stream.aclose()
 
     assert accepted.register_accepted.runtime_id == "runtime-1"
+    assert connection is not None
+    assert connection.metadata["auth_credential_id"] == "credential-1"
+    assert "runner-token" not in repr(connection.metadata)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "register",
+    [
+        runtime_runner_control_pb2.RunnerRegister(
+            runtime_id="runtime-2",
+            runner_id="runner-1",
+            protocol_version="agent-runtime-runner.v1",
+            capabilities=("bash",),
+            health="ok",
+            workspace_path="/workspace/agent",
+            auth_credential_id="credential-1",
+        ),
+        runtime_runner_control_pb2.RunnerRegister(
+            runtime_id="runtime-1",
+            runner_id="runner-1",
+            protocol_version="agent-runtime-runner.v1",
+            capabilities=("bash",),
+            health="ok",
+            workspace_path="/workspace/agent",
+            auth_credential_id="credential-2",
+        ),
+    ],
+)
+async def test_runner_grpc_rejects_registration_identity_mismatch(
+    register: runtime_runner_control_pb2.RunnerRegister,
+) -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    servicer = _servicer(RuntimeControlProtocolService(store), store, FakeStateSink())
+    inbound = QueueIterator()
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="register",
+            register=register,
+        )
+    )
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+
+    with pytest.raises(RuntimeError, match="PERMISSION_DENIED"):
+        await anext(stream)
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_revokes_retained_authority_after_generation_change() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    authenticator = FakeRunnerAuthenticator()
+    servicer = _servicer(
+        service,
+        store,
+        FakeStateSink(),
+        runner_authenticator=authenticator,
+    )
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    authenticator.authorized = False
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="heartbeat-1",
+            generation=accepted.register_accepted.generation,
+            heartbeat=runtime_runner_control_pb2.RunnerHeartbeat(
+                monotonic_sequence=1,
+            ),
+        )
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="file.stat",
+            owner_session_id="session-1",
+            payload={"path": "/workspace/agent"},
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+    assert isinstance(result, RuntimeProtocolRouteUnavailable)
 
 
 @pytest.mark.asyncio
@@ -1198,7 +1344,7 @@ def _servicer(
     store: InMemoryRuntimeCoordinationStore,
     sink: FakeStateSink,
     *,
-    control_auth_token: str | None = None,
+    runner_authenticator: FakeRunnerAuthenticator | None = None,
 ) -> RuntimeRunnerControlGrpcServicer:
     return RuntimeRunnerControlGrpcServicer(
         control_protocol=service,
@@ -1206,7 +1352,7 @@ def _servicer(
         state_sink=sink,
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
-        control_auth_token=control_auth_token,
+        runner_authenticator=runner_authenticator or FakeRunnerAuthenticator(),
         operation_block_ms=1,
     )
 

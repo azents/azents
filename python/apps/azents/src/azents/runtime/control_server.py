@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from azents.core.config import PostgreSQLConfig
 from azents.core.redis import create_redis_client
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
+from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifier
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
@@ -58,6 +59,9 @@ from azents.services.runtime_provider_control.provider_auth import (
 from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,
 )
+from azents.services.runtime_runner_auth.service import (
+    RuntimeRunnerAuthenticationService,
+)
 
 _DEFAULT_PORT = 8030
 _DEFAULT_RECONCILE_INTERVAL_SECONDS = 15.0
@@ -88,8 +92,6 @@ class RuntimeControlSettings(BaseSettings):
         _DEFAULT_LIFECYCLE_RETRY_DELAY_SECONDS
     )
     runtime_control_start_timeout_seconds: float = _DEFAULT_START_TIMEOUT_SECONDS
-    runtime_control_auth_enabled: bool = False
-    runtime_control_auth_token: str | None = None
     runtime_control_kubernetes_token_review_enabled: bool = False
     runtime_control_allow_insecure: bool
     runtime_control_tls_certificate_file: str | None = None
@@ -126,7 +128,6 @@ async def runtime_control_server_lifespan(
     redis = create_redis_client(settings.redis_url)
     coordination_store = RedisRuntimeCoordinationStore(redis)
     control_protocol = RuntimeControlProtocolService(coordination_store)
-    control_token = runtime_control_auth_token(settings)
     transport = runtime_control_transport(settings)
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
@@ -156,6 +157,14 @@ async def runtime_control_server_lifespan(
         runtime_repository=runtime_repository,
         session_manager=session_manager,
     )
+    runner_credential_verifier = RuntimeRunnerCredentialVerifier(
+        settings.credential_encryption_key
+    )
+    runner_authenticator = RuntimeRunnerAuthenticationService(
+        session_manager=session_manager,
+        runtime_repository=runtime_repository,
+        verifier=runner_credential_verifier,
+    )
     reconciler = RuntimeLifecycleReconciler(
         runtime_repository=runtime_repository,
         session_manager=session_manager,
@@ -164,7 +173,7 @@ async def runtime_control_server_lifespan(
         config=RuntimeLifecycleDispatchConfig(
             runner_image=settings.runtime_runner_image,
             runner_control_endpoint=settings.runtime_runner_control_endpoint,
-            runner_control_auth_token=control_token,
+            runner_credential_identifier=runner_credential_verifier,
             runner_control_tls_ca_pem=transport.ca_pem,
             allow_insecure_runner_control=transport.allow_insecure,
             start_timeout=timedelta(
@@ -193,6 +202,7 @@ async def runtime_control_server_lifespan(
         consumer_id=f"{settings.runtime_control_instance_id}:provider",
         credential_authenticator=enrollment_service,
         connection_tracker=enrollment_service,
+        runner_credential_issuer=runner_credential_verifier,
     )
     add_runtime_runner_control_servicer(
         server,
@@ -201,7 +211,7 @@ async def runtime_control_server_lifespan(
         state_sink=runner_sink,
         owner_replica_id=settings.runtime_control_instance_id,
         consumer_id=f"{settings.runtime_control_instance_id}:runner",
-        control_auth_token=control_token,
+        runner_authenticator=runner_authenticator,
     )
     listen_address = f"0.0.0.0:{settings.runtime_control_port}"
     if transport.server_credentials is None:
@@ -221,7 +231,7 @@ async def runtime_control_server_lifespan(
             "lifecycle_retry_delay_seconds": (
                 settings.runtime_control_lifecycle_retry_delay_seconds
             ),
-            "auth_enabled": settings.runtime_control_auth_enabled,
+            "runner_authentication": "runtime_bound_credential",
             "tls_enabled": transport.server_credentials is not None,
         },
     )
@@ -261,24 +271,6 @@ async def _run_reconciler(
             await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
         except TimeoutError:
             continue
-
-
-def runtime_control_auth_token(settings: RuntimeControlSettings) -> str | None:
-    if not settings.runtime_control_auth_enabled:
-        return None
-    token = settings.runtime_control_auth_token
-    if token is None:
-        raise RuntimeError(
-            "AZ_RUNTIME_CONTROL_AUTH_TOKEN is required when "
-            "AZ_RUNTIME_CONTROL_AUTH_ENABLED is true"
-        )
-    normalized = token.strip()
-    if not normalized:
-        raise RuntimeError(
-            "AZ_RUNTIME_CONTROL_AUTH_TOKEN is required when "
-            "AZ_RUNTIME_CONTROL_AUTH_ENABLED is true"
-        )
-    return normalized
 
 
 def runtime_control_transport(

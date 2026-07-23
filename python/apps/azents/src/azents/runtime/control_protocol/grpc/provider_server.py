@@ -28,6 +28,7 @@ from azents_runtime_control.provider import (
 )
 from google.protobuf import timestamp_pb2
 
+from azents.core.runtime_runner_credential import RuntimeRunnerIssuedCredential
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeProviderRegistration,
@@ -126,6 +127,19 @@ class RuntimeProviderConnectionTracker(Protocol):
         ...
 
 
+class RuntimeRunnerCredentialIssuer(Protocol):
+    """Issue Runtime-bound Runner evidence for Provider delivery."""
+
+    def issue(
+        self,
+        *,
+        runtime_id: str,
+        desired_generation: int,
+    ) -> RuntimeRunnerIssuedCredential:
+        """Return signed Runner evidence and its non-secret identifier."""
+        ...
+
+
 class RuntimeProviderControlGrpcServicer(
     runtime_provider_control_pb2_grpc.RuntimeProviderControlServicer
 ):
@@ -140,6 +154,7 @@ class RuntimeProviderControlGrpcServicer(
         consumer_id: str,
         credential_authenticator: RuntimeProviderCredentialAuthenticator,
         connection_tracker: RuntimeProviderConnectionTracker,
+        runner_credential_issuer: RuntimeRunnerCredentialIssuer,
         command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
     ) -> None:
         """Initialize the Provider Control gRPC servicer."""
@@ -149,6 +164,7 @@ class RuntimeProviderControlGrpcServicer(
         self._consumer_id = consumer_id
         self._auth = RuntimeProviderCredentialGrpcAuth(credential_authenticator)
         self._connection_tracker = connection_tracker
+        self._runner_credential_issuer = runner_credential_issuer
         self._command_block_ms = command_block_ms
 
     async def ConnectProvider(
@@ -437,7 +453,10 @@ class RuntimeProviderControlGrpcServicer(
                 await self._control_protocol.ack_claimed_request(envelope)
                 continue
             try:
-                command = _provider_command(envelope)
+                command = _provider_command(
+                    envelope,
+                    runner_credential_issuer=self._runner_credential_issuer,
+                )
             except InvalidRuntimeProviderCommandPayload as exc:
                 _LOGGER.warning(
                     "Runtime Provider command payload invalid",
@@ -571,6 +590,7 @@ def add_runtime_provider_control_servicer(
     consumer_id: str,
     credential_authenticator: RuntimeProviderCredentialAuthenticator,
     connection_tracker: RuntimeProviderConnectionTracker,
+    runner_credential_issuer: RuntimeRunnerCredentialIssuer,
     command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Provider Control servicer to a gRPC server."""
@@ -582,6 +602,7 @@ def add_runtime_provider_control_servicer(
             consumer_id=consumer_id,
             credential_authenticator=credential_authenticator,
             connection_tracker=connection_tracker,
+            runner_credential_issuer=runner_credential_issuer,
             command_block_ms=command_block_ms,
         ),
         server,
@@ -713,6 +734,8 @@ def _registration_identity_error(
 
 def _provider_command(
     envelope: RuntimeRequestEnvelope,
+    *,
+    runner_credential_issuer: RuntimeRunnerCredentialIssuer,
 ) -> runtime_provider_control_pb2.ProviderCommand:
     payload = envelope.payload.get("payload")
     if not isinstance(payload, dict):
@@ -722,6 +745,19 @@ def _provider_command(
         )
     identity = _required_mapping(payload, "identity")
     auth = _required_mapping(payload, "auth")
+    desired_generation = _required_int(envelope.payload, "desired_generation")
+    runner_credential = runner_credential_issuer.issue(
+        runtime_id=envelope.runtime_id,
+        desired_generation=desired_generation,
+    )
+    if (
+        _required_string(auth, "runner_auth_credential_id")
+        != runner_credential.credential_id
+    ):
+        raise InvalidRuntimeProviderCommandPayload(
+            "INVALID_PROVIDER_COMMAND_PAYLOAD",
+            "Provider command Runner credential identifier does not match Runtime",
+        )
     deadline = timestamp_pb2.Timestamp()
     if envelope.deadline_at is not None:
         deadline.FromDatetime(envelope.deadline_at.astimezone(UTC))
@@ -729,7 +765,7 @@ def _provider_command(
         runtime_id=envelope.runtime_id,
         agent_id=_required_string(identity, "agent_id"),
         workspace_id=_required_string(identity, "workspace_id"),
-        desired_generation=_required_int(envelope.payload, "desired_generation"),
+        desired_generation=desired_generation,
         provider_generation=envelope.generation,
         command_type=_required_command_type(envelope.payload),
         reset_final_desired_state=_optional_string(
@@ -738,7 +774,7 @@ def _provider_command(
         ),
         runner_image=_required_string(payload, "runner_image"),
         control_endpoint=_required_string(auth, "control_endpoint"),
-        runner_auth_token=_required_string(auth, "runner_auth_token"),
+        runner_auth_token=runner_credential.token,
     )
     command.payload.update(cast(dict[str, object], payload))
     if envelope.deadline_at is not None:
