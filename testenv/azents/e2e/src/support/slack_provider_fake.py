@@ -259,6 +259,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             {
                 "ok": True,
                 "channel": {
+                    "name": "e2e",
                     "is_member": scenario != "not_member",
                     "is_channel": scenario != "dm",
                     "is_group": False,

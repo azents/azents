@@ -124,6 +124,7 @@ def test_slack_fake_controls_membership_history_and_delivery_failure(
     ).json()
 
     assert membership["channel"]["is_ext_shared"] is True
+    assert membership["channel"]["name"] == "e2e"
     assert history.status_code == 429
     assert history.headers["Retry-After"] == "1"
     assert update == {"ok": False, "error": "token_revoked"}
