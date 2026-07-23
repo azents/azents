@@ -8,7 +8,9 @@ from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
     ExternalChannelConnectionStatus,
@@ -225,15 +227,52 @@ def test_progress_projection_state_uses_delivery_lifecycle(
             desired_progress_revision=1,
         ),
     )
-    deliveries = (
-        []
+    progress = (
+        None
         if operation is None or status is None
-        else [
-            cast(
-                RDBExternalChannelDeliveryAttempt,
-                SimpleNamespace(operation=operation, status=status),
-            )
-        ]
+        else cast(
+            RDBExternalChannelDeliveryAttempt,
+            SimpleNamespace(operation=operation, status=status),
+        )
     )
 
-    assert progress_projection_state(work, deliveries) == expected
+    assert progress_projection_state(work, progress) == expected
+
+
+async def test_latest_progress_query_is_scoped_to_current_work_cycle() -> None:
+    """Ignore prior work deliveries while retaining lifecycle cleanup."""
+    work = cast(
+        RDBExternalChannelWork,
+        SimpleNamespace(
+            id="work-current",
+            created_at=datetime.datetime(2026, 7, 23, tzinfo=datetime.UTC),
+        ),
+    )
+    session = AsyncMock(spec=AsyncSession)
+    captured_sql: list[str] = []
+
+    async def compile_statement(statement: ClauseElement) -> None:
+        sql = str(
+            statement.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        captured_sql.append(sql)
+        return None
+
+    session.scalar.side_effect = compile_statement
+    result = (
+        await ExternalChannelManagementRepository().get_latest_work_progress_delivery(
+            session,
+            binding_id="binding-1",
+            work=work,
+        )
+    )
+    sql = captured_sql[0]
+
+    assert result is None
+    assert "external_channel_delivery_attempts.binding_id = 'binding-1'" in sql
+    assert "external_channel_actions.work_id = 'work-current'" in sql
+    assert "external_channel_delivery_attempts.channel_action_id IS NULL" in sql
+    assert "external_channel_delivery_attempts.created_at >= " in sql

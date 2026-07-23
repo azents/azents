@@ -22,6 +22,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
     RDBExternalChannelAccessRequest,
+    RDBExternalChannelAction,
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelBlock,
@@ -213,6 +214,15 @@ class ExternalChannelManagementRepository:
                     )
                 ).all()
             )
+            progress_delivery = (
+                None
+                if work is None
+                else await self.get_latest_work_progress_delivery(
+                    session,
+                    binding_id=binding.id,
+                    work=work,
+                )
+            )
             result.append(
                 ManagedBinding(
                     id=binding.id,
@@ -228,11 +238,54 @@ class ExternalChannelManagementRepository:
                     disconnected_at=binding.disconnected_at,
                     disconnect_reason=binding.disconnect_reason,
                     latest_activity_at=resource.latest_activity_at,
-                    work=None if work is None else _work(work, deliveries),
+                    work=(
+                        None
+                        if work is None
+                        else _work(work, progress_delivery=progress_delivery)
+                    ),
                     deliveries=[_delivery(item) for item in deliveries],
                 )
             )
         return result
+
+    async def get_latest_work_progress_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+        work: RDBExternalChannelWork,
+    ) -> RDBExternalChannelDeliveryAttempt | None:
+        """Load the latest progress outcome belonging to one work cycle."""
+        return await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt)
+            .outerjoin(
+                RDBExternalChannelAction,
+                RDBExternalChannelAction.id
+                == RDBExternalChannelDeliveryAttempt.channel_action_id,
+            )
+            .where(
+                RDBExternalChannelDeliveryAttempt.binding_id == binding_id,
+                RDBExternalChannelDeliveryAttempt.operation.in_(
+                    (
+                        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                    )
+                ),
+                sa.or_(
+                    RDBExternalChannelAction.work_id == work.id,
+                    sa.and_(
+                        RDBExternalChannelDeliveryAttempt.channel_action_id.is_(None),
+                        RDBExternalChannelDeliveryAttempt.created_at >= work.created_at,
+                    ),
+                ),
+            )
+            .order_by(
+                RDBExternalChannelDeliveryAttempt.created_at.desc(),
+                RDBExternalChannelDeliveryAttempt.id.desc(),
+            )
+            .limit(1)
+        )
 
     async def disconnect_binding(
         self,
@@ -654,7 +707,8 @@ def _resource_label(labels: dict[str, object] | None, fallback: str) -> str:
 
 def _work(
     work: RDBExternalChannelWork,
-    deliveries: list[RDBExternalChannelDeliveryAttempt],
+    *,
+    progress_delivery: RDBExternalChannelDeliveryAttempt | None,
 ) -> ManagedWork:
     return ManagedWork(
         id=work.id,
@@ -663,7 +717,7 @@ def _work(
         state_revision=work.state_revision,
         desired_progress_revision=work.desired_progress_revision,
         progress_projected=work.progress_provider_message_key is not None,
-        projection_state=progress_projection_state(work, deliveries),
+        projection_state=progress_projection_state(work, progress_delivery),
         finished_at=work.finished_at,
     )
 
@@ -732,7 +786,7 @@ def _provider_payload(
 
 def progress_projection_state(
     work: RDBExternalChannelWork,
-    deliveries: list[RDBExternalChannelDeliveryAttempt],
+    progress: RDBExternalChannelDeliveryAttempt | None,
 ) -> Literal[
     "synchronized",
     "missing",
@@ -741,19 +795,6 @@ def progress_projection_state(
     "unknown",
     "none",
 ]:
-    progress = next(
-        (
-            delivery
-            for delivery in deliveries
-            if delivery.operation
-            in {
-                ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-            }
-        ),
-        None,
-    )
     if progress is not None:
         if progress.status is ExternalChannelDeliveryStatus.UNKNOWN:
             return "unknown"
