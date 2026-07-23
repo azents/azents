@@ -11,6 +11,14 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/core/runtime_provider_credential.py
+  - python/apps/azents/src/azents/core/runtime_runner_credential.py
+  - python/apps/azents/src/azents/rdb/models/runtime_provider_binding.py
+  - python/apps/azents/src/azents/rdb/models/runtime_provider_control.py
+  - python/apps/azents/src/azents/repos/runtime_provider_binding/**
+  - python/apps/azents/src/azents/repos/runtime_provider_control/**
+  - python/apps/azents/src/azents/services/runtime_provider_control/**
+  - python/apps/azents/src/azents/services/runtime_runner_auth/**
   - python/apps/azents/src/azents/runtime/**
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/chat/workspace.py
@@ -20,10 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-  - infra/argocd/azents-runtime-provider-kubernetes/**
-  - infra/argocd/azents-server/**
 last_verified_at: 2026-07-23
-spec_version: 25
+spec_version: 26
 ---
 
 # Agent Runtime Control
@@ -106,15 +112,32 @@ The store is not a source of product truth. Losing store data may interrupt in-f
 
 ## Control Stream Authentication
 
-Provider and Runner streams use separate credentials.
+Provider and Runner streams use distinct authentication methods and credentials. Authentication evidence establishes authority before Control reads registration claims; a payload can only be checked for consistency with that authenticated identity.
 
-Every Provider stream presents a Provider-bound credential as bearer metadata. Control resolves that credential to one known durable Provider before reading registration, rejects a client-supplied Provider ID or credential ID that does not match the resolved identity, and records the authenticated credential on the durable connection. A Runtime Control shared token cannot authenticate a Provider, and a Provider connection cannot create or discover its Provider resource.
+Every Provider stream declares exactly one authentication method in gRPC metadata. Control dispatches only to that method's verifier and never infers a method from token shape or falls back after a failure. The supported methods are:
 
-Runner streams use the optional Runtime Control transport-token gate. When `AZ_RUNTIME_CONTROL_AUTH_ENABLED` is true, Control requires a non-empty `AZ_RUNTIME_CONTROL_AUTH_TOKEN` at startup and rejects Runner streams that do not provide the matching token. Runners may present the token with `authorization: Bearer ...` metadata or `x-azents-runtime-control-token` metadata.
+- `azents_issued_token`, which resolves an active, unexpired Azents-issued credential through its durable authentication binding; and
+- `kubernetes_service_account`, which verifies a Kubernetes ServiceAccount projected token and resolves its durable bootstrap-owned binding.
 
-The Helm chart reads the Runner transport token and Provider credential from separate existing Secret references. It must not place token or credential literals in default values or rendered manifests. Runtime Control auth is disabled by default in chart values. When enabled, `server.runtimeControl.auth.existingSecret` and `server.runtimeControl.auth.tokenKey` identify the transport token used by the Control server. The Kubernetes Provider receives the same transport token only so it can inject it into Runtime Runner containers; the Provider's own Control stream continues to use its Provider-bound credential.
+The normalized Provider authentication result contains the durable binding ID, Provider ID, method, normalized subject, method-safe audit metadata, and evidence expiry. Control records that result on the durable Provider connection. An issued-token connection records its credential ID; a Kubernetes ServiceAccount connection has no synthetic credential or enrollment grant. A binding must be active and belong to the authenticated Provider. Registration `provider_id`, credential identifiers, scope, and generation cannot select or discover a Provider; a mismatched registration is rejected with `PERMISSION_DENIED`.
 
-Credential values are secret material. Logs, test evidence, and user-visible diagnostics may mention authentication being enabled, disabled, missing, or invalid, but must not include raw values.
+For `kubernetes_service_account`, Runtime Control submits the presented projected token to Kubernetes TokenReview with the exact `azents-runtime-control` audience. It accepts only an authenticated review with that audience and an exact `system:serviceaccount:<namespace>:<name>` subject matching one active durable binding. Evidence expiry is derived only after that successful review. The Kubernetes Provider watches the projected token file and reconnects after rotation. Runtime Control, not the Provider ServiceAccount, has the narrow `create` permission on `authentication.k8s.io/tokenreviews`.
+
+Provider connection authority remains binding-backed after registration. Heartbeats and commands require the authenticated binding, Provider, subject, and method-specific evidence to remain active and unexpired. Expiry or revocation prevents a connection from retaining command authority; reconnecting does not bypass those checks. Unknown methods, malformed or rejected evidence, missing or ambiguous bindings, stale credentials, and method/configuration mismatches fail closed with bounded `UNAUTHENTICATED` errors.
+
+Runner authentication uses a signed credential bound to one logical Runtime ID and its durable desired generation. Runtime Control derives its signing key from the existing credential-encryption root and does not require an operator-managed shared Runtime Control token. The Provider receives the plaintext credential only in the lifecycle command and injects it into the Runtime Runner as `AZ_RUNTIME_RUNNER_AUTH_TOKEN`; it is not persisted or logged. A deterministic one-way credential fingerprint may be retained as the non-secret connection credential identifier.
+
+Before accepting a Runner stream, Control verifies the signature, resolves the Runtime ID and desired generation from the verified credential, loads the durable Runtime, and requires the generation to equal the current durable desired generation. A registration `runtime_id` may only match that resolved identity; another Runtime claim is rejected with `PERMISSION_DENIED`. Missing, malformed, tampered, absent-Runtime, or stale-generation Runner credentials are rejected with `UNAUTHENTICATED`. Desired-generation changes invalidate prior credentials without a wall-clock refresh or a shared-token compatibility path. Physical connection generation fencing remains separate from this logical Runtime-incarnation authority.
+
+Credential values, projected token contents, bearer headers, verifiers, and plaintext signed Runner credentials are excluded from logs, diagnostics, fixtures, rendered manifests, and Git. Authentication failures expose only bounded method-safe status and error codes.
+
+## Helm Authentication and Storage Boundary
+
+The Helm chart keeps Runtime Control TLS mandatory and removes active shared Runtime Control authentication values, Provider credential values, credential bootstrap Jobs, staging/final credential Secrets, Provider credential volumes, and their Secret-based wiring. The trusted Kubernetes Provider instead receives an explicit projected ServiceAccount token volume with the `azents-runtime-control` audience and token path. Bootstrap metadata declares the opaque `system-kubernetes` Provider and its Kubernetes ServiceAccount binding for durable reconciliation.
+
+Runtime Control receives a dedicated ClusterRole/ClusterRoleBinding that permits only TokenReview creation. Provider workload RBAC remains limited to its Pod, PersistentVolumeClaim, and leader-Lease responsibilities and does not grant TokenReview or Secret-write access. Chart rendering must not include a legacy Provider credential or shared Runner-token path, credential plaintext, a host Docker socket, or a generic privileged workload toggle.
+
+Authentication rollout resources do not own, select, prune, reset, rename, replace, or delete Runtime PersistentVolumeClaims or PersistentVolumes. Provider-driven Runtime Pod replacement caused by credential or authentication reconciliation reuses the existing Runtime PVC. PVC deletion remains limited to the existing explicit Runtime reset and terminal-delete lifecycle paths; the authentication cutover itself never issues either operation.
 
 ## Provider Contract
 
@@ -263,6 +286,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-23** (spec_version 26) — Replaced shared Runtime Control token and Secret-based Provider authentication wiring with explicit Provider method dispatch, durable binding authority, Kubernetes TokenReview, Runtime/desired-generation-bound Runner credentials, and secret-free Helm/PVC-preserving rollout boundaries.
 - **2026-07-23** (spec_version 25) — Restricted automatic Session lifecycle Git cleanup to one post-commit best-effort archive attempt and removed Runtime access from retention purge.
 - **2026-07-22** (spec_version 24) — Added content-free Git worktree inspection, branch-fenced removal, terminal missing-target and missing-branch outcomes, and non-destructive ambiguous-target rejection.
 - **2026-07-21** (spec_version 23) — Added generation-fenced internal Provider terminal deletion and durable acknowledgement for Agent decommission finalization.
