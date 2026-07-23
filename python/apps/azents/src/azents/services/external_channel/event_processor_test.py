@@ -549,9 +549,11 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
     assert len(final_sessions) == 1
     assert len(batches) == 1
     assert batches[0].trigger_message_id == all_requests[1].source_message_id
-    assert len(projection_items) == 1
-    assert projection_items[0].message_id == all_requests[1].source_message_id
-    assert projection_items[0].correction_of_revision_id is None
+    assert [item.message_id for item in projection_items] == [
+        all_requests[0].source_message_id,
+        all_requests[1].source_message_id,
+    ]
+    assert all(item.correction_of_revision_id is None for item in projection_items)
     assert len(remaining_pending) == 1
     assert remaining_pending[0].provider_position == later_context.provider_position
 
