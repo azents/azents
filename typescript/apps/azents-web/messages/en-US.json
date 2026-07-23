@@ -1010,6 +1010,7 @@
         "emptyDescription": "This session has not been invoked from a supported external channel.",
         "disconnect": "Disconnect",
         "disconnectConfirm": "Disconnect this session channel permanently? Its history remains available.",
+        "cancel": "Cancel",
         "connectedAt": "Connected",
         "latestActivity": "Latest activity",
         "retainedContext": "Pending-context truncation",

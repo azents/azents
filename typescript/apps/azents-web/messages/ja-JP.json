@@ -1010,6 +1010,7 @@
         "emptyDescription": "対応する外部チャンネルからこのセッションが呼び出されたことはありません。",
         "disconnect": "切断",
         "disconnectConfirm": "このセッションチャンネルを完全に切断しますか？履歴は保持されます。",
+        "cancel": "キャンセル",
         "connectedAt": "接続日時",
         "latestActivity": "最新アクティビティ",
         "retainedContext": "Pending context の切り詰め",

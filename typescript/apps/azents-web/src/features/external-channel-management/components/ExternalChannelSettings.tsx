@@ -23,6 +23,7 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
+import { useModals } from "@mantine/modals";
 import {
   IconCheck,
   IconCopy,
@@ -197,11 +198,7 @@ function ConnectionRow({
             size="xs"
             leftSection={<IconTrash size={rem(14)} />}
             disabled={actionsBusy}
-            onClick={() => {
-              if (window.confirm(t("disconnectConfirm"))) {
-                onDisconnect(connection);
-              }
-            }}
+            onClick={() => onDisconnect(connection)}
           >
             {t("disconnect")}
           </Button>
@@ -265,12 +262,7 @@ function AccessRow({
         size="xs"
         loading={busy}
         disabled={actionsBusy}
-        onClick={() => {
-          const key = isGrant ? "revokeConfirm" : "unblockConfirm";
-          if (window.confirm(t(key))) {
-            onRemove();
-          }
-        }}
+        onClick={onRemove}
       >
         {isGrant ? t("revoke") : t("unblock")}
       </Button>
@@ -616,7 +608,28 @@ export function ExternalChannelSettings({
   onRemoveBlock,
 }: ExternalChannelSettingsContainerOutput): React.ReactElement {
   const t = useTranslations("workspace.agents.externalChannels");
+  const modals = useModals();
   const loaded = state.type === "LOADED" ? state : null;
+  const openConfirm = ({
+    title,
+    description,
+    confirmLabel,
+    onConfirm,
+  }: {
+    title: string;
+    description: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  }): void => {
+    modals.openConfirmModal({
+      title,
+      children: <Text size="sm">{description}</Text>,
+      labels: { confirm: confirmLabel, cancel: t("cancel") },
+      confirmProps: { color: "red" },
+      centered: true,
+      onConfirm,
+    });
+  };
 
   return (
     <Box style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
@@ -674,7 +687,14 @@ export function ExternalChannelSettings({
                     actionsBusy={actionsBusy}
                     onValidate={onValidate}
                     onEdit={onOpenEdit}
-                    onDisconnect={onDisconnect}
+                    onDisconnect={(selected) =>
+                      openConfirm({
+                        title: t("disconnect"),
+                        description: t("disconnectConfirm"),
+                        confirmLabel: t("disconnect"),
+                        onConfirm: () => onDisconnect(selected),
+                      })
+                    }
                   />
                 ))
               )}
@@ -702,7 +722,14 @@ export function ExternalChannelSettings({
                           kind="grant"
                           busy={actionTarget === grant.id}
                           actionsBusy={actionsBusy}
-                          onRemove={() => onRevokeGrant(grant)}
+                          onRemove={() =>
+                            openConfirm({
+                              title: t("revoke"),
+                              description: t("revokeConfirm"),
+                              confirmLabel: t("revoke"),
+                              onConfirm: () => onRevokeGrant(grant),
+                            })
+                          }
                         />
                       </Box>
                     ))}
@@ -717,7 +744,14 @@ export function ExternalChannelSettings({
                           kind="block"
                           busy={actionTarget === block.id}
                           actionsBusy={actionsBusy}
-                          onRemove={() => onRemoveBlock(block)}
+                          onRemove={() =>
+                            openConfirm({
+                              title: t("unblock"),
+                              description: t("unblockConfirm"),
+                              confirmLabel: t("unblock"),
+                              onConfirm: () => onRemoveBlock(block),
+                            })
+                          }
                         />
                       </Box>
                     ))}

@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { SessionChannels } from "./SessionChannels";
 import type {
@@ -197,5 +198,25 @@ export const Error = {
 export const Busy = {
   args: {
     disconnectingId: binding.id,
+  },
+} satisfies Story;
+
+export const ConfirmDisconnect = {
+  args: {
+    onDisconnect: fn(),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^disconnect$/i }),
+    );
+    await expect(args.onDisconnect).not.toHaveBeenCalled();
+    const dialog = await within(canvasElement.ownerDocument.body).findByRole(
+      "dialog",
+    );
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /^disconnect$/i }),
+    );
+    await expect(args.onDisconnect).toHaveBeenCalledWith(binding);
   },
 } satisfies Story;

@@ -15,6 +15,7 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
+import { useModals } from "@mantine/modals";
 import {
   IconArchive,
   IconCheck,
@@ -253,11 +254,7 @@ function BindingPanel({
             leftSection={<IconPlugConnectedX size={rem(14)} />}
             loading={busy}
             disabled={actionsBusy || !active || archived}
-            onClick={() => {
-              if (window.confirm(t("disconnectConfirm"))) {
-                onDisconnect(binding);
-              }
-            }}
+            onClick={() => onDisconnect(binding)}
           >
             {t("disconnect")}
           </Button>
@@ -370,6 +367,17 @@ export function SessionChannels({
   onDisconnect,
 }: SessionChannelsContainerOutput): React.ReactElement {
   const t = useTranslations("workspace.agents.sessionChannels");
+  const modals = useModals();
+  const openDisconnectConfirm = (binding: ManagedBinding): void => {
+    modals.openConfirmModal({
+      title: t("disconnect"),
+      children: <Text size="sm">{t("disconnectConfirm")}</Text>,
+      labels: { confirm: t("disconnect"), cancel: t("cancel") },
+      confirmProps: { color: "red" },
+      centered: true,
+      onConfirm: () => onDisconnect(binding),
+    });
+  };
 
   return (
     <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
@@ -434,7 +442,7 @@ export function SessionChannels({
                     archived={state.session.archived_at !== null}
                     busy={disconnectingId === binding.id}
                     actionsBusy={disconnectingId !== null}
-                    onDisconnect={onDisconnect}
+                    onDisconnect={openDisconnectConfirm}
                   />
                 ))}
               </Stack>

@@ -1010,6 +1010,7 @@
         "emptyDescription": "Cette session n’a pas été appelée depuis un canal externe compatible.",
         "disconnect": "Déconnecter",
         "disconnectConfirm": "Déconnecter définitivement ce canal de session ? Son historique sera conservé.",
+        "cancel": "Annuler",
         "connectedAt": "Connexion",
         "latestActivity": "Dernière activité",
         "retainedContext": "Troncature du contexte en attente",
