@@ -1,8 +1,9 @@
 name: Snapshot
 
 on:
-  # Automatic main snapshots are temporarily paused while the Runtime Control
-  # authentication stack is merged. Keep manual dispatch for the final snapshot.
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:

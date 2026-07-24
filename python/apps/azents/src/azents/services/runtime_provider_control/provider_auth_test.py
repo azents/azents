@@ -107,6 +107,7 @@ def _authentication(
             else None
         ),
         provider_id="provider-1",
+        provider_resource_id="provider-1",
         provider_kind=RuntimeProviderKind.KUBERNETES,
         provider_scope=RuntimeProviderScope.SYSTEM,
         provider_workspace_id=None,
@@ -138,6 +139,7 @@ def test_authentication_rejects_method_specific_evidence_mismatch(
             binding_id="binding-1",
             credential_id=credential_id,
             provider_id="provider-1",
+            provider_resource_id="provider-1",
             provider_kind=RuntimeProviderKind.KUBERNETES,
             provider_scope=RuntimeProviderScope.SYSTEM,
             provider_workspace_id=None,
@@ -444,7 +446,8 @@ async def test_kubernetes_verifier_resolves_exact_bootstrap_binding() -> None:
     result = await verifier.verify(secret="service-account-token", now=_NOW)
 
     assert result.binding_id == "binding-1"
-    assert result.provider_id == "provider-row-1"
+    assert result.provider_id == "system-kubernetes"
+    assert result.provider_resource_id == "provider-row-1"
     assert result.credential_id is None
     assert result.auth_method is RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT
     binding_repository.mark_authenticated.assert_awaited_once()

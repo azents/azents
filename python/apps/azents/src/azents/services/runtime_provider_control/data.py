@@ -32,11 +32,12 @@ class RuntimeProviderCredentialIssued:
 
 @dataclass(frozen=True)
 class RuntimeProviderCredentialAuthentication:
-    """Authenticated identity bound to a durable Provider."""
+    """Authenticated logical and resource identities for one durable Provider."""
 
     binding_id: str
     credential_id: str | None
     provider_id: str
+    provider_resource_id: str
     provider_kind: RuntimeProviderKind
     provider_scope: RuntimeProviderScope
     provider_workspace_id: str | None
