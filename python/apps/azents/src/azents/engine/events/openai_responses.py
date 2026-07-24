@@ -111,7 +111,9 @@ from azents.engine.run.provider_failure import (
     classify_model_provider_failure,
     extract_provider_message_text,
     model_provider_failure,
+    sanitize_provider_error_param,
     sanitize_provider_identifier,
+    sanitize_provider_message,
 )
 from azents.engine.run.types import BuiltinToolSpec
 
@@ -749,6 +751,11 @@ class OpenAIResponsesModelAdapter:
                     or (isinstance(event, ResponseErrorEvent) and event.type == "error")
                 ):
                     terminal_failure = True
+                    _log_openai_terminal_error(
+                        native_event=event,
+                        transport=transport,
+                        call_context=call_context,
+                    )
                 yield event
             if completed_response is not None and not terminal_failure:
                 self._record_completion(
@@ -778,6 +785,11 @@ class OpenAIResponsesModelAdapter:
                 category=_websocket_failure_category(failure.status_code),
             ) from None
         except OpenAIError as exc:
+            _log_openai_sdk_error(
+                exc=exc,
+                transport=transport,
+                call_context=call_context,
+            )
             failure = _map_openai_error(
                 exc,
                 call_context=call_context,
@@ -999,6 +1011,133 @@ def _websocket_failure_category(
     if status_code is not None and status_code >= 500:
         return ModelProviderFailureCategory.PROVIDER_UNAVAILABLE
     return ModelProviderFailureCategory.TRANSPORT
+
+
+def _log_openai_terminal_error(
+    *,
+    native_event: ResponseStreamEvent,
+    transport: OpenAIResponsesPhysicalTransport,
+    call_context: ModelStreamCallContext,
+) -> None:
+    """Record one safe typed terminal Responses event before normalization."""
+    fields = _openai_terminal_error_log_fields(native_event)
+    if fields is None:
+        return
+    logger.warning(
+        "OpenAI Responses terminal provider error received",
+        extra={
+            **_openai_call_context_log_fields(call_context),
+            "openai_responses_transport": transport,
+            **fields,
+        },
+    )
+
+
+def _openai_terminal_error_log_fields(
+    native_event: ResponseStreamEvent,
+) -> dict[str, object] | None:
+    """Extract safe diagnostics from one typed terminal Responses event."""
+    provider_code: object = None
+    provider_message: object = None
+    provider_param: object = None
+    outcome: Literal["error", "failed", "incomplete"]
+    if isinstance(native_event, ResponseErrorEvent) and native_event.type == "error":
+        outcome = "error"
+        provider_code = native_event.code
+        provider_message = native_event.message
+        provider_param = native_event.param
+    elif (
+        isinstance(native_event, ResponseFailedEvent)
+        and native_event.type == "response.failed"
+    ):
+        outcome = "failed"
+        response_error = native_event.response.error
+        provider_code = response_error.code if response_error is not None else None
+        provider_message = (
+            response_error.message if response_error is not None else None
+        )
+    elif (
+        isinstance(native_event, ResponseIncompleteEvent)
+        and native_event.type == "response.incomplete"
+    ):
+        outcome = "incomplete"
+        incomplete_details = native_event.response.incomplete_details
+        provider_code = (
+            incomplete_details.reason if incomplete_details is not None else None
+        )
+    else:
+        return None
+    return {
+        "provider_terminal_outcome": outcome,
+        "provider_terminal_event_type": native_event.type,
+        "provider_terminal_event_sequence_number": native_event.sequence_number,
+        "provider_terminal_error_code": sanitize_provider_identifier(provider_code),
+        "provider_terminal_error_message": sanitize_provider_message(provider_message),
+        "provider_terminal_error_message_length": _provider_message_length(
+            provider_message
+        ),
+        "provider_terminal_error_param": sanitize_provider_error_param(provider_param),
+    }
+
+
+def _log_openai_sdk_error(
+    *,
+    exc: OpenAIError,
+    transport: OpenAIResponsesPhysicalTransport,
+    call_context: ModelStreamCallContext,
+) -> None:
+    """Record safe structured SDK status diagnostics before error mapping."""
+    error_body = _openai_error_body(exc)
+    provider_message = (
+        extract_provider_message_text(error_body.get("message"))
+        or extract_provider_message_text(getattr(exc, "message", None))
+        or extract_provider_message_text(str(exc))
+    )
+    status_code = exc.status_code if isinstance(exc, APIStatusError) else None
+    logger.warning(
+        "OpenAI Responses SDK request failed",
+        extra={
+            **_openai_call_context_log_fields(call_context),
+            "openai_responses_transport": transport,
+            "provider_sdk_exception_type": sanitize_provider_identifier(
+                exc.__class__.__name__
+            ),
+            "provider_status_code": status_code,
+            "provider_error_code": sanitize_provider_identifier(
+                error_body.get("code") or getattr(exc, "code", None)
+            ),
+            "provider_error_type": sanitize_provider_identifier(
+                error_body.get("type") or exc.__class__.__name__
+            ),
+            "provider_error_message": sanitize_provider_message(provider_message),
+            "provider_error_message_length": _provider_message_length(provider_message),
+            "provider_error_param": sanitize_provider_error_param(
+                error_body.get("param")
+            ),
+            "provider_request_id": sanitize_provider_identifier(
+                getattr(exc, "request_id", None)
+            ),
+        },
+    )
+
+
+def _openai_call_context_log_fields(
+    call_context: ModelStreamCallContext,
+) -> dict[str, object]:
+    """Return safe Run correlation fields for adapter-owned logs."""
+    return {
+        "provider": call_context.provider,
+        "provider_integration_id": call_context.provider_integration_id,
+        "model": call_context.model,
+        "session_id": call_context.session_id,
+        "run_id": call_context.run_id,
+        "attempt_number": call_context.attempt_number,
+    }
+
+
+def _provider_message_length(value: object) -> int | None:
+    """Return scalar provider message length without retaining its contents."""
+    return len(value) if isinstance(value, str) else None
 
 
 class _OpenAIResponsesCanonicalNormalizer(ResponsesOutputNormalizer):

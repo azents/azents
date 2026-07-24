@@ -11,6 +11,7 @@ from azents.engine.run.provider_failure import (
     extract_provider_message_text,
     model_provider_error_log_fields,
     model_provider_failure,
+    sanitize_provider_error_param,
     sanitize_provider_message,
 )
 
@@ -67,6 +68,15 @@ def test_rejects_large_body_shaped_message() -> None:
 def test_rejects_oversized_scalar_message() -> None:
     """Oversized probable body dumps are rejected instead of truncated."""
     assert sanitize_provider_message("x" * ((8 * 1024) + 1)) is None
+
+
+def test_sanitizes_provider_error_parameter_path() -> None:
+    """Provider parameter paths retain only bounded structural characters."""
+    assert (
+        sanitize_provider_error_param("input[0].tools[1].function.arguments")
+        == "input[0].tools[1].function.arguments"
+    )
+    assert sanitize_provider_error_param("input value=secret") is None
 
 
 def test_extracts_scalar_message_from_json_error_object() -> None:

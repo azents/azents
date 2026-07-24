@@ -10,6 +10,8 @@ from azents.engine.run.errors import ModelCallError, ModelStreamCallKind
 _PROVIDER_MESSAGE_MAX_INPUT_CHARS = 8 * 1024
 _PROVIDER_MESSAGE_MAX_CHARS = 1000
 _PROVIDER_IDENTIFIER_MAX_CHARS = 96
+_PROVIDER_ERROR_PARAM_MAX_CHARS = 256
+_PROVIDER_ERROR_PARAM_PATTERN = re.compile(r"[A-Za-z0-9._:/\[\]-]+")
 _SECRET_VALUE_PATTERN = re.compile(
     r"(?i)(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|"
     r"cookie|set-cookie|secret|password)\s*[:=]\s*([^\s,;]+)"
@@ -286,6 +288,20 @@ def sanitize_provider_identifier(value: object) -> str | None:
     ):
         return None
     return identifier
+
+
+def sanitize_provider_error_param(value: object) -> str | None:
+    """Return one bounded provider error parameter path or no value."""
+    if not isinstance(value, str):
+        return None
+    parameter = value.strip()
+    if (
+        not parameter
+        or len(parameter) > _PROVIDER_ERROR_PARAM_MAX_CHARS
+        or _PROVIDER_ERROR_PARAM_PATTERN.fullmatch(parameter) is None
+    ):
+        return None
+    return parameter
 
 
 def classify_model_provider_failure(
