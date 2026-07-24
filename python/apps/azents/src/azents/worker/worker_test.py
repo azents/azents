@@ -1697,6 +1697,53 @@ async def test_prepare_toolkits_reuses_same_session_key() -> None:
 
 
 @pytest.mark.asyncio
+async def test_prepare_toolkits_replaces_auto_toolkit_on_context_change() -> None:
+    """Context-derived revision replaces a handover-era auto Toolkit instance."""
+    host = _Host()
+    runner = _make_session_runner(host)
+    events: list[str] = []
+    stale = _TrackingToolkit(events, "stale")
+    current = _TrackingToolkit(events, "current")
+
+    try:
+        first_prepared = await runner.prepare_toolkits(
+            [
+                ToolkitBinding(
+                    toolkit=stale,
+                    slug="skill",
+                    use_prefix=False,
+                    toolkit_type=None,
+                    source_revision="idle-workspace",
+                )
+            ],
+            "user-001",
+        )
+        second_prepared = await runner.prepare_toolkits(
+            [
+                ToolkitBinding(
+                    toolkit=current,
+                    slug="skill",
+                    use_prefix=False,
+                    toolkit_type=None,
+                    source_revision="run-workspace",
+                )
+            ],
+            "user-001",
+        )
+    finally:
+        await runner.shutdown()
+
+    assert first_prepared[0].toolkit is stale
+    assert second_prepared[0].toolkit is current
+    assert events == [
+        "enter:stale",
+        "enter:current",
+        "exit:stale",
+        "exit:current",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_prepare_toolkits_rekeys_registered_toolkit_by_actor() -> None:
     """DB-registered toolkit does not reuse previous instance when actor changes."""
     host = _Host()

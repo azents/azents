@@ -90,13 +90,15 @@ class _LockedSession:
 
     pending_idle_continuation_run_id: str | None
     pending_command_id: str | None
+    workspace_id: str
 
 
 class _AgentSessionRepository:
     """AgentSessionRepository test double."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, workspace_id: str = "workspace-001") -> None:
         self.boundary_run_id: str | None = "run-001"
+        self.workspace_id = workspace_id
         self.consumed: list[tuple[str, str, bool]] = []
 
     async def lock_by_id(
@@ -109,6 +111,7 @@ class _AgentSessionRepository:
         return _LockedSession(
             pending_idle_continuation_run_id=self.boundary_run_id,
             pending_command_id=None,
+            workspace_id=self.workspace_id,
         )
 
     async def consume_pending_idle_continuation(
@@ -212,7 +215,7 @@ class _IdleToolkit(Toolkit[Any]):
         return SessionIdleResult(continuations=self.continuations)
 
 
-def _message() -> SessionWakeUp:
+def _message(*, workspace_id: str | None = "workspace-001") -> SessionWakeUp:
     """Create wake-up message for tests."""
     return SessionWakeUp(
         agent_id="agent-001",
@@ -220,7 +223,7 @@ def _message() -> SessionWakeUp:
         user_id="user-001",
         additional_system_prompt=None,
         interface=None,
-        workspace_id="workspace-001",
+        workspace_id=workspace_id,
         workspace_handle=None,
     )
 
@@ -335,3 +338,27 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     assert event_publisher.dispatched[0][0] == "session-001"
     assert event_publisher.dispatched[0][1].kind == EventKind.GOAL_CONTINUATION
     assert broker.sent_messages == [message]
+
+
+@pytest.mark.asyncio
+async def test_consume_uses_persisted_workspace_for_idle_hook() -> None:
+    """Broker wake-up workspace does not override the persisted session owner."""
+    input_buffer_service = _InputBufferService()
+    event_publisher = _EventPublisher()
+    broker = _Broker()
+    repository = _AgentSessionRepository(workspace_id="workspace-authoritative")
+    toolkit = _IdleToolkit([])
+
+    result = await _service(
+        input_buffer_service=input_buffer_service,
+        event_publisher=event_publisher,
+        broker=broker,
+        agent_session_repository=repository,
+    ).consume(
+        _message(workspace_id=None),
+        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        run_id="run-001",
+    )
+
+    assert result is True
+    assert toolkit.contexts[0].workspace_id == "workspace-authoritative"

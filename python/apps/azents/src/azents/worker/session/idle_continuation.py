@@ -62,7 +62,11 @@ class IdleContinuationService:
         run_id: str,
     ) -> bool:
         """Commit the idle outcome for one durable completed Run boundary."""
-        if not await self._has_eligible_idle_boundary(message, run_id):
+        workspace_id = await self._eligible_idle_boundary_workspace_id(
+            message,
+            run_id,
+        )
+        if workspace_id is None:
             return False
         providers = [
             RuntimeHookProviderRef(slug=binding.slug, toolkit=binding.toolkit)
@@ -71,7 +75,7 @@ class IdleContinuationService:
         result = await RuntimeHookDispatcher().dispatch_session_idle(
             providers,
             SessionIdleHookContext(
-                workspace_id=message.workspace_id or "",
+                workspace_id=workspace_id,
                 agent_id=message.agent_id,
                 session_id=message.session_id,
                 run_id=run_id,
@@ -83,11 +87,13 @@ class IdleContinuationService:
             for continuation in result.continuations
         ]
         async with self.session_manager() as session:
-            if not await self._has_eligible_idle_boundary_in_session(
-                session,
-                message,
-                run_id,
-            ):
+            if (
+                await self._eligible_idle_boundary_workspace_id_in_session(
+                    session,
+                    message,
+                    run_id,
+                )
+            ) is None:
                 return False
             enqueue_results = await self.input_buffer_service.enqueue_many(
                 session,
@@ -116,26 +122,26 @@ class IdleContinuationService:
             await self.broker.send_message(message)
         return True
 
-    async def _has_eligible_idle_boundary(
+    async def _eligible_idle_boundary_workspace_id(
         self,
         message: SessionWakeUp,
         run_id: str,
-    ) -> bool:
-        """Return whether a completed boundary can enter hook evaluation."""
+    ) -> str | None:
+        """Return persisted workspace ID when a boundary can enter hook evaluation."""
         async with self.session_manager() as session:
-            return await self._has_eligible_idle_boundary_in_session(
+            return await self._eligible_idle_boundary_workspace_id_in_session(
                 session,
                 message,
                 run_id,
             )
 
-    async def _has_eligible_idle_boundary_in_session(
+    async def _eligible_idle_boundary_workspace_id_in_session(
         self,
         session: AsyncSession,
         message: SessionWakeUp,
         run_id: str,
-    ) -> bool:
-        """Recheck the durable true-idle fence under the Session lock."""
+    ) -> str | None:
+        """Return persisted workspace ID after rechecking the true-idle fence."""
         locked = await self.agent_session_repository.lock_by_id(
             session,
             message.session_id,
@@ -143,9 +149,9 @@ class IdleContinuationService:
         if locked is None:
             raise ValueError("AgentSession not found")
         if locked.pending_idle_continuation_run_id != run_id:
-            return False
+            return None
         if locked.pending_command_id is not None:
-            return False
+            return None
         input_buffer_repository = self.input_buffer_repository
         pending_wake_input = (
             await input_buffer_repository.has_by_session_id_and_scheduling_mode(
@@ -155,12 +161,14 @@ class IdleContinuationService:
             )
         )
         if pending_wake_input:
-            return False
+            return None
         active_run = await self.agent_run_repository.get_active_by_session_id(
             session,
             session_id=message.session_id,
         )
-        return active_run is None
+        if active_run is not None:
+            return None
+        return locked.workspace_id
 
     def _continuation_input(
         self,

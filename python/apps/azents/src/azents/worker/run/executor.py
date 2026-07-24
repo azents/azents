@@ -500,9 +500,17 @@ class RunExecutor:
         async def publish_event(event: PublishedEvent) -> None:
             await dispatch_event(message.session_id, event)
 
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, message.agent_id)
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                message.session_id,
+            )
+        if agent_session is None:
+            raise ValueError("AgentSession not found")
         context = ToolkitContext(
             session_id=message.session_id,
-            workspace_id=message.workspace_id or "",
+            workspace_id=agent_session.workspace_id,
             agent_id=message.agent_id,
             user_id=message.user_id,
             run_id=run_id,
@@ -517,16 +525,9 @@ class RunExecutor:
                 else None
             ),
         )
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, message.agent_id)
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                message.session_id,
-            )
         execution_mode = (
             ToolkitExecutionMode.SUBAGENT
-            if agent_session is not None
-            and agent_session.session_kind == AgentSessionKind.SUBAGENT
+            if agent_session.session_kind == AgentSessionKind.SUBAGENT
             else ToolkitExecutionMode.ROOT
         )
         toolkits = await resolve_agent_tools(
