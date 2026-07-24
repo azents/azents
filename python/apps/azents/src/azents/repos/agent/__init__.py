@@ -14,6 +14,9 @@ from azents.core.agent import (
 from azents.core.enums import AgentLifecycleStatus, AgentType
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
+from azents.rdb.models.agent_automatic_project_setting import (
+    RDBAgentAutomaticProjectSetting,
+)
 from azents.services.uploads.schema import StoredImage
 
 from .data import (
@@ -72,6 +75,8 @@ class AgentRepository:
             subagent_settings=create.subagent_settings.model_dump(mode="json"),
         )
         session.add(rdb_agent)
+        await session.flush()
+        session.add(RDBAgentAutomaticProjectSetting(agent_id=rdb_agent.id))
         await session.flush()
         return self._build_row(rdb_agent)
 
