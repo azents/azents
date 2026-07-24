@@ -160,11 +160,13 @@ async def _create_runtime_fixture(
     await session.flush()
 
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent.id)
-    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-        session,
-        workspace_id=workspace_id,
-        agent_id=agent.id,
-    )
+    agent_session = (
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            session,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+        )
+    ).session
     return _RuntimeFixture(
         agent_id=agent.id,
         runtime_id=runtime.id,

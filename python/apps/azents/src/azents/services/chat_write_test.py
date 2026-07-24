@@ -356,11 +356,13 @@ class TestChatWriteService:
             )
             agent_id = await _create_agent(session, workspace_id, "chat-write-stop")
             session_repo = AgentSessionRepository()
-            root_session = await session_repo.ensure_team_primary_for_agent(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
+            root_session = (
+                await session_repo.ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            ).session
             root_agent = await session_repo.get_session_agent_by_session_id(
                 session,
                 root_session.id,
@@ -419,7 +421,7 @@ class TestChatWriteService:
                     workspace_id=workspace_id,
                     agent_id=agent_id,
                 )
-            )
+            ).session
             transcript_repo = EventTranscriptRepository()
             target = await transcript_repo.append(
                 session,
@@ -513,7 +515,7 @@ class TestChatWriteService:
                     workspace_id=workspace_id,
                     agent_id=agent_id,
                 )
-            )
+            ).session
             transcript_repo = EventTranscriptRepository()
             user_event = await transcript_repo.append(
                 session,
@@ -650,7 +652,7 @@ class TestChatWriteService:
                     workspace_id=workspace_id,
                     agent_id=agent_id,
                 )
-            )
+            ).session
             transcript_repo = EventTranscriptRepository()
             failed_event = await transcript_repo.append(
                 session,
@@ -704,11 +706,13 @@ class TestChatWriteService:
                 workspace_id,
                 "chat-write-idempotent-session",
             )
-            first = await AgentSessionRepository().ensure_team_primary_for_agent(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
+            first = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            ).session
 
         service = _service(rdb_session_manager)
         payload: dict[str, object] = {"command": "compact"}

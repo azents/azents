@@ -31,6 +31,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -55,6 +56,9 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
@@ -198,6 +202,11 @@ def _service(
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
+        root_agent_session_creation_service=RootAgentSessionCreationService(
+            agent_session_repository=AgentSessionRepository(),
+            automatic_project_repository=AgentAutomaticProjectRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+        ),
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -231,9 +240,11 @@ async def _create_session_with_buffer(
     await _add_workspace_user(session, workspace_id=workspace_id, user_id=user_id)
     agent_id = await _create_agent(session, workspace_id, slug)
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-        session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
-    )
+    agent_session = (
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
+        )
+    ).session
     input_buffer = await InputBufferRepository().create(
         session,
         InputBufferCreate(

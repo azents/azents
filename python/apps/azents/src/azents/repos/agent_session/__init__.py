@@ -37,6 +37,7 @@ from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from .data import (
     AgentSession,
     AgentSessionCreate,
+    AgentSessionEnsureTeamPrimaryResult,
     AgentSessionUnreadTerminalRunProjection,
     PendingSessionCommand,
     SessionAgent,
@@ -800,7 +801,7 @@ class AgentSessionRepository:
         *,
         workspace_id: str,
         agent_id: str,
-    ) -> AgentSession:
+    ) -> AgentSessionEnsureTeamPrimaryResult:
         """Ensure active team primary AgentSession for Agent."""
         lifecycle_status = await session.scalar(
             sa.select(RDBAgent.lifecycle_status).where(RDBAgent.id == agent_id)
@@ -809,7 +810,10 @@ class AgentSessionRepository:
             raise ValueError("Agent is not active for team-primary recovery")
         existing_primary = await self.get_team_primary_by_agent_id(session, agent_id)
         if existing_primary is not None:
-            return existing_primary
+            return AgentSessionEnsureTeamPrimaryResult(
+                session=existing_primary,
+                created=False,
+            )
         return await self._create_team_primary_if_absent(
             session,
             workspace_id=workspace_id,
@@ -824,7 +828,7 @@ class AgentSessionRepository:
         workspace_id: str,
         agent_id: str,
         start_reason: AgentSessionStartReason,
-    ) -> AgentSession:
+    ) -> AgentSessionEnsureTeamPrimaryResult:
         """Create team primary AgentSession race-safely or return existing row."""
         for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
             result = await session.execute(
@@ -852,11 +856,17 @@ class AgentSessionRepository:
                     agent_id=rdb.agent_id,
                 )
                 await session.flush()
-                return self._build(rdb)
+                return AgentSessionEnsureTeamPrimaryResult(
+                    session=self._build(rdb),
+                    created=True,
+                )
 
             primary = await self.get_team_primary_by_agent_id(session, agent_id)
             if primary is not None:
-                return primary
+                return AgentSessionEnsureTeamPrimaryResult(
+                    session=primary,
+                    created=False,
+                )
 
         raise RuntimeError("AgentSession handle generation exhausted retry attempts")
 

@@ -26,6 +26,14 @@ class AgentSessionUnreadTerminalRunProjection:
     unread_terminal_run_id: str | None
 
 
+@dataclasses.dataclass(frozen=True)
+class AgentSessionEnsureTeamPrimaryResult:
+    """Race-aware team-primary ensure result."""
+
+    session: "AgentSession"
+    created: bool
+
+
 class AgentSession(BaseModel):
     """AgentSession domain model."""
 

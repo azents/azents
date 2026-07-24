@@ -104,11 +104,13 @@ async def _create_fixture(
     )
     session.add(agent)
     await session.flush()
-    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-        session,
-        workspace_id=workspace_id,
-        agent_id=agent.id,
-    )
+    agent_session = (
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            session,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+        )
+    ).session
 
     user_id = "external-user"
     if create_workspace_user:

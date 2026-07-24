@@ -53,11 +53,13 @@ async def _create_session(session: AsyncSession, workspace_id: str, slug: str) -
     session.add(agent)
     await session.flush()
 
-    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-        session,
-        workspace_id=workspace_id,
-        agent_id=agent.id,
-    )
+    agent_session = (
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            session,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+        )
+    ).session
     return agent_session.id
 
 
