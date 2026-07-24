@@ -17,6 +17,7 @@ import {
   IconAdjustments,
   IconBrain,
   IconChevronRight,
+  IconFolder,
   IconPlugConnected,
   IconRobot,
   IconSettings,
@@ -31,10 +32,13 @@ import type { AgentResponse } from "@azents/public-client";
 interface AgentSettingsHubProps {
   handle: string;
   agent: AgentResponse;
+  automaticProjectsCount: number | null;
 }
 
 interface SettingsRow {
   href: string;
+  testId?: string;
+  valueTestId?: string;
   icon: React.ReactNode;
   label: string;
   description: string;
@@ -52,6 +56,7 @@ function SettingsRowItem({ row }: { row: SettingsRow }): React.ReactElement {
   return (
     <UnstyledButton
       component={Link}
+      data-testid={row.testId}
       href={row.href}
       w="100%"
       px="md"
@@ -77,7 +82,12 @@ function SettingsRowItem({ row }: { row: SettingsRow }): React.ReactElement {
               {row.label}
             </Text>
             {row.value && (
-              <Badge variant="light" color={danger ? "red" : "gray"} size="sm">
+              <Badge
+                data-testid={row.valueTestId}
+                variant="light"
+                color={danger ? "red" : "gray"}
+                size="sm"
+              >
                 {row.value}
               </Badge>
             )}
@@ -130,6 +140,7 @@ function SettingsSectionCard({
 export function AgentSettingsHub({
   handle,
   agent,
+  automaticProjectsCount,
 }: AgentSettingsHubProps): React.ReactElement {
   const t = useTranslations("workspace.agents.settingsHub");
   const basePath = `/w/${handle}/agents/${agent.id}/settings`;
@@ -184,6 +195,18 @@ export function AgentSettingsHub({
             count: agent.subagent_settings.max_subagents ?? 3,
             depth: agent.subagent_settings.max_depth ?? 1,
           }),
+        },
+        {
+          href: `${basePath}/projects`,
+          icon: <IconFolder size={rem(18)} />,
+          label: t("projects.label"),
+          description: t("projects.description"),
+          testId: "agent-settings-row-projects",
+          valueTestId: "agent-settings-project-count",
+          value:
+            automaticProjectsCount === null
+              ? t("values.none")
+              : t("values.projects", { count: automaticProjectsCount }),
         },
       ],
     },

@@ -2,6 +2,7 @@
 
 /** Workspace panel container hook. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { trpc } from "@/trpc/client";
 import {
   mapProjectBrowserManifest,
@@ -164,10 +165,6 @@ export function useWorkspacePanelContainer({
       agentSessionQuery.data?.current_reasoning_effort,
     ],
   );
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const [projectPickerDirectoryPath, setProjectPickerDirectoryPath] = useState<
-    string | null
-  >(null);
   const [registerProjectError, setRegisterProjectError] = useState<
     string | null
   >(null);
@@ -196,8 +193,6 @@ export function useWorkspacePanelContainer({
     setWorkspaceView("browser");
     setBrowserMode("projects");
     setDirectoryEntriesByPath({});
-    setProjectPickerOpen(false);
-    setProjectPickerDirectoryPath(null);
     setRegistrationPath(null);
     setRegistrationRepositoryType(null);
     setRegistrationMode("existing_project");
@@ -302,17 +297,6 @@ export function useWorkspacePanelContainer({
           browserMode === "projects" &&
           activeDirectoryPath === projectBrowserRoot
         ),
-    },
-  );
-
-  const projectPickerPath = projectPickerDirectoryPath ?? manifest?.cwd ?? "";
-  const projectPickerDirectoryQuery = trpc.chat.readAgentWorkspacePath.useQuery(
-    { agentId, sessionId, path: projectPickerPath },
-    {
-      enabled:
-        projectPickerOpen &&
-        workspaceQuery.data?.workspace.type === "READY" &&
-        projectPickerPath !== "",
     },
   );
 
@@ -732,17 +716,11 @@ export function useWorkspacePanelContainer({
     [agentId, registerProjectMutation, sessionId],
   );
 
-  const onOpenProjectPicker = useCallback((): void => {
-    setProjectPickerDirectoryPath(null);
-    setProjectPickerOpen(true);
-  }, []);
-
   const onSelectProjectPickerDirectory = useCallback(
     (entry: ProjectDirectoryPickerEntry): void => {
       const repositoryType =
         entry.repositoryType ??
         repositoryTypeForPath(directoryEntriesByPath, entry.path);
-      setProjectPickerOpen(false);
       if (repositoryType === "git") {
         setRegistrationPath(entry.path);
         setRegistrationRepositoryType("git");
@@ -755,6 +733,18 @@ export function useWorkspacePanelContainer({
     },
     [directoryEntriesByPath, onRegisterProject],
   );
+
+  const projectPicker = useAgentWorkspaceDirectoryPickerContainer({
+    handle,
+    agentId,
+    sessionId,
+    onSelectDirectory: onSelectProjectPickerDirectory,
+    refreshQueries: onRefresh,
+  });
+
+  const onOpenProjectPicker = useCallback((): void => {
+    projectPicker.open();
+  }, [projectPicker]);
 
   const onCloseProjectRegistration = useCallback((): void => {
     setRegistrationPath(null);
@@ -868,92 +858,6 @@ export function useWorkspacePanelContainer({
       [mappedDirectory.path]: mappedDirectory.entries,
     }));
   }, [directoryQuery.data]);
-
-  useEffect(() => {
-    if (!projectPickerDirectoryQuery.data) {
-      return;
-    }
-    const mappedDirectory = mapWorkspacePathResult(
-      projectPickerDirectoryQuery.data,
-    );
-    if (mappedDirectory.type !== "DIRECTORY") {
-      return;
-    }
-    setDirectoryEntriesByPath((previous) => ({
-      ...previous,
-      [mappedDirectory.path]: mappedDirectory.entries,
-    }));
-  }, [projectPickerDirectoryQuery.data]);
-
-  const projectPickerState = useMemo<ProjectDirectoryPickerState>(() => {
-    if (!projectPickerOpen) {
-      return { type: "CLOSED" };
-    }
-    if (workspaceQuery.isLoading) {
-      return { type: "LOADING" };
-    }
-    if (workspaceQuery.isError) {
-      return { type: "ERROR", message: getErrorMessage(workspaceQuery.error) };
-    }
-    if (!workspaceQuery.data || !manifest) {
-      return { type: "LOADING" };
-    }
-    if (projectPickerDirectoryQuery.isError) {
-      return {
-        type: "ERROR",
-        message: getErrorMessage(projectPickerDirectoryQuery.error),
-      };
-    }
-    const pickerDirectory = projectPickerDirectoryQuery.data
-      ? mapWorkspacePathResult(projectPickerDirectoryQuery.data)
-      : null;
-    if (
-      projectPickerDirectoryPath !== null &&
-      projectPickerDirectoryQuery.isLoading &&
-      !pickerDirectory
-    ) {
-      return { type: "LOADING" };
-    }
-    const entries =
-      pickerDirectory?.type === "DIRECTORY"
-        ? pickerDirectory.entries.map((entry) => ({
-            path: entry.path,
-            kind: entry.kind,
-            repositoryType: entry.repositoryType ?? null,
-          }))
-        : projectPickerDirectoryPath === null
-          ? manifest.entries.map((entry) => ({
-              path: entry.path,
-              kind: entry.kind,
-              repositoryType: entry.repositoryType ?? null,
-            }))
-          : [];
-    return {
-      type: "SERVER",
-      server: workspaceQuery.data,
-      currentPath: projectPickerPath || manifest.cwd,
-      entries,
-      isRefreshing:
-        workspaceQuery.isFetching || projectPickerDirectoryQuery.isFetching,
-      isStarting: startRuntimeMutation.isPending,
-    };
-  }, [
-    manifest,
-    projectPickerDirectoryPath,
-    projectPickerDirectoryQuery.data,
-    projectPickerDirectoryQuery.error,
-    projectPickerDirectoryQuery.isError,
-    projectPickerDirectoryQuery.isFetching,
-    projectPickerDirectoryQuery.isLoading,
-    projectPickerOpen,
-    projectPickerPath,
-    startRuntimeMutation.isPending,
-    workspaceQuery.data,
-    workspaceQuery.error,
-    workspaceQuery.isError,
-    workspaceQuery.isFetching,
-    workspaceQuery.isLoading,
-  ]);
 
   const state = useMemo<WorkspacePanelState>(() => {
     if (workspaceQuery.isLoading || projectBrowserManifestQuery.isLoading) {
@@ -1206,17 +1110,14 @@ export function useWorkspacePanelContainer({
     onBulkMovePaths,
     onBulkDeletePaths,
     getDownloadHref,
-    projectPickerState,
-    isProjectPickerOpen: projectPickerOpen,
+    projectPickerState: projectPicker.state,
+    isProjectPickerOpen: projectPicker.isOpen,
     onOpenProjectPicker,
-    onCloseProjectPicker: () => {
-      setProjectPickerOpen(false);
-      setProjectPickerDirectoryPath(null);
-    },
-    onOpenProjectPickerDirectory: setProjectPickerDirectoryPath,
-    onSelectProjectPickerDirectory,
-    onRefreshProjectPicker: onRefresh,
-    onStartRuntimeForProjectPicker: onStartRuntime,
+    onCloseProjectPicker: projectPicker.close,
+    onOpenProjectPickerDirectory: projectPicker.openDirectory,
+    onSelectProjectPickerDirectory: projectPicker.selectDirectory,
+    onRefreshProjectPicker: projectPicker.refresh,
+    onStartRuntimeForProjectPicker: projectPicker.startRuntime,
     onCloseProjectRegistration,
     onSetProjectRegistrationMode: setRegistrationMode,
     onSetProjectRegistrationStartingRef: setRegistrationStartingRef,

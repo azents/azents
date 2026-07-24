@@ -5,15 +5,18 @@ import * as Sentry from "@sentry/nextjs";
 import { initTRPC } from "@trpc/server";
 import superjson from "superjson";
 import { getServerConfig } from "@/config/server";
+import { projectApiError } from "./api-error";
 import type { Context } from "./context";
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
   errorFormatter({ shape, error }) {
+    const apiError = projectApiError(error.cause);
     return {
       ...shape,
       data: {
         ...shape.data,
+        ...(apiError ? { apiError } : {}),
         // Include stack trace only in development environment
         ...(getServerConfig().nodeEnv === "development" && {
           stack: error.stack,

@@ -8,20 +8,19 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { trpc } from "@/trpc/client";
-import type { UploadedFile } from "@/features/chat/hooks/useFileUpload";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
-} from "@/features/chat/workspace/components/WorkspaceDirectoryPickerModal";
+} from "@/features/agent-workspace/types";
+import type { UploadedFile } from "@/features/chat/hooks/useFileUpload";
 import type {
   AgentProjectPresetResponse,
   AgentResponse,
   GitRefEntryResponse,
   RequestedInferenceProfile,
 } from "@azents/public-client";
-
-const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
 
 export interface AgentDraftChatContainerProps {
   handle: string;
@@ -259,13 +258,39 @@ export function useAgentDraftChatContainer(
   const [activeWorktreeItemId, setActiveWorktreeItemId] = useState<
     string | null
   >(null);
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectPickerPurpose, setProjectPickerPurpose] =
     useState<ProjectPickerPurpose>("existing_project");
-  const [projectPickerPath, setProjectPickerPath] = useState<string | null>(
-    null,
-  );
   const defaultsAppliedRef = useRef(false);
+
+  const onAddPresetProject = useCallback((path: string): void => {
+    defaultsAppliedRef.current = true;
+    setWorkspaceItems((previous) =>
+      dedupeWorkspaceItems([...previous, makeExistingProjectItem(path)]),
+    );
+  }, []);
+
+  const onAddWorktreeProject = useCallback((path: string): void => {
+    defaultsAppliedRef.current = true;
+    const item = makeGitWorktreeItem(path);
+    setWorkspaceItems((previous) => dedupeWorkspaceItems([...previous, item]));
+    setActiveWorktreeItemId(item.id);
+  }, []);
+
+  const onSelectProjectPickerDirectory = useCallback(
+    (entry: ProjectDirectoryPickerEntry): void => {
+      if (projectPickerPurpose === "git_worktree") {
+        onAddWorktreeProject(entry.path);
+      } else {
+        onAddPresetProject(entry.path);
+      }
+    },
+    [onAddPresetProject, onAddWorktreeProject, projectPickerPurpose],
+  );
+  const projectPicker = useAgentWorkspaceDirectoryPickerContainer({
+    handle,
+    agentId: agent.id,
+    onSelectDirectory: onSelectProjectPickerDirectory,
+  });
 
   const projectPresetsQuery = trpc.chat.listAgentProjectPresets.useQuery({
     agentId: agent.id,
@@ -279,7 +304,6 @@ export function useAgentDraftChatContainer(
     defaultsAppliedRef.current = false;
     setWorkspaceItems([]);
     setActiveWorktreeItemId(null);
-    setProjectPickerPath(null);
     setProjectPickerPurpose("existing_project");
   }, [agent.id]);
 
@@ -337,64 +361,6 @@ export function useAgentDraftChatContainer(
       ),
     );
   }, [activeWorktreeItem, gitRefsQuery.data, gitRefsQuery.isFetching]);
-
-  const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
-    { agentId: agent.id },
-    {
-      enabled: projectPickerOpen,
-      refetchInterval: (query): number | false =>
-        query.state.data?.workspace.type === "CONNECTING" ||
-        query.state.data?.workspace.type === "CONTROL_UNAVAILABLE" ||
-        query.state.data?.runtime.type === "STARTING" ||
-        query.state.data?.runtime.type === "RESETTING" ||
-        query.state.data?.runtime.type === "STOPPING"
-          ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
-          : false,
-    },
-  );
-
-  const manifest =
-    workspaceQuery.data?.workspace.type === "READY"
-      ? workspaceQuery.data.workspace.manifest
-      : null;
-  const activeProjectPickerPath = projectPickerPath ?? manifest?.cwd ?? "";
-
-  useEffect(() => {
-    if (!projectPickerOpen || !manifest || projectPickerPath) {
-      return;
-    }
-    setProjectPickerPath(manifest.cwd);
-  }, [manifest, projectPickerOpen, projectPickerPath]);
-
-  const directoryQuery = trpc.chat.readAgentWorkspacePath.useQuery(
-    { agentId: agent.id, path: activeProjectPickerPath },
-    {
-      enabled:
-        projectPickerOpen &&
-        workspaceQuery.data?.workspace.type === "READY" &&
-        activeProjectPickerPath !== "",
-    },
-  );
-
-  const startRuntimeMutation = trpc.chat.startAgentRuntime.useMutation({
-    onSuccess: async () => {
-      await utils.chat.getAgentWorkspace.invalidate({ agentId: agent.id });
-    },
-  });
-
-  const onAddPresetProject = useCallback((path: string): void => {
-    defaultsAppliedRef.current = true;
-    setWorkspaceItems((previous) =>
-      dedupeWorkspaceItems([...previous, makeExistingProjectItem(path)]),
-    );
-  }, []);
-
-  const onAddWorktreeProject = useCallback((path: string): void => {
-    defaultsAppliedRef.current = true;
-    const item = makeGitWorktreeItem(path);
-    setWorkspaceItems((previous) => dedupeWorkspaceItems([...previous, item]));
-    setActiveWorktreeItemId(item.id);
-  }, []);
 
   const onSetWorkspaceItemKind = useCallback(
     (itemId: string, kind: NewSessionWorkspaceItemKind): void => {
@@ -574,54 +540,6 @@ export function useAgentDraftChatContainer(
     gitRefsQuery.isFetching,
   ]);
 
-  const projectPickerState = useMemo<ProjectDirectoryPickerState>(() => {
-    if (!projectPickerOpen) {
-      return { type: "CLOSED" };
-    }
-    if (workspaceQuery.isLoading) {
-      return { type: "LOADING" };
-    }
-    if (workspaceQuery.isError) {
-      return { type: "ERROR", message: getErrorMessage(workspaceQuery.error) };
-    }
-    if (!workspaceQuery.data) {
-      return { type: "LOADING" };
-    }
-    const directoryResult = directoryQuery.data;
-    const entries =
-      directoryResult?.type === "DIRECTORY"
-        ? directoryResult.entries.map((entry) => ({
-            path: entry.path,
-            kind: entry.kind,
-            repositoryType: entry.repository_type ?? null,
-          }))
-        : (manifest?.entries.map((entry) => ({
-            path: entry.path,
-            kind: entry.kind,
-            repositoryType: entry.repository_type ?? null,
-          })) ?? []);
-    return {
-      type: "SERVER",
-      server: workspaceQuery.data,
-      currentPath: activeProjectPickerPath,
-      entries,
-      isRefreshing: workspaceQuery.isFetching || directoryQuery.isFetching,
-      isStarting: startRuntimeMutation.isPending,
-    };
-  }, [
-    activeProjectPickerPath,
-    directoryQuery.data,
-    directoryQuery.isFetching,
-    manifest?.entries,
-    projectPickerOpen,
-    startRuntimeMutation.isPending,
-    workspaceQuery.data,
-    workspaceQuery.error,
-    workspaceQuery.isError,
-    workspaceQuery.isFetching,
-    workspaceQuery.isLoading,
-  ]);
-
   return {
     handle,
     agent,
@@ -632,8 +550,8 @@ export function useAgentDraftChatContainer(
     activeWorktreeItemId: activeWorktreeItem?.id ?? null,
     gitRefPreviewState,
     projectPresetState,
-    projectPickerState,
-    isProjectPickerOpen: projectPickerOpen,
+    projectPickerState: projectPicker.state,
+    isProjectPickerOpen: projectPicker.isOpen,
     onAddPresetProject,
     onAddWorktreeProject,
     onSetWorkspaceItemKind,
@@ -642,26 +560,13 @@ export function useAgentDraftChatContainer(
     onRemoveWorkspaceItem,
     onOpenProjectPicker: (purpose: ProjectPickerPurpose) => {
       setProjectPickerPurpose(purpose);
-      setProjectPickerOpen(true);
+      projectPicker.open();
     },
-    onCloseProjectPicker: () => setProjectPickerOpen(false),
-    onOpenProjectPickerDirectory: setProjectPickerPath,
-    onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => {
-      if (projectPickerPurpose === "git_worktree") {
-        onAddWorktreeProject(entry.path);
-      } else {
-        onAddPresetProject(entry.path);
-      }
-      setProjectPickerOpen(false);
-    },
-    onRefreshProjectPicker: () => {
-      void Promise.all([
-        utils.chat.getAgentWorkspace.invalidate({ agentId: agent.id }),
-        utils.chat.readAgentWorkspacePath.invalidate({ agentId: agent.id }),
-      ]);
-    },
-    onStartRuntimeForProjectPicker: () =>
-      startRuntimeMutation.mutate({ handle, agentId: agent.id }),
+    onCloseProjectPicker: projectPicker.close,
+    onOpenProjectPickerDirectory: projectPicker.openDirectory,
+    onSelectProjectPickerDirectory: projectPicker.selectDirectory,
+    onRefreshProjectPicker: projectPicker.refresh,
+    onStartRuntimeForProjectPicker: projectPicker.startRuntime,
     onSendMessage,
   };
 }
