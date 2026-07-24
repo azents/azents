@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -85,6 +86,14 @@ class SlackProviderMessageNotFound(SlackProviderError):
     """Slack no longer contains the requested message."""
 
 
+class SlackProviderFileNotFound(SlackProviderError):
+    """Slack no longer exposes the requested file."""
+
+
+class SlackProviderFileTooLarge(SlackProviderError):
+    """Slack returned more file bytes than the configured limit."""
+
+
 @dataclass(frozen=True)
 class SlackConnectionRevocation:
     """Provider event that makes a Slack connection unavailable."""
@@ -144,6 +153,14 @@ class SlackControlMessageResult:
     provider_message_key: str | None
     error_kind: str | None
     error_summary: str | None
+
+
+@dataclass(frozen=True)
+class SlackFileDownloadInfo:
+    """Current provider metadata and private URL for one Slack-hosted file."""
+
+    metadata: ExternalChannelFileMetadata
+    private_url: str | None
 
 
 def normalize_slack_event(
@@ -507,6 +524,120 @@ class SlackConversationClient:
             return None
         return permalink
 
+    async def fetch_file_download_info(
+        self,
+        *,
+        bot_token: str,
+        provider_file_id: str,
+    ) -> SlackFileDownloadInfo:
+        """Fetch current metadata and a server-only private download URL."""
+        response = await self._request(
+            "GET",
+            "/files.info",
+            bot_token=bot_token,
+            params={"file": provider_file_id},
+        )
+        payload = self._success_payload(response)
+        raw_file = payload.get("file")
+        if not isinstance(raw_file, dict):
+            raise SlackProviderTemporaryError("Slack file response is malformed.")
+        if raw_file.get("deleted") is True:
+            raise SlackProviderFileNotFound(
+                "Slack no longer exposes the requested file."
+            )
+        metadata = normalize_slack_file_metadata(raw_file)
+        if metadata.provider_file_id != provider_file_id:
+            raise SlackProviderTemporaryError(
+                "Slack file response identity does not match the request."
+            )
+        private_url = _optional_string(raw_file, "url_private_download")
+        if private_url is None:
+            private_url = _optional_string(raw_file, "url_private")
+        if private_url is not None:
+            parsed = urlsplit(private_url)
+            if parsed.scheme != "https" or not parsed.netloc:
+                raise SlackProviderTemporaryError(
+                    "Slack returned an invalid private file URL."
+                )
+        return SlackFileDownloadInfo(
+            metadata=metadata,
+            private_url=private_url,
+        )
+
+    async def download_private_file(
+        self,
+        *,
+        bot_token: str,
+        private_url: str,
+        max_bytes: int,
+    ) -> bytes:
+        """Read one authenticated private file while enforcing an actual-byte cap."""
+        parsed = urlsplit(private_url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise SlackProviderTemporaryError(
+                "Slack returned an invalid private file URL."
+            )
+        try:
+            async with self.http_client.stream(
+                "GET",
+                private_url,
+                headers={"Authorization": f"Bearer {bot_token}"},
+            ) as response:
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After", "1")
+                    try:
+                        retry_after_seconds = int(retry_after)
+                    except ValueError:
+                        retry_after_seconds = 1
+                    raise SlackProviderRateLimited(retry_after_seconds)
+                if response.status_code == 401:
+                    raise SlackProviderCredentialsInvalid(
+                        "Slack rejected the configured credential."
+                    )
+                if response.status_code == 403:
+                    raise SlackProviderPermissionDenied(
+                        "Slack denied access to the requested file."
+                    )
+                if response.status_code == 404:
+                    raise SlackProviderFileNotFound(
+                        "Slack no longer exposes the requested file."
+                    )
+                if response.status_code >= 500:
+                    raise SlackProviderTemporaryError(
+                        "Slack is temporarily unavailable."
+                    )
+                if response.status_code >= 400:
+                    raise SlackProviderRequestRejected("file_download_failed")
+                if response.status_code != 200:
+                    raise SlackProviderTemporaryError(
+                        "Slack private file response is incomplete."
+                    )
+                content_length = response.headers.get("Content-Length")
+                if content_length is not None:
+                    try:
+                        declared_response_size = int(content_length)
+                    except ValueError:
+                        declared_response_size = None
+                    if (
+                        declared_response_size is not None
+                        and declared_response_size > max_bytes
+                    ):
+                        raise SlackProviderFileTooLarge(
+                            "Slack file exceeds the configured limit."
+                        )
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(body) + len(chunk) > max_bytes:
+                        raise SlackProviderFileTooLarge(
+                            "Slack file exceeds the configured limit."
+                        )
+                    body.extend(chunk)
+                return bytes(body)
+        except httpx.RequestError as error:
+            raise SlackProviderTemporaryError(
+                "Slack file download did not produce a complete response."
+            ) from error
+
     async def post_approval_control_message(
         self,
         *,
@@ -860,6 +991,10 @@ class SlackConversationClient:
             raise SlackProviderMessageNotFound(
                 "Slack no longer contains the requested message."
             )
+        if error_code in {"file_deleted", "file_not_found"}:
+            raise SlackProviderFileNotFound(
+                "Slack no longer exposes the requested file."
+            )
         normalized_error_code = (
             error_code
             if isinstance(error_code, str)
@@ -1043,13 +1178,14 @@ def _file_attachment_metadata(value: object) -> list[dict[str, object]]:
     for raw_file in value[:MAX_EXTERNAL_CHANNEL_FILES]:
         if not isinstance(raw_file, dict):
             continue
-        metadata.append(_normalized_file_metadata(raw_file).model_dump(mode="json"))
+        metadata.append(normalize_slack_file_metadata(raw_file).model_dump(mode="json"))
     return metadata
 
 
-def _normalized_file_metadata(
+def normalize_slack_file_metadata(
     raw_file: dict[str, object],
 ) -> ExternalChannelFileMetadata:
+    """Normalize current or event-carried Slack file metadata identically."""
     provider_file_id = _bounded_file_string(raw_file.get("id"))
     name = _bounded_file_string(raw_file.get("name"))
     title = _bounded_file_string(raw_file.get("title"))

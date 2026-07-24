@@ -11,12 +11,14 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionStatus,
     ExternalChannelActionMode,
+    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
+    ExternalChannelResourceStatus,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
@@ -46,6 +48,7 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkDelivery,
     ChannelWorkSnapshot,
     ChannelWorkTask,
+    ExternalChannelFileAccessTarget,
 )
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
@@ -116,6 +119,75 @@ class ExternalChannelWorkRepository:
             )
         )
         return bool(exists)
+
+    async def get_active_file_access_target(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        agent_id: str,
+        binding_id: str,
+    ) -> ExternalChannelFileAccessTarget | None:
+        """Resolve one active binding and its current provider credential boundary."""
+        row = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelConnection,
+                )
+                .join(
+                    RDBAgentSession,
+                    RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
+                )
+                .join(
+                    RDBAgent,
+                    RDBAgent.id == RDBAgentSession.agent_id,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelBinding.route_id,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .where(
+                    RDBExternalChannelBinding.id == binding_id,
+                    RDBExternalChannelBinding.agent_session_id == session_id,
+                    RDBExternalChannelBinding.status
+                    == ExternalChannelBindingStatus.ACTIVE,
+                    RDBExternalChannelBinding.activation_status
+                    == ExternalChannelBindingActivationStatus.ACTIVE,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgentSession.agent_id == agent_id,
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                    RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    RDBExternalChannelResource.status
+                    == ExternalChannelResourceStatus.ACTIVE,
+                    RDBExternalChannelResource.connection_id
+                    == RDBExternalChannelConnection.id,
+                    RDBExternalChannelConnection.status
+                    == ExternalChannelConnectionStatus.ACTIVE,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        binding, connection = row
+        return ExternalChannelFileAccessTarget(
+            binding_id=binding.id,
+            connection_id=connection.id,
+            provider=connection.provider,
+            encrypted_credentials=connection.encrypted_credentials,
+            capabilities=connection.capabilities,
+        )
 
     async def list_active_work(
         self,

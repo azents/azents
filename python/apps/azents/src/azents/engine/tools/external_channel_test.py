@@ -27,6 +27,10 @@ from azents.engine.tools.external_channel import (
     ExternalChannelToolkit,
     render_channel_work_prompt,
 )
+from azents.engine.tools.runtime_instruction_context import (
+    RuntimeInstructionContext,
+    RuntimeInstructionContextStore,
+)
 from azents.repos.external_channel.work_data import (
     ChannelActionCommit,
     ChannelWorkDelivery,
@@ -36,6 +40,11 @@ from azents.repos.external_channel.work_data import (
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
+from azents.services.external_channel.file_transfer import (
+    ExternalChannelFileDownloadResult,
+    ExternalChannelFileTransferService,
+)
+from azents.services.file_storage import FileStorage
 
 
 def _at(second: int) -> datetime.datetime:
@@ -119,13 +128,42 @@ class _ActionService:
         )
 
 
-def _toolkit(service: _ActionService) -> ExternalChannelToolkit:
-    return ExternalChannelToolkit(
+class _FileTransferService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def download(
+        self,
+        **kwargs: object,
+    ) -> ExternalChannelFileDownloadResult:
+        self.calls.append(kwargs)
+        return ExternalChannelFileDownloadResult(
+            path=str(kwargs["path"]),
+            filename="report.csv",
+            media_type="text/csv",
+            bytes_written=42,
+        )
+
+
+def _toolkit(
+    service: _ActionService,
+    *,
+    file_transfer_service: _FileTransferService | None = None,
+    file_storage: FileStorage | None = None,
+) -> ExternalChannelToolkit:
+    transfer = file_transfer_service or _FileTransferService()
+    toolkit = ExternalChannelToolkit(
         service=cast(ExternalChannelActionService, service),
+        file_transfer_service=cast(ExternalChannelFileTransferService, transfer),
         agent_id="agent-1",
         session_id="session-1",
         run_id="run-1",
     )
+    if file_storage is not None:
+        store = RuntimeInstructionContextStore()
+        store.set(RuntimeInstructionContext(file_storage=file_storage, projects=()))
+        toolkit.set_runtime_context_store(store)
+    return toolkit
 
 
 async def _publish(event: PublishedEvent) -> None:
@@ -187,6 +225,51 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_download_external_file_uses_current_runtime_storage() -> None:
+    """The root-only file Tool passes one opaque locator to the current Runtime."""
+    service = _ActionService([_snapshot()])
+    file_transfer_service = _FileTransferService()
+    file_storage = cast(FileStorage, object())
+    toolkit = _toolkit(
+        service,
+        file_transfer_service=file_transfer_service,
+        file_storage=file_storage,
+    )
+    state = await toolkit.update_context(_turn_context())
+
+    assert [tool.spec.name for tool in state.tools] == [
+        "channel_action",
+        "download_external_file",
+    ]
+    output = await state.tools[1].handler(
+        json.dumps(
+            {
+                "file": "external-file:v1:slack:binding-1:F123",
+                "path": "/workspace/agent/report.csv",
+                "overwrite": False,
+            }
+        )
+    )
+
+    assert json.loads(cast(str, output)) == {
+        "bytes": 42,
+        "filename": "report.csv",
+        "media_type": "text/csv",
+        "path": "/workspace/agent/report.csv",
+    }
+    assert file_transfer_service.calls == [
+        {
+            "session_id": "session-1",
+            "agent_id": "agent-1",
+            "file": "external-file:v1:slack:binding-1:F123",
+            "path": "/workspace/agent/report.csv",
+            "overwrite": False,
+            "file_storage": file_storage,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_continue_requires_unfinished_work() -> None:
     """Continue cannot leave the binding with only completed tasks."""
     toolkit = _toolkit(_ActionService([_snapshot()]))
@@ -240,6 +323,7 @@ async def test_prompt_compaction_and_idle_include_every_active_binding() -> None
 
     prompt = await toolkit.get_dynamic_prompt(_turn_context())
     assert "ordinary assistant output is not sent" in prompt.lower()
+    assert "metadata-only until `download_external_file`" in prompt
     assert "`binding-1`" in prompt
     assert "`binding-2`" in prompt
     assert prompt == render_channel_work_prompt(service.snapshots)

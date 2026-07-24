@@ -16,8 +16,11 @@ from azents.services.external_channel.slack_events import (
     SlackEventExcluded,
     SlackNormalizedMessage,
     SlackProviderCredentialsInvalid,
+    SlackProviderFileNotFound,
+    SlackProviderFileTooLarge,
     SlackProviderPermissionDenied,
     SlackProviderRateLimited,
+    SlackProviderTemporaryError,
     normalize_projected_slack_event,
     normalize_slack_event,
     slack_message_reference_ids,
@@ -674,6 +677,137 @@ async def test_thread_page_maps_missing_scope_to_connection_failure() -> None:
                 root_thread_ts="1721600000.000100",
                 cursor=None,
                 limit=100,
+            )
+
+
+async def test_file_info_returns_current_metadata_and_private_download_target() -> None:
+    """The file read adapter keeps provider URLs inside the server-only result."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "file": {
+                    "id": "F123",
+                    "name": "report.csv",
+                    "title": "Report",
+                    "mimetype": "text/csv",
+                    "size": 7,
+                    "mode": "hosted",
+                    "url_private": "https://files.slack.test/private/F123",
+                    "url_private_download": ("https://files.slack.test/download/F123"),
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        info = await SlackConversationClient(http).fetch_file_download_info(
+            bot_token="xoxb-secret",
+            provider_file_id="F123",
+        )
+
+    assert info.metadata.provider_file_id == "F123"
+    assert info.metadata.supported is True
+    assert info.private_url == "https://files.slack.test/download/F123"
+    assert requests[0].url.path == "/api/files.info"
+    assert requests[0].url.params["file"] == "F123"
+    assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
+
+
+async def test_file_info_rejects_deleted_file() -> None:
+    """A currently deleted Slack file cannot be materialized."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "file": {
+                    "id": "F123",
+                    "deleted": True,
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        with pytest.raises(SlackProviderFileNotFound):
+            await SlackConversationClient(http).fetch_file_download_info(
+                bot_token="xoxb-secret",
+                provider_file_id="F123",
+            )
+
+
+async def test_file_info_rejects_mismatched_response_identity() -> None:
+    """Slack must return the exact file object selected by files.info."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "file": {
+                    "id": "F-OTHER",
+                    "name": "other.csv",
+                    "size": 7,
+                    "mode": "hosted",
+                    "url_private": "https://files.slack.test/private/F-OTHER",
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        with pytest.raises(
+            SlackProviderTemporaryError,
+            match="identity does not match",
+        ):
+            await SlackConversationClient(http).fetch_file_download_info(
+                bot_token="xoxb-secret",
+                provider_file_id="F123",
+            )
+
+
+async def test_private_file_download_authenticates_and_enforces_actual_limit() -> None:
+    """Private bytes use the bearer token and stop before returning an oversize body."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"12345678")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = SlackConversationClient(http)
+        body = await client.download_private_file(
+            bot_token="xoxb-secret",
+            private_url="https://files.slack.test/private/F123",
+            max_bytes=8,
+        )
+        with pytest.raises(SlackProviderFileTooLarge):
+            await client.download_private_file(
+                bot_token="xoxb-secret",
+                private_url="https://files.slack.test/private/F123",
+                max_bytes=7,
+            )
+
+    assert body == b"12345678"
+    assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
+    assert requests[0].url == "https://files.slack.test/private/F123"
+
+
+async def test_private_file_download_rejects_partial_response_status() -> None:
+    """A ranged or empty success is not accepted as the complete Slack file."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(206, content=b"partial")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        with pytest.raises(SlackProviderTemporaryError, match="incomplete"):
+            await SlackConversationClient(http).download_private_file(
+                bot_token="xoxb-secret",
+                private_url="https://files.slack.test/private/F123",
+                max_bytes=100,
             )
 
 
