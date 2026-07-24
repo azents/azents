@@ -984,6 +984,7 @@ def test_agent_settings_projects_web_add_reorder_remove_save(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
+    azents_public_server_container: DockerContainer,
     azents_main_web_url: str,
     browser_driver: WebDriver,
     azents_runtime_provider_docker_container: DockerContainer,
@@ -996,11 +997,21 @@ def test_agent_settings_projects_web_add_reorder_remove_save(
         azents_public_server_url,
         runtime_provider_id=_RUNTIME_PROVIDER_ID,
     )
-    paths = _prepare_runtime_workspace(
-        public_api_client=public_api_client,
-        public_url=azents_public_server_url,
-        setup=setup,
-    )
+    try:
+        paths = _prepare_runtime_workspace(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            setup=setup,
+        )
+    except azentspublicclient.ApiException as error:
+        stdout, stderr = azents_public_server_container.get_logs()
+        stdout_tail = stdout.decode(errors="replace")[-12000:]
+        stderr_tail = stderr.decode(errors="replace")[-12000:]
+        raise AssertionError(
+            "Runtime workspace preparation failed.\n\n"
+            f"Public Server stdout tail:\n{stdout_tail}\n\n"
+            f"Public Server stderr tail:\n{stderr_tail}"
+        ) from error
     _login_main_web(
         browser_driver,
         main_web_url=azents_main_web_url,
