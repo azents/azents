@@ -19,6 +19,7 @@ from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
+    AgentSessionStatus,
     EventKind,
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
@@ -846,7 +847,22 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
     input_buffer_repository = AsyncMock(spec=InputBufferRepository)
     input_buffer_repository.list_for_flush.return_value = [buffer]
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
-    agent_session_repository.get_by_id.return_value = SimpleNamespace(agent_id=agent_id)
+    agent_session_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-001",
+        agent_id=agent_id,
+        owner_generation=0,
+        status=AgentSessionStatus.ACTIVE,
+    )
+    agent_session_repository.get_root_session_agent_by_session_id.return_value = (
+        SimpleNamespace(agent_session_id="root-session-001")
+    )
+    agent_run_repository = AsyncMock(spec=AgentRunRepository)
+    agent_run_repository.get_by_id.return_value = SimpleNamespace(
+        id="run-1",
+        session_id=session_id,
+        run_index=1,
+        status=AgentRunStatus.RUNNING,
+    )
     service = InputBufferService(
         session_manager=cast(
             SessionManager[AsyncSession],
@@ -868,7 +884,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         ),
         agent_run_repository=cast(
             AgentRunRepository,
-            AsyncMock(spec=AgentRunRepository),
+            agent_run_repository,
         ),
         action_execution_repository=cast(
             ActionExecutionRepository,

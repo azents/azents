@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import ModelFileStatus
+from azents.core.enums import AgentRunStatus, AgentSessionStatus, ModelFileStatus
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -165,7 +165,11 @@ class ModelFileService:
                 content_type=normalized_body.media_type,
             )
             async with self.session_manager() as session:
-                if not await self._has_valid_resource_authority(session, authority):
+                if not await self._has_valid_resource_authority(
+                    session,
+                    authority,
+                    lock=True,
+                ):
                     return Failure(ModelFileAccessDenied())
                 created = await self.model_file_repository.create(
                     session,
@@ -250,13 +254,30 @@ class ModelFileService:
                 model_file_id=model_file_id,
                 agent_id=authority.agent_id,
             )
-        if (
-            model_file is None
-            or model_file.workspace_id != authority.workspace_id
-            or model_file.session_id != authority.session_id
-        ):
-            return Failure(ModelFileNotFound())
-        return await self._download_resolved_model_file(Success(model_file))
+            if (
+                model_file is None
+                or model_file.workspace_id != authority.workspace_id
+                or model_file.session_id != authority.session_id
+            ):
+                return Failure(ModelFileNotFound())
+            if model_file.created_run_id is not None:
+                created_run = await self.agent_run_repository.get_by_id(
+                    session,
+                    model_file.created_run_id,
+                )
+                if (
+                    created_run is None
+                    or created_run.session_id != model_file.session_id
+                    or created_run.run_index != model_file.created_run_index
+                ):
+                    return Failure(ModelFileNotFound())
+        downloaded = await self._download_resolved_model_file(Success(model_file))
+        if isinstance(downloaded, Failure):
+            return downloaded
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(ModelFileAccessDenied())
+        return downloaded
 
     async def _download_resolved_model_file(
         self,
@@ -339,17 +360,26 @@ class ModelFileService:
         self,
         session: AsyncSession,
         authority: SessionResourceAuthority,
+        *,
+        lock: bool = False,
     ) -> bool:
         """Validate canonical Session/Run authority for an internal operation."""
-        agent_session = await self.agent_session_repository.get_by_id(
-            session,
-            authority.session_id,
-        )
+        if lock:
+            agent_session = await self.agent_session_repository.lock_by_id(
+                session,
+                authority.session_id,
+            )
+        else:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                authority.session_id,
+            )
         if (
             agent_session is None
             or agent_session.workspace_id != authority.workspace_id
             or agent_session.agent_id != authority.agent_id
             or agent_session.owner_generation != authority.owner_generation
+            or agent_session.status is not AgentSessionStatus.ACTIVE
         ):
             return False
         root = await self.agent_session_repository.get_root_session_agent_by_session_id(
@@ -358,11 +388,48 @@ class ModelFileService:
         )
         if root is None or root.agent_session_id != authority.root_session_id:
             return False
-        run = await self.agent_run_repository.get_by_id(session, authority.run_id)
+        if authority.root_session_id == authority.session_id:
+            root_session = agent_session
+        else:
+            root_session = await self.agent_session_repository.get_by_id(
+                session,
+                authority.root_session_id,
+            )
+        if (
+            root_session is None
+            or root_session.workspace_id != authority.workspace_id
+            or root_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            return False
+        if lock:
+            run = await self.agent_run_repository.lock_by_id(
+                session,
+                authority.run_id,
+            )
+        else:
+            run = await self.agent_run_repository.get_by_id(
+                session,
+                authority.run_id,
+            )
         return (
             run is not None
             and run.session_id == authority.session_id
             and run.run_index == authority.run_index
+            and run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+        )
+
+    async def validate_resource_authority_in_session(
+        self,
+        session: AsyncSession,
+        authority: SessionResourceAuthority,
+        *,
+        lock: bool,
+    ) -> bool:
+        """Validate resource authority inside a caller-owned transaction."""
+        return await self._has_valid_resource_authority(
+            session,
+            authority,
+            lock=lock,
         )
 
     async def _has_workspace_access(

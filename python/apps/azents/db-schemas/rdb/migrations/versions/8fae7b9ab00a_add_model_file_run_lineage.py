@@ -33,18 +33,6 @@ def upgrade() -> None:
           AND agent_run.run_index = model_file.created_run_index
         """
     )
-    unresolved = op.get_bind().scalar(
-        sa.text(
-            """
-            SELECT count(*)
-            FROM model_files
-            WHERE created_run_id IS NULL
-            """
-        )
-    )
-    if unresolved:
-        raise RuntimeError("Cannot deterministically backfill ModelFile created_run_id")
-    op.alter_column("model_files", "created_run_id", nullable=False)
     op.create_foreign_key(
         "fk_model_files_created_run_id_agent_runs",
         "model_files",

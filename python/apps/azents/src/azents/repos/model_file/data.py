@@ -19,7 +19,9 @@ class ModelFile(BaseModel):
     media_type: str = Field(description="MIME type")
     kind: str = Field(description="Broad file kind")
     size_bytes: int = Field(description="Normalized blob size")
-    created_run_id: str = Field(description="Created AgentRun ID")
+    created_run_id: str | None = Field(
+        description="Created AgentRun ID, unavailable for unresolved historical rows"
+    )
     created_run_index: int = Field(ge=1, description="Created run index")
     storage_key: str = Field(description="Object storage key")
     status: ModelFileStatus = Field(description="ModelFile status")

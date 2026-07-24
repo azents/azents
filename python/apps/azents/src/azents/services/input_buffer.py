@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ActionExecutionStatus,
+    AgentRunStatus,
+    AgentSessionStatus,
     EventKind,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -763,6 +765,10 @@ class InputBufferService:
             )
         async with self.session_manager() as session:
             repository = self.agent_session_repository
+            current_agent_session = await repository.get_by_id(
+                session,
+                session_id,
+            )
             get_root = repository.get_root_session_agent_by_session_id
             root = await get_root(
                 session,
@@ -770,17 +776,22 @@ class InputBufferService:
             )
             run = await self.agent_run_repository.get_by_id(session, active_run_id)
         if (
-            root is None
+            current_agent_session is None
+            or root is None
             or run is None
             or run.session_id != session_id
-            or agent_session.owner_generation != owner_generation
+            or run.status not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+            or current_agent_session.workspace_id != agent_session.workspace_id
+            or current_agent_session.agent_id != agent_session.agent_id
+            or current_agent_session.status is not AgentSessionStatus.ACTIVE
+            or current_agent_session.owner_generation != owner_generation
         ):
             raise InputBufferPreparationStaleError(
                 "Canonical resource authority changed before attachment materialization"
             )
         authority = SessionResourceAuthority(
-            workspace_id=agent_session.workspace_id,
-            agent_id=agent_session.agent_id,
+            workspace_id=current_agent_session.workspace_id,
+            agent_id=current_agent_session.agent_id,
             session_id=session_id,
             root_session_id=root.agent_session_id,
             run_id=run.id,

@@ -43,6 +43,7 @@ from azents.services.model_file import (
     ModelFileService,
     normalize_model_file_body,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 _MAX_DECODED_IMAGE_BYTES = 20 * 1024 * 1024
 _MAX_ENCODED_IMAGE_CHARS = ((_MAX_DECODED_IMAGE_BYTES + 2) // 3) * 4
@@ -147,12 +148,32 @@ class ProviderOutputMaterializer:
 
     exchange_file_service: ExchangeFileService
     model_file_service: ModelFileService
-    workspace_id: str
-    agent_id: str
-    session_id: str
-    user_id: str | None
-    run_id: str
-    run_index: int
+    authority: SessionResourceAuthority
+
+    @property
+    def workspace_id(self) -> str:
+        """Return the authorized Workspace identity."""
+        return self.authority.workspace_id
+
+    @property
+    def agent_id(self) -> str:
+        """Return the authorized Agent identity."""
+        return self.authority.agent_id
+
+    @property
+    def session_id(self) -> str:
+        """Return the authorized Session identity."""
+        return self.authority.session_id
+
+    @property
+    def run_id(self) -> str:
+        """Return the authorized Run identity."""
+        return self.authority.run_id
+
+    @property
+    def run_index(self) -> int:
+        """Return the authorized Run index."""
+        return self.authority.run_index
 
     async def prepare(
         self,
@@ -222,13 +243,10 @@ class ProviderOutputMaterializer:
         """Serialize admission, upload new objects, and persist file metadata."""
         if not generated_images:
             return
-        run = await self.model_file_service.agent_run_repository.lock_by_id(
+        retention_root_session_id = await self._validate_scope_in_session(
             session,
-            self.run_id,
+            lock=True,
         )
-        if run is None or run.session_id != self.session_id:
-            raise ModelCallError("Generated image output scope is unavailable.")
-        retention_root_session_id = await self._validate_scope_in_session(session)
         if any(
             image.exchange_source.retention_root_session_id != retention_root_session_id
             for image in generated_images
@@ -417,6 +435,9 @@ class ProviderOutputMaterializer:
             or existing.kind != expected.kind
             or existing.size_bytes != expected.size_bytes
             or existing.sha256 != expected.sha256
+            or existing.created_run_id != expected.created_run_id
+            or existing.created_run_index != expected.created_run_index
+            or existing.normalized_format != expected.normalized_format
         ):
             raise ModelCallError("Generated image output identity collided.")
 
@@ -425,29 +446,20 @@ class ProviderOutputMaterializer:
         async with self.model_file_service.session_manager() as session:
             return await self._validate_scope_in_session(session)
 
-    async def _validate_scope_in_session(self, session: AsyncSession) -> str:
+    async def _validate_scope_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        lock: bool = False,
+    ) -> str:
         """Validate scope and return the root AgentSession retention owner."""
-        agent_session = (
-            await self.model_file_service.agent_session_repository.get_by_id(
-                session,
-                self.session_id,
-            )
-        )
-        if (
-            agent_session is None
-            or agent_session.workspace_id != self.workspace_id
-            or agent_session.agent_id != self.agent_id
+        if not await self.model_file_service.validate_resource_authority_in_session(
+            session,
+            self.authority,
+            lock=lock,
         ):
             raise ModelCallError("Generated image output scope is unavailable.")
-        root = await (
-            self.model_file_service.agent_session_repository
-        ).get_root_session_agent_by_session_id(
-            session,
-            self.session_id,
-        )
-        if root is None:
-            raise ModelCallError("Generated image output scope is unavailable.")
-        return root.agent_session_id
+        return self.authority.root_session_id
 
     def _prepare_generated_image(
         self,

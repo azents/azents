@@ -79,6 +79,10 @@ def make_import_file_tool(
 
     async def handler(input: ImportFileInput) -> str:
         """Copy URI file into runtime workspace."""
+        if not await exchange_file_service.validate_resource_authority(authority):
+            raise FunctionToolError(
+                "Session resource authority changed before file import."
+            )
         try:
             resolved = await resolver_registry.resolve(input.uri)
         except ImportResolveError as exc:
@@ -103,6 +107,10 @@ def make_import_file_tool(
                 agent_id=authority.agent_id,
             )
 
+        if not await exchange_file_service.validate_resource_authority(authority):
+            raise FunctionToolError(
+                "Session resource authority changed before file import."
+            )
         try:
             await session_storage.put(
                 destination,

@@ -4,6 +4,7 @@ import datetime
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -267,9 +268,11 @@ class _AuthorityArtifactService(ArtifactService):
         self,
         session: AsyncSession,
         authority: SessionResourceAuthority,
+        *,
+        lock: bool = False,
     ) -> bool:
         """Accept the test fixture's explicit canonical authority."""
-        del session
+        del session, lock
         return authority == _authority()
 
 
@@ -338,9 +341,15 @@ def _artifact_service() -> tuple[
     """Configure ArtifactService for tests."""
     artifact_repo = _FakeArtifactRepository()
     s3_service = _FakeS3Service()
+    agent_run_repository = AsyncMock()
+    agent_run_repository.get_by_id.return_value = SimpleNamespace(
+        session_id="session-1",
+        run_index=1,
+    )
     service = _AuthorityArtifactService(
         artifact_repository=cast(Any, artifact_repo),
         agent_session_repository=cast(Any, _FakeAgentSessionRepository()),
+        agent_run_repository=agent_run_repository,
         workspace_user_repository=cast(Any, _FakeWorkspaceUserRepository()),
         session_manager=_session_manager,
         s3_service=cast(Any, s3_service),

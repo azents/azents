@@ -13,7 +13,7 @@ from azcommon.result import Failure, Success
 from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ModelFileStatus
+from azents.core.enums import AgentRunStatus, AgentSessionStatus, ModelFileStatus
 from azents.repos.model_file import model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.services.model_file import (
@@ -187,13 +187,22 @@ async def test_model_file_upload_closes_db_session_before_s3_io() -> None:
         workspace_id="workspace-1",
         agent_id="agent-1",
         owner_generation=1,
+        status=AgentSessionStatus.ACTIVE,
+    )
+    agent_session_repository.lock_by_id.return_value = (
+        agent_session_repository.get_by_id.return_value
     )
     agent_session_repository.get_root_session_agent_by_session_id.return_value = (
         SimpleNamespace(agent_session_id="root-session-1")
     )
     agent_run_repository = AsyncMock()
     agent_run_repository.get_by_id.return_value = SimpleNamespace(
-        session_id="session-1", run_index=1
+        session_id="session-1",
+        run_index=1,
+        status=AgentRunStatus.RUNNING,
+    )
+    agent_run_repository.lock_by_id.return_value = (
+        agent_run_repository.get_by_id.return_value
     )
     service = ModelFileService(
         model_file_repository=cast(Any, _ModelFileRepository(boundary)),
@@ -230,13 +239,22 @@ async def test_admitted_model_file_creation_ignores_workspace_membership() -> No
         workspace_id="workspace-1",
         agent_id="agent-1",
         owner_generation=1,
+        status=AgentSessionStatus.ACTIVE,
+    )
+    agent_session_repository.lock_by_id.return_value = (
+        agent_session_repository.get_by_id.return_value
     )
     agent_session_repository.get_root_session_agent_by_session_id.return_value = (
         SimpleNamespace(agent_session_id="root-session-1")
     )
     agent_run_repository = AsyncMock()
     agent_run_repository.get_by_id.return_value = SimpleNamespace(
-        session_id="session-1", run_index=1
+        session_id="session-1",
+        run_index=1,
+        status=AgentRunStatus.RUNNING,
+    )
+    agent_run_repository.lock_by_id.return_value = (
+        agent_run_repository.get_by_id.return_value
     )
     workspace_user_repository = AsyncMock()
     workspace_user_repository.get_by_workspace_and_user.return_value = None
@@ -274,12 +292,24 @@ async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> 
     agent_session_repository = AsyncMock()
     agent_session_repository.get_by_id.side_effect = [
         SimpleNamespace(
-            workspace_id="workspace-1", agent_id="agent-1", owner_generation=1
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            owner_generation=1,
+            status=AgentSessionStatus.ACTIVE,
         ),
         SimpleNamespace(
-            workspace_id="workspace-1", agent_id="agent-1", owner_generation=1
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            owner_generation=1,
+            status=AgentSessionStatus.ACTIVE,
         ),
     ]
+    agent_session_repository.lock_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        owner_generation=1,
+        status=AgentSessionStatus.ACTIVE,
+    )
     agent_session_repository.get_root_session_agent_by_session_id.side_effect = [
         SimpleNamespace(agent_session_id="root-session-1"),
         SimpleNamespace(agent_session_id="new-root-session"),
@@ -291,8 +321,19 @@ async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> 
         agent_session_repository=agent_session_repository,
         agent_run_repository=AsyncMock(
             get_by_id=AsyncMock(
-                return_value=SimpleNamespace(session_id="session-1", run_index=1)
-            )
+                return_value=SimpleNamespace(
+                    session_id="session-1",
+                    run_index=1,
+                    status=AgentRunStatus.RUNNING,
+                )
+            ),
+            lock_by_id=AsyncMock(
+                return_value=SimpleNamespace(
+                    session_id="session-1",
+                    run_index=1,
+                    status=AgentRunStatus.RUNNING,
+                )
+            ),
         ),
         workspace_user_repository=workspace_user_repository,
         session_manager=boundary.session_manager,
