@@ -229,6 +229,8 @@ function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
   }
 
   switch (name) {
+    case "load_skill":
+      return { key: "skill", label: "skill" };
     case "read":
     case "grep":
     case "glob":
