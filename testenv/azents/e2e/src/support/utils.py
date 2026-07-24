@@ -3,15 +3,18 @@
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 
 import azentsadminclient
 import azentspublicclient
 import requests as http_requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
+from azentspublicclient.api.invitation_v1_api import InvitationV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
+from azentspublicclient.api.workspace_user_v1_api import WorkspaceUserV1Api
 from azentspublicclient.api.workspace_v1_api import (
     WorkspaceV1Api as PublicWorkspaceV1Api,
 )
@@ -21,6 +24,9 @@ from azentspublicclient.models.agent_model_selection_input import (
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.create_invitation_request import (
+    CreateInvitationRequest,
+)
 from azentspublicclient.models.create_workspace_request import (
     CreateWorkspaceRequest as PublicCreateWorkspaceRequest,
 )
@@ -31,6 +37,22 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 from azentspublicclient.models.secrets import Secrets
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class TwoMemberTeamSession:
+    """Public-API-created Team Session shared by two Workspace members."""
+
+    owner_access_token: str
+    owner_user_id: str
+    member_access_token: str
+    member_user_id: str
+    member_workspace_user_id: str
+    workspace_handle: str
+    agent_id: str
+    session_id: str
+
+
 PNG_1X1: bytes = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
     b"\x00\x00\x00\x01\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02"
@@ -347,6 +369,107 @@ def create_chat_session_with_agent(
     return token, session_id, agent.id
 
 
+def create_two_member_team_session(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    server_url: str,
+) -> TwoMemberTeamSession:
+    """Create a shared Team Session through public/admin product APIs only."""
+    suffix = unique()
+    owner_token, _, _ = authenticate_user(
+        public_api_client,
+        admin_api_client,
+        email=f"team-owner-{suffix}@example.com",
+    )
+    member_token, _, member_email = authenticate_user(
+        public_api_client,
+        admin_api_client,
+        email=f"team-member-{suffix}@example.com",
+    )
+    handle = f"team-session-{suffix}"
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+    member_headers = {"Authorization": f"Bearer {member_token}"}
+
+    PublicWorkspaceV1Api(public_api_client).workspace_v1_create_workspace(
+        PublicCreateWorkspaceRequest(
+            workspace_name=f"Team Session {suffix}",
+            workspace_handle=handle,
+            owner_name=f"Owner {suffix}",
+        ),
+        _headers=owner_headers,
+    )
+    invitation = InvitationV1Api(public_api_client).invitation_v1_create_invitation(
+        handle,
+        CreateInvitationRequest(email=member_email),
+        _headers=owner_headers,
+    )
+    InvitationV1Api(public_api_client).invitation_v1_accept_invitation(
+        invitation.id,
+        _headers=member_headers,
+    )
+
+    workspace_user_api = WorkspaceUserV1Api(public_api_client)
+    owner_profile = workspace_user_api.workspaceuser_v1_get_my_profile(
+        handle,
+        _headers=owner_headers,
+    )
+    member_profile = workspace_user_api.workspaceuser_v1_get_my_profile(
+        handle,
+        _headers=member_headers,
+    )
+
+    integration = LLMProviderIntegrationV1Api(
+        public_api_client
+    ).llm_provider_integration_v1_create_integration(
+        handle=handle,
+        llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+            provider=LLMProvider.OPENAI,
+            name="__testenv_model_listing:deterministic-success",
+            secrets=Secrets(ApiKeySecrets(api_key="sk-team-session-e2e")),
+        ),
+        _headers=owner_headers,
+    )
+    model_selection = model_selection_from_first_candidate(
+        server_url,
+        owner_token,
+        handle,
+        integration.id,
+    )
+    agent = AgentV1Api(public_api_client).agent_v1_create_agent(
+        handle=handle,
+        agent_create_request=AgentCreateRequest(
+            name=f"Team Session Agent {suffix}",
+            model_selection=model_selection,
+            lightweight_model_selection=model_selection,
+            type=AgentType.PUBLIC,
+        ),
+        _headers=owner_headers,
+    )
+    session_response = http_requests.get(
+        f"{server_url}/chat/v1/agents/{agent.id}/team-primary-session",
+        headers=owner_headers,
+        timeout=10,
+    )
+    session_response.raise_for_status()
+    session_payload = session_response.json()
+    session_id = session_payload.get("id")
+    if not isinstance(session_id, str):
+        raise RuntimeError(
+            f"Team primary session response did not include id: {session_payload!r}"
+        )
+
+    return TwoMemberTeamSession(
+        owner_access_token=owner_token,
+        owner_user_id=owner_profile.user_id,
+        member_access_token=member_token,
+        member_user_id=member_profile.user_id,
+        member_workspace_user_id=member_profile.id,
+        workspace_handle=handle,
+        agent_id=agent.id,
+        session_id=session_id,
+    )
+
+
 def create_second_user_token(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
@@ -366,18 +489,16 @@ def upload_file(
     server_url: str,
     token: str,
     agent_id: str,
-    session_id: str,
     *,
     filename: str = "test.png",
     content: bytes = PNG_1X1,
     media_type: str = "image/png",
 ) -> http_requests.Response:
-    """file upload requestt t.
+    """Upload a file through the Agent-scoped public API.
 
     :param server_url: Public API server URL
     :param token: auth token
     :param agent_id: Agent ID
-    :param session_id: AgentSession ID
     :param filename: filet
     :param content: file t
     :param media_type: MIME t
@@ -386,7 +507,6 @@ def upload_file(
     return http_requests.post(
         f"{server_url}/chat/v1/agents/{agent_id}/upload",
         files={"file": (filename, content, media_type)},
-        data={"session_id": session_id},
         headers={"Authorization": f"Bearer {token}"},
         timeout=10,
     )

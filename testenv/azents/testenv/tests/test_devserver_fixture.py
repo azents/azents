@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from testenv.devserverlib import tmux
 from testenv.fixture_manifest import WorktreeFingerprint, load_fixture_manifest
 from testenv.fixture_resources import DevserverFixtureProvider, FixtureContext
 
@@ -161,6 +162,15 @@ def test_fixture_up_devserver_missing_state_returns_fixture_error(
     assert result.status == "error"
     assert result.error_code == "FIXTURE_DEVSERVER_STATE_MISSING"
     assert result.guidance is not None
+
+
+def test_missing_tmux_is_reported_as_fixture_readiness_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing tmux is treated as an unavailable session, not a CLI traceback."""
+    monkeypatch.setattr("testenv.devserverlib.tmux.shutil.which", lambda _: None)
+
+    assert tmux.has_session("azents-testenv-devserver") is False
 
 
 def test_fixture_doctor_missing_manifest_reports_stale_with_up_guidance(
