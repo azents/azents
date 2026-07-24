@@ -133,7 +133,7 @@ This comparison was recorded before the later living-spec promotion. It is retai
 then-current gap analysis and validation-evidence inventory; it does not change the current living
 specs or claim that the blocked deterministic scenarios have since executed.
 
-| Current living spec | Implemented behavior under comparison | Current spec coverage | Phase 8 action |
+| Living spec at Phase 8 | Implemented behavior under comparison | Coverage recorded at Phase 8 | Phase 8 action |
 | --- | --- | --- | --- |
 | `spec/domain/conversation.md` | Team admission, sender-bearing inputs, requester/public read separation, canonical Session work | Does not yet describe this complete `session-260724` boundary set | collect evidence only; promote in Phase 9 |
 | `spec/flow/agent-execution-loop.md` | pure wake-ups, canonical snapshots, Userless execution, recovery, resource authority | Does not yet describe the complete Phase 1–5 cutover contract | collect evidence only; promote in Phase 9 |
