@@ -122,6 +122,10 @@ class InputBufferPreparationStaleError(RuntimeError):
     """The FIFO head changed after its preparation snapshot was read."""
 
 
+class InputBufferOwnerGenerationStaleError(RuntimeError):
+    """The Session owner generation changed before FIFO promotion."""
+
+
 class TurnEffect(enum.StrEnum):
     """Effect of one prepared InputBuffer on the next model turn."""
 
@@ -443,6 +447,7 @@ class InputBufferService:
         self,
         *,
         session_id: str,
+        owner_generation: int,
         model: str | None,
         required_inference_profile: RequestedInferenceProfile | None,
         expected_buffer_id: str | None,
@@ -470,6 +475,10 @@ class InputBufferService:
             )
             if agent_session is None:
                 raise ValueError("AgentSession not found")
+            if agent_session.owner_generation != owner_generation:
+                raise InputBufferOwnerGenerationStaleError(
+                    "Session owner generation changed before input promotion"
+                )
             oldest = await self.input_buffer_repository.lock_oldest_by_session_id(
                 session,
                 session_id,

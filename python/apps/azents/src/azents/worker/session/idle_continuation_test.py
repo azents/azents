@@ -7,7 +7,12 @@ from typing import Any, cast
 import pytest
 
 from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
-from azents.core.enums import EventKind, InputBufferKind, InputBufferSchedulingMode
+from azents.core.enums import (
+    AgentSessionKind,
+    EventKind,
+    InputBufferKind,
+    InputBufferSchedulingMode,
+)
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.types import Event
 from azents.engine.hooks.types import (
@@ -24,6 +29,10 @@ from azents.services.input_buffer import (
     InputBufferService,
 )
 from azents.worker.events.publisher import WorkerEventPublisher
+from azents.worker.session.execution_snapshot import (
+    CanonicalExecutionOwnerGenerationStaleError,
+    CanonicalExecutionSnapshot,
+)
 from azents.worker.session.idle_continuation import IdleContinuationService
 
 
@@ -91,14 +100,21 @@ class _LockedSession:
     pending_idle_continuation_run_id: str | None
     pending_command_id: str | None
     workspace_id: str
+    owner_generation: int
 
 
 class _AgentSessionRepository:
     """AgentSessionRepository test double."""
 
-    def __init__(self, *, workspace_id: str = "workspace-001") -> None:
+    def __init__(
+        self,
+        *,
+        workspace_id: str = "workspace-001",
+        owner_generation: int = 1,
+    ) -> None:
         self.boundary_run_id: str | None = "run-001"
         self.workspace_id = workspace_id
+        self.owner_generation = owner_generation
         self.consumed: list[tuple[str, str, bool]] = []
 
     async def lock_by_id(
@@ -112,6 +128,7 @@ class _AgentSessionRepository:
             pending_idle_continuation_run_id=self.boundary_run_id,
             pending_command_id=None,
             workspace_id=self.workspace_id,
+            owner_generation=self.owner_generation,
         )
 
     async def consume_pending_idle_continuation(
@@ -215,16 +232,28 @@ class _IdleToolkit(Toolkit[Any]):
         return SessionIdleResult(continuations=self.continuations)
 
 
-def _message(*, workspace_id: str | None = "workspace-001") -> SessionWakeUp:
-    """Create wake-up message for tests."""
-    return SessionWakeUp(
-        agent_id="agent-001",
+def _snapshot(
+    *,
+    workspace_id: str = "workspace-001",
+    agent_id: str = "agent-001",
+) -> CanonicalExecutionSnapshot:
+    """Create a canonical execution snapshot for tests."""
+    return CanonicalExecutionSnapshot(
         session_id="session-001",
-        user_id="user-001",
-        additional_system_prompt=None,
-        interface=None,
+        root_session_id="session-001",
         workspace_id=workspace_id,
-        workspace_handle=None,
+        workspace_handle="workspace",
+        agent_id=agent_id,
+        session_agent_id="session-agent-001",
+        root_session_agent_id="session-agent-001",
+        session_agent_context_id="context-001",
+        execution_mode=AgentSessionKind.ROOT,
+        owner_generation=1,
+        fifo_input_buffer_id=None,
+        pending_command=None,
+        recoverable_run_id=None,
+        recoverable_run_status=None,
+        pending_idle_continuation_run_id="run-001",
     )
 
 
@@ -271,7 +300,7 @@ async def test_consume_defers_when_new_pending_input_exists() -> None:
         broker=broker,
         input_buffer_repository=input_buffer_repository,
     ).consume(
-        _message(),
+        _snapshot(),
         toolkits=[ToolkitBinding(toolkit, "goal", False)],
         run_id="run-001",
     )
@@ -282,6 +311,34 @@ async def test_consume_defers_when_new_pending_input_exists() -> None:
     assert event_publisher.dispatched == []
     assert broker.sent_messages == []
     assert input_buffer_repository.checked_session_ids == ["session-001"]
+
+
+@pytest.mark.asyncio
+async def test_consume_rejects_owner_generation_takeover() -> None:
+    """A stale owner hands the idle continuation boundary to a fresh Worker."""
+    input_buffer_service = _InputBufferService()
+    event_publisher = _EventPublisher()
+    broker = _Broker()
+    toolkit = _IdleToolkit(
+        [SessionContinuationInput(content="", metadata={"source": "goal"})]
+    )
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await _service(
+            input_buffer_service=input_buffer_service,
+            event_publisher=event_publisher,
+            broker=broker,
+            agent_session_repository=_AgentSessionRepository(owner_generation=2),
+        ).consume(
+            _snapshot(),
+            toolkits=[ToolkitBinding(toolkit, "goal", False)],
+            run_id="run-001",
+        )
+
+    assert toolkit.contexts == []
+    assert input_buffer_service.enqueued_batches == []
+    assert event_publisher.dispatched == []
+    assert broker.sent_messages == []
 
 
 @pytest.mark.asyncio
@@ -306,7 +363,7 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
         broker=broker,
         agent_session_repository=repository,
     ).consume(
-        message := _message(),
+        snapshot := _snapshot(),
         toolkits=[ToolkitBinding(toolkit, "goal", False)],
         run_id="run-001",
     )
@@ -337,12 +394,12 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     assert len(event_publisher.dispatched) == 1
     assert event_publisher.dispatched[0][0] == "session-001"
     assert event_publisher.dispatched[0][1].kind == EventKind.GOAL_CONTINUATION
-    assert broker.sent_messages == [message]
+    assert broker.sent_messages == [SessionWakeUp(session_id=snapshot.session_id)]
 
 
 @pytest.mark.asyncio
-async def test_consume_uses_persisted_workspace_for_idle_hook() -> None:
-    """Broker wake-up workspace does not override the persisted session owner."""
+async def test_consume_uses_snapshot_workspace_for_idle_hook() -> None:
+    """Idle hook context uses the canonical execution snapshot workspace."""
     input_buffer_service = _InputBufferService()
     event_publisher = _EventPublisher()
     broker = _Broker()
@@ -355,10 +412,10 @@ async def test_consume_uses_persisted_workspace_for_idle_hook() -> None:
         broker=broker,
         agent_session_repository=repository,
     ).consume(
-        _message(workspace_id=None),
+        _snapshot(workspace_id="workspace-snapshot"),
         toolkits=[ToolkitBinding(toolkit, "goal", False)],
         run_id="run-001",
     )
 
     assert result is True
-    assert toolkit.contexts[0].workspace_id == "workspace-authoritative"
+    assert toolkit.contexts[0].workspace_id == "workspace-snapshot"

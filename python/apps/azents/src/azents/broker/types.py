@@ -16,26 +16,10 @@ class SessionActivity:
 
 
 @dataclasses.dataclass(frozen=True)
-class WebInterfaceContext:
-    """Web platform context."""
-
-    type: Literal["web"] = "web"
-
-
-InterfaceContext = WebInterfaceContext
-
-
-@dataclasses.dataclass(frozen=True)
 class SessionWakeUp:
-    """Broker envelope that wakes the session runner."""
+    """Routing-only broker signal that wakes a session runner."""
 
-    agent_id: str
     session_id: str
-    user_id: str | None
-    additional_system_prompt: str | None
-    interface: InterfaceContext | None
-    workspace_id: str | None
-    workspace_handle: str | None
     type: Literal["session_wake_up"] = "session_wake_up"
 
 
@@ -44,7 +28,6 @@ class SessionStopSignal:
     """Fast-path signal that immediately notifies the session runner to stop."""
 
     session_id: str
-    user_id: str | None = None
     type: Literal["session_stop_signal"] = "session_stop_signal"
 
 

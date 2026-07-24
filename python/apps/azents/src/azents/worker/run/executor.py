@@ -148,6 +148,7 @@ from azents.services.chat.data import (
 )
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import (
+    InputBufferOwnerGenerationStaleError,
     InputBufferPreparationStaleError,
     InputBufferService,
     PromotedInputBuffers,
@@ -193,6 +194,11 @@ from azents.worker.run.helpers import (
 )
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.contracts import PrepareToolkits
+from azents.worker.session.execution_snapshot import (
+    CanonicalExecutionOwnerGenerationStaleError,
+    CanonicalExecutionSnapshot,
+    CanonicalExecutionWorkDriftError,
+)
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
@@ -431,10 +437,14 @@ class RunExecutor:
         session_id: str,
         exc: Exception,
         *,
+        owner_generation: int,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> str | None:
         """Finalize an active Run after an exception escapes its execution boundary."""
-        active_run = await self.session_lifecycle.get_running_agent_run(session_id)
+        active_run = await self.session_lifecycle.get_running_agent_run(
+            session_id,
+            owner_generation=owner_generation,
+        )
         if active_run is None:
             return None
         previous_retry_state = active_run.retry_state
@@ -455,6 +465,7 @@ class RunExecutor:
         retry_state = await self._record_failed_run_attempt(
             session_id=session_id,
             run_id=active_run.id,
+            owner_generation=owner_generation,
             attempt=FailedRunAttempt(
                 user_message=user_message,
                 internal_message=str(exc),
@@ -478,6 +489,7 @@ class RunExecutor:
         await self.failed_run_finalizer.finalize(
             FailedRunFinalizationInput(
                 session_id=session_id,
+                owner_generation=owner_generation,
                 run_id=active_run.id,
                 user_message=retry_state.last_user_message,
                 retry_state=retry_state,
@@ -489,7 +501,7 @@ class RunExecutor:
 
     async def resolve_idle_continuation_toolkits(
         self,
-        message: SessionWakeUp,
+        snapshot: CanonicalExecutionSnapshot,
         *,
         run_id: str,
         prepare_toolkits: PrepareToolkits,
@@ -498,40 +510,28 @@ class RunExecutor:
         """Rebuild session hook providers after an ownership handover."""
 
         async def publish_event(event: PublishedEvent) -> None:
-            await dispatch_event(message.session_id, event)
+            await dispatch_event(snapshot.session_id, event)
 
         async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, message.agent_id)
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                message.session_id,
-            )
-        if agent_session is None:
-            raise ValueError("AgentSession not found")
+            agent = await self.agent_repository.get_by_id(session, snapshot.agent_id)
         context = ToolkitContext(
-            session_id=message.session_id,
-            workspace_id=agent_session.workspace_id,
-            agent_id=message.agent_id,
-            user_id=message.user_id,
+            session_id=snapshot.session_id,
+            workspace_id=snapshot.workspace_id,
+            agent_id=snapshot.agent_id,
+            user_id=None,
             run_id=run_id,
             publish_event=publish_event,
             session_type=SessionType.USER,
-            interface_type=(
-                message.interface.type if message.interface is not None else None
-            ),
-            interface_channel_id=(
-                getattr(message.interface, "channel_id", None)
-                if message.interface is not None
-                else None
-            ),
+            interface_type=None,
+            interface_channel_id=None,
         )
         execution_mode = (
             ToolkitExecutionMode.SUBAGENT
-            if agent_session.session_kind == AgentSessionKind.SUBAGENT
+            if snapshot.execution_mode is AgentSessionKind.SUBAGENT
             else ToolkitExecutionMode.ROOT
         )
         toolkits = await resolve_agent_tools(
-            message.agent_id,
+            snapshot.agent_id,
             context,
             execution_mode=execution_mode,
             toolkit_registry=self.toolkit_registry,
@@ -545,7 +545,7 @@ class RunExecutor:
                 allowed_domains=(),
                 denied_domains=(),
             ),
-            workspace_handle=message.workspace_handle or "",
+            workspace_handle=snapshot.workspace_handle,
             builtin_toolkit_provider=self.builtin_toolkit_provider,
             claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
             todo_toolkit_provider=self.todo_toolkit_provider,
@@ -556,13 +556,13 @@ class RunExecutor:
             memory_enabled=agent.memory_enabled if agent is not None else True,
             runtime_tools_enabled=agent.shell_enabled if agent is not None else False,
         )
-        prepared = await prepare_toolkits(toolkits, message.user_id)
+        prepared = await prepare_toolkits(toolkits, None)
         _refresh_runtime_peer_toolkits(prepared)
         return prepared
 
     async def execute(
         self,
-        message: SessionWakeUp,
+        snapshot: CanonicalExecutionSnapshot,
         *,
         poll_fn: PollMessages | None,
         check_stop: CheckStop | None,
@@ -572,26 +572,27 @@ class RunExecutor:
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
         model_transport_state: ModelTransportState,
-        command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Execute one Session processing boundary with cancellation cleanup."""
+        if owner_generation != snapshot.owner_generation:
+            raise ValueError(
+                "Session execution owner generation does not match snapshot"
+            )
         try:
             return await self._execute(
-                message,
+                snapshot,
                 poll_fn=poll_fn,
                 check_stop=check_stop,
                 prepare_toolkits=prepare_toolkits,
                 shutdown_event=shutdown_event,
                 dispatch_event=dispatch_event,
-                owner_generation=owner_generation,
                 tool_admission_barrier=tool_admission_barrier,
                 model_transport_state=model_transport_state,
-                command=command,
             )
         except asyncio.CancelledError as exc:
             await asyncio.shield(
                 self._cancel_leftover_action_executions(
-                    message.session_id,
+                    snapshot.session_id,
                     reason=_operation_cancellation_reason(exc),
                 )
             )
@@ -599,40 +600,57 @@ class RunExecutor:
 
     async def _execute(
         self,
-        message: SessionWakeUp,
+        snapshot: CanonicalExecutionSnapshot,
         *,
         poll_fn: PollMessages | None,
         check_stop: CheckStop | None,
         prepare_toolkits: PrepareToolkits | None,
         shutdown_event: asyncio.Event,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
-        owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
         model_transport_state: ModelTransportState,
-        command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
-        """Handle one session wake-up.
+        """Handle one Session execution boundary.
 
-        :param message: Incoming session wake-up.
+        :param snapshot: Validated canonical Session execution snapshot.
         :param poll_fn: Callback that polls for new user messages during a run.
         :param check_stop: Callback that checks whether execution should stop.
         :param prepare_toolkits: Callback that prepares session-managed toolkits.
         :param shutdown_event: Worker shutdown event.
         :param dispatch_event: Event publication callback.
-        :param command: Pending runtime command to execute instead of normal model run.
         :return: Session-managed toolkits used by execution.
         """
+        owner_generation = snapshot.owner_generation
         await self._cancel_leftover_action_executions(
-            message.session_id,
+            snapshot.session_id,
             reason="Operation cancelled during Session ownership handover.",
         )
         command_handler: CommandHandler | None = None
+        command = (
+            PendingSessionCommand(
+                id=snapshot.pending_command.id,
+                name=snapshot.pending_command.name,
+                payload=snapshot.pending_command.payload,
+                requester_user_id=snapshot.pending_command.requester_user_id,
+                created_at=snapshot.pending_command.created_at,
+            )
+            if snapshot.pending_command is not None
+            else None
+        )
         if command is not None:
+            assert snapshot.pending_command is not None
+            await self.session_lifecycle.validate_pending_command(
+                snapshot.session_id,
+                owner_generation=owner_generation,
+                command=snapshot.pending_command,
+            )
             command_handler = self.command_registry.get(command.name)
             if command_handler is None:
                 logger.warning("Unknown command", extra={"command": command.name})
                 await self._clear_pending_command(
-                    message.session_id, command_id=command.id
+                    snapshot.session_id,
+                    owner_generation=owner_generation,
+                    command_id=command.id,
                 )
                 return RunExecutionResult(
                     toolkits=[],
@@ -644,13 +662,27 @@ class RunExecutor:
         preparation_started_at = loop.time()
         boundary_started_at = preparation_started_at
         recoverable_run = await self.session_lifecycle.claim_recoverable_agent_run(
-            message.session_id
+            snapshot.session_id,
+            owner_generation=owner_generation,
         )
+        if snapshot.recoverable_run_id is None:
+            if recoverable_run is not None:
+                raise CanonicalExecutionWorkDriftError(
+                    "Canonical recoverable AgentRun changed before claim"
+                )
+        elif (
+            recoverable_run is None
+            or recoverable_run.id != snapshot.recoverable_run_id
+            or recoverable_run.status != snapshot.recoverable_run_status
+        ):
+            raise CanonicalExecutionWorkDriftError(
+                "Canonical recoverable AgentRun claim is stale"
+            )
         actionable_transcript_pending = False
         created_run = recoverable_run is None
         async with self.session_manager() as db_session:
             session_state = await self.agent_session_repository.get_by_id(
-                db_session, message.session_id
+                db_session, snapshot.session_id
             )
         if session_state is None:
             raise ValueError("AgentSession not found")
@@ -674,7 +706,7 @@ class RunExecutor:
             if command is None:
                 pending_input = (
                     await self.input_buffer_service.peek_pending_inference_profile(
-                        message.session_id
+                        snapshot.session_id
                     )
                 )
                 if (
@@ -693,12 +725,12 @@ class RunExecutor:
             if command is None:
                 pending_input = (
                     await self.input_buffer_service.peek_pending_inference_profile(
-                        message.session_id
+                        snapshot.session_id
                     )
                 )
                 if not pending_input.exists or not pending_input.requires_inference:
                     actionable_transcript_pending = (
-                        await self._has_actionable_model_input(message.session_id)
+                        await self._has_actionable_model_input(snapshot.session_id)
                     )
                 if (
                     not pending_input.exists
@@ -708,8 +740,8 @@ class RunExecutor:
                     logger.info(
                         "Session wake-up ignored because no runtime input is pending",
                         extra={
-                            "session_id": message.session_id,
-                            "agent_id": message.agent_id,
+                            "session_id": snapshot.session_id,
+                            "agent_id": snapshot.agent_id,
                         },
                     )
                     return RunExecutionResult(
@@ -730,15 +762,16 @@ class RunExecutor:
                 )
             else:
                 selected_profile = await self._select_requested_profile(
-                    agent_id=message.agent_id,
-                    session_id=message.session_id,
+                    agent_id=snapshot.agent_id,
+                    session_id=snapshot.session_id,
                     explicit_profile=explicit_profile,
                 )
                 turn_inference_state = None
 
             agent_run = recoverable_run or (
-                await self.session_lifecycle.create_or_claim_pending_agent_run(
-                    message.session_id,
+                await self.session_lifecycle.create_pending_agent_run(
+                    snapshot.session_id,
+                    owner_generation=owner_generation,
                     input_event_ids=[],
                 )
             )
@@ -746,18 +779,20 @@ class RunExecutor:
         run_id = agent_run.id
         await self.vfs_projection_service.ensure_run_projection(
             run_id=run_id,
-            agent_id=message.agent_id,
-            session_id=message.session_id,
-            workspace_id=session_state.workspace_id,
+            agent_id=snapshot.agent_id,
+            session_id=snapshot.session_id,
+            workspace_id=snapshot.workspace_id,
         )
         if command is None:
             initial_input = await self.poll_run_inputs(
-                agent_id=message.agent_id,
-                session_id=message.session_id,
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
                 model=None,
                 required_inference_profile=selected_profile.profile,
                 active_run_id=run_id,
                 owner_generation=owner_generation,
+                expected_input_buffer_id=snapshot.fifo_input_buffer_id,
+                enforce_snapshot_head=True,
                 tool_admission_barrier=tool_admission_barrier,
                 initial_turn_eligible=(
                     actionable_transcript_pending
@@ -778,18 +813,20 @@ class RunExecutor:
             if initial_input.complete_run:
                 if agent_run.status is AgentRunStatus.PENDING:
                     await self.session_lifecycle.cancel_pending_agent_run(
-                        message.session_id,
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
                         run_id=run_id,
                     )
                     terminal_run_status = AgentRunStatus.CANCELLED
                 else:
                     await self.session_lifecycle.mark_agent_run_terminal_if_running(
-                        message.session_id,
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
                         run_id=run_id,
                         status=AgentRunStatus.COMPLETED,
                     )
                     terminal_run_status = AgentRunStatus.COMPLETED
-                await dispatch_event(message.session_id, RunComplete(run_id=run_id))
+                await dispatch_event(snapshot.session_id, RunComplete(run_id=run_id))
                 return RunExecutionResult(
                     toolkits=[],
                     terminal_event_observed=True,
@@ -799,17 +836,20 @@ class RunExecutor:
                 )
             if created_run and not initial_input.has_actionable_work:
                 await self.session_lifecycle.cancel_pending_agent_run(
-                    message.session_id,
+                    snapshot.session_id,
+                    owner_generation=owner_generation,
                     run_id=run_id,
                 )
             if initial_input.context_invalidated:
                 async with self.session_manager() as db_session:
                     prepared_session = await self.agent_session_repository.get_by_id(
                         db_session,
-                        message.session_id,
+                        snapshot.session_id,
                     )
                 if prepared_session is None or prepared_session.inference_state is None:
-                    await self.session_lifecycle.send_session_wake_up(message)
+                    await self.session_lifecycle.send_session_wake_up(
+                        SessionWakeUp(session_id=snapshot.session_id)
+                    )
                     return RunExecutionResult(
                         toolkits=[],
                         terminal_event_observed=False,
@@ -827,23 +867,20 @@ class RunExecutor:
         logger.info(
             "Run execution started",
             extra={
-                "session_id": message.session_id,
-                "agent_id": message.agent_id,
+                "session_id": snapshot.session_id,
+                "agent_id": snapshot.agent_id,
                 "run_id": run_id,
-                "user_id": message.user_id,
+                "user_id": None,
                 "model_target_label": selected_profile.profile.model_target_label,
                 "inference_profile_source": selected_profile.source.value,
-                "interface_type": message.interface.type
-                if message.interface is not None
-                else None,
-                "has_additional_system_prompt": bool(message.additional_system_prompt),
+                "interface_type": None,
             },
         )
         invoke_input = InvokeInput(
-            agent_id=message.agent_id,
-            session_id=message.session_id,
+            agent_id=snapshot.agent_id,
+            session_id=snapshot.session_id,
             messages=[],
-            user_id=message.user_id,
+            user_id=None,
         )
 
         run_request: RunRequest | None = None
@@ -861,22 +898,25 @@ class RunExecutor:
                 failure = _profile_resolution_failure(resolved.error)
                 if agent_run.status == AgentRunStatus.PENDING:
                     await self.session_lifecycle.cancel_pending_agent_run(
-                        message.session_id, run_id=run_id
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
+                        run_id=run_id,
                     )
                 else:
                     await self.session_lifecycle.mark_agent_run_terminal_if_running(
-                        message.session_id,
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
                         run_id=run_id,
                         status=AgentRunStatus.CANCELLED,
                     )
                 await dispatch_event(
-                    message.session_id,
+                    snapshot.session_id,
                     make_system_error_event(
-                        session_id=message.session_id,
+                        session_id=snapshot.session_id,
                         content=failure.message,
                     ),
                 )
-                await dispatch_event(message.session_id, RunComplete(run_id=run_id))
+                await dispatch_event(snapshot.session_id, RunComplete(run_id=run_id))
                 return RunExecutionResult(
                     toolkits=[],
                     terminal_event_observed=True,
@@ -899,13 +939,11 @@ class RunExecutor:
                 ),
                 resolved_at=datetime.datetime.now(datetime.UTC),
             )
-            async with self.session_manager() as db_session:
-                await self.agent_session_repository.set_inference_state(
-                    db_session,
-                    session_id=message.session_id,
-                    inference_state=turn_inference_state,
-                )
-                await db_session.commit()
+            await self.session_lifecycle.set_inference_state(
+                snapshot.session_id,
+                owner_generation=owner_generation,
+                inference_state=turn_inference_state,
+            )
         else:
             recovered = await resolve_invoke_input_with_resolved_profile(
                 invoke_input,
@@ -922,25 +960,27 @@ class RunExecutor:
                 failure = _profile_resolution_failure(recovered.error)
                 if agent_run.status == AgentRunStatus.PENDING:
                     await self.session_lifecycle.cancel_pending_agent_run(
-                        message.session_id,
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
                         run_id=run_id,
                     )
                     terminal_status = AgentRunStatus.CANCELLED
                 else:
                     await self.session_lifecycle.mark_agent_run_terminal_if_running(
-                        message.session_id,
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
                         run_id=run_id,
                         status=AgentRunStatus.FAILED,
                     )
                     terminal_status = AgentRunStatus.FAILED
                 await dispatch_event(
-                    message.session_id,
+                    snapshot.session_id,
                     make_system_error_event(
-                        session_id=message.session_id,
+                        session_id=snapshot.session_id,
                         content=failure.message,
                     ),
                 )
-                await dispatch_event(message.session_id, RunComplete(run_id=run_id))
+                await dispatch_event(snapshot.session_id, RunComplete(run_id=run_id))
                 return RunExecutionResult(
                     toolkits=[],
                     terminal_event_observed=True,
@@ -964,7 +1004,8 @@ class RunExecutor:
         )
         if agent_run.status == AgentRunStatus.PENDING:
             agent_run = await self.session_lifecycle.activate_pending_agent_run(
-                message.session_id,
+                snapshot.session_id,
+                owner_generation=owner_generation,
                 run_id=run_id,
                 initial_phase=(
                     AgentRunPhase.COMPACTING
@@ -980,8 +1021,8 @@ class RunExecutor:
         logger.info(
             "Run invoke input resolved",
             extra={
-                "session_id": message.session_id,
-                "agent_id": message.agent_id,
+                "session_id": snapshot.session_id,
+                "agent_id": snapshot.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
                 "model": run_request.model,
@@ -1005,7 +1046,7 @@ class RunExecutor:
             target_session_ids = {
                 agent.agent_session_id
                 for agent in tree_agents
-                if agent.agent_session_id != message.session_id
+                if agent.agent_session_id != snapshot.session_id
             }
             for target_session_id in sorted(target_session_ids):
                 await dispatch_event(target_session_id, event)
@@ -1016,7 +1057,7 @@ class RunExecutor:
                 current_agent = (
                     await self.agent_session_repository.get_session_agent_by_session_id(
                         session,
-                        message.session_id,
+                        snapshot.session_id,
                     )
                 )
             if current_agent is None:
@@ -1025,19 +1066,16 @@ class RunExecutor:
                 root_session_agent_id=current_agent.root_session_agent_id,
                 changed_session_agent_id=current_agent.id,
             )
-            await dispatch_event(message.session_id, event)
+            await dispatch_event(snapshot.session_id, event)
             await dispatch_tree_change_to_tree(event)
 
         async def publish_event(event: PublishedEvent) -> None:
-            await dispatch_event(message.session_id, event)
+            await dispatch_event(snapshot.session_id, event)
             if isinstance(event, SubagentTreeChanged):
                 await dispatch_tree_change_to_tree(event)
 
-        iface = message.interface
-        iface_type = iface.type if iface is not None else None
-        iface_channel_id = getattr(iface, "channel_id", None)
         run_context = RunContext(
-            user_id=message.user_id,
+            user_id=None,
             run_id=run_id,
             owner_generation=owner_generation,
             tool_admission_barrier=tool_admission_barrier,
@@ -1045,28 +1083,24 @@ class RunExecutor:
             publish_event=publish_event,
         )
         context = ToolkitContext(
-            session_id=message.session_id,
+            session_id=snapshot.session_id,
             workspace_id=run_request.workspace_id,
             agent_id=invoke_input.agent_id,
-            user_id=message.user_id,
+            user_id=None,
             run_id=run_id,
             publish_event=publish_event,
             session_type=SessionType.USER,
-            interface_type=iface_type,
-            interface_channel_id=iface_channel_id,
+            interface_type=None,
+            interface_channel_id=None,
         )
 
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(
                 session, invoke_input.agent_id
             )
-            agent_session = await self.agent_session_repository.get_by_id(
-                session, message.session_id
-            )
             execution_mode = (
                 ToolkitExecutionMode.SUBAGENT
-                if agent_session is not None
-                and agent_session.session_kind == AgentSessionKind.SUBAGENT
+                if snapshot.execution_mode is AgentSessionKind.SUBAGENT
                 else ToolkitExecutionMode.ROOT
             )
             agent_memory_enabled = agent.memory_enabled if agent else True
@@ -1078,7 +1112,7 @@ class RunExecutor:
         logger.info(
             "Run agent tools resolve started",
             extra={
-                "session_id": message.session_id,
+                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1100,7 +1134,7 @@ class RunExecutor:
             oauth_secret_key=self.worker_config.oauth_secret_key,
             mcp_proxy_url=self.worker_config.mcp_proxy_url,
             runtime_domain_config=runtime_domain_config,
-            workspace_handle=message.workspace_handle or "",
+            workspace_handle=snapshot.workspace_handle,
             builtin_toolkit_provider=self.builtin_toolkit_provider,
             claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
             todo_toolkit_provider=self.todo_toolkit_provider,
@@ -1116,7 +1150,7 @@ class RunExecutor:
         logger.info(
             "Run agent tools resolved",
             extra={
-                "session_id": message.session_id,
+                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1136,7 +1170,7 @@ class RunExecutor:
             logger.info(
                 "Run session toolkits prepare started",
                 extra={
-                    "session_id": message.session_id,
+                    "session_id": snapshot.session_id,
                     "agent_id": invoke_input.agent_id,
                     "run_id": run_id,
                     "workspace_id": run_request.workspace_id,
@@ -1146,7 +1180,7 @@ class RunExecutor:
             )
             prepared_toolkits = await prepare_toolkits(
                 run_request.toolkits,
-                message.user_id,
+                None,
             )
             run_request = dataclasses.replace(run_request, toolkits=prepared_toolkits)
             _refresh_runtime_peer_toolkits(prepared_toolkits)
@@ -1155,7 +1189,7 @@ class RunExecutor:
         logger.info(
             "Run session toolkits prepared",
             extra={
-                "session_id": message.session_id,
+                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1168,20 +1202,12 @@ class RunExecutor:
         )
         boundary_started_at = now
 
-        if message.additional_system_prompt:
-            run_request = dataclasses.replace(
-                run_request,
-                agent_prompt=(run_request.agent_prompt or "")
-                + "\n\n"
-                + message.additional_system_prompt,
-            )
-
         hook_dispatcher = RuntimeHookDispatcher()
         hook_providers = _runtime_hook_provider_refs(run_request.toolkits)
         logger.info(
             "Run lifecycle hooks dispatch started",
             extra={
-                "session_id": message.session_id,
+                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1189,14 +1215,11 @@ class RunExecutor:
                 "hook_provider_count": len(hook_providers),
             },
         )
-        async with self.session_manager() as session:
-            session_start_claimed = (
-                await self.agent_session_repository.claim_lifecycle_start(
-                    session,
-                    message.session_id,
-                    now=tznow(),
-                )
-            )
+        session_start_claimed = await self.session_lifecycle.claim_lifecycle_start(
+            snapshot.session_id,
+            owner_generation=owner_generation,
+            now=tznow(),
+        )
         if session_start_claimed:
             await hook_dispatcher.dispatch_observation(
                 hook_providers,
@@ -1204,7 +1227,7 @@ class RunExecutor:
                 SessionStartHookContext(
                     workspace_id=run_request.workspace_id,
                     agent_id=run_request.agent_id,
-                    session_id=message.session_id,
+                    session_id=snapshot.session_id,
                     run_id=run_id,
                 ),
             )
@@ -1215,7 +1238,7 @@ class RunExecutor:
             RunStartHookContext(
                 workspace_id=run_request.workspace_id,
                 agent_id=run_request.agent_id,
-                session_id=message.session_id,
+                session_id=snapshot.session_id,
                 run_id=run_id,
             ),
         )
@@ -1224,7 +1247,7 @@ class RunExecutor:
         logger.info(
             "Run lifecycle hooks dispatched",
             extra={
-                "session_id": message.session_id,
+                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1267,7 +1290,7 @@ class RunExecutor:
         async def publish_live_run() -> None:
             """Publish the current live run snapshot to WebSocket clients."""
             await self.live_event_projector.publish_live_run_updated(
-                message.session_id,
+                snapshot.session_id,
                 ChatLiveRunState(
                     run_id=run_id,
                     phase=active_phase or AgentRunPhase.IDLE,
@@ -1290,7 +1313,7 @@ class RunExecutor:
         async def refresh_session_activity() -> None:
             """Publish the current run phase and active tool calls to the broker."""
             await self.session_lifecycle.set_session_activity(
-                message.session_id,
+                snapshot.session_id,
                 run_id=run_id,
                 phase=active_phase,
             )
@@ -1298,11 +1321,11 @@ class RunExecutor:
 
         await refresh_session_activity()
         await dispatch_event(
-            message.session_id,
+            snapshot.session_id,
             RunStarted(run_id=run_id, phase=active_phase),
         )
         await self.live_event_projector.replace_active_tool_calls(
-            message.session_id,
+            snapshot.session_id,
             active_tool_calls,
             removed_call_ids=set(),
         )
@@ -1311,7 +1334,7 @@ class RunExecutor:
         logger.info(
             "Run started dispatched",
             extra={
-                "session_id": message.session_id,
+                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1333,7 +1356,8 @@ class RunExecutor:
             if current_retry_state is None and live_retry_state is None:
                 return
             await self.session_lifecycle.update_agent_run_retry_state(
-                message.session_id,
+                snapshot.session_id,
+                owner_generation=owner_generation,
                 run_id=run_id,
                 retry_state=None,
             )
@@ -1349,7 +1373,8 @@ class RunExecutor:
             run_end_reason = "cancelled"
             terminal_run_status = AgentRunStatus.STOPPED
             await self.user_stop_finalizer.record_interrupted_run(
-                message.session_id,
+                snapshot.session_id,
+                owner_generation=owner_generation,
                 run_id=run_id,
             )
             terminal_state_persisted = True
@@ -1392,7 +1417,8 @@ class RunExecutor:
                     if event_run_id != run_id:
                         raise RuntimeError("RunComplete run ID mismatch")
                     await self.session_lifecycle.mark_agent_run_terminal_if_running(
-                        message.session_id,
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
                         run_id=run_id,
                         status=AgentRunStatus.COMPLETED,
                     )
@@ -1405,7 +1431,8 @@ class RunExecutor:
                         raise RuntimeError("RunStopped run ID mismatch")
                     await clear_retry_state_for_stop()
                     await self.session_lifecycle.mark_agent_run_terminal_if_running(
-                        message.session_id,
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
                         run_id=run_id,
                         status=AgentRunStatus.STOPPED,
                     )
@@ -1442,17 +1469,20 @@ class RunExecutor:
                 active_tool_calls[:] = updated_tool_calls
                 await refresh_session_activity()
                 await self.live_event_projector.replace_active_tool_calls(
-                    message.session_id,
+                    snapshot.session_id,
                     active_tool_calls,
                     removed_call_ids=removed_call_ids,
                 )
             await handle_engine_event(
                 item,
-                publish=lambda ev: dispatch_event(message.session_id, ev),
+                publish=lambda ev: dispatch_event(snapshot.session_id, ev),
             )
 
         heartbeat_task = asyncio.create_task(
-            self._run_session_heartbeat_loop(message.session_id)
+            self._run_session_heartbeat_loop(
+                snapshot.session_id,
+                owner_generation=owner_generation,
+            )
         )
         failed_attempt_source: FailedRunAttemptSource = (
             "command" if command_handler is not None else "model"
@@ -1469,7 +1499,8 @@ class RunExecutor:
                         terminal_run_status = AgentRunStatus.FAILED
                         await self.failed_run_finalizer.finalize(
                             FailedRunFinalizationInput(
-                                session_id=message.session_id,
+                                session_id=snapshot.session_id,
+                                owner_generation=owner_generation,
                                 run_id=run_id,
                                 user_message=current_retry_state.last_user_message,
                                 retry_state=current_retry_state,
@@ -1480,7 +1511,7 @@ class RunExecutor:
                         run_completed = True
                     else:
                         retry_stopped = await self._wait_for_failed_run_retry(
-                            session_id=message.session_id,
+                            session_id=snapshot.session_id,
                             retry_state=current_retry_state,
                             check_stop=check_stop,
                             shutdown_event=shutdown_event,
@@ -1491,7 +1522,7 @@ class RunExecutor:
                 try:
                     if command_handler is None:
                         boundary_poll = self.make_boundary_poll(
-                            message=message,
+                            snapshot=snapshot,
                             model=run_request.model,
                             requested_inference_profile=selected_profile.profile,
                             run_id=run_id,
@@ -1521,7 +1552,7 @@ class RunExecutor:
                             prepared_session = (
                                 await self.agent_session_repository.get_by_id(
                                     db_session,
-                                    message.session_id,
+                                    snapshot.session_id,
                                 )
                             )
                         if (
@@ -1589,13 +1620,14 @@ class RunExecutor:
                         continue
                     if command_handler is not None:
                         await self.session_lifecycle.mark_agent_run_terminal_if_running(
-                            message.session_id,
+                            snapshot.session_id,
+                            owner_generation=owner_generation,
                             run_id=run_id,
                             status=AgentRunStatus.COMPLETED,
                         )
                         terminal_state_persisted = True
                         await dispatch_event(
-                            message.session_id,
+                            snapshot.session_id,
                             RunComplete(run_id=run_id),
                         )
                         run_completed = True
@@ -1604,13 +1636,14 @@ class RunExecutor:
                     break
                 except UserVisibleRuntimeError as exc:
                     await self.live_event_projector.discard_failed_attempt(
-                        message.session_id
+                        snapshot.session_id
                     )
                     if await record_user_stop_if_requested():
                         break
                     retry_state = await self._record_failed_run_attempt(
-                        session_id=message.session_id,
+                        session_id=snapshot.session_id,
                         run_id=run_id,
+                        owner_generation=owner_generation,
                         attempt=self._failed_run_attempt_from_user_visible_error(
                             exc,
                             attempt_number=attempt_number,
@@ -1630,7 +1663,8 @@ class RunExecutor:
                         terminal_run_status = AgentRunStatus.FAILED
                         await self.failed_run_finalizer.finalize(
                             FailedRunFinalizationInput(
-                                session_id=message.session_id,
+                                session_id=snapshot.session_id,
+                                owner_generation=owner_generation,
                                 run_id=run_id,
                                 user_message=retry_state.last_user_message,
                                 retry_state=retry_state,
@@ -1641,7 +1675,7 @@ class RunExecutor:
                         run_completed = True
                         break
                     retry_stopped = await self._wait_for_failed_run_retry(
-                        session_id=message.session_id,
+                        session_id=snapshot.session_id,
                         retry_state=retry_state,
                         check_stop=check_stop,
                         shutdown_event=shutdown_event,
@@ -1652,7 +1686,7 @@ class RunExecutor:
                     attempt_number += 1
                 except Exception as exc:
                     await self.live_event_projector.discard_failed_attempt(
-                        message.session_id
+                        snapshot.session_id
                     )
                     if await record_user_stop_if_requested():
                         break
@@ -1682,8 +1716,9 @@ class RunExecutor:
                         )
                     )
                     retry_state = await self._record_failed_run_attempt(
-                        session_id=message.session_id,
+                        session_id=snapshot.session_id,
                         run_id=run_id,
+                        owner_generation=owner_generation,
                         attempt=failed_attempt,
                         previous_retry_state=current_retry_state,
                     )
@@ -1697,7 +1732,7 @@ class RunExecutor:
                         logger.warning(
                             "Compaction model stream attempt timed out",
                             extra={
-                                "session_id": message.session_id,
+                                "session_id": snapshot.session_id,
                                 "run_id": run_id,
                                 "attempt_number": attempt_number,
                                 "error_type": exc.__class__.__name__,
@@ -1707,7 +1742,7 @@ class RunExecutor:
                         )
                     else:
                         error_log_fields: dict[str, object] = {
-                            "session_id": message.session_id,
+                            "session_id": snapshot.session_id,
                             "run_id": run_id,
                             "attempt_number": attempt_number,
                             "error_type": exc.__class__.__name__,
@@ -1726,7 +1761,8 @@ class RunExecutor:
                         terminal_run_status = AgentRunStatus.FAILED
                         await self.failed_run_finalizer.finalize(
                             FailedRunFinalizationInput(
-                                session_id=message.session_id,
+                                session_id=snapshot.session_id,
+                                owner_generation=owner_generation,
                                 run_id=run_id,
                                 user_message=retry_state.last_user_message,
                                 retry_state=retry_state,
@@ -1737,7 +1773,7 @@ class RunExecutor:
                         run_completed = True
                         break
                     retry_stopped = await self._wait_for_failed_run_retry(
-                        session_id=message.session_id,
+                        session_id=snapshot.session_id,
                         retry_state=retry_state,
                         check_stop=check_stop,
                         shutdown_event=shutdown_event,
@@ -1755,7 +1791,7 @@ class RunExecutor:
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
-            await self.live_event_projector.flush_session(message.session_id)
+            await self.live_event_projector.flush_session(snapshot.session_id)
             terminal_event_observed = observed_terminal_run_event(
                 run_completed=run_completed,
                 terminal_run_status=terminal_run_status,
@@ -1764,13 +1800,14 @@ class RunExecutor:
                 logger.info(
                     "Leaving agent run RUNNING until terminal event recovery",
                     extra={
-                        "session_id": message.session_id,
+                        "session_id": snapshot.session_id,
                         "run_id": run_id,
                     },
                 )
             elif not terminal_state_persisted:
                 await self.session_lifecycle.mark_agent_run_terminal_if_running(
-                    message.session_id,
+                    snapshot.session_id,
+                    owner_generation=owner_generation,
                     run_id=run_id,
                     status=terminal_run_status or AgentRunStatus.CANCELLED,
                 )
@@ -1780,7 +1817,7 @@ class RunExecutor:
                 RunEndHookContext(
                     workspace_id=run_request.workspace_id,
                     agent_id=run_request.agent_id,
-                    session_id=message.session_id,
+                    session_id=snapshot.session_id,
                     run_id=run_id,
                     reason=run_end_reason,
                 ),
@@ -1788,18 +1825,19 @@ class RunExecutor:
             if not terminal_event_observed:
                 logger.info(
                     "Keeping session activity until terminal event recovery",
-                    extra={"session_id": message.session_id},
+                    extra={"session_id": snapshot.session_id},
                 )
             else:
-                await self.session_lifecycle.clear_session_activity(message.session_id)
                 await self.live_event_projector.publish_live_run_cleared(
-                    message.session_id,
+                    snapshot.session_id,
                     run_id=run_id,
                 )
                 await publish_session_tree_changed()
             if command is not None:
                 await self._clear_pending_command(
-                    message.session_id, command_id=command.id
+                    snapshot.session_id,
+                    owner_generation=owner_generation,
+                    command_id=command.id,
                 )
 
         return RunExecutionResult(
@@ -1814,15 +1852,15 @@ class RunExecutor:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         command_id: str,
     ) -> None:
         """Remove processed pending command."""
-        async with self.session_manager() as session:
-            await self.agent_session_repository.clear_pending_command(
-                session,
-                session_id=session_id,
-                command_id=command_id,
-            )
+        await self.session_lifecycle.clear_pending_command(
+            session_id,
+            owner_generation=owner_generation,
+            command_id=command_id,
+        )
 
     def _failed_run_attempt_from_user_visible_error(
         self,
@@ -1867,6 +1905,7 @@ class RunExecutor:
         *,
         session_id: str,
         run_id: str,
+        owner_generation: int,
         attempt: FailedRunAttempt,
         previous_retry_state: FailedRunRetryState | None,
     ) -> FailedRunRetryState:
@@ -1890,6 +1929,7 @@ class RunExecutor:
         )
         await self.session_lifecycle.update_agent_run_retry_state(
             session_id,
+            owner_generation=owner_generation,
             run_id=run_id,
             retry_state=retry_state,
         )
@@ -1990,11 +2030,19 @@ class RunExecutor:
         task.add_done_callback(self._session_title_tasks.discard)
         task.add_done_callback(on_done)
 
-    async def _run_session_heartbeat_loop(self, session_id: str) -> None:
+    async def _run_session_heartbeat_loop(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
         """Refresh session heartbeat while the engine run is active."""
         while True:
             try:
-                await self.session_lifecycle.heartbeat_session(session_id)
+                await self.session_lifecycle.heartbeat_session(
+                    session_id,
+                    owner_generation=owner_generation,
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -2109,7 +2157,7 @@ class RunExecutor:
     def make_boundary_poll(
         self,
         *,
-        message: SessionWakeUp,
+        snapshot: CanonicalExecutionSnapshot,
         model: str | None,
         requested_inference_profile: RequestedInferenceProfile,
         run_id: str,
@@ -2123,12 +2171,14 @@ class RunExecutor:
 
         async def poll() -> PollMessagesResult:
             result = await self.poll_run_inputs(
-                agent_id=message.agent_id,
-                session_id=message.session_id,
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
                 model=model,
                 required_inference_profile=requested_inference_profile,
                 active_run_id=run_id,
                 owner_generation=owner_generation,
+                expected_input_buffer_id=None,
+                enforce_snapshot_head=False,
                 tool_admission_barrier=tool_admission_barrier,
                 initial_turn_eligible=True,
                 poll_fn=poll_fn,
@@ -2138,9 +2188,11 @@ class RunExecutor:
             if result.context_invalidated:
                 mark_context_invalidated()
                 if await self.input_buffer_service.has_pending_session_input_buffers(
-                    message.session_id
+                    snapshot.session_id
                 ):
-                    await self.session_lifecycle.send_session_wake_up(message)
+                    await self.session_lifecycle.send_session_wake_up(
+                        SessionWakeUp(session_id=snapshot.session_id)
+                    )
             return PollMessagesResult(
                 user_messages=result.user_messages,
                 context_invalidated=result.context_invalidated,
@@ -2158,6 +2210,8 @@ class RunExecutor:
         required_inference_profile: RequestedInferenceProfile | None,
         active_run_id: str | None,
         owner_generation: int,
+        expected_input_buffer_id: str | None,
+        enforce_snapshot_head: bool,
         tool_admission_barrier: ToolAdmissionBarrier,
         initial_turn_eligible: bool,
         poll_fn: PollMessages | None,
@@ -2171,11 +2225,29 @@ class RunExecutor:
         context_invalidated = False
         turn_eligible = initial_turn_eligible
         preparation_failed = False
+        first_promotion = True
         while True:
             pending_profile = (
                 await self.input_buffer_service.peek_pending_inference_profile(
                     session_id
                 )
+            )
+            if enforce_snapshot_head:
+                if first_promotion:
+                    if pending_profile.input_buffer_id != expected_input_buffer_id:
+                        raise CanonicalExecutionWorkDriftError(
+                            "Canonical input buffer FIFO head changed before promotion"
+                        )
+                elif pending_profile.exists:
+                    raise CanonicalExecutionWorkDriftError(
+                        "New input buffer FIFO head requires a fresh snapshot"
+                    )
+                else:
+                    break
+            expected_buffer_id = (
+                expected_input_buffer_id
+                if first_promotion and enforce_snapshot_head
+                else pending_profile.input_buffer_id
             )
             profile_changed = (
                 initial_turn_eligible
@@ -2190,8 +2262,11 @@ class RunExecutor:
                 model=model,
                 required_inference_profile=selected_profile,
                 active_run_id=active_run_id,
+                owner_generation=owner_generation,
+                expected_buffer_id=expected_buffer_id,
                 include_action_messages=process_actions,
             )
+            first_promotion = False
             await self._publish_session_agent_tree_changes(
                 promoted.changed_session_agent_ids,
                 dispatch_event=dispatch_event,
@@ -2417,6 +2492,8 @@ class RunExecutor:
         model: str | None,
         required_inference_profile: RequestedInferenceProfile | None,
         active_run_id: str | None,
+        owner_generation: int,
+        expected_buffer_id: str | None,
         include_action_messages: bool,
     ) -> PromotedInputBuffers:
         """Promote input buffers and publish the matching live-state changes."""
@@ -2425,83 +2502,84 @@ class RunExecutor:
             "Input buffer flush started before model boundary",
             extra={"session_id": session_id, "model": model},
         )
-        while True:
-            pending = await self.input_buffer_service.peek_pending_inference_profile(
-                session_id
+        pending = await self.input_buffer_service.peek_pending_inference_profile(
+            session_id
+        )
+        if pending.input_buffer_id != expected_buffer_id:
+            raise CanonicalExecutionWorkDriftError(
+                "Input buffer FIFO head changed before preparation"
             )
-            prepared_inference_state: SessionInferenceState | None = None
-            profile_resolution_failure: str | None = None
-            if pending.requires_inference:
-                requested_profile = (
-                    pending.requested_inference_profile or required_inference_profile
+        prepared_inference_state: SessionInferenceState | None = None
+        profile_resolution_failure: str | None = None
+        if pending.requires_inference:
+            requested_profile = (
+                pending.requested_inference_profile or required_inference_profile
+            )
+            if requested_profile is None:
+                raise RuntimeError("Inference-producing input has no requested profile")
+            async with self.session_manager() as session:
+                session_state = await self.agent_session_repository.get_by_id(
+                    session,
+                    session_id,
                 )
-                if requested_profile is None:
-                    raise RuntimeError(
-                        "Inference-producing input has no requested profile"
+            current_inference_state = (
+                session_state.inference_state if session_state is not None else None
+            )
+            prepared_inference_state = matching_session_inference_state(
+                current_inference_state,
+                requested_profile,
+            )
+            if prepared_inference_state is None:
+                resolved = await resolve_invoke_input_with_profile(
+                    InvokeInput(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        messages=[],
+                        user_id=None,
+                    ),
+                    requested_profile=requested_profile,
+                    agent_repository=self.agent_repository,
+                    integration_repository=self.integration_repository,
+                    session_manager=self.session_manager,
+                    exchange_file_service=self.exchange_file_service,
+                    model_file_service=self.model_file_service,
+                )
+                if resolved.failure:
+                    profile_resolution_failure = _profile_resolution_failure(
+                        resolved.error
+                    ).message
+                else:
+                    resolved_profile = resolved.value
+                    effective_tokens = (
+                        resolved_profile.run_request.effective_max_input_tokens
                     )
-                async with self.session_manager() as session:
-                    session_state = await self.agent_session_repository.get_by_id(
-                        session,
-                        session_id,
-                    )
-                current_inference_state = (
-                    session_state.inference_state if session_state is not None else None
-                )
-                prepared_inference_state = matching_session_inference_state(
-                    current_inference_state,
-                    requested_profile,
-                )
-                if prepared_inference_state is None:
-                    resolved = await resolve_invoke_input_with_profile(
-                        InvokeInput(
-                            agent_id=agent_id,
-                            session_id=session_id,
-                            messages=[],
-                            user_id=None,
+                    prepared_inference_state = SessionInferenceState(
+                        model_target_label=requested_profile.model_target_label,
+                        model_selection=resolved_profile.model_selection,
+                        model_settings=resolved_profile.model_settings,
+                        reasoning_effort=resolved_profile.reasoning_effort,
+                        effective_context_window_tokens=effective_tokens,
+                        effective_auto_compaction_threshold_tokens=(
+                            compute_auto_compaction_threshold_tokens(effective_tokens)
                         ),
-                        requested_profile=requested_profile,
-                        agent_repository=self.agent_repository,
-                        integration_repository=self.integration_repository,
-                        session_manager=self.session_manager,
-                        exchange_file_service=self.exchange_file_service,
-                        model_file_service=self.model_file_service,
+                        resolved_at=datetime.datetime.now(datetime.UTC),
                     )
-                    if resolved.failure:
-                        profile_resolution_failure = _profile_resolution_failure(
-                            resolved.error
-                        ).message
-                    else:
-                        resolved_profile = resolved.value
-                        effective_tokens = (
-                            resolved_profile.run_request.effective_max_input_tokens
-                        )
-                        prepared_inference_state = SessionInferenceState(
-                            model_target_label=requested_profile.model_target_label,
-                            model_selection=resolved_profile.model_selection,
-                            model_settings=resolved_profile.model_settings,
-                            reasoning_effort=resolved_profile.reasoning_effort,
-                            effective_context_window_tokens=effective_tokens,
-                            effective_auto_compaction_threshold_tokens=(
-                                compute_auto_compaction_threshold_tokens(
-                                    effective_tokens
-                                )
-                            ),
-                            resolved_at=datetime.datetime.now(datetime.UTC),
-                        )
-            try:
-                promoted = await self.input_buffer_service.flush_session_input_buffers(
-                    session_id=session_id,
-                    model=model,
-                    required_inference_profile=required_inference_profile,
-                    expected_buffer_id=pending.input_buffer_id,
-                    prepared_inference_state=prepared_inference_state,
-                    profile_resolution_failure=profile_resolution_failure,
-                    active_run_id=active_run_id,
-                    include_action_messages=include_action_messages,
-                )
-            except InputBufferPreparationStaleError:
-                continue
-            break
+        try:
+            promoted = await self.input_buffer_service.flush_session_input_buffers(
+                session_id=session_id,
+                owner_generation=owner_generation,
+                model=model,
+                required_inference_profile=required_inference_profile,
+                expected_buffer_id=expected_buffer_id,
+                prepared_inference_state=prepared_inference_state,
+                profile_resolution_failure=profile_resolution_failure,
+                active_run_id=active_run_id,
+                include_action_messages=include_action_messages,
+            )
+        except InputBufferOwnerGenerationStaleError as exc:
+            raise CanonicalExecutionOwnerGenerationStaleError(str(exc)) from exc
+        except InputBufferPreparationStaleError as exc:
+            raise CanonicalExecutionWorkDriftError(str(exc)) from exc
         logger.info(
             "Input buffer flush completed before model boundary",
             extra={

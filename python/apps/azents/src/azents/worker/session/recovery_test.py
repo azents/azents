@@ -164,12 +164,7 @@ async def test_recover_once_enqueues_resume_for_stuck_sessions() -> None:
 
     assert repository.find_calls == [(datetime.timedelta(seconds=5), 7)]
     assert lifecycle.running_session_ids == ["session-001"]
-    assert len(broker.sent_messages) == 1
-    message = broker.sent_messages[0]
-    assert message.agent_id == "agent-001"
-    assert message.session_id == "session-001"
-    assert message.user_id is None
-    assert message.workspace_id == "workspace-001"
+    assert broker.sent_messages == [SessionWakeUp(session_id="session-001")]
 
 
 @pytest.mark.asyncio

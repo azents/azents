@@ -2,6 +2,7 @@
 
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -19,6 +20,7 @@ from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.input_buffer import InputBufferRepository
+from azents.repos.session_execution.data import PendingCommandSnapshot
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -85,7 +87,14 @@ class _Broker:
 class _AgentSessionRepository:
     """AgentSessionRepository test double."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        owner_generation: int = 0,
+        pending_command_id: str | None = None,
+    ) -> None:
+        self.owner_generation = owner_generation
+        self.pending_command_id = pending_command_id
         self.idle_session_ids: list[str] = []
         self.heartbeat_session_ids: list[str] = []
 
@@ -105,7 +114,21 @@ class _AgentSessionRepository:
     ) -> AgentSession:
         """Return an existing locked Session marker."""
         del session, agent_session_id
-        return cast(AgentSession, object())
+        return cast(
+            AgentSession,
+            SimpleNamespace(
+                owner_generation=self.owner_generation,
+                pending_command_id=self.pending_command_id,
+                pending_command_name="compact" if self.pending_command_id else None,
+                pending_command_payload={} if self.pending_command_id else None,
+                pending_command_requester_user_id=None,
+                pending_command_created_at=(
+                    datetime(2026, 7, 24, tzinfo=UTC)
+                    if self.pending_command_id
+                    else None
+                ),
+            ),
+        )
 
     async def mark_idle(self, session: AsyncSession, runtime_id: str) -> None:
         """Record idle transition."""
@@ -292,7 +315,7 @@ async def test_heartbeat_session_refreshes_db_and_active_owner_lease() -> None:
         ),
     )
 
-    await service.heartbeat_session("session-001")
+    await service.heartbeat_session("session-001", owner_generation=0)
 
     assert agent_session_repository.heartbeat_session_ids == ["session-001"]
     assert broker.renewed_session_ids == ["session-001"]
@@ -310,7 +333,7 @@ async def test_mark_session_idle_rejects_active_agent_run() -> None:
         pending_scheduling_modes=set(),
     )
 
-    marked_idle = await service.mark_session_idle("session-001")
+    marked_idle = await service.mark_session_idle("session-001", owner_generation=0)
 
     assert not marked_idle
     assert agent_session_repository.idle_session_ids == []
@@ -328,7 +351,27 @@ async def test_mark_session_idle_rechecks_queue_under_session_lock() -> None:
         pending_scheduling_modes={InputBufferSchedulingMode.WAKE_SESSION},
     )
 
-    marked_idle = await service.mark_session_idle("session-001")
+    marked_idle = await service.mark_session_idle("session-001", owner_generation=0)
+
+    assert not marked_idle
+    assert agent_session_repository.idle_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_mark_session_idle_rechecks_pending_command_under_session_lock() -> None:
+    """A concurrently accepted command prevents the Session from becoming idle."""
+    agent_run_repository = _AgentRunRepository(None)
+    agent_session_repository = _AgentSessionRepository(pending_command_id="command-001")
+    service = _service(
+        agent_run_repository=agent_run_repository,
+        agent_session_repository=agent_session_repository,
+        pending_scheduling_modes=set(),
+    )
+
+    marked_idle = await service.mark_session_idle(
+        "session-001",
+        owner_generation=0,
+    )
 
     assert not marked_idle
     assert agent_session_repository.idle_session_ids == []
@@ -345,7 +388,7 @@ async def test_mark_session_idle_allows_queue_only_pending_input() -> None:
         pending_scheduling_modes={InputBufferSchedulingMode.QUEUE_ONLY},
     )
 
-    marked_idle = await service.mark_session_idle("session-001")
+    marked_idle = await service.mark_session_idle("session-001", owner_generation=0)
 
     assert marked_idle
     assert agent_session_repository.idle_session_ids == ["session-001"]
@@ -362,7 +405,7 @@ async def test_mark_session_idle_allows_terminal_run_boundary() -> None:
         pending_scheduling_modes=set(),
     )
 
-    marked_idle = await service.mark_session_idle("session-001")
+    marked_idle = await service.mark_session_idle("session-001", owner_generation=0)
 
     assert marked_idle
     assert agent_session_repository.idle_session_ids == ["session-001"]
@@ -382,7 +425,7 @@ async def test_mark_session_idle_propagates_db_failure() -> None:
     )
 
     with pytest.raises(RuntimeError, match="database unavailable"):
-        await service.mark_session_idle("session-001")
+        await service.mark_session_idle("session-001", owner_generation=0)
 
 
 @pytest.mark.asyncio
@@ -399,11 +442,59 @@ async def test_terminal_update_rejects_cross_session_run() -> None:
     with pytest.raises(ValueError, match="AgentRun session mismatch"):
         await service.mark_agent_run_terminal_if_running(
             "session-001",
+            owner_generation=0,
             run_id=run.id,
             status=AgentRunStatus.STOPPED,
         )
 
     assert agent_run_repository.terminal_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_terminal_update_rejects_superseded_owner_generation() -> None:
+    """A stale Worker cannot terminate the current owner's running Run."""
+    run = _running_run()
+    agent_run_repository = _AgentRunRepository(run)
+    service = _service(
+        agent_run_repository=agent_run_repository,
+        agent_session_repository=_AgentSessionRepository(owner_generation=2),
+        pending_scheduling_modes=set(),
+    )
+
+    with pytest.raises(ValueError, match="owner generation is stale"):
+        await service.mark_agent_run_terminal_if_running(
+            "session-001",
+            owner_generation=1,
+            run_id=run.id,
+            status=AgentRunStatus.FAILED,
+        )
+
+    assert agent_run_repository.terminal_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_validate_pending_command_rejects_changed_command_identity() -> None:
+    """A snapshot command cannot be replaced before execution."""
+    service = _service(
+        agent_run_repository=_AgentRunRepository(None),
+        agent_session_repository=_AgentSessionRepository(
+            pending_command_id="command-new"
+        ),
+        pending_scheduling_modes=set(),
+    )
+
+    with pytest.raises(ValueError, match="pending command changed"):
+        await service.validate_pending_command(
+            "session-001",
+            owner_generation=0,
+            command=PendingCommandSnapshot(
+                id="command-old",
+                name="compact",
+                payload={},
+                requester_user_id=None,
+                created_at=datetime(2026, 7, 24, tzinfo=UTC),
+            ),
+        )
 
 
 @pytest.mark.asyncio
@@ -422,6 +513,7 @@ async def test_activate_pending_sets_initial_phase_before_commit() -> None:
 
     run = await service.activate_pending_agent_run(
         "session-001",
+        owner_generation=0,
         run_id=activated_run.id,
         initial_phase=AgentRunPhase.COMPACTING,
     )
@@ -450,6 +542,7 @@ async def test_activate_pending_rejects_session_mismatch() -> None:
     with pytest.raises(ValueError, match="AgentRun session mismatch"):
         await service.activate_pending_agent_run(
             "session-001",
+            owner_generation=0,
             run_id=activated_run.id,
             initial_phase=AgentRunPhase.COMPACTING,
         )

@@ -5,7 +5,6 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 
-from azents.broker.types import SessionWakeUp
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import (
     SHUTDOWN_CANCEL_MESSAGE,
@@ -13,11 +12,11 @@ from azents.engine.run.types import (
     CheckStop,
     PollMessages,
 )
-from azents.repos.agent_session.data import PendingSessionCommand
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.contracts import PrepareToolkits
+from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshot
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
@@ -128,29 +127,26 @@ class RunTaskSupervisor:
 
     async def run(
         self,
-        message: SessionWakeUp,
+        snapshot: CanonicalExecutionSnapshot,
         *,
         poll_fn: PollMessages,
         check_stop: CheckStop,
         prepare_toolkits: PrepareToolkits,
         drain_stop_signals: Callable[[], None],
-        owner_generation: int,
         model_transport_state: ModelTransportState,
-        command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Create engine execution task and apply stop/shutdown policy."""
         engine_task: asyncio.Task[RunExecutionResult] = asyncio.create_task(
             self.run_executor.execute(
-                message,
+                snapshot,
                 poll_fn=poll_fn,
                 check_stop=check_stop,
                 prepare_toolkits=prepare_toolkits,
                 shutdown_event=self.shutdown_event,
                 dispatch_event=self.event_publisher.dispatch_event,
-                owner_generation=owner_generation,
+                owner_generation=snapshot.owner_generation,
                 tool_admission_barrier=self.stop_controller.tool_admission_barrier,
                 model_transport_state=model_transport_state,
-                command=command,
             )
         )
         self.stop_controller.register_active_task(engine_task)
@@ -168,7 +164,7 @@ class RunTaskSupervisor:
 
         explicit_stop_waiter = asyncio.create_task(
             self._wait_for_explicit_stop(
-                message.session_id,
+                snapshot.session_id,
                 drain_stop_signals=drain_stop_signals,
             )
         )
@@ -182,7 +178,8 @@ class RunTaskSupervisor:
             if engine_task in done:
                 if engine_task.cancelled() and self.stop_controller.user_stop_requested:
                     await self.user_stop_finalizer.finalize(
-                        message.session_id,
+                        snapshot.session_id,
+                        owner_generation=snapshot.owner_generation,
                         run_id=None,
                         active_tool_calls=[],
                     )
@@ -195,10 +192,11 @@ class RunTaskSupervisor:
             if explicit_stop_waiter in done:
                 logger.info(
                     "Explicit stop detected during engine run, canceling",
-                    extra={"session_id": message.session_id},
+                    extra={"session_id": snapshot.session_id},
                 )
                 await self.user_stop_finalizer.finalize(
-                    message.session_id,
+                    snapshot.session_id,
+                    owner_generation=snapshot.owner_generation,
                     run_id=None,
                     active_tool_calls=[],
                 )
@@ -209,7 +207,7 @@ class RunTaskSupervisor:
             logger.info(
                 "Shutdown detected during engine run, applying timeout",
                 extra={
-                    "session_id": message.session_id,
+                    "session_id": snapshot.session_id,
                     "timeout": _SHUTDOWN_TIMEOUT,
                 },
             )

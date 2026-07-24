@@ -9,13 +9,11 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionBroker
 from azents.core.enums import AgentRunStatus, EventKind
 from azents.engine.events.engine_events import RunStopped
 from azents.engine.events.tool_calls import finalize_tool_result
 from azents.engine.events.types import (
     ActiveToolCall,
-    AgentRunState,
     AssistantMessagePayload,
     ClientToolCallPayload,
     ClientToolResultPayload,
@@ -30,9 +28,10 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.services.chat.live_events import RedisLiveEventStore
-from azents.worker.deps import get_live_event_store, get_worker_broker
+from azents.worker.deps import get_live_event_store
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
+from azents.worker.session.lifecycle import SessionLifecycleService
 
 SessionManagerFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -60,18 +59,24 @@ class UserStopFinalizer:
     live_event_store: Annotated[RedisLiveEventStore, Depends(get_live_event_store)]
     live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
     event_publisher: Annotated[WorkerEventPublisher, Depends(WorkerEventPublisher)]
-    broker: Annotated[SessionBroker, Depends(get_worker_broker)]
+    session_lifecycle: Annotated[
+        SessionLifecycleService, Depends(SessionLifecycleService)
+    ]
 
     async def finalize(
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
     ) -> None:
         """Immediately clean run observation state as terminal after User stop."""
         del active_tool_calls
-        running_run = await self._get_running_agent_run(session_id)
+        running_run = await self.session_lifecycle.get_running_agent_run(
+            session_id,
+            owner_generation=owner_generation,
+        )
         effective_run_id = run_id or (
             running_run.id if running_run is not None else None
         )
@@ -81,6 +86,7 @@ class UserStopFinalizer:
         await self.live_event_projector.flush_session(session_id)
         await self._persist_live_events_for_user_stop(
             session_id,
+            owner_generation=owner_generation,
             run_id=effective_run_id,
             active_tool_calls=effective_tool_calls,
         )
@@ -92,17 +98,20 @@ class UserStopFinalizer:
         if effective_run_id is None:
             await self._mark_session_agent_runs_terminal(
                 session_id,
+                owner_generation=owner_generation,
                 status=AgentRunStatus.STOPPED,
             )
         else:
             await self._mark_agent_run_terminal_if_running(
                 session_id,
+                owner_generation=owner_generation,
                 run_id=effective_run_id,
                 status=AgentRunStatus.STOPPED,
             )
             durable_events = await self._append_user_stop_events(
                 session_id,
-                effective_run_id,
+                owner_generation=owner_generation,
+                run_id=effective_run_id,
             )
             await self.event_publisher.dispatch_event(
                 session_id,
@@ -116,22 +125,30 @@ class UserStopFinalizer:
                 session_id,
                 RunStopped(run_id=effective_run_id),
             )
-        await self._clear_stop_request(session_id)
-        await self.broker.clear_session_activity(session_id)
+        await self._clear_stop_request(
+            session_id,
+            owner_generation=owner_generation,
+        )
 
     async def record_interrupted_run(
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
     ) -> None:
         """Record and publish durable User stop history after terminal state."""
         await self._mark_agent_run_terminal_if_running(
             session_id,
+            owner_generation=owner_generation,
             run_id=run_id,
             status=AgentRunStatus.STOPPED,
         )
-        durable_events = await self._append_user_stop_events(session_id, run_id)
+        durable_events = await self._append_user_stop_events(
+            session_id,
+            owner_generation=owner_generation,
+            run_id=run_id,
+        )
         await self.event_publisher.dispatch_event(
             session_id,
             durable_events.interrupted,
@@ -144,31 +161,29 @@ class UserStopFinalizer:
             session_id,
             RunStopped(run_id=run_id),
         )
-        await self._clear_stop_request(session_id)
-
-    async def _get_running_agent_run(
-        self,
-        session_id: str,
-    ) -> AgentRunState | None:
-        """Fetch current running AgentRun projection."""
-        async with self.session_manager() as db_session:
-            return await self.agent_run_repository.get_running_by_session_id(
-                db_session,
-                session_id=session_id,
-            )
+        await self._clear_stop_request(
+            session_id,
+            owner_generation=owner_generation,
+        )
 
     async def _persist_live_events_for_user_stop(
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
     ) -> None:
         """Promote live projection to durable history on Stop critical path."""
         live_events = await self.live_event_store.list_by_session_id(session_id)
-        await self._append_live_partial_events(session_id, live_events)
+        await self._append_live_partial_events(
+            session_id,
+            owner_generation=owner_generation,
+            live_events=live_events,
+        )
         await self._append_cancelled_tool_results(
             session_id,
+            owner_generation=owner_generation,
             run_id=run_id,
             active_tool_calls=active_tool_calls,
         )
@@ -177,6 +192,8 @@ class UserStopFinalizer:
     async def _append_live_partial_events(
         self,
         session_id: str,
+        *,
+        owner_generation: int,
         live_events: Sequence[Event],
     ) -> None:
         """Append live assistant/reasoning projection to durable history."""
@@ -189,6 +206,11 @@ class UserStopFinalizer:
             return
 
         async def append(db_session: AsyncSession) -> None:
+            await self.session_lifecycle.assert_owner_generation(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
             for event in appendable:
                 get_by_external_id = self.event_transcript_repository.get_by_external_id
                 existing = await get_by_external_id(
@@ -221,6 +243,8 @@ class UserStopFinalizer:
     async def _append_user_stop_events(
         self,
         session_id: str,
+        *,
+        owner_generation: int,
         run_id: str,
     ) -> UserStopDurableEvents:
         """Record User stop event and run marker to durable history."""
@@ -228,6 +252,11 @@ class UserStopFinalizer:
         marker_external_id = f"run-marker:{run_id}:interrupted"
 
         async with self.session_manager() as db_session:
+            await self.session_lifecycle.assert_owner_generation(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
             interrupted_payload = InterruptedPayload(
                 run_id=run_id,
                 reason="user_requested",
@@ -259,10 +288,20 @@ class UserStopFinalizer:
             run_marker=run_marker,
         )
 
-    async def _clear_stop_request(self, session_id: str) -> None:
+    async def _clear_stop_request(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
         """Remove consumed durable stop intent."""
 
         async def clear(db_session: AsyncSession) -> None:
+            await self.session_lifecycle.assert_owner_generation(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
             await self.agent_session_repository.clear_stop_request(
                 db_session,
                 session_id=session_id,
@@ -274,6 +313,7 @@ class UserStopFinalizer:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
     ) -> None:
@@ -285,6 +325,11 @@ class UserStopFinalizer:
             raise RuntimeError("Active tool calls require a running AgentRun")
 
         async def append(db_session: AsyncSession) -> None:
+            await self.session_lifecycle.assert_owner_generation(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
             for call in calls_by_id.values():
                 payload = ClientToolResultPayload(
                     call_id=call.call_id,
@@ -329,28 +374,42 @@ class UserStopFinalizer:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         status: AgentRunStatus,
     ) -> None:
         """Close remaining running AgentRun projections when session is idle."""
-        await self._run_short_db(
-            lambda db: self.agent_run_repository.mark_session_running_terminal(
-                db,
+
+        async def mark_terminal(db_session: AsyncSession) -> None:
+            await self.session_lifecycle.assert_owner_generation(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
+            await self.agent_run_repository.mark_session_running_terminal(
+                db_session,
                 session_id=session_id,
                 status=status,
                 ended_at=datetime.datetime.now(datetime.UTC),
             )
-        )
+
+        await self._run_short_db(mark_terminal)
 
     async def _mark_agent_run_terminal_if_running(
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         status: AgentRunStatus,
     ) -> None:
         """Close AgentRun row as terminal state if still running."""
 
         async def mark_terminal(db_session: AsyncSession) -> None:
+            await self.session_lifecycle.assert_owner_generation(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
             run = await self.agent_run_repository.get_by_id(db_session, run_id)
             if run is not None and run.session_id != session_id:
                 raise ValueError("AgentRun session mismatch")
