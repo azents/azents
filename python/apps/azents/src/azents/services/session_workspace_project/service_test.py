@@ -29,8 +29,9 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.runtime.control_protocol.runner_operations import (
-    RuntimeFileListResult,
+    RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
+    RuntimeRunnerOperationFailedError,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
 
@@ -67,24 +68,54 @@ class _RuntimeFixture:
 class _FakeRunnerOperations(RuntimeRunnerOperationClient):
     """Runner operation fake for tests."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        kind: str = "directory",
+        error_code: str | None = None,
+    ) -> None:
+        self.kind = kind
+        self.error_code = error_code
         self.paths: list[str] = []
 
-    async def list_files(
+    async def stat_file(
         self,
         *,
         runtime_id: str,
         runner_generation: int,
-        owner_session_id: str | None = None,
+        owner_session_id: str | None,
         path: str,
-        recursive: bool = False,
-        exclude_patterns: list[str] | None = None,
         deadline_at: datetime.datetime,
-    ) -> RuntimeFileListResult:
-        """Treat Directory existence check as success."""
-        del runtime_id, runner_generation, recursive, exclude_patterns, deadline_at
+    ) -> RuntimeFileStatResult:
+        """Return one configured Runtime path outcome."""
+        del runtime_id, runner_generation, owner_session_id, deadline_at
         self.paths.append(path)
-        return RuntimeFileListResult(entries=(), final_cursor="0")
+        if self.error_code is not None:
+            raise RuntimeRunnerOperationFailedError(
+                "Runtime stat failed.",
+                code=self.error_code,
+            )
+        if self.kind == "file":
+            return RuntimeFileStatResult(
+                path=path,
+                kind="file",
+                size_bytes=1,
+                symlink=False,
+                real_path=None,
+                resolved_kind="file",
+                modified_at=None,
+                final_cursor="0",
+            )
+        return RuntimeFileStatResult(
+            path=path,
+            kind="directory",
+            size_bytes=None,
+            symlink=False,
+            real_path=None,
+            resolved_kind="directory",
+            modified_at=None,
+            final_cursor="0",
+        )
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -340,6 +371,78 @@ class TestSessionWorkspaceProjectService:
         assert catalog_entries[0].status == AgentProjectCatalogStatus.AVAILABLE
         assert catalog_entries[0].checked_at is not None
         assert runner_operations.paths == ["/workspace/agent/app"]
+
+    async def test_register_existing_folder_rejects_non_directory(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Session registration shares strict Runtime directory semantics."""
+        workspace_id = await _create_workspace(rdb_session, "swp-svc-register-file")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-svc-register-file",
+        )
+        user_id = await _create_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            email="swp-svc-register-file@example.com",
+        )
+        runtime = await rdb_session.get(RDBAgentRuntime, fixture.runtime_id)
+        assert runtime is not None
+        runtime.runner_state = RuntimeRunnerState.READY
+        service = _service(
+            rdb_session,
+            runner_operations=_FakeRunnerOperations(kind="file"),
+        )
+
+        result = await service.register_existing_folder_for_session(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            user_id=user_id,
+            path="/workspace/agent/file",
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, InvalidProjectPath)
+        assert result.error.reason == "Project path must be a runtime directory."
+
+    async def test_register_existing_folder_preserves_timeout_error_contract(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Session registration maps shared unavailability to its existing error."""
+        workspace_id = await _create_workspace(rdb_session, "swp-svc-register-timeout")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-svc-register-timeout",
+        )
+        user_id = await _create_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            email="swp-svc-register-timeout@example.com",
+        )
+        runtime = await rdb_session.get(RDBAgentRuntime, fixture.runtime_id)
+        assert runtime is not None
+        runtime.runner_state = RuntimeRunnerState.READY
+        service = _service(
+            rdb_session,
+            runner_operations=_FakeRunnerOperations(
+                error_code="operation_timeout",
+            ),
+        )
+
+        result = await service.register_existing_folder_for_session(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            user_id=user_id,
+            path="/workspace/agent/app",
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, InvalidProjectPath)
+        assert result.error.reason == (
+            "Project path can only be approved from a ready runtime."
+        )
 
     async def test_list_projects_for_session_requires_matching_agent(
         self, rdb_session: AsyncSession

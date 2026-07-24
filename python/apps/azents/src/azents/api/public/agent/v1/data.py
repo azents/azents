@@ -1,7 +1,7 @@
 """Agent v1 Public API data models."""
 
 import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 from typing_extensions import Self, TypedDict
@@ -15,6 +15,7 @@ from azents.core.agent import (
     SubagentSettings,
 )
 from azents.core.enums import AgentType
+from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
 from azents.repos.memory.data import MemoryScope
 from azents.services.agent.data import (
     AgentAdminOutput,
@@ -89,6 +90,83 @@ class AgentListResponse(BaseModel):
     """Agent list response."""
 
     items: list[AgentResponse]
+
+
+class AutomaticSessionProjectsResponse(BaseModel):
+    """Ordered Agent automatic-Session Project policy response."""
+
+    revision: int = Field(ge=1, description="Optimistic policy revision")
+    project_paths: list[str] = Field(
+        description="Ordered normalized existing Project paths"
+    )
+    updated_at: datetime.datetime = Field(description="Last policy update time")
+
+    @classmethod
+    def convert_from(cls, data: AgentAutomaticProjectPolicy) -> Self:
+        """Convert a policy repository snapshot to an API response."""
+        return cls(
+            revision=data.revision,
+            project_paths=list(data.project_paths),
+            updated_at=data.updated_at,
+        )
+
+
+class AutomaticSessionProjectsReplaceRequest(BaseModel):
+    """Complete replacement request for automatic-Session Project paths."""
+
+    expected_revision: int = Field(
+        ge=1,
+        description="Revision that must match before replacing the policy",
+    )
+    project_paths: list[str] = Field(
+        description="Ordered existing Project paths; empty clears the policy"
+    )
+
+
+class AutomaticSessionProjectsMessageErrorResponse(BaseModel):
+    """FastAPI error envelope containing a user-facing message."""
+
+    detail: str
+
+
+class AutomaticSessionProjectsInvalidPathDetail(BaseModel):
+    """Invalid automatic Session Project path detail."""
+
+    message: str
+    path: str
+
+
+class AutomaticSessionProjectsInvalidPathErrorResponse(BaseModel):
+    """FastAPI error envelope for an invalid Project path."""
+
+    detail: AutomaticSessionProjectsInvalidPathDetail
+
+
+class AutomaticSessionProjectsRevisionConflictDetail(BaseModel):
+    """Stable optimistic policy revision conflict detail."""
+
+    code: Literal["automatic_session_projects_revision_conflict"]
+    message: str
+
+
+class AutomaticSessionProjectsRuntimeUnavailableDetail(BaseModel):
+    """Stable Runtime-unavailable policy conflict detail."""
+
+    code: Literal["automatic_session_projects_runtime_unavailable"]
+    message: str
+
+
+AutomaticSessionProjectsConflictDetail = Annotated[
+    AutomaticSessionProjectsRevisionConflictDetail
+    | AutomaticSessionProjectsRuntimeUnavailableDetail,
+    Field(discriminator="code"),
+]
+
+
+class AutomaticSessionProjectsConflictErrorResponse(BaseModel):
+    """FastAPI error envelope for an automatic Project policy conflict."""
+
+    detail: AutomaticSessionProjectsConflictDetail
 
 
 class AgentDecommissionResponse(BaseModel):

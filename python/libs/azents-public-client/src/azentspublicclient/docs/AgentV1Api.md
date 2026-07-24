@@ -12,11 +12,13 @@ Method | HTTP request | Description
 [**agent_v1_finalize_avatar**](AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 [**agent_v1_get_agent**](AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
 [**agent_v1_get_agent_memory**](AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
+[**agent_v1_get_automatic_session_projects**](AgentV1Api.md#agent_v1_get_automatic_session_projects) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Get Automatic Session Projects
 [**agent_v1_list_agent_admins**](AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
 [**agent_v1_list_agent_memories**](AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
 [**agent_v1_list_agents**](AgentV1Api.md#agent_v1_list_agents) | **GET** /agent/v1/workspaces/{handle}/agents | List Agents
 [**agent_v1_remove_agent_admin**](AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
 [**agent_v1_remove_avatar**](AgentV1Api.md#agent_v1_remove_avatar) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar | Remove Avatar
+[**agent_v1_replace_automatic_session_projects**](AgentV1Api.md#agent_v1_replace_automatic_session_projects) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Replace Automatic Session Projects
 [**agent_v1_request_avatar_upload**](AgentV1Api.md#agent_v1_request_avatar_upload) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/upload-url | Request Avatar Upload
 [**agent_v1_update_agent**](AgentV1Api.md#agent_v1_update_agent) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id} | Update Agent
 [**agent_v1_update_agent_memory**](AgentV1Api.md#agent_v1_update_agent_memory) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Update Agent Memory
@@ -695,6 +697,89 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **agent_v1_get_automatic_session_projects**
+> AutomaticSessionProjectsResponse agent_v1_get_automatic_session_projects(agent_id, handle)
+
+Get Automatic Session Projects
+
+Return the AgentAdmin-managed Project policy for automatic root Sessions.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.automatic_session_projects_response import AutomaticSessionProjectsResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+
+    try:
+        # Get Automatic Session Projects
+        api_response = api_instance.agent_v1_get_automatic_session_projects(agent_id, handle)
+        print("The response of AgentV1Api->agent_v1_get_automatic_session_projects:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_get_automatic_session_projects: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+
+### Return type
+
+[**AutomaticSessionProjectsResponse**](AutomaticSessionProjectsResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**403** | The caller is not an AgentAdmin. |  -  |
+**404** | The Agent or policy was not found. |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **agent_v1_list_agent_admins**
 > AgentAdminListResponse agent_v1_list_agent_admins(agent_id, handle)
 
@@ -1115,6 +1200,94 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_v1_replace_automatic_session_projects**
+> AutomaticSessionProjectsResponse agent_v1_replace_automatic_session_projects(agent_id, handle, automatic_session_projects_replace_request)
+
+Replace Automatic Session Projects
+
+Replace the complete AgentAdmin-managed automatic Session Project policy.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.automatic_session_projects_replace_request import AutomaticSessionProjectsReplaceRequest
+from azentspublicclient.models.automatic_session_projects_response import AutomaticSessionProjectsResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    automatic_session_projects_replace_request = azentspublicclient.AutomaticSessionProjectsReplaceRequest() # AutomaticSessionProjectsReplaceRequest | 
+
+    try:
+        # Replace Automatic Session Projects
+        api_response = api_instance.agent_v1_replace_automatic_session_projects(agent_id, handle, automatic_session_projects_replace_request)
+        print("The response of AgentV1Api->agent_v1_replace_automatic_session_projects:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_replace_automatic_session_projects: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **automatic_session_projects_replace_request** | [**AutomaticSessionProjectsReplaceRequest**](AutomaticSessionProjectsReplaceRequest.md)|  | 
+
+### Return type
+
+[**AutomaticSessionProjectsResponse**](AutomaticSessionProjectsResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**400** | A submitted Project path is invalid. |  -  |
+**403** | The caller is not an AgentAdmin. |  -  |
+**404** | The Agent or policy was not found. |  -  |
+**409** | The policy revision is stale or Runtime validation is unavailable. |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

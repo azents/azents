@@ -88,11 +88,13 @@ Class | Method | HTTP request | Description
 *AgentV1Api* | [**agent_v1_finalize_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 *AgentV1Api* | [**agent_v1_get_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
 *AgentV1Api* | [**agent_v1_get_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
+*AgentV1Api* | [**agent_v1_get_automatic_session_projects**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_automatic_session_projects) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Get Automatic Session Projects
 *AgentV1Api* | [**agent_v1_list_agent_admins**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
 *AgentV1Api* | [**agent_v1_list_agent_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
 *AgentV1Api* | [**agent_v1_list_agents**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agents) | **GET** /agent/v1/workspaces/{handle}/agents | List Agents
 *AgentV1Api* | [**agent_v1_remove_agent_admin**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
 *AgentV1Api* | [**agent_v1_remove_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_avatar) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar | Remove Avatar
+*AgentV1Api* | [**agent_v1_replace_automatic_session_projects**](azentspublicclient/docs/AgentV1Api.md#agent_v1_replace_automatic_session_projects) | **PUT** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Replace Automatic Session Projects
 *AgentV1Api* | [**agent_v1_request_avatar_upload**](azentspublicclient/docs/AgentV1Api.md#agent_v1_request_avatar_upload) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/upload-url | Request Avatar Upload
 *AgentV1Api* | [**agent_v1_update_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_update_agent) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id} | Update Agent
 *AgentV1Api* | [**agent_v1_update_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_update_agent_memory) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Update Agent Memory
@@ -316,6 +318,14 @@ Class | Method | HTTP request | Description
  - [ApiKeySecrets](azentspublicclient/docs/ApiKeySecrets.md)
  - [AppliedInferenceProfile](azentspublicclient/docs/AppliedInferenceProfile.md)
  - [AuthMethod](azentspublicclient/docs/AuthMethod.md)
+ - [AutomaticSessionProjectsConflictErrorResponse](azentspublicclient/docs/AutomaticSessionProjectsConflictErrorResponse.md)
+ - [AutomaticSessionProjectsInvalidPathDetail](azentspublicclient/docs/AutomaticSessionProjectsInvalidPathDetail.md)
+ - [AutomaticSessionProjectsInvalidPathErrorResponse](azentspublicclient/docs/AutomaticSessionProjectsInvalidPathErrorResponse.md)
+ - [AutomaticSessionProjectsMessageErrorResponse](azentspublicclient/docs/AutomaticSessionProjectsMessageErrorResponse.md)
+ - [AutomaticSessionProjectsReplaceRequest](azentspublicclient/docs/AutomaticSessionProjectsReplaceRequest.md)
+ - [AutomaticSessionProjectsResponse](azentspublicclient/docs/AutomaticSessionProjectsResponse.md)
+ - [AutomaticSessionProjectsRevisionConflictDetail](azentspublicclient/docs/AutomaticSessionProjectsRevisionConflictDetail.md)
+ - [AutomaticSessionProjectsRuntimeUnavailableDetail](azentspublicclient/docs/AutomaticSessionProjectsRuntimeUnavailableDetail.md)
  - [AvatarFinalizeRequest](azentspublicclient/docs/AvatarFinalizeRequest.md)
  - [AvatarUploadRequest](azentspublicclient/docs/AvatarUploadRequest.md)
  - [AvatarUploadTicketResponse](azentspublicclient/docs/AvatarUploadTicketResponse.md)
@@ -350,6 +360,7 @@ Class | Method | HTTP request | Description
  - [CreateWorkspaceRequest](azentspublicclient/docs/CreateWorkspaceRequest.md)
  - [CreateWorkspaceResponse](azentspublicclient/docs/CreateWorkspaceResponse.md)
  - [CurrentMemberResponse](azentspublicclient/docs/CurrentMemberResponse.md)
+ - [Detail](azentspublicclient/docs/Detail.md)
  - [ElevateResponse](azentspublicclient/docs/ElevateResponse.md)
  - [ElevateWithEmailRequest](azentspublicclient/docs/ElevateWithEmailRequest.md)
  - [ElevateWithPasswordRequest](azentspublicclient/docs/ElevateWithPasswordRequest.md)

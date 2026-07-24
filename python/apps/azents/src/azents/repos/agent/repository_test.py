@@ -10,6 +10,9 @@ from azents.core.agent import (
     SelectableModelOption,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_automatic_project_setting import (
+    RDBAgentAutomaticProjectSetting,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -73,6 +76,24 @@ async def test_create_maps_explicit_tool_search_opt_out_to_rdb_agent() -> None:
     rdb_agent = session.add.call_args.args[0]
     assert isinstance(rdb_agent, RDBAgent)
     assert rdb_agent.tool_search_enabled is False
+
+
+async def test_create_adds_initial_empty_automatic_project_policy() -> None:
+    """Persist revision-one policy settings after inserting the Agent row."""
+    session = AsyncMock(spec=AsyncSession)
+    session.flush.side_effect = [None, _StopAfterWrite]
+
+    with pytest.raises(_StopAfterWrite):
+        await AgentRepository().create(
+            session,
+            _agent_create(),
+        )
+
+    policy_setting = session.add.call_args_list[1].args[0]
+    assert isinstance(policy_setting, RDBAgentAutomaticProjectSetting)
+    assert policy_setting.agent_id == session.add.call_args_list[0].args[0].id
+    assert policy_setting.revision == 1
+    assert policy_setting.updated_by_workspace_user_id is None
 
 
 async def test_update_maps_tool_search_enabled_to_update_statement() -> None:

@@ -116,6 +116,14 @@ __all__ = [
     "ApiKeySecrets",
     "AppliedInferenceProfile",
     "AuthMethod",
+    "AutomaticSessionProjectsConflictErrorResponse",
+    "AutomaticSessionProjectsInvalidPathDetail",
+    "AutomaticSessionProjectsInvalidPathErrorResponse",
+    "AutomaticSessionProjectsMessageErrorResponse",
+    "AutomaticSessionProjectsReplaceRequest",
+    "AutomaticSessionProjectsResponse",
+    "AutomaticSessionProjectsRevisionConflictDetail",
+    "AutomaticSessionProjectsRuntimeUnavailableDetail",
     "AvatarFinalizeRequest",
     "AvatarUploadRequest",
     "AvatarUploadTicketResponse",
@@ -150,6 +158,7 @@ __all__ = [
     "CreateWorkspaceRequest",
     "CreateWorkspaceResponse",
     "CurrentMemberResponse",
+    "Detail",
     "ElevateResponse",
     "ElevateWithEmailRequest",
     "ElevateWithPasswordRequest",
@@ -477,6 +486,14 @@ from azentspublicclient.models.agent_workspace_unavailable_access_response impor
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets as ApiKeySecrets
 from azentspublicclient.models.applied_inference_profile import AppliedInferenceProfile as AppliedInferenceProfile
 from azentspublicclient.models.auth_method import AuthMethod as AuthMethod
+from azentspublicclient.models.automatic_session_projects_conflict_error_response import AutomaticSessionProjectsConflictErrorResponse as AutomaticSessionProjectsConflictErrorResponse
+from azentspublicclient.models.automatic_session_projects_invalid_path_detail import AutomaticSessionProjectsInvalidPathDetail as AutomaticSessionProjectsInvalidPathDetail
+from azentspublicclient.models.automatic_session_projects_invalid_path_error_response import AutomaticSessionProjectsInvalidPathErrorResponse as AutomaticSessionProjectsInvalidPathErrorResponse
+from azentspublicclient.models.automatic_session_projects_message_error_response import AutomaticSessionProjectsMessageErrorResponse as AutomaticSessionProjectsMessageErrorResponse
+from azentspublicclient.models.automatic_session_projects_replace_request import AutomaticSessionProjectsReplaceRequest as AutomaticSessionProjectsReplaceRequest
+from azentspublicclient.models.automatic_session_projects_response import AutomaticSessionProjectsResponse as AutomaticSessionProjectsResponse
+from azentspublicclient.models.automatic_session_projects_revision_conflict_detail import AutomaticSessionProjectsRevisionConflictDetail as AutomaticSessionProjectsRevisionConflictDetail
+from azentspublicclient.models.automatic_session_projects_runtime_unavailable_detail import AutomaticSessionProjectsRuntimeUnavailableDetail as AutomaticSessionProjectsRuntimeUnavailableDetail
 from azentspublicclient.models.avatar_finalize_request import AvatarFinalizeRequest as AvatarFinalizeRequest
 from azentspublicclient.models.avatar_upload_request import AvatarUploadRequest as AvatarUploadRequest
 from azentspublicclient.models.avatar_upload_ticket_response import AvatarUploadTicketResponse as AvatarUploadTicketResponse
@@ -511,6 +528,7 @@ from azentspublicclient.models.create_join_request_request import CreateJoinRequ
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest as CreateWorkspaceRequest
 from azentspublicclient.models.create_workspace_response import CreateWorkspaceResponse as CreateWorkspaceResponse
 from azentspublicclient.models.current_member_response import CurrentMemberResponse as CurrentMemberResponse
+from azentspublicclient.models.detail import Detail as Detail
 from azentspublicclient.models.elevate_response import ElevateResponse as ElevateResponse
 from azentspublicclient.models.elevate_with_email_request import ElevateWithEmailRequest as ElevateWithEmailRequest
 from azentspublicclient.models.elevate_with_password_request import ElevateWithPasswordRequest as ElevateWithPasswordRequest
