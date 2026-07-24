@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, workspace, toolkit]
 code_paths:
+  - python/apps/azents/db-schemas/rdb/migrations/versions/374a722fb9ee_add_exchange_file_provenance.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/8fae7b9ab00a_add_model_file_run_lineage.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py

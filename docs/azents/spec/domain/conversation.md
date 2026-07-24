@@ -19,6 +19,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/scheduler.py
   - python/apps/azents/src/azents/worker/live/**
+  - python/apps/azents/src/azents/broker/types.py
+  - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_session_unread_run.py
   - python/apps/azents/src/azents/rdb/models/session_agent.py
