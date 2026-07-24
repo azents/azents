@@ -7,7 +7,6 @@ import re
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
-from urllib.parse import urlsplit
 
 import httpx
 
@@ -27,7 +26,10 @@ from azents.services.external_channel.slack_blocks import (
     projected_slack_blocks_text,
     slack_blocks_text,
 )
-from azents.services.external_channel.slack_endpoint import slack_api_base_url
+from azents.services.external_channel.slack_endpoint import (
+    slack_api_base_url,
+    slack_file_url_allowed,
+)
 
 _MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
 _MAX_ATTACHMENT_TYPES = 32
@@ -567,12 +569,10 @@ class SlackConversationClient:
         private_url = _optional_string(raw_file, "url_private_download")
         if private_url is None:
             private_url = _optional_string(raw_file, "url_private")
-        if private_url is not None:
-            parsed = urlsplit(private_url)
-            if parsed.scheme != "https" or not parsed.netloc:
-                raise SlackProviderTemporaryError(
-                    "Slack returned an invalid private file URL."
-                )
+        if private_url is not None and not slack_file_url_allowed(private_url):
+            raise SlackProviderTemporaryError(
+                "Slack returned an invalid private file URL."
+            )
         return SlackFileDownloadInfo(
             metadata=metadata,
             private_url=private_url,
@@ -586,8 +586,7 @@ class SlackConversationClient:
         max_bytes: int,
     ) -> bytes:
         """Read one authenticated private file while enforcing an actual-byte cap."""
-        parsed = urlsplit(private_url)
-        if parsed.scheme != "https" or not parsed.netloc:
+        if not slack_file_url_allowed(private_url):
             raise SlackProviderTemporaryError(
                 "Slack returned an invalid private file URL."
             )
@@ -824,8 +823,7 @@ class SlackConversationClient:
                             "Slack did not return a valid file upload target."
                         ),
                     )
-                parsed_upload_url = urlsplit(upload_url)
-                if parsed_upload_url.scheme != "https" or not parsed_upload_url.netloc:
+                if not slack_file_url_allowed(upload_url):
                     return SlackControlMessageResult(
                         status="unknown",
                         provider_message_key=None,

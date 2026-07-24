@@ -107,9 +107,11 @@ Class | Method | HTTP request | Description
 *SystemSettingsV1Api* | [**system_settings_v1_cancel_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_cancel_platform_github_app_candidate) | **DELETE** /system-setting/v1/sections/platform-github-app/candidate | Cancel Platform Github App Candidate
 *SystemSettingsV1Api* | [**system_settings_v1_check_platform_github_app_health**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_check_platform_github_app_health) | **POST** /system-setting/v1/sections/platform-github-app/health-check | Check Platform Github App Health
 *SystemSettingsV1Api* | [**system_settings_v1_confirm_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_confirm_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/confirm | Confirm Platform Github App Candidate
+*SystemSettingsV1Api* | [**system_settings_v1_get_external_channel_files_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_external_channel_files_setting) | **GET** /system-setting/v1/sections/external-channel-files | Get External Channel Files Setting
 *SystemSettingsV1Api* | [**system_settings_v1_get_platform_github_app_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_platform_github_app_setting) | **GET** /system-setting/v1/sections/platform-github-app | Get Platform Github App Setting
 *SystemSettingsV1Api* | [**system_settings_v1_list_system_setting_audit_events**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_list_system_setting_audit_events) | **GET** /system-setting/v1/audit-events | List System Setting Audit Events
 *SystemSettingsV1Api* | [**system_settings_v1_list_system_setting_sections**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_list_system_setting_sections) | **GET** /system-setting/v1/sections | List System Setting Sections
+*SystemSettingsV1Api* | [**system_settings_v1_patch_external_channel_files_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_external_channel_files_setting) | **PATCH** /system-setting/v1/sections/external-channel-files | Patch External Channel Files Setting
 *SystemSettingsV1Api* | [**system_settings_v1_patch_platform_github_app_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_platform_github_app_setting) | **PATCH** /system-setting/v1/sections/platform-github-app | Patch Platform Github App Setting
 *SystemSettingsV1Api* | [**system_settings_v1_validate_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_validate_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/validate | Validate Platform Github App Candidate
 *SystemV1Api* | [**system_v1_get_archive_retention_application**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_archive_retention_application) | **GET** /system/v1/settings/file-lifecycle/retention-applications/{application_id} | Get Archive Retention Application
@@ -154,6 +156,8 @@ Class | Method | HTTP request | Description
  - [EmailVerificationListResponse](azentsadminclient/docs/EmailVerificationListResponse.md)
  - [EmailVerificationResponse](azentsadminclient/docs/EmailVerificationResponse.md)
  - [ErrorLevel](azentsadminclient/docs/ErrorLevel.md)
+ - [ExternalChannelFilesDetailResponse](azentsadminclient/docs/ExternalChannelFilesDetailResponse.md)
+ - [ExternalChannelFilesPatchRequest](azentsadminclient/docs/ExternalChannelFilesPatchRequest.md)
  - [FileLifecycleSettingsResponse](azentsadminclient/docs/FileLifecycleSettingsResponse.md)
  - [FileLifecycleSettingsUpdateRequest](azentsadminclient/docs/FileLifecycleSettingsUpdateRequest.md)
  - [FileLifecycleSettingsUpdateResponse](azentsadminclient/docs/FileLifecycleSettingsUpdateResponse.md)
@@ -215,6 +219,8 @@ Class | Method | HTTP request | Description
  - [SystemSettingSecretActionRequest](azentsadminclient/docs/SystemSettingSecretActionRequest.md)
  - [SystemSettingSecretActionType](azentsadminclient/docs/SystemSettingSecretActionType.md)
  - [SystemSettingValidationStatus](azentsadminclient/docs/SystemSettingValidationStatus.md)
+ - [SystemSettingVersionConflictDetail](azentsadminclient/docs/SystemSettingVersionConflictDetail.md)
+ - [SystemSettingVersionConflictResponse](azentsadminclient/docs/SystemSettingVersionConflictResponse.md)
  - [SystemUserRole](azentsadminclient/docs/SystemUserRole.md)
  - [SystemUserRoleAssignmentListResponse](azentsadminclient/docs/SystemUserRoleAssignmentListResponse.md)
  - [SystemUserRoleAssignmentResponse](azentsadminclient/docs/SystemUserRoleAssignmentResponse.md)

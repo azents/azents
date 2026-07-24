@@ -1,5 +1,6 @@
 """Deterministic Slack provider fake contract tests."""
 
+import base64
 import threading
 from collections.abc import Generator
 from http.server import ThreadingHTTPServer
@@ -128,6 +129,268 @@ def test_slack_fake_controls_membership_history_and_delivery_failure(
     assert history.status_code == 429
     assert history.headers["Retry-After"] == "1"
     assert update == {"ok": False, "error": "token_revoked"}
+
+
+def test_slack_fake_serves_private_file_without_leaking_content_evidence(
+    slack_fake_url: str,
+) -> None:
+    """Expose selected file bytes while retaining only sanitized request metadata."""
+    content = b"private input body"
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
+        json={
+            "files": [
+                {
+                    "id": "F-IN-1",
+                    "name": "input-private.txt",
+                    "title": "Private input",
+                    "mimetype": "text/plain",
+                    "mode": "hosted",
+                    "is_external": False,
+                    "content_base64": base64.b64encode(content).decode(),
+                }
+            ]
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    info = requests.get(
+        f"{slack_fake_url}/api/files.info",
+        params={"file": "F-IN-1"},
+        headers={"Authorization": "Bearer xoxb-private-token"},
+        timeout=5,
+    ).json()
+    download = requests.get(
+        info["file"]["url_private_download"],
+        headers={"Authorization": "Bearer xoxb-private-token"},
+        timeout=5,
+    )
+    download.raise_for_status()
+
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    rendered = str(evidence)
+    assert info["file"]["size"] == len(content)
+    assert download.content == content
+    assert evidence["request_counts"] == {
+        "files.info": 1,
+        "file.download": 1,
+    }
+    assert "xoxb-private-token" not in rendered
+    assert "private input body" not in rendered
+    assert "input-private.txt" not in rendered
+    assert "url_private_download" not in rendered
+
+
+def test_slack_fake_collects_ordered_external_upload_evidence(
+    slack_fake_url: str,
+) -> None:
+    """Acquire, stream, and complete ordered files without retaining their bodies."""
+    first_target = requests.post(
+        f"{slack_fake_url}/api/files.getUploadURLExternal",
+        json={"filename": "first-private.txt", "length": 3},
+        headers={"Authorization": "Bearer xoxb-private-token"},
+        timeout=5,
+    ).json()
+    second_target = requests.post(
+        f"{slack_fake_url}/api/files.getUploadURLExternal",
+        json={"filename": "second-private.txt", "length": 4},
+        headers={"Authorization": "Bearer xoxb-private-token"},
+        timeout=5,
+    ).json()
+    requests.post(
+        first_target["upload_url"],
+        data=b"abc",
+        headers={"Content-Type": "application/octet-stream"},
+        timeout=5,
+    ).raise_for_status()
+    requests.post(
+        second_target["upload_url"],
+        data=b"defg",
+        headers={"Content-Type": "application/octet-stream"},
+        timeout=5,
+    ).raise_for_status()
+    completion = requests.post(
+        f"{slack_fake_url}/api/files.completeUploadExternal",
+        json={
+            "files": [
+                {"id": first_target["file_id"], "title": "first-private.txt"},
+                {"id": second_target["file_id"], "title": "second-private.txt"},
+            ],
+            "channel_id": "C-E2E",
+            "thread_ts": "1721600000.000100",
+            "initial_comment": "Private completion text",
+        },
+        headers={"Authorization": "Bearer xoxb-private-token"},
+        timeout=5,
+    )
+    completion.raise_for_status()
+
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    rendered = str(evidence)
+    assert completion.json()["ok"] is True
+    assert evidence["request_counts"] == {
+        "files.getUploadURLExternal": 2,
+        "file.upload": 2,
+        "files.completeUploadExternal": 1,
+    }
+    assert evidence["deliveries"] == [
+        {
+            "operation": "files.completeUploadExternal",
+            "channel": "C-E2E",
+            "thread_ts": "1721600000.000100",
+            "file_ids": [
+                first_target["file_id"],
+                second_target["file_id"],
+            ],
+            "file_count": 2,
+            "total_bytes": 7,
+            "has_initial_comment": True,
+            "outcome": "delivered",
+        }
+    ]
+    assert "xoxb-private-token" not in rendered
+    assert "first-private.txt" not in rendered
+    assert "Private completion text" not in rendered
+    assert "abcdefg" not in rendered
+
+
+def test_slack_fake_controls_file_scope_and_size_rejection(
+    slack_fake_url: str,
+) -> None:
+    """Expose optional scopes and deterministic upload rejection scenarios."""
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
+        json={
+            "granted_scopes": [
+                "app_mentions:read",
+                "channels:history",
+                "channels:read",
+                "groups:history",
+                "groups:read",
+                "chat:write",
+                "users:read",
+                "files:read",
+            ],
+            "file_scenarios": {"file.upload": "size_mismatch"},
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    auth = requests.post(
+        f"{slack_fake_url}/api/auth.test",
+        timeout=5,
+    )
+    target = requests.post(
+        f"{slack_fake_url}/api/files.getUploadURLExternal",
+        json={"filename": "size.txt", "length": 4},
+        timeout=5,
+    ).json()
+    upload = requests.post(
+        target["upload_url"],
+        data=b"abc",
+        timeout=5,
+    )
+
+    assert "files:read" in auth.headers["X-OAuth-Scopes"]
+    assert "files:write" not in auth.headers["X-OAuth-Scopes"]
+    assert upload.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("operation", "scenario", "expected_status", "expected_error"),
+    [
+        ("files.info", "missing", 200, "file_not_found"),
+        ("files.info", "rejected", 200, "file_not_found"),
+        ("files.info", "missing_scope", 200, "missing_scope"),
+        ("file.download", "missing", 404, "file_not_found"),
+        ("file.download", "rejected", 400, "file_not_found"),
+        ("file.download", "missing_scope", 403, "missing_scope"),
+    ],
+)
+def test_slack_fake_controls_inbound_file_failures(
+    slack_fake_url: str,
+    operation: str,
+    scenario: str,
+    expected_status: int,
+    expected_error: str,
+) -> None:
+    """Return deterministic missing, rejected, and scope failures by phase."""
+    content = b"private input body"
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
+        json={
+            "file_scenarios": {operation: scenario},
+            "files": [
+                {
+                    "id": "F-IN-FAILURE",
+                    "name": "private-input.txt",
+                    "mimetype": "text/plain",
+                    "mode": "hosted",
+                    "is_external": False,
+                    "content_base64": base64.b64encode(content).decode(),
+                }
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    if operation == "files.info":
+        response = requests.get(
+            f"{slack_fake_url}/api/files.info",
+            params={"file": "F-IN-FAILURE"},
+            timeout=5,
+        )
+    else:
+        response = requests.get(
+            f"{slack_fake_url}/files/F-IN-FAILURE",
+            timeout=5,
+        )
+
+    assert response.status_code == expected_status
+    assert response.json()["error"] == expected_error
+
+
+def test_slack_fake_can_make_completion_ambiguous(
+    slack_fake_url: str,
+) -> None:
+    """Close the completion connection after successful temporary upload."""
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
+        json={
+            "file_scenarios": {
+                "files.completeUploadExternal": "ambiguous",
+            }
+        },
+        timeout=5,
+    ).raise_for_status()
+    target = requests.post(
+        f"{slack_fake_url}/api/files.getUploadURLExternal",
+        json={"filename": "ambiguous.txt", "length": 3},
+        timeout=5,
+    ).json()
+    requests.post(
+        target["upload_url"],
+        data=b"abc",
+        timeout=5,
+    ).raise_for_status()
+
+    with pytest.raises(requests.exceptions.ConnectionError):
+        requests.post(
+            f"{slack_fake_url}/api/files.completeUploadExternal",
+            json={
+                "files": [{"id": target["file_id"], "title": "ambiguous.txt"}],
+                "channel_id": "C-E2E",
+                "thread_ts": "1721600000.000100",
+                "initial_comment": "Ambiguous completion",
+            },
+            timeout=5,
+        )
 
 
 def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:

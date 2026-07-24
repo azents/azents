@@ -8,6 +8,7 @@ import {
   Divider,
   Group,
   Loader,
+  NumberInput,
   Paper,
   PasswordInput,
   Radio,
@@ -22,6 +23,7 @@ import {
   IconAlertTriangle,
   IconBrandGithub,
   IconCheck,
+  IconFile,
   IconHeartbeat,
   IconRefresh,
   IconSettings,
@@ -50,6 +52,10 @@ function titleCase(value: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function formatBytes(value: number): string {
+  return `${new Intl.NumberFormat().format(value)} bytes`;
 }
 
 function effectiveStatusColor(
@@ -130,6 +136,143 @@ function FieldMetadata({
         {field.environment_variable}
       </Text>
     </Group>
+  );
+}
+
+function ExternalChannelFilesCard({
+  externalFilesState,
+  externalFilesDraft,
+  externalFilesSaving,
+  externalFilesDraftDirty,
+  externalFilesSaveDisabled,
+  externalFilesMutationError,
+  onInboundMaxFileMiBChange,
+  onOutboundMaxFileMiBChange,
+  onOutboundMaxActionMiBChange,
+  onSaveExternalFiles,
+}: Pick<
+  SystemSettingsPageContentProps,
+  | "externalFilesState"
+  | "externalFilesDraft"
+  | "externalFilesSaving"
+  | "externalFilesDraftDirty"
+  | "externalFilesSaveDisabled"
+  | "externalFilesMutationError"
+  | "onInboundMaxFileMiBChange"
+  | "onOutboundMaxFileMiBChange"
+  | "onOutboundMaxActionMiBChange"
+  | "onSaveExternalFiles"
+>): React.ReactElement {
+  const aggregateInvalid =
+    typeof externalFilesDraft.outboundMaxFileMiB === "number" &&
+    typeof externalFilesDraft.outboundMaxActionMiB === "number" &&
+    externalFilesDraft.outboundMaxActionMiB <
+      externalFilesDraft.outboundMaxFileMiB;
+
+  return (
+    <Paper withBorder p="lg" radius="md">
+      <Stack gap="lg">
+        <Group justify="space-between" align="flex-start">
+          <Stack gap={2}>
+            <Group gap="xs">
+              <IconFile size={20} />
+              <Text fw={700}>External Channel files</Text>
+            </Group>
+            <Text size="sm" c="dimmed">
+              Set provider-neutral transfer limits. Changes activate directly
+              and apply to new inbound downloads and outbound replies.
+            </Text>
+          </Stack>
+          <Group gap="xs">
+            {externalFilesDraftDirty && (
+              <Badge color="yellow" variant="light">
+                Unsaved changes
+              </Badge>
+            )}
+            {externalFilesState.type === "LOADED" && (
+              <Badge variant="light">
+                Version {externalFilesState.detail.admin_version}
+              </Badge>
+            )}
+          </Group>
+        </Group>
+
+        {externalFilesState.type === "LOADING" && <Loader size="sm" />}
+        {externalFilesState.type === "ERROR" && (
+          <Alert color="red" title="Unable to load file transfer policy">
+            {externalFilesState.message}
+          </Alert>
+        )}
+        {externalFilesMutationError && (
+          <Alert color="red" title="Unable to save file transfer policy">
+            {externalFilesMutationError}
+          </Alert>
+        )}
+
+        {externalFilesState.type === "LOADED" && (
+          <>
+            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
+              <NumberInput
+                label="Inbound file limit"
+                description={`Effective: ${formatBytes(
+                  externalFilesState.detail.inbound_max_file_bytes,
+                )}`}
+                value={externalFilesDraft.inboundMaxFileMiB}
+                min={1}
+                max={100}
+                allowDecimal={false}
+                suffix=" MiB"
+                onChange={onInboundMaxFileMiBChange}
+              />
+              <NumberInput
+                label="Outbound file limit"
+                description={`Effective: ${formatBytes(
+                  externalFilesState.detail.outbound_max_file_bytes,
+                )}`}
+                value={externalFilesDraft.outboundMaxFileMiB}
+                min={1}
+                max={100}
+                allowDecimal={false}
+                suffix=" MiB"
+                onChange={onOutboundMaxFileMiBChange}
+              />
+              <NumberInput
+                label="Outbound reply limit"
+                description={`Effective: ${formatBytes(
+                  externalFilesState.detail.outbound_max_action_bytes,
+                )}`}
+                error={
+                  aggregateInvalid
+                    ? "The reply limit must be at least the outbound file limit."
+                    : false
+                }
+                value={externalFilesDraft.outboundMaxActionMiB}
+                min={1}
+                max={2_000}
+                allowDecimal={false}
+                suffix=" MiB"
+                onChange={onOutboundMaxActionMiBChange}
+              />
+            </SimpleGrid>
+            <Divider />
+            <Group justify="space-between" align="flex-end">
+              <Text size="xs" c="dimmed">
+                Values are entered in MiB and stored as exact byte limits.
+                Saving writes one versioned audit event without a candidate or
+                health-check step.
+              </Text>
+              <Button
+                loading={externalFilesSaving}
+                disabled={externalFilesSaveDisabled}
+                onClick={onSaveExternalFiles}
+              >
+                Save file policy
+              </Button>
+            </Group>
+          </>
+        )}
+      </Stack>
+    </Paper>
   );
 }
 
@@ -328,6 +471,12 @@ function AuditTable({
 }
 
 export function SystemSettingsPageContent({
+  externalFilesState,
+  externalFilesDraft,
+  externalFilesSaving,
+  externalFilesDraftDirty,
+  externalFilesSaveDisabled,
+  externalFilesMutationError,
   state,
   auditState,
   draft,
@@ -340,6 +489,10 @@ export function SystemSettingsPageContent({
   checkingHealth,
   saveDisabled,
   mutationError,
+  onInboundMaxFileMiBChange,
+  onOutboundMaxFileMiBChange,
+  onOutboundMaxActionMiBChange,
+  onSaveExternalFiles,
   onAppIdChange,
   onClientIdChange,
   onPrivateKeyChange,
@@ -408,6 +561,19 @@ export function SystemSettingsPageContent({
           identity. Users must reconnect affected toolkits in Main Web.
         </Alert>
       )}
+
+      <ExternalChannelFilesCard
+        externalFilesState={externalFilesState}
+        externalFilesDraft={externalFilesDraft}
+        externalFilesSaving={externalFilesSaving}
+        externalFilesDraftDirty={externalFilesDraftDirty}
+        externalFilesSaveDisabled={externalFilesSaveDisabled}
+        externalFilesMutationError={externalFilesMutationError}
+        onInboundMaxFileMiBChange={onInboundMaxFileMiBChange}
+        onOutboundMaxFileMiBChange={onOutboundMaxFileMiBChange}
+        onOutboundMaxActionMiBChange={onOutboundMaxActionMiBChange}
+        onSaveExternalFiles={onSaveExternalFiles}
+      />
 
       <Paper withBorder p="lg" radius="md">
         <Stack gap="lg">

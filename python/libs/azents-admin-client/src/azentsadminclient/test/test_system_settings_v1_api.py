@@ -47,6 +47,13 @@ class TestSystemSettingsV1Api(unittest.TestCase):
         """
         pass
 
+    def test_system_settings_v1_get_external_channel_files_setting(self) -> None:
+        """Test case for system_settings_v1_get_external_channel_files_setting
+
+        Get External Channel Files Setting
+        """
+        pass
+
     def test_system_settings_v1_get_platform_github_app_setting(self) -> None:
         """Test case for system_settings_v1_get_platform_github_app_setting
 
@@ -65,6 +72,13 @@ class TestSystemSettingsV1Api(unittest.TestCase):
         """Test case for system_settings_v1_list_system_setting_sections
 
         List System Setting Sections
+        """
+        pass
+
+    def test_system_settings_v1_patch_external_channel_files_setting(self) -> None:
+        """Test case for system_settings_v1_patch_external_channel_files_setting
+
+        Patch External Channel Files Setting
         """
         pass
 

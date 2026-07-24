@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 _HTTP_PORT = 8083
 _WEBSOCKET_PORT = 8084
+_MAX_CONFIGURED_FILE_BYTES = 8 * 1024 * 1024
 _APPROVAL_PATH = re.compile(r"/external-channel/access/([^/?\s]+)")
 
 
@@ -35,11 +36,31 @@ class FakeState:
             self.membership_scenario = "member"
             self.history_scenario = "ok"
             self.permalink_scenario = "ok"
+            self.granted_scopes = (
+                "app_mentions:read",
+                "channels:history",
+                "channels:read",
+                "groups:history",
+                "groups:read",
+                "chat:write",
+                "users:read",
+                "files:read",
+                "files:write",
+            )
             self.delivery_scenarios: dict[str, str] = {
                 "chat.postMessage": "delivered",
                 "chat.update": "delivered",
                 "chat.delete": "delivered",
             }
+            self.file_scenarios: dict[str, str] = {
+                "files.info": "available",
+                "file.download": "available",
+                "files.getUploadURLExternal": "available",
+                "file.upload": "available",
+                "files.completeUploadExternal": "available",
+            }
+            self.files: dict[str, dict[str, object]] = {}
+            self.uploads: dict[str, dict[str, object]] = {}
             self.history_pages: list[list[dict[str, object]]] = []
             self.socket_envelopes: list[dict[str, object]] = []
             self.socket_disconnect_reason: str | None = None
@@ -50,6 +71,7 @@ class FakeState:
             self.socket_envelope_ids: list[str] = []
             self.socket_acknowledgements: list[str] = []
             self._message_sequence = 0
+            self._upload_sequence = 0
 
     def configure(self, payload: dict[str, object]) -> None:
         """Apply one bounded deterministic provider scenario."""
@@ -58,7 +80,10 @@ class FakeState:
             "membership_scenario",
             "history_scenario",
             "permalink_scenario",
+            "granted_scopes",
             "delivery_scenarios",
+            "file_scenarios",
+            "files",
             "history_pages",
             "socket_envelopes",
             "socket_disconnect_reason",
@@ -77,6 +102,14 @@ class FakeState:
                     if not isinstance(value, str):
                         raise ValueError(f"{name} must be a string.")
                     setattr(self, name, value)
+            granted_scopes = payload.get("granted_scopes")
+            if granted_scopes is not None:
+                if not isinstance(granted_scopes, list) or not all(
+                    isinstance(scope, str)
+                    for scope in cast(list[object], granted_scopes)
+                ):
+                    raise ValueError("granted_scopes must be a list of strings.")
+                self.granted_scopes = tuple(cast(list[str], granted_scopes))
             delivery_scenarios = payload.get("delivery_scenarios")
             if delivery_scenarios is not None:
                 if not isinstance(delivery_scenarios, dict):
@@ -88,6 +121,20 @@ class FakeState:
                         delivery_scenarios,
                     ).items()
                 }
+            file_scenarios = payload.get("file_scenarios")
+            if file_scenarios is not None:
+                if not isinstance(file_scenarios, dict):
+                    raise ValueError("file_scenarios must be an object.")
+                self.file_scenarios = {
+                    str(key): str(value)
+                    for key, value in cast(
+                        dict[object, object],
+                        file_scenarios,
+                    ).items()
+                }
+            files = payload.get("files")
+            if files is not None:
+                self.files = _configured_files(files)
             history_pages = payload.get("history_pages")
             if history_pages is not None:
                 self.history_pages = _object_pages(history_pages)
@@ -105,9 +152,11 @@ class FakeState:
             self.request_counts = {}
             self.requests = []
             self.deliveries = []
+            self.uploads = {}
             self.socket_connections = 0
             self.socket_envelope_ids = []
             self.socket_acknowledgements = []
+            self._upload_sequence = 0
 
     def record_request(
         self,
@@ -132,6 +181,48 @@ class FakeState:
         with self.lock:
             self._message_sequence += 1
             return f"1721600100.{self._message_sequence:06d}"
+
+    def next_upload(self, *, expected_length: int) -> tuple[str, str]:
+        """Allocate one deterministic temporary upload identity and path."""
+        with self.lock:
+            self._upload_sequence += 1
+            file_id = f"F-UPLOAD-{self._upload_sequence}"
+            upload_path = f"/upload/{file_id}"
+            self.uploads[file_id] = {
+                "expected_length": expected_length,
+                "received_length": None,
+                "uploaded": False,
+            }
+            return file_id, upload_path
+
+    def record_upload(self, *, file_id: str, received_length: int) -> bool:
+        """Record only upload size evidence and return whether length matched."""
+        with self.lock:
+            upload = self.uploads.get(file_id)
+            if upload is None:
+                return False
+            expected_length = upload.get("expected_length")
+            matched = expected_length == received_length
+            upload["received_length"] = received_length
+            upload["uploaded"] = matched
+            return matched
+
+    def completed_uploads(
+        self,
+        file_ids: list[str],
+    ) -> tuple[bool, int]:
+        """Return whether every ordered ID uploaded and its aggregate byte count."""
+        with self.lock:
+            total_bytes = 0
+            for file_id in file_ids:
+                upload = self.uploads.get(file_id)
+                if upload is None or upload.get("uploaded") is not True:
+                    return False, 0
+                received_length = upload.get("received_length")
+                if not isinstance(received_length, int):
+                    return False, 0
+                total_bytes += received_length
+            return True, total_bytes
 
     def evidence(self) -> dict[str, object]:
         """Return sanitized evidence suitable for test assertions and failure output."""
@@ -166,6 +257,15 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if parsed.path == "/__testenv/state":
             self._json_response(200, self.state.evidence())
             return
+        if parsed.path.startswith("/files/"):
+            provider_file_id = parsed.path.removeprefix("/files/")
+            self.state.record_request(
+                "file.download",
+                method="GET",
+                metadata={"file": provider_file_id},
+            )
+            self._file_download(provider_file_id)
+            return
         operation = parsed.path.removeprefix("/api/")
         query = parse_qs(parsed.query)
         metadata = _query_metadata(query)
@@ -185,6 +285,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if operation == "bots.info":
             self._bot_info(query)
             return
+        if operation == "files.info":
+            self._file_info(query)
+            return
         self._json_response(404, {"ok": False, "error": "not_found"})
 
     def do_POST(self) -> None:
@@ -201,6 +304,10 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
                 return
             self._json_response(200, {"status": "configured"})
             return
+        if self.path.startswith("/upload/"):
+            file_id = urlparse(self.path).path.removeprefix("/upload/")
+            self._file_upload(file_id)
+            return
         operation = urlparse(self.path).path.removeprefix("/api/")
         body = self._json_body()
         self.state.record_request(
@@ -216,6 +323,12 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         if operation in {"chat.postMessage", "chat.update", "chat.delete"}:
             self._delivery(operation, body)
+            return
+        if operation == "files.getUploadURLExternal":
+            self._get_upload_url(body)
+            return
+        if operation == "files.completeUploadExternal":
+            self._complete_upload(body)
             return
         self._json_response(404, {"ok": False, "error": "not_found"})
 
@@ -235,6 +348,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
                 "user_id": "U-BOT-E2E",
                 "bot_id": "B-E2E",
             },
+            headers={"X-OAuth-Scopes": ",".join(self.state.granted_scopes)},
         )
 
     def _bot_info(self, query: dict[str, list[str]]) -> None:
@@ -346,6 +460,166 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _file_info(self, query: dict[str, list[str]]) -> None:
+        scenario = self.state.file_scenarios.get("files.info", "available")
+        if self._file_failure(scenario):
+            return
+        provider_file_id = query.get("file", [""])[0]
+        with self.state.lock:
+            configured = self.state.files.get(provider_file_id)
+            metadata = dict(configured) if configured is not None else None
+        if metadata is None:
+            self._json_response(200, {"ok": False, "error": "file_not_found"})
+            return
+        metadata.pop("_content", None)
+        host = self.headers.get("Host") or f"slack-fake:{_HTTP_PORT}"
+        metadata["url_private_download"] = f"http://{host}/files/{provider_file_id}"
+        if scenario == "malformed":
+            metadata["id"] = "F-MISMATCH"
+        self._json_response(200, {"ok": True, "file": metadata})
+
+    def _file_download(self, provider_file_id: str) -> None:
+        scenario = self.state.file_scenarios.get("file.download", "available")
+        if scenario == "ambiguous":
+            self._close_connection()
+            return
+        if scenario == "timeout":
+            time.sleep(21)
+            return
+        if scenario == "rate_limited":
+            self._json_response(
+                429,
+                {"ok": False, "error": "ratelimited"},
+                headers={"Retry-After": "1"},
+            )
+            return
+        if scenario == "revoked":
+            self._json_response(401, {"ok": False, "error": "token_revoked"})
+            return
+        if scenario == "missing_scope":
+            self._json_response(403, {"ok": False, "error": "missing_scope"})
+            return
+        if scenario in {"missing", "rejected"}:
+            status = 404 if scenario == "missing" else 400
+            self._json_response(status, {"ok": False, "error": "file_not_found"})
+            return
+        if scenario == "unavailable":
+            self._json_response(503, {"ok": False, "error": "unavailable"})
+            return
+        with self.state.lock:
+            configured = self.state.files.get(provider_file_id)
+            content = configured.get("_content") if configured is not None else None
+        if not isinstance(content, bytes):
+            self._json_response(404, {"ok": False, "error": "file_not_found"})
+            return
+        declared_length = len(content)
+        if scenario == "size_mismatch":
+            declared_length += 1
+        self._bytes_response(
+            200,
+            content,
+            headers={"Content-Length": str(declared_length)},
+        )
+
+    def _get_upload_url(self, body: dict[str, object]) -> None:
+        scenario = self.state.file_scenarios.get(
+            "files.getUploadURLExternal",
+            "available",
+        )
+        if self._file_failure(scenario):
+            return
+        length = body.get("length")
+        if isinstance(length, bool) or not isinstance(length, int) or length <= 0:
+            self._json_response(200, {"ok": False, "error": "invalid_arguments"})
+            return
+        file_id, upload_path = self.state.next_upload(expected_length=length)
+        host = self.headers.get("Host") or f"slack-fake:{_HTTP_PORT}"
+        self._json_response(
+            200,
+            {
+                "ok": True,
+                "upload_url": f"http://{host}{upload_path}",
+                "file_id": file_id,
+            },
+        )
+
+    def _file_upload(self, file_id: str) -> None:
+        scenario = self.state.file_scenarios.get("file.upload", "available")
+        content_length = int(self.headers.get("Content-Length", "0"))
+        content = self.rfile.read(content_length)
+        self.state.record_request(
+            "file.upload",
+            method="POST",
+            metadata={
+                "file": file_id,
+                "content_length": content_length,
+                "received_length": len(content),
+            },
+        )
+        if scenario == "ambiguous":
+            self._close_connection()
+            return
+        if scenario == "timeout":
+            time.sleep(21)
+            return
+        if scenario == "rate_limited":
+            self._bytes_response(429, b"rate_limited")
+            return
+        if scenario == "unavailable":
+            self._bytes_response(503, b"unavailable")
+            return
+        matched = self.state.record_upload(
+            file_id=file_id,
+            received_length=len(content),
+        )
+        if scenario in {"rejected", "size_mismatch"} or not matched:
+            self._bytes_response(400, b"rejected")
+            return
+        self._bytes_response(200, b"OK")
+
+    def _complete_upload(self, body: dict[str, object]) -> None:
+        scenario = self.state.file_scenarios.get(
+            "files.completeUploadExternal",
+            "available",
+        )
+        if scenario == "ambiguous":
+            self._close_connection()
+            return
+        if scenario == "timeout":
+            time.sleep(21)
+            return
+        if self._file_failure(scenario):
+            return
+        files = _object_list_or_empty(body.get("files"))
+        file_ids: list[str] = []
+        for item in files:
+            file_id = item.get("id")
+            if not isinstance(file_id, str) or not file_id:
+                self._json_response(
+                    200,
+                    {"ok": False, "error": "file_not_found"},
+                )
+                return
+            file_ids.append(file_id)
+        completed, total_bytes = self.state.completed_uploads(file_ids)
+        if not files or not completed:
+            self._json_response(200, {"ok": False, "error": "file_not_found"})
+            return
+        delivery: dict[str, object] = {
+            "operation": "files.completeUploadExternal",
+            "channel": _optional_string(body, "channel_id"),
+            "thread_ts": _optional_string(body, "thread_ts"),
+            "file_ids": file_ids,
+            "file_count": len(file_ids),
+            "total_bytes": total_bytes,
+            "has_initial_comment": _optional_string(body, "initial_comment")
+            is not None,
+            "outcome": "delivered",
+        }
+        with self.state.lock:
+            self.state.deliveries.append(delivery)
+        self._json_response(200, {"ok": True, "files": []})
+
     def _delivery(self, operation: str, body: dict[str, object]) -> None:
         with self.state.lock:
             scenario = self.state.delivery_scenarios.get(operation, "delivered")
@@ -386,6 +660,29 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         with self.state.lock:
             self.state.deliveries.append(delivery)
         self._json_response(200, {"ok": True, "ts": timestamp})
+
+    def _file_failure(self, scenario: str) -> bool:
+        if scenario == "ambiguous":
+            self._close_connection()
+            return True
+        if scenario == "timeout":
+            time.sleep(21)
+            return True
+        if scenario == "missing_scope":
+            self._json_response(200, {"ok": False, "error": "missing_scope"})
+            return True
+        if scenario in {"missing", "rejected"}:
+            self._json_response(200, {"ok": False, "error": "file_not_found"})
+            return True
+        return self._common_failure(scenario)
+
+    def _close_connection(self) -> None:
+        self.close_connection = True
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        self.connection.close()
 
     def _common_failure(self, scenario: str) -> bool:
         if scenario == "invalid":
@@ -434,6 +731,23 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if headers is not None:
+            for key, value in headers.items():
+                self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _bytes_response(
+        self,
+        status: int,
+        body: bytes,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "application/octet-stream")
+        if headers is None or "Content-Length" not in headers:
+            self.send_header("Content-Length", str(len(body)))
         if headers is not None:
             for key, value in headers.items():
                 self.send_header(key, value)
@@ -537,6 +851,46 @@ def _object_pages(value: object) -> list[list[dict[str, object]]]:
     return [_object_list(page) for page in cast(list[object], value)]
 
 
+def _configured_files(value: object) -> dict[str, dict[str, object]]:
+    """Parse bounded fake file metadata and keep content outside evidence."""
+    allowed = {
+        "id",
+        "name",
+        "title",
+        "mimetype",
+        "size",
+        "mode",
+        "external_type",
+        "file_access",
+        "is_external",
+        "deleted",
+        "content_base64",
+    }
+    files: dict[str, dict[str, object]] = {}
+    for item in _object_list(value):
+        if set(item) - allowed:
+            raise ValueError("Unsupported configured Slack file field.")
+        provider_file_id = item.get("id")
+        if not isinstance(provider_file_id, str) or not provider_file_id:
+            raise ValueError("Configured Slack files require an ID.")
+        encoded_content = item.get("content_base64")
+        if not isinstance(encoded_content, str):
+            raise ValueError("Configured Slack files require base64 content.")
+        try:
+            content = base64.b64decode(encoded_content, validate=True)
+        except ValueError as error:
+            raise ValueError("Configured Slack file content is invalid.") from error
+        if len(content) > _MAX_CONFIGURED_FILE_BYTES:
+            raise ValueError("Configured Slack file content is too large.")
+        metadata: dict[str, object] = {
+            key: field for key, field in item.items() if key != "content_base64"
+        }
+        metadata.setdefault("size", len(content))
+        metadata["_content"] = content
+        files[provider_file_id] = metadata
+    return files
+
+
 def _optional_string(payload: dict[str, object], key: str) -> str | None:
     value = payload.get(key)
     return value if isinstance(value, str) and value else None
@@ -563,16 +917,25 @@ def _query_metadata(query: dict[str, list[str]]) -> dict[str, object]:
     return {
         key: values[0]
         for key, values in query.items()
-        if key in {"channel", "user", "ts", "message_ts", "cursor", "limit"} and values
+        if key in {"channel", "user", "ts", "message_ts", "cursor", "limit", "file"}
+        and values
     }
 
 
 def _body_metadata(body: dict[str, object]) -> dict[str, object]:
-    return {
+    metadata: dict[str, object] = {
         key: value
         for key, value in body.items()
-        if key in {"channel", "thread_ts", "ts"} and isinstance(value, str)
+        if key in {"channel", "channel_id", "thread_ts", "ts"}
+        and isinstance(value, str)
     }
+    length = body.get("length")
+    if isinstance(length, int) and not isinstance(length, bool):
+        metadata["length"] = length
+    files = body.get("files")
+    if isinstance(files, list):
+        metadata["file_count"] = len(cast(list[object], files))
+    return metadata
 
 
 def _read_http_headers(connection: socket.socket) -> dict[str, str]:

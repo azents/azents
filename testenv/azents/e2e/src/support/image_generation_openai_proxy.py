@@ -56,6 +56,7 @@ _IMAGE_PATH = Path(
 )
 _JOURNAL_PATH = "/v1/_image_generation_requests"
 _EXTERNAL_CHANNEL_PROGRESS_JOURNAL_PATH = "/v1/_external_channel_progress_requests"
+_EXTERNAL_CHANNEL_FILE_JOURNAL_PATH = "/v1/_external_channel_file_requests"
 _XAI_IMAGINE_JOURNAL_PATH = "/v1/_xai_imagine_requests"
 _XAI_OAUTH_JOURNAL_PATH = "/v1/_xai_oauth_requests"
 _SUBSCRIPTION_USAGE_JOURNAL_PATH = "/v1/_subscription_usage_requests"
@@ -105,6 +106,16 @@ _EXTERNAL_CHANNEL_PROGRESS_MARKER = "Provider-native Channel Work progress E2E"
 _EXTERNAL_CHANNEL_PROGRESS_CALL_ID = "call_external_channel_progress"
 _EXTERNAL_CHANNEL_FINISH_CALL_ID = "call_external_channel_finish"
 _EXTERNAL_CHANNEL_BINDING = re.compile(r"### Binding `([^`]+)`")
+_EXTERNAL_CHANNEL_FILE_MARKER = "External Channel file transfer E2E"
+_EXTERNAL_CHANNEL_FILE_LOCATOR = re.compile(r"File: (external-file:v1:[^\\\s\"']+)")
+_EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID = "call_external_channel_file_download"
+_EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID = "call_external_channel_file_process"
+_EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID = "call_external_channel_file_finish"
+_EXTERNAL_CHANNEL_FILE_INPUT_PATH = "/workspace/agent/external-input.txt"
+_EXTERNAL_CHANNEL_FILE_OUTPUT_PATHS = (
+    "/workspace/agent/external-summary.txt",
+    "/workspace/agent/external-details.txt",
+)
 
 
 def _last_user_text(request: dict[str, object]) -> str | None:
@@ -208,6 +219,49 @@ def external_channel_progress_evidence(
     }
 
 
+def external_channel_file_locators(request: dict[str, object]) -> list[str]:
+    """Extract ordered opaque file locators from the rendered external message."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    return list(dict.fromkeys(_EXTERNAL_CHANNEL_FILE_LOCATOR.findall(serialized)))
+
+
+def is_external_channel_file_request(request: dict[str, object]) -> bool:
+    """Recognize the deterministic file-transfer journey and required tools."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    return (
+        _EXTERNAL_CHANNEL_FILE_MARKER in serialized
+        and external_channel_binding(request) is not None
+        and len(external_channel_file_locators(request)) >= 2
+        and _request_has_named_tool(request, "download_external_file")
+        and _request_has_named_tool(request, "exec_command")
+        and _request_has_named_tool(request, "channel_action")
+    )
+
+
+def external_channel_file_evidence(
+    request: dict[str, object],
+) -> dict[str, object]:
+    """Return sanitized request-stage evidence for the file-transfer journey."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    return {
+        "binding": external_channel_binding(request),
+        "marker_present": _EXTERNAL_CHANNEL_FILE_MARKER in serialized,
+        "locator_count": len(external_channel_file_locators(request)),
+        "download_tool_available": _request_has_named_tool(
+            request,
+            "download_external_file",
+        ),
+        "process_tool_available": _request_has_named_tool(
+            request,
+            "exec_command",
+        ),
+        "channel_action_tool_available": _request_has_named_tool(
+            request,
+            "channel_action",
+        ),
+    }
+
+
 def _is_semantic_compaction_request(request: dict[str, object]) -> bool:
     """Return whether compaction belongs to the semantic transcript scenario."""
     instructions = request.get("instructions")
@@ -225,6 +279,7 @@ def _is_semantic_compaction_request(request: dict[str, object]) -> bool:
 class _State:
     requests: ClassVar[list[dict[str, object]]] = []
     external_channel_progress_requests: ClassVar[list[dict[str, object]]] = []
+    external_channel_file_requests: ClassVar[list[dict[str, object]]] = []
     imagine_requests: ClassVar[list[dict[str, object]]] = []
     oauth_requests: ClassVar[list[dict[str, object]]] = []
     subscription_usage_requests: ClassVar[list[dict[str, object]]] = []
@@ -310,6 +365,33 @@ class _Handler(BaseHTTPRequestHandler):
             self._write_image_generation_response(request)
             return
         serialized = json.dumps(request, ensure_ascii=False)
+        if is_external_channel_file_request(request):
+            file_evidence = external_channel_file_evidence(request)
+            file_evidence["path"] = self.path
+            file_evidence["stage"] = (
+                "after_finish"
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID,
+                )
+                else (
+                    "after_process"
+                    if request_has_tool_output(
+                        request,
+                        _EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID,
+                    )
+                    else (
+                        "after_download"
+                        if request_has_tool_output(
+                            request,
+                            _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID,
+                        )
+                        else "initial"
+                    )
+                )
+            )
+            with _State.lock:
+                _State.external_channel_file_requests.append(file_evidence)
         if (
             _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized
             or external_channel_binding(request) is not None
@@ -335,6 +417,72 @@ class _Handler(BaseHTTPRequestHandler):
             )
             with _State.lock:
                 _State.external_channel_progress_requests.append(evidence)
+        if self.path == "/v1/responses" and is_external_channel_file_request(request):
+            binding = external_channel_binding(request)
+            locators = external_channel_file_locators(request)
+            if binding is not None and locators:
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID,
+                ):
+                    self._write_text_response(
+                        request,
+                        "External Channel file transfer E2E completed.",
+                        response_id="resp_external_channel_file_completed",
+                    )
+                    return
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID,
+                ):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "finish",
+                            "binding": binding,
+                            "message": (
+                                "Processed the selected input and attached two "
+                                "deterministic results."
+                            ),
+                            "files": list(_EXTERNAL_CHANNEL_FILE_OUTPUT_PATHS),
+                        },
+                    )
+                    return
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID,
+                ):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID,
+                        name="exec_command",
+                        arguments={
+                            "command": (
+                                'python -c "from pathlib import Path; '
+                                f"data=Path('{_EXTERNAL_CHANNEL_FILE_INPUT_PATH}')"
+                                ".read_text(); "
+                                f"Path('{_EXTERNAL_CHANNEL_FILE_OUTPUT_PATHS[0]}')"
+                                ".write_text('summary:' + data); "
+                                f"Path('{_EXTERNAL_CHANNEL_FILE_OUTPUT_PATHS[1]}')"
+                                ".write_text('details:' + data.upper())\""
+                            ),
+                            "workdir": "/workspace/agent",
+                        },
+                    )
+                    return
+                self._write_function_call_response(
+                    request,
+                    call_id=_EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID,
+                    name="download_external_file",
+                    arguments={
+                        "file": locators[0],
+                        "path": _EXTERNAL_CHANNEL_FILE_INPUT_PATH,
+                        "overwrite": True,
+                    },
+                )
+                return
         if self.path == "/v1/responses" and is_external_channel_progress_request(
             request
         ):
@@ -432,6 +580,8 @@ class _Handler(BaseHTTPRequestHandler):
             return _State.requests
         if self.path == _EXTERNAL_CHANNEL_PROGRESS_JOURNAL_PATH:
             return _State.external_channel_progress_requests
+        if self.path == _EXTERNAL_CHANNEL_FILE_JOURNAL_PATH:
+            return _State.external_channel_file_requests
         if self.path == _XAI_IMAGINE_JOURNAL_PATH:
             return _State.imagine_requests
         if self.path == _XAI_OAUTH_JOURNAL_PATH:
