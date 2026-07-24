@@ -232,6 +232,57 @@ async def test_events_api_acknowledges_only_after_durable_admission() -> None:
 
 
 @pytest.mark.asyncio
+async def test_events_api_uses_safe_bounded_file_projection() -> None:
+    """Socket Mode stores the same URL-free file projection as HTTP admission."""
+    envelope = json.loads(_events_api_envelope())
+    event = envelope["payload"]["event"]
+    event["files"] = [
+        {
+            "id": "F1",
+            "name": "report.csv",
+            "mimetype": "text/csv",
+            "size": 42,
+            "mode": "hosted",
+            "url_private": "https://files.slack.test/private/F1",
+            "body": "must not survive",
+        }
+    ]
+    socket = FakeSocket(
+        [
+            json.dumps(envelope),
+            json.dumps(
+                {
+                    "type": "disconnect",
+                    "payload": {"reason": "link_disabled"},
+                }
+            ),
+        ]
+    )
+    admitted: list[ExternalChannelEventCreate] = []
+    client = _client(socket=socket, admitted=admitted)
+
+    result = await client.run_connection(
+        connection_id="connection-1",
+        endpoint_url="wss://socket.example.test/connection",
+    )
+
+    assert result.admitted_event_count == 1
+    projected_event = admitted[0].envelope["event"]
+    assert isinstance(projected_event, dict)
+    assert projected_event["files"] == [
+        {
+            "id": "F1",
+            "name": "report.csv",
+            "mimetype": "text/csv",
+            "mode": "hosted",
+            "size": 42,
+        }
+    ]
+    assert "url_private" not in repr(projected_event)
+    assert "must not survive" not in repr(projected_event)
+
+
+@pytest.mark.asyncio
 async def test_events_api_does_not_acknowledge_failed_admission() -> None:
     """Leave an envelope unacknowledged when its durable transaction fails."""
     socket = FakeSocket([_events_api_envelope()])

@@ -212,7 +212,7 @@ class ExternalChannelConnectionService:
             checked_at=checked_at,
             identity=_connection_identity(connection),
             credentials=self.credentials_codec.snapshot(credentials),
-            capabilities=_connection_capabilities(connection),
+            capabilities=external_channel_capabilities_from_storage(connection),
         )
 
 
@@ -243,9 +243,13 @@ def _connection_identity(
     )
 
 
-def _connection_capabilities(
+def external_channel_capabilities_from_storage(
     connection: ExternalChannelConnection,
 ) -> ExternalChannelCapabilitySnapshot | None:
+    """Decode stored capabilities while treating absent file fields as unavailable."""
     if connection.capabilities is None:
         return None
-    return ExternalChannelCapabilitySnapshot.model_validate(connection.capabilities)
+    stored = dict(connection.capabilities)
+    stored.setdefault("download_files", False)
+    stored.setdefault("upload_files", False)
+    return ExternalChannelCapabilitySnapshot.model_validate(stored)

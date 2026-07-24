@@ -13,6 +13,13 @@ from azents.core.enums import (
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+)
+from azents.core.external_channel_file import (
+    MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
+    MAX_EXTERNAL_CHANNEL_FILES,
+    ExternalChannelFileMetadata,
+    ExternalChannelFileUnsupportedReason,
 )
 from azents.services.external_channel.slack_blocks import (
     projected_slack_blocks_text,
@@ -245,7 +252,11 @@ def _normalize_slack_event(
             trusted_block_projection=trusted_block_projection,
         )
     )
-    attachment_metadata = _attachment_metadata(message.get("blocks"))
+    attachment_metadata = _attachment_metadata(
+        blocks=message.get("blocks"),
+        files=message.get("files"),
+        files_truncated=message.get("files_truncated"),
+    )
     normalized_size = _normalized_size(normalized_body, attachment_metadata)
     provider_created_at = _slack_timestamp(message_ts)
     provider_position = slack_provider_position(message_ts)
@@ -989,7 +1000,28 @@ def _normalized_message_body(
     return _bounded_text(block_text)
 
 
-def _attachment_metadata(value: object) -> dict[str, object] | None:
+def _attachment_metadata(
+    *,
+    blocks: object,
+    files: object,
+    files_truncated: object,
+) -> dict[str, object] | None:
+    metadata: dict[str, object] = {}
+    block_metadata = _block_attachment_metadata(blocks)
+    if block_metadata is not None:
+        metadata["blocks"] = block_metadata
+    file_metadata = _file_attachment_metadata(files)
+    if file_metadata:
+        metadata["files"] = file_metadata
+        metadata["files_truncated"] = (
+            files_truncated is True
+            or isinstance(files, list)
+            and len(files) > MAX_EXTERNAL_CHANNEL_FILES
+        )
+    return metadata or None
+
+
+def _block_attachment_metadata(value: object) -> dict[str, object] | None:
     if not isinstance(value, list) or not value:
         return None
     block_types = [
@@ -1002,6 +1034,75 @@ def _attachment_metadata(value: object) -> dict[str, object] | None:
         "block_types": block_types,
         "truncated": len(value) > _MAX_ATTACHMENT_TYPES,
     }
+
+
+def _file_attachment_metadata(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    metadata: list[dict[str, object]] = []
+    for raw_file in value[:MAX_EXTERNAL_CHANNEL_FILES]:
+        if not isinstance(raw_file, dict):
+            continue
+        metadata.append(_normalized_file_metadata(raw_file).model_dump(mode="json"))
+    return metadata
+
+
+def _normalized_file_metadata(
+    raw_file: dict[str, object],
+) -> ExternalChannelFileMetadata:
+    provider_file_id = _bounded_file_string(raw_file.get("id"))
+    name = _bounded_file_string(raw_file.get("name"))
+    title = _bounded_file_string(raw_file.get("title"))
+    media_type = _bounded_file_string(raw_file.get("mimetype"))
+    mode = _bounded_file_string(raw_file.get("mode"))
+    external_type = _bounded_file_string(raw_file.get("external_type"))
+    file_access = _bounded_file_string(raw_file.get("file_access"))
+    declared_size, invalid_size = _file_declared_size(raw_file.get("size"))
+    external = (
+        raw_file.get("is_external") is True
+        or external_type is not None
+        or mode in {"external", "remote"}
+    )
+    unsupported_reason: ExternalChannelFileUnsupportedReason | None = None
+    if file_access == "check_file_info":
+        unsupported_reason = ExternalChannelFileUnsupportedReason.SLACK_CONNECT_FILE
+    elif external:
+        unsupported_reason = ExternalChannelFileUnsupportedReason.EXTERNAL_FILE
+    elif provider_file_id is None:
+        unsupported_reason = ExternalChannelFileUnsupportedReason.MISSING_FILE_ID
+    elif invalid_size:
+        unsupported_reason = ExternalChannelFileUnsupportedReason.INVALID_SIZE
+    elif mode is None or declared_size is None or (name is None and title is None):
+        unsupported_reason = ExternalChannelFileUnsupportedReason.SPARSE_FILE
+    elif mode != "hosted":
+        unsupported_reason = ExternalChannelFileUnsupportedReason.UNSUPPORTED_MODE
+    return ExternalChannelFileMetadata(
+        provider=ExternalChannelProvider.SLACK,
+        provider_file_id=provider_file_id,
+        name=name,
+        title=title,
+        media_type=media_type,
+        declared_size=declared_size,
+        mode=mode,
+        external=external,
+        file_access=file_access,
+        supported=unsupported_reason is None,
+        unsupported_reason=unsupported_reason,
+    )
+
+
+def _bounded_file_string(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    return value[:MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH]
+
+
+def _file_declared_size(value: object) -> tuple[int | None, bool]:
+    if value is None:
+        return None, False
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None, True
+    return value, False
 
 
 def _normalized_size(

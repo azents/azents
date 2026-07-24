@@ -133,7 +133,12 @@ def _event(content: str = "hello") -> Event:
     )
 
 
-def _external_payload(message_id: str, batch_id: str) -> ExternalChannelMessagePayload:
+def _external_payload(
+    message_id: str,
+    batch_id: str,
+    *,
+    attachment_metadata: dict[str, object] | None = None,
+) -> ExternalChannelMessagePayload:
     """Create one deterministic external message payload."""
     return ExternalChannelMessagePayload(
         provider=ExternalChannelProvider.SLACK,
@@ -156,7 +161,7 @@ def _external_payload(message_id: str, batch_id: str) -> ExternalChannelMessageP
         authorization="authorized_invocation",
         lifecycle=ExternalChannelMessageLifecycle.CURRENT,
         body=f"message-{message_id}",
-        attachment_metadata={},
+        attachment_metadata=attachment_metadata or {},
         provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),
         provider_updated_at=None,
         original_url=None,
@@ -2642,7 +2647,23 @@ def test_openai_lowerer_groups_external_invocation_batch() -> None:
             id="1" * 32,
             session_id="session-1",
             kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
-            payload=_external_payload("1", "batch-1"),
+            payload=_external_payload(
+                "1",
+                "batch-1",
+                attachment_metadata={
+                    "files": [
+                        {
+                            "name": "report.csv",
+                            "title": "Report",
+                            "media_type": "text/csv",
+                            "declared_size": 1024,
+                            "supported": True,
+                            "unsupported_reason": None,
+                            "file": "external-file:v1:slack:binding-1:F123",
+                        }
+                    ]
+                },
+            ),
             created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
         ),
         Event(
@@ -2660,3 +2681,5 @@ def test_openai_lowerer_groups_external_invocation_batch() -> None:
     assert content.startswith("Message Type: EXTERNAL_CHANNEL_TURN")
     assert "Body: message-1" in content
     assert "Body: message-2" in content
+    assert "Files:" in content
+    assert "File: external-file:v1:slack:binding-1:F123" in content

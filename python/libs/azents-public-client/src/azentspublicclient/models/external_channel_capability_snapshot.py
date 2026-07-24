@@ -35,8 +35,10 @@ class ExternalChannelCapabilitySnapshot(BaseModel):
     post_messages: StrictBool = Field(description="Whether messages can be posted")
     update_messages: StrictBool = Field(description="Whether owned messages can be updated")
     delete_messages: StrictBool = Field(description="Whether owned messages can be deleted")
+    download_files: StrictBool = Field(description="Whether provider files can be downloaded")
+    upload_files: StrictBool = Field(description="Whether Runtime files can be uploaded")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["provider", "transport", "inbound_events", "thread_history", "post_messages", "update_messages", "delete_messages"]
+    __properties: ClassVar[List[str]] = ["provider", "transport", "inbound_events", "thread_history", "post_messages", "update_messages", "delete_messages", "download_files", "upload_files"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -102,7 +104,9 @@ class ExternalChannelCapabilitySnapshot(BaseModel):
             "thread_history": obj.get("thread_history"),
             "post_messages": obj.get("post_messages"),
             "update_messages": obj.get("update_messages"),
-            "delete_messages": obj.get("delete_messages")
+            "delete_messages": obj.get("delete_messages"),
+            "download_files": obj.get("download_files"),
+            "upload_files": obj.get("upload_files")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

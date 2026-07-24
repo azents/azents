@@ -2213,6 +2213,25 @@ async def test_external_invocation_projection() -> None:
             tzinfo=datetime.UTC,
         )
 
+    source_attachment_metadata: dict[str, object] = {
+        "files": [
+            {
+                "provider": "slack",
+                "provider_file_id": "F123",
+                "name": "report.csv",
+                "title": "Report",
+                "media_type": "text/csv",
+                "declared_size": 1024,
+                "mode": "hosted",
+                "external": False,
+                "file_access": None,
+                "supported": True,
+                "unsupported_reason": None,
+            }
+        ],
+        "files_truncated": False,
+    }
+
     class _ProjectionRepository:
         async def list_invocation_projection_items(
             self,
@@ -2233,7 +2252,7 @@ async def test_external_invocation_projection() -> None:
                 revision_id="revision-1",
                 revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
                 revision_body="Context",
-                attachment_metadata=None,
+                attachment_metadata=source_attachment_metadata,
                 reference_mappings=None,
                 provider_occurred_at=at(1),
                 resource_id="resource-1",
@@ -2315,3 +2334,13 @@ async def test_external_invocation_projection() -> None:
     assert outcome.promoted[0].payload["authorization"] == "context_only"
     assert outcome.promoted[1].payload["authorization"] == "authorized_invocation"
     assert outcome.promoted[0].payload["invocation_batch_id"] == "batch-1"
+    projected_metadata = outcome.promoted[0].payload["attachment_metadata"]
+    assert isinstance(projected_metadata, dict)
+    projected_files = projected_metadata["files"]
+    assert isinstance(projected_files, list)
+    assert isinstance(projected_files[0], dict)
+    assert projected_files[0]["file"] == "external-file:v1:slack:binding-1:F123"
+    source_files = source_attachment_metadata["files"]
+    assert isinstance(source_files, list)
+    assert isinstance(source_files[0], dict)
+    assert "file" not in source_files[0]

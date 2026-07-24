@@ -30,6 +30,7 @@ def _payload(
     external_message_id: str = "message-1",
     revision_id: str = "revision-1",
     reference_mappings: dict[str, dict[str, str]] | None = None,
+    attachment_metadata: dict[str, object] | None = None,
 ) -> ExternalChannelMessagePayload:
     return ExternalChannelMessagePayload(
         provider=ExternalChannelProvider.SLACK,
@@ -52,7 +53,7 @@ def _payload(
         authorization="authorized_invocation",
         lifecycle=lifecycle,
         body=body,
-        attachment_metadata={},
+        attachment_metadata=attachment_metadata or {},
         reference_mappings=reference_mappings or {},
         provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),
         provider_updated_at=None,
@@ -160,3 +161,122 @@ def test_visible_reference_resolution_does_not_reprocess_display_names() -> None
     rendered = render_external_channel_turn([payload])
 
     assert "Body: @U2 and @Alice discussed #C2 with #incidents." in rendered
+
+
+def test_file_metadata_is_identical_and_safe_across_visible_renderers() -> None:
+    """Structured and text projections expose only bounded file decision fields."""
+    payload = _payload(
+        attachment_metadata={
+            "blocks": {
+                "block_count": 2,
+                "block_types": ["section", "context"],
+                "truncated": False,
+            },
+            "files": [
+                {
+                    "provider": "slack",
+                    "provider_file_id": "F123",
+                    "name": "report.csv",
+                    "title": "Quarterly\nReport",
+                    "media_type": "text/csv",
+                    "declared_size": 1024,
+                    "mode": "hosted",
+                    "external": False,
+                    "file_access": None,
+                    "supported": True,
+                    "unsupported_reason": None,
+                    "file": "external-file:v1:slack:binding-1:F123",
+                    "url_private": "https://secret-download.example/F123",
+                    "body": "private file bytes",
+                },
+                {
+                    "provider": "slack",
+                    "provider_file_id": "F456",
+                    "name": None,
+                    "title": "Remote",
+                    "media_type": None,
+                    "declared_size": None,
+                    "mode": "external",
+                    "external": True,
+                    "file_access": None,
+                    "supported": False,
+                    "unsupported_reason": "external_file",
+                    "file": "external-file:v1:slack:binding-1:F456",
+                },
+            ],
+            "files_truncated": True,
+        }
+    )
+
+    value = external_channel_message_visible_value(payload)
+    rendered_message = render_external_channel_message(payload)
+    rendered_turn = render_external_channel_turn([payload])
+
+    assert value["attachments"] == {
+        "blocks": {
+            "block_count": 2,
+            "block_types": ["section", "context"],
+            "truncated": False,
+        },
+        "files": [
+            {
+                "name": "report.csv",
+                "title": "Quarterly Report",
+                "media_type": "text/csv",
+                "declared_size": 1024,
+                "supported": True,
+                "unsupported_reason": None,
+                "file": "external-file:v1:slack:binding-1:F123",
+            },
+            {
+                "name": None,
+                "title": "Remote",
+                "media_type": None,
+                "declared_size": None,
+                "supported": False,
+                "unsupported_reason": "external_file",
+                "file": "external-file:v1:slack:binding-1:F456",
+            },
+        ],
+        "files_truncated": True,
+    }
+    for rendered in (rendered_message, rendered_turn):
+        assert "Files:" in rendered
+        assert "Name: report.csv" in rendered
+        assert "Title: Quarterly Report" in rendered
+        assert "Declared size: 1024 bytes" in rendered
+        assert "Status: supported" in rendered
+        assert "Status: unsupported (external_file)" in rendered
+        assert "external-file:v1:slack:binding-1:F123" in rendered
+        assert "Additional files omitted" in rendered
+        assert "secret-download" not in rendered
+        assert "private file bytes" not in rendered
+        assert "provider_file_id" not in rendered
+    assert "secret-download" not in str(value)
+    assert "private file bytes" not in str(value)
+    assert "provider_file_id" not in str(value)
+
+
+def test_file_renderer_omits_untrusted_locator_values() -> None:
+    """Only a valid versioned locator reaches structured or text visibility."""
+    payload = _payload(
+        attachment_metadata={
+            "files": [
+                {
+                    "name": "report.csv",
+                    "title": None,
+                    "media_type": "text/csv",
+                    "declared_size": 1024,
+                    "supported": True,
+                    "unsupported_reason": None,
+                    "file": "https://secret-download.example/F123",
+                }
+            ]
+        }
+    )
+
+    value = external_channel_message_visible_value(payload)
+    rendered = render_external_channel_message(payload)
+
+    assert "file" not in value["attachments"]["files"][0]  # type: ignore[index]
+    assert "secret-download" not in rendered

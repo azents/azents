@@ -207,6 +207,97 @@ def test_event_callback_projects_bounded_rich_text_content() -> None:
     assert "untrusted-provider-block-id" not in repr(projected_event)
 
 
+def test_event_callback_projects_bounded_files_without_private_fields() -> None:
+    """Retain safe file metadata while dropping URLs, bodies, and excess entries."""
+    payload = json.loads(_event_body())
+    event = payload["event"]
+    event["files"] = [
+        {
+            "id": f"F{index}",
+            "name": "x" * 300,
+            "title": f"File {index}",
+            "mimetype": "text/plain",
+            "size": index,
+            "mode": "hosted",
+            "is_external": False,
+            "url_private": f"https://files.slack.test/private/F{index}",
+            "thumb_1024": "https://files.slack.test/thumb",
+            "body": "must not survive",
+        }
+        for index in range(21)
+    ]
+
+    result = parse_slack_callback(
+        connection_id="connection-1",
+        raw_body=json.dumps(payload).encode(),
+        received_at=_NOW,
+    )
+
+    assert isinstance(result, SlackEventCallback)
+    projected_event = result.event.envelope["event"]
+    assert isinstance(projected_event, dict)
+    files = projected_event["files"]
+    assert isinstance(files, list)
+    assert len(files) == 20
+    assert projected_event["files_truncated"] is True
+    assert files[0] == {
+        "id": "F0",
+        "name": "x" * 255,
+        "title": "File 0",
+        "mimetype": "text/plain",
+        "mode": "hosted",
+        "size": 0,
+        "is_external": False,
+    }
+    assert "url_private" not in repr(files)
+    assert "thumb_1024" not in repr(files)
+    assert "must not survive" not in repr(files)
+
+
+def test_event_callback_projects_nested_edited_message_files() -> None:
+    """Edited and deleted message variants use the same safe file projection."""
+    payload = json.loads(_event_body())
+    event = payload["event"]
+    event["type"] = "message"
+    event["subtype"] = "message_changed"
+    event["message"] = {
+        "user": "U-1",
+        "ts": "100.0002",
+        "text": "updated",
+        "files": [
+            {
+                "id": "F1",
+                "name": "report.csv",
+                "size": 42,
+                "mode": "hosted",
+                "url_private": "https://files.slack.test/private/F1",
+            }
+        ],
+    }
+
+    result = parse_slack_callback(
+        connection_id="connection-1",
+        raw_body=json.dumps(payload).encode(),
+        received_at=_NOW,
+    )
+
+    assert isinstance(result, SlackEventCallback)
+    projected_event = result.event.envelope["event"]
+    assert isinstance(projected_event, dict)
+    nested = projected_event["message"]
+    assert isinstance(nested, dict)
+    assert nested["files"] == [
+        {
+            "id": "F1",
+            "name": "report.csv",
+            "mode": "hosted",
+            "size": 42,
+        }
+    ]
+    assert nested["files_truncated"] is False
+    assert "url_private" not in repr(nested)
+
+
 def test_event_callback_rejects_oversized_body() -> None:
     """Bound the provider inbox before JSON normalization."""
     with pytest.raises(SlackHTTPPayloadTooLarge):
@@ -253,7 +344,62 @@ async def test_auth_test_returns_sanitized_identity() -> None:
     assert result.identity.tenant_id == "T-1"
     assert result.identity.bot_user_id == "B-1"
     assert result.capabilities is not None
+    assert result.capabilities.download_files is False
+    assert result.capabilities.upload_files is False
     assert "xoxb-secret" not in repr(result)
+
+
+@pytest.mark.parametrize(
+    ("optional_scopes", "download_files", "upload_files"),
+    [
+        ("files:read", True, False),
+        ("files:write", False, True),
+        ("files:read,files:write", True, True),
+        ("files:read invalid", False, False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_auth_test_derives_optional_file_capabilities_independently(
+    optional_scopes: str,
+    download_files: bool,
+    upload_files: bool,
+) -> None:
+    """Optional file scopes never gate unrelated text connection behavior."""
+    required_scopes = (
+        "app_mentions:read,channels:history,channels:read,groups:history,"
+        "groups:read,chat:write,users:read"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth.test"):
+            return httpx.Response(
+                200,
+                headers={
+                    "x-oauth-scopes": f"{required_scopes},{optional_scopes}",
+                },
+                json={
+                    "ok": True,
+                    "team_id": "T-1",
+                    "user_id": "U-BOT",
+                    "bot_id": "B-1",
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"ok": True, "bot": {"id": "B-1", "app_id": "A-1"}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await SlackWebAPIClient(client).validate_connection(
+            bot_token="xoxb-secret",
+            app_id="A-1",
+            transport=ExternalChannelTransport.HTTP,
+        )
+
+    assert result.status == "valid"
+    assert result.capabilities is not None
+    assert result.capabilities.download_files is download_files
+    assert result.capabilities.upload_files is upload_files
 
 
 @pytest.mark.asyncio

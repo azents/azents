@@ -13,6 +13,8 @@ Name | Type | Description | Notes
 **post_messages** | **bool** | Whether messages can be posted | 
 **update_messages** | **bool** | Whether owned messages can be updated | 
 **delete_messages** | **bool** | Whether owned messages can be deleted | 
+**download_files** | **bool** | Whether provider files can be downloaded | 
+**upload_files** | **bool** | Whether Runtime files can be uploaded | 
 
 ## Example
 
