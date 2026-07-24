@@ -21,8 +21,7 @@ _WORKSPACE_ID: str = _admission_migration._WORKSPACE_ID
 _migration_database = _admission_migration._migration_database
 _seed_legacy_graph = _admission_migration._seed_legacy_graph
 
-_MODEL_LINEAGE_REVISION = "8fae7b9ab00a"
-_RESOURCE_PROVENANCE_REVISION = "374a722fb9ee"
+_RESOURCE_PROVENANCE_REVISION = "b6088a911203"
 _EXACT_RUN_ID = "run-resource-exact"
 _EXACT_MODEL_FILE_ID = "model-file-exact"
 _UNMATCHED_MODEL_FILE_ID = "model-file-unmatched"
@@ -159,7 +158,7 @@ def test_team_session_resource_provenance_migrations(
         with engine.begin() as connection:
             _seed_legacy_resource_rows(connection)
 
-        alembic_command.upgrade(config, _MODEL_LINEAGE_REVISION)
+        alembic_command.upgrade(config, _RESOURCE_PROVENANCE_REVISION)
         with engine.connect() as connection:
             model_lineage = {
                 row.id: row.created_run_id
@@ -183,7 +182,6 @@ def test_team_session_resource_provenance_migrations(
             _UNMATCHED_MODEL_FILE_ID: None,
         }
 
-        alembic_command.upgrade(config, _RESOURCE_PROVENANCE_REVISION)
         with engine.connect() as connection:
             exchange_provenance = connection.execute(
                 sa.text(
