@@ -102,7 +102,7 @@ class RuntimeProviderBootstrapEnrollmentService:
             except RuntimeProviderCredentialUnavailable:
                 pass
             else:
-                if authentication.provider_id == provider_id:
+                if authentication.provider_resource_id == provider_id:
                     return RuntimeProviderBootstrapCredential(
                         secret=existing_secret,
                         changed=False,

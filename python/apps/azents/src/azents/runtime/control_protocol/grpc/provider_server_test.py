@@ -64,6 +64,7 @@ class FakeProviderCredentialBridge:
             binding_id="binding-1",
             credential_id="credential-1",
             provider_id="provider-1",
+            provider_resource_id="provider-row-1",
             provider_kind=RuntimeProviderKind.DOCKER,
             provider_scope=RuntimeProviderScope.SYSTEM,
             provider_workspace_id=None,

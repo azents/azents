@@ -332,7 +332,7 @@ class RuntimeProviderEnrollmentService:
         async with self.session_manager() as session:
             provider = await self.provider_repository.get_by_id(
                 session,
-                provider_id=authentication.provider_id,
+                provider_id=authentication.provider_resource_id,
                 for_update=True,
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
@@ -344,7 +344,7 @@ class RuntimeProviderEnrollmentService:
             )
             if (
                 binding is None
-                or binding.provider_id != authentication.provider_id
+                or binding.provider_id != authentication.provider_resource_id
                 or binding.auth_method is not authentication.auth_method
                 or binding.subject != authentication.auth_subject
                 or binding.state is not RuntimeProviderBindingState.ACTIVE
@@ -371,7 +371,7 @@ class RuntimeProviderEnrollmentService:
             connection = await self.repository.create_connection(
                 session,
                 create=RuntimeProviderConnectionCreate(
-                    provider_id=authentication.provider_id,
+                    provider_id=authentication.provider_resource_id,
                     binding_id=authentication.binding_id,
                     credential_id=authentication.credential_id,
                     auth_method=authentication.auth_method,
@@ -389,7 +389,7 @@ class RuntimeProviderEnrollmentService:
                 revoked_credentials = (
                     await self.repository.revoke_older_bootstrap_credentials(
                         session,
-                        provider_id=authentication.provider_id,
+                        provider_id=authentication.provider_resource_id,
                         current_credential_id=authentication.credential_id,
                         revoked_at=connected_at,
                     )
@@ -397,7 +397,7 @@ class RuntimeProviderEnrollmentService:
             await self.provider_repository.append_audit_event(
                 session,
                 create=RuntimeProviderAuditEventCreate(
-                    provider_id=authentication.provider_id,
+                    provider_id=authentication.provider_resource_id,
                     event_type=RuntimeProviderAuditEventType.CONNECTION_OPENED,
                     actor_user_id=None,
                     metadata={
@@ -432,7 +432,7 @@ class RuntimeProviderEnrollmentService:
         async with self.session_manager() as session:
             return await self.repository.heartbeat_connection(
                 session,
-                provider_id=authentication.provider_id,
+                provider_id=authentication.provider_resource_id,
                 binding_id=authentication.binding_id,
                 credential_id=authentication.credential_id,
                 auth_method=authentication.auth_method,
@@ -452,7 +452,7 @@ class RuntimeProviderEnrollmentService:
         async with self.session_manager() as session:
             return await self.repository.connection_active(
                 session,
-                provider_id=authentication.provider_id,
+                provider_id=authentication.provider_resource_id,
                 binding_id=authentication.binding_id,
                 credential_id=authentication.credential_id,
                 auth_method=authentication.auth_method,
@@ -472,7 +472,7 @@ class RuntimeProviderEnrollmentService:
         async with self.session_manager() as session:
             disconnected = await self.repository.disconnect_connection(
                 session,
-                provider_id=authentication.provider_id,
+                provider_id=authentication.provider_resource_id,
                 binding_id=authentication.binding_id,
                 credential_id=authentication.credential_id,
                 auth_method=authentication.auth_method,
@@ -484,7 +484,7 @@ class RuntimeProviderEnrollmentService:
                 await self.provider_repository.append_audit_event(
                     session,
                     create=RuntimeProviderAuditEventCreate(
-                        provider_id=authentication.provider_id,
+                        provider_id=authentication.provider_resource_id,
                         event_type=RuntimeProviderAuditEventType.CONNECTION_CLOSED,
                         actor_user_id=None,
                         metadata={

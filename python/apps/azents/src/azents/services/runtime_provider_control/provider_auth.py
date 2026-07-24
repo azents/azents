@@ -213,7 +213,8 @@ class IssuedTokenProviderAuthVerifier:
         return RuntimeProviderCredentialAuthentication(
             binding_id=binding.id,
             credential_id=credential.id,
-            provider_id=provider.id,
+            provider_id=provider.provider_id,
+            provider_resource_id=provider.id,
             provider_kind=provider.kind,
             provider_scope=provider.scope,
             provider_workspace_id=provider.workspace_id,
@@ -295,7 +296,8 @@ class KubernetesServiceAccountProviderAuthVerifier:
         return RuntimeProviderCredentialAuthentication(
             binding_id=binding.id,
             credential_id=None,
-            provider_id=provider.id,
+            provider_id=provider.provider_id,
+            provider_resource_id=provider.id,
             provider_kind=provider.kind,
             provider_scope=provider.scope,
             provider_workspace_id=provider.workspace_id,
