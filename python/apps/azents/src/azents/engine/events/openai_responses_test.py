@@ -1120,10 +1120,10 @@ async def test_adapter_logs_safe_typed_terminal_error_context(
     await adapter.close()
 
 
-async def test_adapter_logs_safe_sdk_status_error_context(
+async def test_adapter_maps_sdk_status_error_without_duplicate_adapter_log(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """SDK status failures retain safe fields and upstream request correlation."""
+    """SDK status failures preserve their exception context for the error boundary."""
     caplog.set_level(logging.WARNING)
     request_handle = httpx.Request("POST", "https://provider.example/responses")
     error = BadRequestError(
@@ -1175,21 +1175,12 @@ async def test_adapter_logs_safe_sdk_status_error_context(
         ]
 
     assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
-
-    record = next(
-        record
-        for record in caplog.records
-        if record.message == "OpenAI Responses SDK request failed"
-    )
-    fields = record.__dict__
-    assert fields["openai_responses_transport"] == "http"
-    assert fields["provider_sdk_exception_type"] == "BadRequestError"
-    assert fields["provider_status_code"] == 400
-    assert fields["provider_error_code"] == "future_error"
-    assert fields["provider_error_type"] == "future_error_type"
-    assert fields["provider_error_param"] == "input[0].tools[1]"
-    assert fields["provider_request_id"] == "req_synthetic"
-    assert fields["provider_error_message"] == "Rejected api_key=[REDACTED]"
+    assert raised.value.status_code == 400
+    assert raised.value.provider_code == "future_error"
+    assert raised.value.provider_error_type == "future_error_type"
+    assert raised.value.provider_message == "Rejected api_key=[REDACTED]"
+    assert raised.value.__cause__ is error
+    assert "OpenAI Responses SDK request failed" not in caplog.text
     assert "sk-abcdefghijk" not in caplog.text
     await adapter.close()
 

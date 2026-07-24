@@ -785,11 +785,6 @@ class OpenAIResponsesModelAdapter:
                 category=_websocket_failure_category(failure.status_code),
             ) from None
         except OpenAIError as exc:
-            _log_openai_sdk_error(
-                exc=exc,
-                transport=transport,
-                call_context=call_context,
-            )
             failure = _map_openai_error(
                 exc,
                 call_context=call_context,
@@ -799,7 +794,7 @@ class OpenAIResponsesModelAdapter:
                     else call_context.provider_integration_id
                 ),
             )
-            raise failure from None
+            raise failure from exc
         finally:
             await close_stream_response(response)
             if physical_response is not response:
@@ -1078,47 +1073,6 @@ def _openai_terminal_error_log_fields(
         ),
         "provider_terminal_error_param": sanitize_provider_error_param(provider_param),
     }
-
-
-def _log_openai_sdk_error(
-    *,
-    exc: OpenAIError,
-    transport: OpenAIResponsesPhysicalTransport,
-    call_context: ModelStreamCallContext,
-) -> None:
-    """Record safe structured SDK status diagnostics before error mapping."""
-    error_body = _openai_error_body(exc)
-    provider_message = (
-        extract_provider_message_text(error_body.get("message"))
-        or extract_provider_message_text(getattr(exc, "message", None))
-        or extract_provider_message_text(str(exc))
-    )
-    status_code = exc.status_code if isinstance(exc, APIStatusError) else None
-    logger.warning(
-        "OpenAI Responses SDK request failed",
-        extra={
-            **_openai_call_context_log_fields(call_context),
-            "openai_responses_transport": transport,
-            "provider_sdk_exception_type": sanitize_provider_identifier(
-                exc.__class__.__name__
-            ),
-            "provider_status_code": status_code,
-            "provider_error_code": sanitize_provider_identifier(
-                error_body.get("code") or getattr(exc, "code", None)
-            ),
-            "provider_error_type": sanitize_provider_identifier(
-                error_body.get("type") or exc.__class__.__name__
-            ),
-            "provider_error_message": sanitize_provider_message(provider_message),
-            "provider_error_message_length": _provider_message_length(provider_message),
-            "provider_error_param": sanitize_provider_error_param(
-                error_body.get("param")
-            ),
-            "provider_request_id": sanitize_provider_identifier(
-                getattr(exc, "request_id", None)
-            ),
-        },
-    )
 
 
 def _openai_call_context_log_fields(

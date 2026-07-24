@@ -147,10 +147,10 @@ the internal-error boundary enriches its single traceback log with the same safe
 typed terminal event with an unknown provider code follows the same internal-error contract. OpenAI
 Responses terminal-event observations log the safe structured provider fields available from the SDK
 (`outcome`, event type, code, message, parameter path, and sequence number), the selected physical
-transport, and Run correlation fields. SDK status failures additionally log the validated upstream
-request ID and status code. These observability records apply the same secret redaction and bounded
-scalar rules as provider failures; raw bodies, stream frames, request data, output data, and headers
-remain excluded.
+transport, and Run correlation fields. SDK request failures retain their exception chain for the
+existing error boundary rather than emitting a duplicate adapter log. These observability records
+apply the same secret redaction and bounded scalar rules as provider failures; raw bodies, stream
+frames, request data, output data, and headers remain excluded.
 
 Completed output items may reconstruct a successfully completed response but do not independently
 prove response completion. Once the adapter has observed the provider-native successful completion
@@ -1143,8 +1143,8 @@ with a channel/message icon rather than presenting it as Goal continuation.
 
 ## Changelog
 
-- **2026-07-24** (spec_version 131) — Added safe structured OpenAI Responses terminal-event and SDK
-  status-error observations with physical transport and Run correlation while excluding raw payloads.
+- **2026-07-24** (spec_version 131) — Added safe structured OpenAI Responses terminal-event
+  observations with physical transport and Run correlation while excluding raw payloads.
 - **2026-07-23** (spec_version 130) — Added the explicit External Channel file download
   Tool and file-bearing Channel action to the run-scoped Runtime tool loop without
   introducing durable file staging.
