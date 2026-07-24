@@ -21,7 +21,7 @@ class ModelFile(BaseModel):
     size_bytes: int = Field(description="Normalized blob size")
     created_run_id: str | None = Field(
         default=None,
-        description="Created AgentRun ID, unavailable for unresolved historical rows"
+        description="Created AgentRun ID, unavailable for unresolved historical rows",
     )
     created_run_index: int = Field(ge=1, description="Created run index")
     storage_key: str = Field(description="Object storage key")

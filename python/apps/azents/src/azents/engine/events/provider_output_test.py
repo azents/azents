@@ -404,6 +404,7 @@ def _materializer(
         exchange_file_repository=exchange_repository,
         agent_repository=AgentRepository(),
         agent_session_repository=session_repository,
+        agent_run_repository=_AgentRunRepository(),
         workspace_user_repository=workspace_user_repository,
         session_manager=session_manager,
         s3_service=s3_service,
