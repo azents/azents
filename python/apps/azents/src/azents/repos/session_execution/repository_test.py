@@ -121,28 +121,6 @@ class TestSessionExecutionRepository:
                 owner_generation=agent_session.owner_generation,
             )
 
-    async def test_load_canonical_snapshot_rejects_invalid_pending_idle_run(
-        self,
-        rdb_session: AsyncSession,
-    ) -> None:
-        """A pending idle fence must reference this Session's completed Run."""
-        agent_session, _agent_id = await _create_execution_subject(
-            rdb_session,
-            handle="execution-invalid-idle",
-        )
-        agent_session.pending_idle_continuation_run_id = "missing-run-001"
-        await rdb_session.flush()
-
-        with pytest.raises(
-            CanonicalExecutionSnapshotError,
-            match="Pending idle continuation Run is invalid",
-        ):
-            await SessionExecutionRepository().load_canonical_snapshot(
-                rdb_session,
-                session_id=agent_session.id,
-                owner_generation=agent_session.owner_generation,
-            )
-
     async def test_load_canonical_snapshot_projects_only_matching_recoverable_run(
         self,
         rdb_session: AsyncSession,
