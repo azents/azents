@@ -199,7 +199,6 @@ async def _publish(event: PublishedEvent) -> None:
 
 def _turn_context() -> TurnContext:
     return TurnContext(
-        user_id=None,
         workspace_id="workspace-1",
         model="test-model",
         run_id="run-current",

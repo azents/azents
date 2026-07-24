@@ -22,7 +22,6 @@ def _make_tool(
     tool = make_delete_file_tool(
         session_storage=storage,
         agent_id="",
-        user_id="",
     )
     return tool, storage
 

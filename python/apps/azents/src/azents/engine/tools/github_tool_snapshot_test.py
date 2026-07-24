@@ -132,7 +132,6 @@ def _make_config() -> GitHubToolkitConfig:
 def _make_context() -> TurnContext:
     """Create TurnContext for tests."""
     return TurnContext(
-        user_id="user-1",
         workspace_id="workspace-1",
         model="model",
         run_id="run-1",

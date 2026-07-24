@@ -695,7 +695,6 @@ class TestClaudeRulesToolkit:
 
         state = await toolkit.update_context(
             TurnContext(
-                user_id="user-1",
                 workspace_id="ws-1",
                 model="test-model",
                 run_id="run-1",

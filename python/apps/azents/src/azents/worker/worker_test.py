@@ -1814,11 +1814,9 @@ async def test_prepare_toolkits_enters_before_update_context() -> None:
                     toolkit_type=None,
                 )
             ],
-            "user-001",
         )
         await prepared[0].toolkit.update_context(
             TurnContext(
-                user_id="user-001",
                 workspace_id="workspace-001",
                 model="test-model",
                 run_id="run-001",
@@ -1850,7 +1848,6 @@ async def test_prepare_toolkits_reuses_same_session_key() -> None:
                     toolkit_type="mcp",
                 )
             ],
-            "user-001",
         )
         second_prepared = await runner.prepare_toolkits(
             [
@@ -1861,7 +1858,6 @@ async def test_prepare_toolkits_reuses_same_session_key() -> None:
                     toolkit_type="mcp",
                 )
             ],
-            "user-001",
         )
     finally:
         await runner.shutdown()
@@ -1892,7 +1888,6 @@ async def test_prepare_toolkits_replaces_auto_toolkit_on_context_change() -> Non
                     source_revision="idle-workspace",
                 )
             ],
-            "user-001",
         )
         second_prepared = await runner.prepare_toolkits(
             [
@@ -1904,7 +1899,6 @@ async def test_prepare_toolkits_replaces_auto_toolkit_on_context_change() -> Non
                     source_revision="run-workspace",
                 )
             ],
-            "user-001",
         )
     finally:
         await runner.shutdown()
@@ -1920,8 +1914,8 @@ async def test_prepare_toolkits_replaces_auto_toolkit_on_context_change() -> Non
 
 
 @pytest.mark.asyncio
-async def test_prepare_toolkits_rekeys_registered_toolkit_by_actor() -> None:
-    """DB-registered toolkit does not reuse previous instance when actor changes."""
+async def test_prepare_toolkits_reuses_registered_toolkit_across_senders() -> None:
+    """DB-registered Toolkit reuse does not vary by Human sender."""
     host = _Host()
     runner = _make_session_runner(host)
     events: list[str] = []
@@ -1938,7 +1932,6 @@ async def test_prepare_toolkits_rekeys_registered_toolkit_by_actor() -> None:
                     toolkit_type="github",
                 )
             ],
-            "user-001",
         )
         second_prepared = await runner.prepare_toolkits(
             [
@@ -1949,19 +1942,13 @@ async def test_prepare_toolkits_rekeys_registered_toolkit_by_actor() -> None:
                     toolkit_type="github",
                 )
             ],
-            "user-002",
         )
     finally:
         await runner.shutdown()
 
     assert first_prepared[0].toolkit is first
-    assert second_prepared[0].toolkit is second
-    assert events == [
-        "enter:first-user",
-        "enter:second-user",
-        "exit:first-user",
-        "exit:second-user",
-    ]
+    assert second_prepared[0].toolkit is first
+    assert events == ["enter:first-user", "exit:first-user"]
 
 
 @pytest.mark.asyncio

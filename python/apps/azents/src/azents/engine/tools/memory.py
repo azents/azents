@@ -1,9 +1,4 @@
-"""Memory tool factory.
-
-Allows agent to store, list, search, and delete memories.
-save_memory, list_memories, get_memory, search_memories, delete_memory
-Provides five tools.
-"""
+"""Agent-scope Memory tool factory for Team Session execution."""
 
 import json
 
@@ -21,26 +16,21 @@ from azents.repos.memory.data import (
     MemorySummary,
 )
 
-# ---------------------------------------------------------------------------
-# Input models
-# ---------------------------------------------------------------------------
-
 
 class SaveMemoryInput(BaseModel):
     """save_memory tool input."""
 
     scope: MemoryScope = Field(
-        description="Where to save. 'agent' for team-wide knowledge (shared with all users), 'user' for personal preference (only this user)."  # noqa: E501
+        description="Memory scope. Team Sessions support agent only."
     )
     type: str = Field(
-        description="Memory type: 'user' (role/expertise), 'feedback' (behavioral rules), 'project' (ongoing work), 'reference' (external system pointers)."  # noqa: E501
+        description=(
+            "Memory type: 'user' (role/expertise), 'feedback' (behavioral rules), "
+            "'project' (ongoing work), or 'reference' (external system pointers)."
+        )
     )
-    name: str = Field(
-        description="Memory identifier. Used for upsert — same name in the same scope overwrites."  # noqa: E501
-    )
-    description: str = Field(
-        description="One-line summary. Always loaded in context for relevance judgment."  # noqa: E501
-    )
+    name: str = Field(description="Memory identifier used as the upsert key.")
+    description: str = Field(description="One-line summary for the memory index.")
     content: str = Field(description="Memory body in markdown.")
 
 
@@ -48,18 +38,19 @@ class ListMemoriesInput(BaseModel):
     """list_memories tool input."""
 
     scope: MemoryScope | None = Field(
-        default=None, description="Filter by scope. None returns both scopes."
-    )  # noqa: E501
-    type: str | None = Field(
-        default=None, description="Filter by type. None returns all types."
-    )  # noqa: E501
+        default=None,
+        description="Filter by scope. Team Sessions return agent scope only.",
+    )
+    type: str | None = Field(default=None, description="Filter by memory type.")
 
 
 class GetMemoryInput(BaseModel):
     """get_memory tool input."""
 
-    scope: MemoryScope = Field(description="Memory scope.")
-    name: str = Field(description="Memory name to retrieve.")
+    scope: MemoryScope = Field(
+        description="Memory scope. Team Sessions support agent only."
+    )
+    name: str = Field(description="Memory name.")
 
 
 class SearchMemoriesInput(BaseModel):
@@ -72,106 +63,78 @@ class SearchMemoriesInput(BaseModel):
         )
     )
     scope: MemoryScope | None = Field(
-        default=None, description="Filter by scope. None searches both scopes."
-    )  # noqa: E501
+        default=None,
+        description="Filter by scope. Team Sessions search agent scope only.",
+    )
 
 
 class DeleteMemoryInput(BaseModel):
     """delete_memory tool input."""
 
-    scope: MemoryScope = Field(description="Memory scope.")
-    name: str = Field(description="Memory name to delete.")
+    scope: MemoryScope = Field(
+        description="Memory scope. Team Sessions support agent only."
+    )
+    name: str = Field(description="Memory name.")
 
 
-# ---------------------------------------------------------------------------
-# Formatting helpers
-# ---------------------------------------------------------------------------
+def _require_agent_scope(scope: MemoryScope | None) -> None:
+    """Reject User-scope Memory from Team Session execution."""
+    if scope == MemoryScope.USER:
+        raise FunctionToolError("User-scope memories are unavailable in Team Sessions")
 
 
-def _format_memory_list(
-    agent_summaries: list[MemorySummary],
-    user_summaries: list[MemorySummary],
-) -> str:
-    """Group by type and create index text."""
-    parts: list[str] = []
-
-    if agent_summaries:
-        parts.append("## Agent Memories")
-        parts.extend(_format_by_type(agent_summaries))
-
-    if user_summaries:
-        if parts:
-            parts.append("")
-        parts.append("## User Memories")
-        parts.extend(_format_by_type(user_summaries))
-
-    return "\n".join(parts) if parts else "No memories found."
+def _format_memory_list(agent_summaries: list[MemorySummary]) -> str:
+    """Group Agent Memory summaries by type."""
+    if not agent_summaries:
+        return "No memories found."
+    return "\n".join(["## Agent Memories", *_format_by_type(agent_summaries)])
 
 
 def _format_by_type(summaries: list[MemorySummary]) -> list[str]:
-    """Formatter grouping by type."""
+    """Format summary entries grouped by memory type."""
     by_type: dict[str, list[MemorySummary]] = {}
-    for s in summaries:
-        by_type.setdefault(s.type, []).append(s)
+    for summary in summaries:
+        by_type.setdefault(summary.type, []).append(summary)
 
     lines: list[str] = []
-    for mem_type in sorted(by_type):
-        group = by_type.get(mem_type)
-        if not group:
-            continue
+    for memory_type in sorted(by_type):
         lines.append("")
-        lines.append(f"### {mem_type.title()}")
-        for m in group:
-            lines.append(f"- **{m.name}** — {m.description}")
+        lines.append(f"### {memory_type.title()}")
+        lines.extend(
+            f"- **{summary.name}** — {summary.description}"
+            for summary in by_type[memory_type]
+        )
     return lines
-
-
-# ---------------------------------------------------------------------------
-# Tool factories
-# ---------------------------------------------------------------------------
 
 
 def make_save_memory_tool(
     repo: MemoryRepository,
     agent_id: str,
-    user_id: str | None,
     session_manager: SessionManager[AsyncSession],
 ) -> FunctionTool:
-    """save_memory Create tool.
-
-    :param repo: Memory repository
-    :param agent_id: Agent ID
-    :param user_id: User ID; user scope unavailable when None
-    :param session_manager: DB session manager
-    :return: FunctionTool instance
-    """
+    """Create the Team Agent-scope Memory upsert tool."""
 
     async def save_memory(args: SaveMemoryInput) -> str:
-        """Save or update a memory entry. Same name in the same scope overwrites."""
-        if args.scope == MemoryScope.USER and not user_id:
-            raise FunctionToolError("Cannot save user-scope memory: no user context")
-
-        effective_user_id = user_id if args.scope == MemoryScope.USER else None
-
+        """Save or update an Agent-scope Memory entry."""
+        _require_agent_scope(args.scope)
         async with session_manager() as session:
             await repo.upsert(
                 session,
                 agent_id=agent_id,
-                user_id=effective_user_id,
+                user_id=None,
                 create=MemoryCreate(
-                    scope=args.scope,
+                    scope=MemoryScope.AGENT,
                     type=args.type,
                     name=args.name,
                     description=args.description,
                     content=args.content,
                 ),
             )
-
         return json.dumps(
             {
                 "status": "saved",
                 "name": args.name,
-                "scope": args.scope.value,
+                "scope": MemoryScope.AGENT.value,
                 "type": args.type,
             },
             ensure_ascii=False,
@@ -181,10 +144,8 @@ def make_save_memory_tool(
         save_memory,
         name="save_memory",
         description=(
-            "Save or update a memory entry. "
-            "Use 'agent' scope for team-wide knowledge, "
-            "'user' scope for personal preferences. "
-            "Same name in the same scope overwrites the existing entry."
+            "Save or update a shared Agent Memory entry. "
+            "Team Sessions support agent scope only."
         ),
     )
 
@@ -192,99 +153,51 @@ def make_save_memory_tool(
 def make_list_memories_tool(
     repo: MemoryRepository,
     agent_id: str,
-    user_id: str | None,
     session_manager: SessionManager[AsyncSession],
 ) -> FunctionTool:
-    """list_memories Create tool.
-
-    :param repo: Memory repository
-    :param agent_id: Agent ID
-    :param user_id: User ID; user scope unavailable when None
-    :param session_manager: DB session manager
-    :return: FunctionTool instance
-    """
+    """Create the Team Agent-scope Memory list tool."""
 
     async def list_memories(args: ListMemoriesInput) -> str:
-        """List memory entries, optionally filtered by scope and type."""
-        if args.scope == MemoryScope.USER and not user_id:
-            raise FunctionToolError("Cannot list user-scope memories: no user context")
-
-        type_filter = args.type if args.type is not None else None
-        agent_summaries: list[MemorySummary] = []
-        user_summaries: list[MemorySummary] = []
-
+        """List Agent-scope Memory entries."""
+        _require_agent_scope(args.scope)
         async with session_manager() as session:
-            # agent scope
-            if args.scope is None or args.scope == MemoryScope.AGENT:
-                agent_summaries = await repo.list_summaries(
-                    session,
-                    agent_id=agent_id,
-                    user_id=None,
-                    type=type_filter,
-                )
-
-            # user scope
-            if (args.scope is None or args.scope == MemoryScope.USER) and user_id:
-                user_summaries = await repo.list_summaries(
-                    session,
-                    agent_id=agent_id,
-                    user_id=user_id,
-                    type=type_filter,
-                )
-
-        return _format_memory_list(agent_summaries, user_summaries)
+            summaries = await repo.list_summaries(
+                session,
+                agent_id=agent_id,
+                user_id=None,
+                type=args.type,
+            )
+        return _format_memory_list(summaries)
 
     return make_tool(
         list_memories,
         name="list_memories",
-        description=(
-            "List all memory entries. "
-            "Filter by scope (agent/user) and type "
-            "(user/feedback/project/reference)."
-        ),
+        description="List shared Agent Memory entries by optional type.",
     )
 
 
 def make_get_memory_tool(
     repo: MemoryRepository,
     agent_id: str,
-    user_id: str | None,
     session_manager: SessionManager[AsyncSession],
 ) -> FunctionTool:
-    """get_memory Create tool.
-
-    :param repo: Memory repository
-    :param agent_id: Agent ID
-    :param user_id: User ID; user scope unavailable when None
-    :param session_manager: DB session manager
-    :return: FunctionTool instance
-    """
+    """Create the Team Agent-scope Memory read tool."""
 
     async def get_memory(args: GetMemoryInput) -> str:
-        """Retrieve the full content of a specific memory by name and scope."""
-        if args.scope == MemoryScope.USER and not user_id:
-            raise FunctionToolError("Cannot get user-scope memory: no user context")
-        effective_user_id = user_id if args.scope == MemoryScope.USER else None
-
+        """Read one Agent-scope Memory entry."""
+        _require_agent_scope(args.scope)
         async with session_manager() as session:
             memory = await repo.get_by_name(
                 session,
                 agent_id=agent_id,
-                user_id=effective_user_id,
+                user_id=None,
                 name=args.name,
             )
-
         if memory is None:
-            raise FunctionToolError(
-                f"Memory '{args.name}' not found in {args.scope} scope"
-            )
-
+            raise FunctionToolError(f"Memory '{args.name}' not found in agent scope")
         return (
-            f"# {memory.name} ({memory.type}, {memory.scope.value} scope)\n"
-            f"\n"
-            f"{memory.content}\n"
-            f"\n"
-            f"---\n"
+            f"# {memory.name} ({memory.type}, {memory.scope.value} scope)\n\n"
+            f"{memory.content}\n\n---\n"
             f"Created: {memory.created_at:%Y-%m-%d} | "
             f"Updated: {memory.updated_at:%Y-%m-%d}"
         )
@@ -292,79 +205,50 @@ def make_get_memory_tool(
     return make_tool(
         get_memory,
         name="get_memory",
-        description=(
-            "Retrieve the full content of a specific memory entry. "
-            "Requires the exact name and scope."
-        ),
+        description="Retrieve one shared Agent Memory entry by exact name.",
     )
 
 
 def make_search_memories_tool(
     repo: MemoryRepository,
     agent_id: str,
-    user_id: str | None,
     session_manager: SessionManager[AsyncSession],
 ) -> FunctionTool:
-    """search_memories Create tool.
-
-    :param repo: Memory repository
-    :param agent_id: Agent ID
-    :param user_id: User ID; only agent scope searched when None
-    :param session_manager: DB session manager
-    :return: FunctionTool instance
-    """
+    """Create the Team Agent-scope Memory search tool."""
 
     async def search_memories(args: SearchMemoriesInput) -> str:
-        """Search memories, falling back to ranked partial matches."""
-        if args.scope == MemoryScope.USER and not user_id:
-            raise FunctionToolError(
-                "Cannot search user-scope memories: no user context"
-            )
-
-        if args.scope == MemoryScope.AGENT:
-            search_user_id = None
-            include_agent_scope = False
-        elif args.scope == MemoryScope.USER:
-            search_user_id = user_id
-            include_agent_scope = False
-        else:
-            search_user_id = user_id
-            include_agent_scope = user_id is not None
-
-        results: list[MemorySummary]
-        partial_results: list[MemorySearchMatch] = []
+        """Search Agent-scope Memory with an exact-to-partial fallback."""
+        _require_agent_scope(args.scope)
         async with session_manager() as session:
             results = await repo.search(
                 session,
                 agent_id=agent_id,
-                user_id=search_user_id,
-                include_agent_scope=include_agent_scope,
+                user_id=None,
+                include_agent_scope=True,
                 query=args.query,
             )
+            partial_results: list[MemorySearchMatch] = []
             if not results:
                 partial_results = await repo.search_partial(
                     session,
                     agent_id=agent_id,
-                    user_id=search_user_id,
-                    include_agent_scope=include_agent_scope,
+                    user_id=None,
+                    include_agent_scope=True,
                     query=args.query,
                 )
-
         if results:
             return "\n".join(
-                f"{i}. **{memory.name}** ({memory.type}) — {memory.description}"
-                for i, memory in enumerate(results, 1)
+                f"{index}. **{memory.name}** ({memory.type}) — {memory.description}"
+                for index, memory in enumerate(results, 1)
             )
-
         if partial_results:
             lines = ["No exact all-term match was found.", "", "Partial matches:"]
             lines.extend(
-                f"{i}. **{memory.name}** ({memory.type}) — {memory.description} "
+                f"{index}. **{memory.name}** ({memory.type}) — {memory.description} "
                 f"(matched {memory.matched_terms}/{memory.total_terms} terms)"
-                for i, memory in enumerate(partial_results, 1)
+                for index, memory in enumerate(partial_results, 1)
             )
             return "\n".join(lines)
-
         return (
             f'No lexical candidates found for "{args.query}". '
             "Check the loaded memory summaries before creating a new memory."
@@ -374,9 +258,7 @@ def make_search_memories_tool(
         search_memories,
         name="search_memories",
         description=(
-            "Search memories by whitespace-separated terms. "
-            "Returns exact all-term matches when possible, otherwise ranked "
-            "partial matches."
+            "Search shared Agent Memory with exact all-term and partial-match results."
         ),
     )
 
@@ -384,42 +266,27 @@ def make_search_memories_tool(
 def make_delete_memory_tool(
     repo: MemoryRepository,
     agent_id: str,
-    user_id: str | None,
     session_manager: SessionManager[AsyncSession],
 ) -> FunctionTool:
-    """delete_memory Create tool.
-
-    :param repo: Memory repository
-    :param agent_id: Agent ID
-    :param user_id: User ID; user scope unavailable when None
-    :param session_manager: DB session manager
-    :return: FunctionTool instance
-    """
+    """Create the Team Agent-scope Memory delete tool."""
 
     async def delete_memory(args: DeleteMemoryInput) -> str:
-        """Delete a memory entry by name and scope."""
-        if args.scope == MemoryScope.USER and not user_id:
-            raise FunctionToolError("Cannot delete user-scope memory: no user context")
-        effective_user_id = user_id if args.scope == MemoryScope.USER else None
-
+        """Delete one Agent-scope Memory entry."""
+        _require_agent_scope(args.scope)
         async with session_manager() as session:
             deleted = await repo.delete_by_name(
                 session,
                 agent_id=agent_id,
-                user_id=effective_user_id,
+                user_id=None,
                 name=args.name,
             )
-
         if not deleted:
-            raise FunctionToolError(
-                f"Memory '{args.name}' not found in {args.scope} scope"
-            )
-
+            raise FunctionToolError(f"Memory '{args.name}' not found in agent scope")
         return json.dumps(
             {
                 "status": "deleted",
                 "name": args.name,
-                "scope": args.scope.value,
+                "scope": MemoryScope.AGENT.value,
             },
             ensure_ascii=False,
         )
@@ -427,8 +294,5 @@ def make_delete_memory_tool(
     return make_tool(
         delete_memory,
         name="delete_memory",
-        description=(
-            "Delete a memory entry by name and scope. "
-            "Returns an error if the memory does not exist."
-        ),
+        description="Delete one shared Agent Memory entry by exact name.",
     )

@@ -35,7 +35,6 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import (
-    SessionType,
     ToolkitContext,
     ToolkitExecutionMode,
     ToolkitProvider,
@@ -518,12 +517,8 @@ class RunExecutor:
             session_id=snapshot.session_id,
             workspace_id=snapshot.workspace_id,
             agent_id=snapshot.agent_id,
-            user_id=None,
             run_id=run_id,
             publish_event=publish_event,
-            session_type=SessionType.USER,
-            interface_type=None,
-            interface_channel_id=None,
         )
         execution_mode = (
             ToolkitExecutionMode.SUBAGENT
@@ -556,7 +551,7 @@ class RunExecutor:
             memory_enabled=agent.memory_enabled if agent is not None else True,
             runtime_tools_enabled=agent.shell_enabled if agent is not None else False,
         )
-        prepared = await prepare_toolkits(toolkits, None)
+        prepared = await prepare_toolkits(toolkits)
         _refresh_runtime_peer_toolkits(prepared)
         return prepared
 
@@ -870,17 +865,14 @@ class RunExecutor:
                 "session_id": snapshot.session_id,
                 "agent_id": snapshot.agent_id,
                 "run_id": run_id,
-                "user_id": None,
                 "model_target_label": selected_profile.profile.model_target_label,
                 "inference_profile_source": selected_profile.source.value,
-                "interface_type": None,
             },
         )
         invoke_input = InvokeInput(
             agent_id=snapshot.agent_id,
             session_id=snapshot.session_id,
             messages=[],
-            user_id=None,
         )
 
         run_request: RunRequest | None = None
@@ -1075,7 +1067,6 @@ class RunExecutor:
                 await dispatch_tree_change_to_tree(event)
 
         run_context = RunContext(
-            user_id=None,
             run_id=run_id,
             owner_generation=owner_generation,
             tool_admission_barrier=tool_admission_barrier,
@@ -1086,12 +1077,8 @@ class RunExecutor:
             session_id=snapshot.session_id,
             workspace_id=run_request.workspace_id,
             agent_id=invoke_input.agent_id,
-            user_id=None,
             run_id=run_id,
             publish_event=publish_event,
-            session_type=SessionType.USER,
-            interface_type=None,
-            interface_channel_id=None,
         )
 
         async with self.session_manager() as session:
@@ -1180,7 +1167,6 @@ class RunExecutor:
             )
             prepared_toolkits = await prepare_toolkits(
                 run_request.toolkits,
-                None,
             )
             run_request = dataclasses.replace(run_request, toolkits=prepared_toolkits)
             _refresh_runtime_peer_toolkits(prepared_toolkits)
@@ -2535,7 +2521,6 @@ class RunExecutor:
                         agent_id=agent_id,
                         session_id=session_id,
                         messages=[],
-                        user_id=None,
                     ),
                     requested_profile=requested_profile,
                     agent_repository=self.agent_repository,

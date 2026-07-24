@@ -412,7 +412,6 @@ class TestAgentSessionInputService:
             agent_session_id="session-1",
             message=InputMessage(
                 text="restore me",
-                user_id="user-1",
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -473,7 +472,6 @@ class TestAgentSessionInputService:
             agent_session_id="session-1",
             message=InputMessage(
                 text="conflicting attachment",
-                user_id="user-1",
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=["exchange://workspace-1/file-1"],
@@ -525,7 +523,6 @@ class TestAgentSessionInputService:
             agent_session_id="session-1",
             message=InputMessage(
                 text="blocked",
-                user_id="user-1",
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -589,7 +586,6 @@ class TestAgentSessionInputService:
             agent_id=agent_id,
             message=InputMessage(
                 text="first draft message",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -691,7 +687,6 @@ class TestAgentSessionInputService:
         )
         message = InputMessage(
             text="one durable first message",
-            user_id=user_id,
             headers=[],
             metadata={"source": "chat"},
             attachments=[],
@@ -787,7 +782,6 @@ class TestAgentSessionInputService:
         )
         message = InputMessage(
             text="original",
-            user_id=user_id,
             headers=[],
             metadata={"source": "chat"},
             attachments=[],
@@ -875,7 +869,6 @@ class TestAgentSessionInputService:
             agent_id=agent_id,
             message=InputMessage(
                 text="first draft message",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=["exchange://workspace-1/file-1"],
@@ -950,7 +943,6 @@ class TestAgentSessionInputService:
             agent_session_id=old_session.id,
             message=InputMessage(
                 text="after rollover",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1020,7 +1012,6 @@ class TestAgentSessionInputService:
             agent_session_id=child_agent.agent_session_id,
             message=InputMessage(
                 text="direct child input",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1085,7 +1076,6 @@ class TestAgentSessionInputService:
             agent_session_id=agent_session.id,
             message=InputMessage(
                 text="restore me",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1185,7 +1175,6 @@ class TestAgentSessionInputService:
                     agent_session_id=agent_session.id,
                     message=InputMessage(
                         text="must not cross the decommission fence",
-                        user_id=user_id,
                         headers=[],
                         metadata={"source": "chat"},
                         attachments=[],
@@ -1256,7 +1245,6 @@ class TestAgentSessionInputService:
             agent_session_id=agent_session.id,
             message=InputMessage(
                 text="first",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1271,7 +1259,6 @@ class TestAgentSessionInputService:
             agent_session_id=agent_session.id,
             message=InputMessage(
                 text="retry payload ignored",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1356,14 +1343,12 @@ class TestAgentSessionInputService:
         shared_client_request_id = "shared-client-request"
         first_message = InputMessage(
             text="first requester payload",
-            user_id=first_user_id,
             headers=[],
             metadata={"source": "chat"},
             attachments=[],
         )
         second_message = InputMessage(
             text="second requester payload",
-            user_id=second_user_id,
             headers=[],
             metadata={"source": "chat"},
             attachments=[],

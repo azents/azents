@@ -234,7 +234,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.agent = agent
         self.subagent_settings = subagent_settings
         self.session_id: str | None = None
-        self.user_id: str | None = None
         self.publish_event: PublishEventFn | None = None
 
     def set_session_id(self, session_id: str) -> None:
@@ -244,7 +243,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return subagent collaboration tools."""
         self.session_id = context.session_id or self.session_id
-        self.user_id = context.user_id
         self.publish_event = context.publish_event
         async with self.session_manager() as session:
             self.agent = await self._current_agent(session)

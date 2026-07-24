@@ -29,7 +29,6 @@ from azents.core.oauth2 import OAuthTokenError, refresh_access_token
 from azents.core.tools import (
     McpToolkitConfig,
     ResolveContext,
-    SessionType,
     TestConnectionResult,
     Toolkit,
     ToolkitProvider,
@@ -67,7 +66,6 @@ class McpToolkit(McpBasedToolkit[McpToolkitConfig]):
         secret: str | None = None,
         on_auth_failure: (Callable[[], Awaitable[str | None]] | None) = None,
         proxy_url: str | None = None,
-        session_type: SessionType = SessionType.USER,
         artifact_service: ArtifactService | None = None,
         session_manager: SessionManager[AsyncSession] | None = None,
         agent_id: str = "",
@@ -80,14 +78,12 @@ class McpToolkit(McpBasedToolkit[McpToolkitConfig]):
         :param secret: Decrypted authentication secret
         :param on_auth_failure: Token reissue callback on 401; no retry when None
         :param proxy_url: MCP egress proxy URL; direct connection when None
-        :param session_type: Session type used by the base state machine
         :param artifact_service: MCP binary output storage service
         """
         self._config = config or McpToolkitConfig(server_url="", auth_type="none")
         self._secret = secret
         self.on_auth_failure = on_auth_failure
         self._proxy_url = proxy_url
-        self._session_type = session_type
         self.artifact_service = artifact_service
         self.session_manager = session_manager
         self._agent_id = agent_id
@@ -200,9 +196,6 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
             secret=secret,
             on_auth_failure=on_auth_failure,
             proxy_url=context.mcp_proxy_url,
-            session_type=SessionType.SYSTEM
-            if context.user_id is None
-            else SessionType.USER,
             artifact_service=self.artifact_service,
             session_manager=self.session_manager,
             agent_id=context.agent_id,
