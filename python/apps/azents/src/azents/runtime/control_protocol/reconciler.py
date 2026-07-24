@@ -138,6 +138,11 @@ class RuntimeLifecycleReconciler:
         )
 
     async def _dispatch_observe(self, runtime: AgentRuntime) -> bool:
+        async with self._session_manager() as session:
+            await self._runtime_repository.mark_provider_observe_requested(
+                session,
+                runtime.id,
+            )
         return await self._dispatch_runtime_command(
             runtime,
             command_type=RuntimeProviderCommandType.OBSERVE,
@@ -247,17 +252,11 @@ class RuntimeLifecycleReconciler:
         )
         if isinstance(result, RuntimeDispatchResult):
             async with self._session_manager() as session:
-                if claim_lifecycle:
-                    await self._runtime_repository.record_provider_connection_state(
-                        session,
-                        runtime.id,
-                        RuntimeProviderConnectionState.CONNECTED,
-                    )
-                else:
-                    await self._runtime_repository.mark_provider_observe_dispatched(
-                        session,
-                        runtime.id,
-                    )
+                await self._runtime_repository.record_provider_connection_state(
+                    session,
+                    runtime.id,
+                    RuntimeProviderConnectionState.CONNECTED,
+                )
             _LOGGER.info(
                 "Runtime lifecycle command dispatched",
                 extra={
