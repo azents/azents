@@ -72,7 +72,7 @@ tags: [agent, workspace, project, backend, api, database]
 | --- | --- | --- | --- | --- | --- |
 | Persistence and repository | `policy-persistence-impl` | `python/apps/azents/src/azents/rdb/models/agent_automatic_project*.py`, model registry wiring, `python/apps/azents/src/azents/repos/agent_automatic_project/**`, generated Alembic revision, `db-schemas/rdb/revision`, focused repository/migration tests, required Agent-create persistence wiring | Approved documents and fixed schema interface | Schema, backfill, new-Agent row, repository snapshots and atomic replacement | Focused repository/model tests, migration upgrade/downgrade or project schema checks, Ruff, Pyright |
 | Management service and Public API | `policy-management-impl` | New policy service/data modules, extracted reusable Runtime directory-validation boundary, `python/apps/azents/src/azents/api/public/agent/v1/**`, related dependency wiring and focused tests | Persistence workstream interfaces available | Authorization, normalization, two-stage revision check, Runtime validation, catalog update, GET/PUT API and structured errors | Focused service and route tests, Ruff, Pyright |
-| OpenAPI and generated clients | `policy-clientgen-impl` | `python/apps/azents/specs/public/openapi.json`, generated Python Public client, generated TypeScript Public client according to repository generation workflow | Management API complete and route tests passing | Regenerated contract artifacts with no manual generated edits | OpenAPI drift check, client generation, Python client tests if selected, TypeScript public-client typecheck |
+| OpenAPI and generated clients | `policy-management-impl` (continued) | `python/apps/azents/specs/public/openapi.json`, generated Python Public client, generated TypeScript Public client according to repository generation workflow | Management API complete and route tests passing | Regenerated contract artifacts with no manual generated edits | OpenAPI drift check, client generation, Python client tests if selected, TypeScript public-client typecheck |
 
 - Integration order:
   1. Persistence owner generates the migration through Alembic, implements
@@ -91,8 +91,8 @@ tags: [agent, workspace, project, backend, api, database]
   - final generated-artifact reconciliation;
   - phase plan updates.
 - Independent review:
-  - Owner: `policy-independent-reviewer`, which must not implement any Phase 1
-    workstream.
+  - Owner: `backend-readiness` (continued as independent reviewer), which did
+    not implement any Phase 1 workstream.
   - Scope: complete branch diff against the authoritative documents and this
     plan.
   - Criteria: schema correctness, migration/backfill safety, AgentAdmin-only

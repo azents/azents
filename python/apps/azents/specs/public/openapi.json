@@ -6,6 +6,188 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects": {
+      "get": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Get Automatic Session Projects",
+        "description": "Return the AgentAdmin-managed Project policy for automatic root Sessions.",
+        "operationId": "agent_v1_get_automatic_session_projects",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticSessionProjectsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an AgentAdmin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticSessionProjectsMessageErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The Agent or policy was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticSessionProjectsMessageErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Replace Automatic Session Projects",
+        "description": "Replace the complete AgentAdmin-managed automatic Session Project policy.",
+        "operationId": "agent_v1_replace_automatic_session_projects",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomaticSessionProjectsReplaceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticSessionProjectsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A submitted Project path is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticSessionProjectsInvalidPathErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an AgentAdmin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticSessionProjectsMessageErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The Agent or policy was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticSessionProjectsMessageErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The policy revision is stale or Runtime validation is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticSessionProjectsConflictErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent/v1/workspaces/{handle}/agents": {
       "post": {
         "tags": [
@@ -11894,6 +12076,177 @@
         ],
         "title": "AuthMethod",
         "description": "Auth method."
+      },
+      "AutomaticSessionProjectsConflictErrorResponse": {
+        "properties": {
+          "detail": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AutomaticSessionProjectsRevisionConflictDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AutomaticSessionProjectsRuntimeUnavailableDetail"
+              }
+            ],
+            "title": "Detail",
+            "discriminator": {
+              "propertyName": "code",
+              "mapping": {
+                "automatic_session_projects_revision_conflict": "#/components/schemas/AutomaticSessionProjectsRevisionConflictDetail",
+                "automatic_session_projects_runtime_unavailable": "#/components/schemas/AutomaticSessionProjectsRuntimeUnavailableDetail"
+              }
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "AutomaticSessionProjectsConflictErrorResponse",
+        "description": "FastAPI error envelope for an automatic Project policy conflict."
+      },
+      "AutomaticSessionProjectsInvalidPathDetail": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "path"
+        ],
+        "title": "AutomaticSessionProjectsInvalidPathDetail",
+        "description": "Invalid automatic Session Project path detail."
+      },
+      "AutomaticSessionProjectsInvalidPathErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/AutomaticSessionProjectsInvalidPathDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "AutomaticSessionProjectsInvalidPathErrorResponse",
+        "description": "FastAPI error envelope for an invalid Project path."
+      },
+      "AutomaticSessionProjectsMessageErrorResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "AutomaticSessionProjectsMessageErrorResponse",
+        "description": "FastAPI error envelope containing a user-facing message."
+      },
+      "AutomaticSessionProjectsReplaceRequest": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "description": "Revision that must match before replacing the policy"
+          },
+          "project_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Project Paths",
+            "description": "Ordered existing Project paths; empty clears the policy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "project_paths"
+        ],
+        "title": "AutomaticSessionProjectsReplaceRequest",
+        "description": "Complete replacement request for automatic-Session Project paths."
+      },
+      "AutomaticSessionProjectsResponse": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision",
+            "description": "Optimistic policy revision"
+          },
+          "project_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Project Paths",
+            "description": "Ordered normalized existing Project paths"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last policy update time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision",
+          "project_paths",
+          "updated_at"
+        ],
+        "title": "AutomaticSessionProjectsResponse",
+        "description": "Ordered Agent automatic-Session Project policy response."
+      },
+      "AutomaticSessionProjectsRevisionConflictDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "automatic_session_projects_revision_conflict",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AutomaticSessionProjectsRevisionConflictDetail",
+        "description": "Stable optimistic policy revision conflict detail."
+      },
+      "AutomaticSessionProjectsRuntimeUnavailableDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "automatic_session_projects_runtime_unavailable",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AutomaticSessionProjectsRuntimeUnavailableDetail",
+        "description": "Stable Runtime-unavailable policy conflict detail."
       },
       "AvatarFinalizeRequest": {
         "properties": {

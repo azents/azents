@@ -2,9 +2,9 @@
 
 import dataclasses
 import posixpath
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentProjectCatalogStatus,
     AgentSessionStatus,
-    RuntimeRunnerState,
 )
 from azents.engine.tools.deps import get_skill_state_store
 from azents.engine.tools.skill import SkillProjectionService, SkillStateStore
@@ -33,15 +32,17 @@ from azents.repos.session_workspace_project.data import (
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient,
-    RuntimeRunnerOperationFailedError,
-    RuntimeRunnerOperationGenerationError,
-    RuntimeRunnerOperationUnavailable,
 )
 from azents.runtime.deps import get_runtime_runner_operation_client
 from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operations
+from azents.services.runtime_directory_validation import (
+    RuntimeDirectoryNotDirectory,
+    RuntimeDirectoryNotFound,
+    RuntimeDirectoryValidationUnavailable,
+    validate_runtime_directory,
+)
 
 SESSION_WORKSPACE_ROOT = PurePosixPath("/workspace/agent")
-_RUNNER_PROJECT_VALIDATION_TIMEOUT_SECONDS = 120
 
 
 @dataclasses.dataclass(frozen=True)
@@ -120,13 +121,6 @@ def normalize_session_workspace_project_paths(paths: list[str]) -> list[str]:
         seen.add(normalized)
         normalized_paths.append(normalized)
     return normalized_paths
-
-
-def _runner_project_validation_deadline() -> datetime:
-    """Return Runtime operation deadline for Project path validation."""
-    return datetime.now(UTC) + timedelta(
-        seconds=_RUNNER_PROJECT_VALIDATION_TIMEOUT_SECONDS
-    )
 
 
 def _available_project_status_patch() -> AgentProjectCatalogStatusPatch:
@@ -253,7 +247,7 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
-            exists_result = await _ensure_real_directory_in_runtime(
+            exists_result = await validate_runtime_directory(
                 self.runner_operations,
                 runtime=runtime,
                 path=normalized_path,
@@ -262,7 +256,38 @@ class SessionWorkspaceProjectService:
                 case Success():
                     pass
                 case Failure(error):
-                    return Failure(error)
+                    match error:
+                        case RuntimeDirectoryValidationUnavailable():
+                            return Failure(
+                                InvalidProjectPath(
+                                    path=normalized_path,
+                                    reason=(
+                                        "Project path can only be approved from a "
+                                        "ready runtime."
+                                    ),
+                                )
+                            )
+                        case RuntimeDirectoryNotFound():
+                            return Failure(
+                                InvalidProjectPath(
+                                    path=normalized_path,
+                                    reason=(
+                                        "Project path must exist as a runtime "
+                                        "directory."
+                                    ),
+                                )
+                            )
+                        case RuntimeDirectoryNotDirectory():
+                            return Failure(
+                                InvalidProjectPath(
+                                    path=normalized_path,
+                                    reason="Project path must be a runtime directory.",
+                                )
+                            )
+                        case _:
+                            assert_never(error)
+                case _:
+                    assert_never(exists_result)
             project = await self.repository.create_project(
                 session,
                 SessionWorkspaceProjectCreate(
@@ -498,45 +523,3 @@ class SessionWorkspaceProjectService:
                 session_id=agent_session.id,
             )
         )
-
-
-async def _ensure_real_directory_in_runtime(
-    runner_operations: RuntimeRunnerOperationClient | None,
-    *,
-    runtime: AgentRuntime,
-    path: str,
-) -> Result[None, InvalidProjectPath]:
-    """Check whether actual directory exists in Runtime."""
-    if runner_operations is None or runtime.runner_state != RuntimeRunnerState.READY:
-        return Failure(
-            InvalidProjectPath(
-                path=path,
-                reason="Project path can only be approved from a ready runtime.",
-            )
-        )
-    try:
-        await runner_operations.list_files(
-            runtime_id=runtime.id,
-            runner_generation=runtime.runner_generation,
-            owner_session_id=None,
-            path=path,
-            deadline_at=_runner_project_validation_deadline(),
-        )
-    except (
-        RuntimeRunnerOperationUnavailable,
-        RuntimeRunnerOperationGenerationError,
-    ):
-        return Failure(
-            InvalidProjectPath(
-                path=path,
-                reason="Project path can only be approved from a ready runtime.",
-            )
-        )
-    except RuntimeRunnerOperationFailedError as error:
-        return Failure(
-            InvalidProjectPath(
-                path=path,
-                reason=f"Project path must exist as a runtime directory: {error}",
-            )
-        )
-    return Success(None)

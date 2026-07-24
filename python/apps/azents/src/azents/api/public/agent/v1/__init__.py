@@ -30,6 +30,12 @@ from azents.services.agent.data import (
     UnlimitedRetention,
     WorkspaceUserNotFound,
 )
+from azents.services.agent_automatic_project import AgentAutomaticProjectService
+from azents.services.agent_automatic_project.data import (
+    AgentAutomaticProjectPolicyNotFound,
+    AutomaticSessionProjectsRevisionConflict,
+    AutomaticSessionProjectsRuntimeUnavailable,
+)
 from azents.services.memory import MemoryService
 from azents.services.memory.data import (
     DuplicateMemory,
@@ -37,6 +43,7 @@ from azents.services.memory.data import (
     MemoryNotFound,
     MemoryUpdateInput,
 )
+from azents.services.session_workspace_project import InvalidProjectPath
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
@@ -48,6 +55,11 @@ from .data import (
     AgentListResponse,
     AgentResponse,
     AgentUpdateRequest,
+    AutomaticSessionProjectsConflictErrorResponse,
+    AutomaticSessionProjectsInvalidPathErrorResponse,
+    AutomaticSessionProjectsMessageErrorResponse,
+    AutomaticSessionProjectsReplaceRequest,
+    AutomaticSessionProjectsResponse,
     AvatarFinalizeRequest,
     AvatarUploadRequest,
     AvatarUploadTicketResponse,
@@ -61,6 +73,143 @@ router = APIRouter()
 
 
 # --- Agent CRUD ---
+
+
+@router.get(
+    "/workspaces/{handle}/agents/{agent_id}/automatic-session-projects",
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": AutomaticSessionProjectsMessageErrorResponse,
+            "description": "The caller is not an AgentAdmin.",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": AutomaticSessionProjectsMessageErrorResponse,
+            "description": "The Agent or policy was not found.",
+        },
+    },
+)
+async def get_automatic_session_projects(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentAutomaticProjectService, Depends()],
+    *,
+    agent_id: str,
+) -> AutomaticSessionProjectsResponse:
+    """Return the AgentAdmin-managed Project policy for automatic root Sessions."""
+    result = await service.get_policy(
+        agent_id=agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+    )
+    match result:
+        case Success(value):
+            return AutomaticSessionProjectsResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case (
+                    NotFound()
+                    | NotBelongToWorkspace()
+                    | AgentAutomaticProjectPolicyNotFound()
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage this agent.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.put(
+    "/workspaces/{handle}/agents/{agent_id}/automatic-session-projects",
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": AutomaticSessionProjectsInvalidPathErrorResponse,
+            "description": "A submitted Project path is invalid.",
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": AutomaticSessionProjectsMessageErrorResponse,
+            "description": "The caller is not an AgentAdmin.",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": AutomaticSessionProjectsMessageErrorResponse,
+            "description": "The Agent or policy was not found.",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": AutomaticSessionProjectsConflictErrorResponse,
+            "description": (
+                "The policy revision is stale or Runtime validation is unavailable."
+            ),
+        },
+    },
+)
+async def replace_automatic_session_projects(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentAutomaticProjectService, Depends()],
+    *,
+    agent_id: str,
+    request_body: AutomaticSessionProjectsReplaceRequest,
+) -> AutomaticSessionProjectsResponse:
+    """Replace the complete AgentAdmin-managed automatic Session Project policy."""
+    result = await service.replace_policy(
+        agent_id=agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        expected_revision=request_body.expected_revision,
+        project_paths=request_body.project_paths,
+    )
+    match result:
+        case Success(value):
+            return AutomaticSessionProjectsResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case (
+                    NotFound()
+                    | NotBelongToWorkspace()
+                    | AgentAutomaticProjectPolicyNotFound()
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage this agent.",
+                    )
+                case InvalidProjectPath(path=path, reason=reason):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={"message": reason, "path": path},
+                    )
+                case AutomaticSessionProjectsRevisionConflict():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "automatic_session_projects_revision_conflict",
+                            "message": (
+                                "Automatic Session Projects changed elsewhere. "
+                                "Reload the latest policy and retry."
+                            ),
+                        },
+                    )
+                case AutomaticSessionProjectsRuntimeUnavailable(message=message):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "automatic_session_projects_runtime_unavailable",
+                            "message": message,
+                        },
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
 
 
 @router.post(

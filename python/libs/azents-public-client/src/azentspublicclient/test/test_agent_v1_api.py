@@ -82,6 +82,13 @@ class TestAgentV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_v1_get_automatic_session_projects(self) -> None:
+        """Test case for agent_v1_get_automatic_session_projects
+
+        Get Automatic Session Projects
+        """
+        pass
+
     def test_agent_v1_list_agent_admins(self) -> None:
         """Test case for agent_v1_list_agent_admins
 
@@ -114,6 +121,13 @@ class TestAgentV1Api(unittest.TestCase):
         """Test case for agent_v1_remove_avatar
 
         Remove Avatar
+        """
+        pass
+
+    def test_agent_v1_replace_automatic_session_projects(self) -> None:
+        """Test case for agent_v1_replace_automatic_session_projects
+
+        Replace Automatic Session Projects
         """
         pass
 

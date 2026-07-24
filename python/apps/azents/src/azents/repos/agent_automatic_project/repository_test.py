@@ -1,6 +1,11 @@
 """Agent automatic Project policy repository tests."""
 
+import datetime
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from azcommon.result import Failure, Success
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider, WorkspaceUserRole
@@ -90,6 +95,32 @@ async def _create_workspace_user(
 
 class TestAgentAutomaticProjectRepository:
     """AgentAutomaticProjectRepository behavior."""
+
+    async def test_get_policy_reads_setting_and_items_in_one_statement(self) -> None:
+        """Read one coherent policy snapshot without a second item query."""
+        session = AsyncMock(spec=AsyncSession)
+        now = datetime.datetime.now(datetime.UTC)
+        setting = RDBAgentAutomaticProjectSetting(agent_id="agent-policy-read")
+        setting.created_at = now
+        setting.updated_at = now
+        result = MagicMock()
+        result.all.return_value = [
+            (setting, "/workspace/agent/first"),
+            (setting, "/workspace/agent/second"),
+        ]
+        session.execute.return_value = result
+
+        policy = await AgentAutomaticProjectRepository().get_policy(
+            session,
+            agent_id=setting.agent_id,
+        )
+
+        assert policy is not None
+        assert policy.project_paths == (
+            "/workspace/agent/first",
+            "/workspace/agent/second",
+        )
+        assert session.execute.await_count == 1
 
     async def test_get_policy_returns_initial_empty_revision_one(
         self,
@@ -235,3 +266,47 @@ class TestAgentAutomaticProjectRepository:
         fetched = await repo.get_policy(rdb_session, agent_id=agent_id)
         assert fetched is not None
         assert fetched.project_paths == ()
+
+    async def test_replace_policy_rejects_duplicate_paths(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """The database constraint rejects duplicate persisted Project paths."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "automatic-policy-duplicate",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "automatic-policy-duplicate",
+        )
+        workspace_user_id = await _create_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            email="automatic-policy-duplicate@example.com",
+        )
+
+        with pytest.raises(
+            IntegrityError,
+            match="uq_agent_automatic_project_items_agent_path",
+        ):
+            async with rdb_session.begin_nested():
+                await AgentAutomaticProjectRepository().replace_policy(
+                    rdb_session,
+                    agent_id=agent_id,
+                    expected_revision=1,
+                    paths=[
+                        "/workspace/agent/duplicate",
+                        "/workspace/agent/duplicate",
+                    ],
+                    updated_by_workspace_user_id=workspace_user_id,
+                )
+
+        policy = await AgentAutomaticProjectRepository().get_policy(
+            rdb_session,
+            agent_id=agent_id,
+        )
+        assert policy is not None
+        assert policy.revision == 1
+        assert policy.project_paths == ()
