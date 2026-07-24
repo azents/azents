@@ -558,8 +558,7 @@ class AgentEngineAdapter:
         model_file_materializer = ModelFileMaterializer(
             model_file_service=self.model_file_service,
             resolver=model_file_resolver,
-            user_id=context.user_id,
-            agent_id=request.agent_id,
+            authority=resource_authority,
         )
         hook_dispatcher = RuntimeHookDispatcher()
         run_hook_providers = _runtime_hook_provider_refs(request.toolkits)

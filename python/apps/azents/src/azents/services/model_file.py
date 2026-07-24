@@ -476,6 +476,54 @@ class ModelFileService:
         )
         return await self._download_resolved_model_file(model_file_result)
 
+    async def download_for_authority(
+        self,
+        *,
+        model_file_id: str,
+        authority: SessionResourceAuthority,
+    ) -> Result[ModelFileDownload, ModelFileResolveError]:
+        """Fetch a same-session ModelFile under canonical Session/Run authority."""
+        async with self.session_manager() as session:
+            if not await self.validate_resource_authority_in_session(
+                session,
+                authority,
+                lock=False,
+            ):
+                return Failure(ModelFileAccessDenied())
+            model_file = await self.model_file_repository.get_by_id_for_agent(
+                session,
+                model_file_id=model_file_id,
+                agent_id=authority.agent_id,
+            )
+            if (
+                model_file is None
+                or model_file.workspace_id != authority.workspace_id
+                or model_file.session_id != authority.session_id
+            ):
+                return Failure(ModelFileNotFound())
+            if model_file.created_run_id is not None:
+                created_run = await self.agent_run_repository.get_by_id(
+                    session,
+                    model_file.created_run_id,
+                )
+                if (
+                    created_run is None
+                    or created_run.session_id != model_file.session_id
+                    or created_run.run_index != model_file.created_run_index
+                ):
+                    return Failure(ModelFileNotFound())
+        downloaded = await self._download_resolved_model_file(Success(model_file))
+        if isinstance(downloaded, Failure):
+            return downloaded
+        async with self.session_manager() as session:
+            if not await self.validate_resource_authority_in_session(
+                session,
+                authority,
+                lock=False,
+            ):
+                return Failure(ModelFileAccessDenied())
+        return downloaded
+
     async def validate_resource_authority_in_session(
         self,
         session: AsyncSession,

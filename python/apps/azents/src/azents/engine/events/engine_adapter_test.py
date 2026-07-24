@@ -31,6 +31,7 @@ from azents.core.enums import (
     EventKind,
     LLMModelDeveloper,
     LLMProvider,
+    SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
@@ -120,7 +121,7 @@ from azents.engine.tooling.tool_search import (
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
@@ -362,6 +363,15 @@ class _AgentSessionRepo(AgentSessionRepository):
         """Handle session lookup call."""
         del session, agent_session_id
         return _agent_session()
+
+    async def get_root_session_agent_by_session_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> SessionAgent | None:
+        """Return root SessionAgent without using an unbound test DB session."""
+        del session, agent_session_id
+        return _root_session_agent()
 
 
 class _EventSessionHeadState:
@@ -2526,6 +2536,28 @@ def _agent_session() -> AgentSession:
         created_at=now,
         updated_at=now,
         started_at=now,
+    )
+
+
+def _root_session_agent() -> SessionAgent:
+    """Return root SessionAgent for adapter authority assembly tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    return SessionAgent(
+        id="root-session-agent-1",
+        context_id="context-1",
+        root_session_agent_id="root-session-agent-1",
+        agent_session_id="session-1",
+        kind=SessionAgentKind.ROOT,
+        name="root",
+        path="/",
+        agent_type="default",
+        parent_session_agent_id=None,
+        last_task_message=None,
+        last_message_at=None,
+        parent_observed_run_index=None,
+        parent_observed_event_id=None,
+        created_at=now,
+        updated_at=now,
     )
 
 
