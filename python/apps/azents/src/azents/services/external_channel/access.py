@@ -41,6 +41,12 @@ from azents.services.input_buffer import (
     InputBufferEnqueue,
     InputBufferService,
 )
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
+from azents.services.root_agent_session_creation.data import (
+    AgentDefaultRootWorkspaceIntent,
+)
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -103,6 +109,10 @@ class ExternalChannelAccessService:
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
+    ]
+    root_agent_session_creation_service: Annotated[
+        RootAgentSessionCreationService,
+        Depends(RootAgentSessionCreationService),
     ]
     input_buffer_service: Annotated[
         InputBufferService,
@@ -228,16 +238,19 @@ class ExternalChannelAccessService:
                     "The linked External Channel binding is no longer active."
                 )
             else:
-                agent_session = await self.agent_session_repository.create(
-                    session,
-                    AgentSessionCreate(
-                        workspace_id=agent.workspace_id,
-                        agent_id=agent.id,
-                        title=None,
-                        start_reason=AgentSessionStartReason.EXTERNAL_CHANNEL,
-                    ),
+                root_session = (
+                    await self.root_agent_session_creation_service.create_root_session(
+                        session,
+                        create=AgentSessionCreate(
+                            workspace_id=agent.workspace_id,
+                            agent_id=agent.id,
+                            title=None,
+                            start_reason=AgentSessionStartReason.EXTERNAL_CHANNEL,
+                        ),
+                        workspace_intent=AgentDefaultRootWorkspaceIntent(),
+                    )
                 )
-                agent_session_id = agent_session.id
+                agent_session_id = root_session.agent_session.id
             snapshot_count = request.decision_policy_snapshot.get(
                 "pending_truncation_message_count",
                 0,
