@@ -11,9 +11,16 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodSpec,
 )
 from azents_runtime_provider_kubernetes.kubernetes_http import (
+    POD_WATCH_TIMEOUT,
     pod_manifest,
     pod_resource,
 )
+
+
+def test_pod_watch_has_no_total_or_socket_read_timeout() -> None:
+    assert POD_WATCH_TIMEOUT.total is None
+    assert POD_WATCH_TIMEOUT.sock_connect == 30
+    assert POD_WATCH_TIMEOUT.sock_read is None
 
 
 def test_pod_manifest_omits_container_resources_when_unset() -> None:

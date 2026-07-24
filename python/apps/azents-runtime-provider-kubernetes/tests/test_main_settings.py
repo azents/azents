@@ -1,6 +1,8 @@
 """Runtime Provider settings tests."""
 
 import asyncio
+import dataclasses
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -10,15 +12,62 @@ import azents_runtime_provider_kubernetes.main as provider_main
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ContainerResourceClaim,
     ContainerResources,
+    LeaseResource,
+    LeaseSpec,
     LocalObjectReference,
+    ObjectMeta,
 )
+from azents_runtime_provider_kubernetes.kubernetes_http import KubernetesHttpApi
+from azents_runtime_provider_kubernetes.leader import LeaderElectionResult
 from azents_runtime_provider_kubernetes.main import (
     ProviderSettings,
     create_provider_control_client,
     read_service_account_token,
+    wait_for_leadership,
     wait_for_provider_credential_change,
 )
 from azents_runtime_provider_kubernetes.provider import RUNNER_LIMIT_ENV_NAMES
+
+
+@dataclasses.dataclass
+class _StandbyThenLeaderElector:
+    """Model a standby Provider that later acquires leadership."""
+
+    standby_observed: asyncio.Event
+    promote: asyncio.Event
+    attempts: int = dataclasses.field(init=False, default=0)
+
+    async def try_acquire(self, *, now: datetime) -> LeaderElectionResult:
+        self.attempts += 1
+        if self.attempts == 1:
+            self.standby_observed.set()
+            return LeaderElectionResult(
+                acquired=False,
+                lease=_lease("current-leader"),
+            )
+        await self.promote.wait()
+        return LeaderElectionResult(
+            acquired=True,
+            lease=_lease("new-leader"),
+        )
+
+
+def _lease(holder_identity: str) -> LeaseResource:
+    return LeaseResource(
+        metadata=ObjectMeta(
+            name="runtime-provider",
+            namespace="azents",
+            labels={},
+            annotations={},
+        ),
+        spec=LeaseSpec(
+            holder_identity=holder_identity,
+            acquire_time=None,
+            renew_time=None,
+            lease_duration_seconds=30,
+            lease_transitions=0,
+        ),
+    )
 
 
 @pytest.fixture
@@ -64,6 +113,36 @@ def test_provider_settings_defaults_runner_resources_to_none(
     assert settings.image_pull_secrets == ()
     assert settings.service_account_token_file == provider_env
     assert read_service_account_token(provider_env) == "test-provider-credential"
+
+
+@pytest.mark.asyncio
+async def test_standby_readiness_allows_rollout_then_clears_on_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+    tmp_path: Path,
+) -> None:
+    standby_observed = asyncio.Event()
+    promote = asyncio.Event()
+    elector = _StandbyThenLeaderElector(
+        standby_observed=standby_observed,
+        promote=promote,
+    )
+    monkeypatch.setattr(provider_main, "_elector", lambda settings, api: elector)
+    monkeypatch.setattr(provider_main, "_MIN_LEADERSHIP_POLL_SECONDS", 0.01)
+    settings = ProviderSettings()
+    settings.connection_id = "standby"
+    settings.lease_duration_seconds = 0
+    settings.readiness_file = tmp_path / "ready"
+    api = KubernetesHttpApi.__new__(KubernetesHttpApi)
+    stop = asyncio.Event()
+    task = asyncio.create_task(wait_for_leadership(settings, api, stop=stop))
+
+    await asyncio.wait_for(standby_observed.wait(), timeout=1)
+    assert settings.readiness_file.read_text() == "ready\n"
+
+    promote.set()
+    await asyncio.wait_for(task, timeout=1)
+    assert not settings.readiness_file.exists()
 
 
 @pytest.mark.asyncio

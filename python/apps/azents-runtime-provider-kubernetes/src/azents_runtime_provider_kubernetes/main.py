@@ -50,6 +50,7 @@ _DEFAULT_COMMAND_BLOCK_MS = 5_000
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _CREDENTIAL_POLL_INTERVAL_SECONDS = 1.0
 _LEADERSHIP_WAIT_LOG_INTERVAL_SECONDS = 60.0
+_MIN_LEADERSHIP_POLL_SECONDS = 1.0
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -73,7 +74,7 @@ async def _main() -> None:
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(signum, stop.set)
-        await _wait_for_leadership(settings, api, stop=stop)
+        await wait_for_leadership(settings, api, stop=stop)
         if stop.is_set():
             return
         leader_task = asyncio.create_task(
@@ -314,17 +315,19 @@ async def wait_for_provider_credential_change(
             continue
 
 
-async def _wait_for_leadership(
+async def wait_for_leadership(
     settings: "ProviderSettings",
     api: KubernetesHttpApi,
     *,
     stop: asyncio.Event,
 ) -> None:
+    _set_readiness(settings.readiness_file, ready=False)
     elector = _elector(settings, api)
     next_waiting_log_at = 0.0
     while not stop.is_set():
         result = await elector.try_acquire(now=datetime.now(UTC))
         if result.acquired:
+            _set_readiness(settings.readiness_file, ready=False)
             _LOGGER.info(
                 "Runtime Provider leadership acquired",
                 extra={
@@ -335,6 +338,7 @@ async def _wait_for_leadership(
                 },
             )
             return
+        _set_readiness(settings.readiness_file, ready=True)
         now = asyncio.get_running_loop().time()
         if now >= next_waiting_log_at:
             _LOGGER.info(
@@ -351,7 +355,10 @@ async def _wait_for_leadership(
         try:
             await asyncio.wait_for(
                 stop.wait(),
-                timeout=max(settings.lease_duration_seconds / 3, 1),
+                timeout=max(
+                    settings.lease_duration_seconds / 3,
+                    _MIN_LEADERSHIP_POLL_SECONDS,
+                ),
             )
         except TimeoutError:
             continue
@@ -382,7 +389,10 @@ async def _maintain_leadership(
         try:
             await asyncio.wait_for(
                 stop.wait(),
-                timeout=max(settings.lease_duration_seconds / 3, 1),
+                timeout=max(
+                    settings.lease_duration_seconds / 3,
+                    _MIN_LEADERSHIP_POLL_SECONDS,
+                ),
             )
         except TimeoutError:
             continue

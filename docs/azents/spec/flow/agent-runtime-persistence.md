@@ -17,8 +17,8 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
-last_verified_at: 2026-07-22
-spec_version: 3
+last_verified_at: 2026-07-24
+spec_version: 4
 ---
 
 # Agent Runtime Persistence
@@ -88,6 +88,16 @@ the desired state. Ambiguity is not permission to delete the workspace.
 Kubernetes Provider v1 is an external process that talks to the Kubernetes API and Runtime Control
 gRPC. It uses Lease leader election so only the active leader issues lifecycle commands for a
 provider id.
+
+A healthy non-leader process reports Kubernetes readiness while it can inspect the leader Lease, so
+a single-replica rolling Deployment can replace the old leader without waiting for the standby to
+become active first. On leadership acquisition, the process clears readiness until Runtime Control
+authentication and registration succeed. Standby processes do not open the authoritative Control
+stream or mutate Runtime resources.
+
+The active Provider keeps the Kubernetes Pod watch as a long-lived request without a client total or
+socket-read deadline. Normal server-side watch completion is reopened independently and does not
+rotate the authoritative Runtime Control connection.
 
 For each Runtime, the provider creates or reuses an EBS-backed PVC and mounts it at the reported
 Agent Workspace path in the Runner Pod. PVC identity is tied to Runtime identity/generation labels

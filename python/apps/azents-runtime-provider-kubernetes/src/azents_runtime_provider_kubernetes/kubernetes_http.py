@@ -38,6 +38,11 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
 _SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 _TOKEN_PATH = _SERVICE_ACCOUNT_DIR / "token"
 _CA_CERT_PATH = _SERVICE_ACCOUNT_DIR / "ca.crt"
+POD_WATCH_TIMEOUT = aiohttp.ClientTimeout(
+    total=None,
+    sock_connect=30,
+    sock_read=None,
+)
 _LOGGER = logging.getLogger(__name__)
 
 JsonObject = dict[str, Any]
@@ -161,6 +166,7 @@ class KubernetesHttpApi(KubernetesApi):
                 "watch": "true",
                 "allowWatchBookmarks": "true",
             },
+            timeout=POD_WATCH_TIMEOUT,
         ) as response:
             if response.status >= 400:
                 body = await response.text()
