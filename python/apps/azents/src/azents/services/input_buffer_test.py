@@ -43,6 +43,7 @@ from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
 from azents.engine.events.action_messages import GoalAction, SkillAction
 from azents.engine.events.types import (
     AgentMessagePayload,
+    AgentRunState,
     FileOutputPart,
     SkillLoadedPayload,
     UserMessagePayload,
@@ -202,6 +203,20 @@ async def _create_fixture(
             )
         ).session
         return agent_session.id, user.id
+
+
+async def _create_active_run(
+    rdb_session_manager: SessionManager[AsyncSession],
+    *,
+    session_id: str,
+) -> AgentRunState:
+    """Create an active Run required for authority-backed materialization."""
+    async with rdb_session_manager() as session:
+        return await AgentRunRepository().create_pending(
+            session,
+            session_id=session_id,
+            parent_agent_run_id=None,
+        )
 
 
 async def _create_buffer(
@@ -1488,6 +1503,10 @@ class TestInputBufferService:
             content="resolve before lock",
             attachments=[attachment_uri],
         )
+        run = await _create_active_run(
+            rdb_session_manager,
+            session_id=session_id,
+        )
         exchange_file = _exchange_file(
             file_id="1234567890abcdef1234567890abcdef",
             user_id=user_id,
@@ -1540,7 +1559,7 @@ class TestInputBufferService:
                     expected_buffer_id=buffer_id,
                     prepared_inference_state=None,
                     profile_resolution_failure=None,
-                    active_run_id=None,
+                    active_run_id=run.id,
                 )
         assert model_file_service.discarded_model_file_ids == [model_file.id]
 
@@ -2249,6 +2268,10 @@ class TestInputBufferService:
             content="buffered with file",
             attachments=[attachment_uri],
         )
+        run = await _create_active_run(
+            rdb_session_manager,
+            session_id=session_id,
+        )
         exchange_file = _exchange_file(
             file_id=file_id,
             user_id=user_id,
@@ -2296,7 +2319,7 @@ class TestInputBufferService:
             expected_buffer_id=attachment_buffer_id,
             prepared_inference_state=None,
             profile_resolution_failure=None,
-            active_run_id=None,
+            active_run_id=run.id,
         )
 
         promoted = result.user_messages[0]
@@ -2344,6 +2367,10 @@ class TestInputBufferService:
             user_id=user_id,
             content="retry this attachment",
             attachments=[attachment_uri],
+        )
+        run = await _create_active_run(
+            rdb_session_manager,
+            session_id=session_id,
         )
         exchange_file = _exchange_file(
             file_id="fedcba0987654321fedcba0987654321",
@@ -2394,7 +2421,7 @@ class TestInputBufferService:
                 expected_buffer_id=buffer_id,
                 prepared_inference_state=None,
                 profile_resolution_failure=None,
-                active_run_id=None,
+                active_run_id=run.id,
             )
         async with rdb_session_manager() as session:
             preserved = await InputBufferRepository().get_by_id(session, buffer_id)
@@ -2409,7 +2436,7 @@ class TestInputBufferService:
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
             profile_resolution_failure=None,
-            active_run_id=None,
+            active_run_id=run.id,
         )
 
         assert promoted.deleted_buffer_ids == [buffer_id]
