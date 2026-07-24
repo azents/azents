@@ -10,7 +10,7 @@ document_type: supporting-implementation-plan
 
 - Requirements: [session-260724/REQ](../requirements/session-260724-team-session-execution-boundaries.md)
 - ADR: [session-260724/ADR](../adr/session-260724-team-session-execution-boundaries.md)
-- Design: [session-260724/DESIGN](./session-260724-team-session-execution-boundaries.md)
+- Design: [session-260724/DESIGN](../design/session-260724-team-session-execution-boundaries.md)
 - Stack prefix: `Team Session execution boundaries`
 
 ## Feature Summary
