@@ -32,7 +32,6 @@ from azents.engine.tools.google_analytics_api import (
 def _make_context() -> TurnContext:
     """Create TurnContext for tests."""
     return TurnContext(
-        user_id="test-user",
         workspace_id="test-workspace",
         model="claude-sonnet-4-20250514",
         run_id="test-run",

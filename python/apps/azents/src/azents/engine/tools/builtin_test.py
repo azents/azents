@@ -86,14 +86,12 @@ from azents.services.runtime_storage_error import RuntimeStorageError
 
 def _make_context(
     *,
-    user_id: str | None = "user-1",
     workspace_id: str = "ws-1",
     model: str = "test-model",
     run_id: str = "run-1",
 ) -> TurnContext:
     """Create TurnContext for tests."""
     return TurnContext(
-        user_id=user_id,
         workspace_id=workspace_id,
         model=model,
         run_id=run_id,
@@ -105,7 +103,6 @@ def _make_resolve_context(
     *,
     agent_id: str = "agent-1",
     session_id: str = "session-1",
-    user_id: str = "user-1",
     workspace_id: str = "ws-1",
 ) -> ResolveContext:
     """Create ResolveContext for toolkit provider tests."""
@@ -115,7 +112,6 @@ def _make_resolve_context(
         credentials_json=None,
         agent_id=agent_id,
         session_id=session_id,
-        user_id=user_id,
         session=AsyncMock(),
         web_url="https://example.test",
         oauth_secret_key="test-secret",
@@ -136,7 +132,6 @@ def _make_mock_session_manager() -> SessionManager[AsyncMock]:
 
 def _make_mock_memory_repo(
     agent_summaries: list[MemorySummary] | None = None,
-    user_summaries: list[MemorySummary] | None = None,
 ) -> MemoryRepository:
     """Create MemoryRepository mock for tests."""
     repo = AsyncMock(spec=MemoryRepository)
@@ -148,9 +143,8 @@ def _make_mock_memory_repo(
         user_id: str | None,
         type: str | None = None,  # noqa: ARG001
     ) -> list[MemorySummary]:
-        if user_id is None:
-            return agent_summaries or []
-        return user_summaries or []
+        assert user_id is None
+        return agent_summaries or []
 
     repo.list_summaries = _list_summaries
     return repo
@@ -796,13 +790,10 @@ class TestRuntimeToolkitUpdateContext:
         assert "exec_command" in names
         assert "write_stdin" in names
         assert "bash" not in names
-        assert "read" in names
-        assert "write" in names
         assert "edit" in names
-        assert "glob" in names
-        assert "grep" in names
-        assert "import_file" in names
-        assert "present_file" in names
+        assert "apply_patch" in names
+        assert {"read", "write", "delete", "glob", "grep"} <= names
+        assert names.isdisjoint({"import_file", "present_file", "read_image"})
 
     @pytest.mark.asyncio
     async def test_update_context_registers_instruction_context(self) -> None:
@@ -929,11 +920,11 @@ class TestRuntimeToolkitUpdateContext:
         assert runtime_repo.get_by_agent_id.await_args.args[1] == "parent-agent"
 
     @pytest.mark.asyncio
-    async def test_read_and_agents_appendix_share_runtime_and_log_diagnostics(
+    async def test_read_and_agents_appendix_log_runtime_diagnostics(
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Visible read and AGENTS appendix share Runtime and emit phase metrics."""
+        """Visible read and AGENTS appendix retain separate Runtime diagnostics."""
         caplog.set_level(logging.INFO)
         toolkit = _make_toolkit(
             storage_files={
@@ -985,12 +976,12 @@ class TestRuntimeToolkitUpdateContext:
         assert appendix_fields["appendix_duration_ms"] >= 0
 
     @pytest.mark.asyncio
-    async def test_prompt_includes_runtime_files(self) -> None:
-        """Check that prompt includes Runtime Files section."""
+    async def test_prompt_includes_runtime_workspace(self) -> None:
+        """Check that prompt includes the Runtime workspace section."""
         toolkit = _make_toolkit()
         ctx = _make_context()
         await toolkit.update_context(ctx)
-        assert "Runtime Files" in (await toolkit.get_static_prompt(_make_context()))
+        assert "Runtime Workspace" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
     async def test_prompt_includes_agent_workspace_path(self) -> None:
@@ -1001,13 +992,23 @@ class TestRuntimeToolkitUpdateContext:
         assert "/workspace/agent/" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
-    async def test_prompt_includes_exchange_tools_when_user_id(self) -> None:
-        """When user_id exists, exchange tool guidance is included."""
+    async def test_prompt_does_not_advertise_withheld_resource_tools(self) -> None:
+        """Team prompt lists only currently available Runtime capabilities."""
         toolkit = _make_toolkit()
-        ctx = _make_context(user_id="user-1")
+        ctx = _make_context()
         await toolkit.update_context(ctx)
-        assert "import_file" in (await toolkit.get_static_prompt(_make_context()))
-        assert "present_file" in (await toolkit.get_static_prompt(_make_context()))
+        prompt = await toolkit.get_static_prompt(_make_context())
+        assert "exec_command" in prompt
+        assert "write_stdin" in prompt
+        assert "apply_patch" in prompt
+        assert "`read`" in prompt
+        assert "`write`" in prompt
+        assert "`delete`" in prompt
+        assert "`glob`" in prompt
+        assert "`grep`" in prompt
+        assert "import_file" not in prompt
+        assert "present_file" not in prompt
+        assert "read_image" not in prompt
 
     @pytest.mark.asyncio
     async def test_prompt_excludes_legacy_data_paths(self) -> None:
@@ -1403,7 +1404,9 @@ class TestBuiltinToolkitMemoryPrompt:
         assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
         dynamic_prompt = await toolkit.get_dynamic_prompt(ctx)
         assert "Memory Rules" in dynamic_prompt
-        assert "loaded memory summaries as the primary index" in dynamic_prompt
+        assert "loaded Agent Memory summaries as the primary index" in dynamic_prompt
+        assert "shared Agent Memory only" in dynamic_prompt
+        assert "User-scope Memory is unavailable" in dynamic_prompt
         assert "ranked partial matches" in dynamic_prompt
 
     @pytest.mark.asyncio
@@ -1440,9 +1443,11 @@ class TestBuiltinToolkitMemoryPrompt:
         write_prompt = await write_toolkit.get_dynamic_prompt(ctx)
 
         assert "Types of memory" in read_prompt
-        assert "Scope selection" in read_prompt
+        assert "shared Agent Memory only" in read_prompt
+        assert "User-scope Memory is unavailable" in read_prompt
         assert "Types of memory" not in write_prompt
-        assert "Scope selection" not in write_prompt
+        assert "with `agent` scope" in write_prompt
+        assert "private personal preferences" in write_prompt
         assert "What NOT to save" in write_prompt
         assert "Duplicate prevention" in write_prompt
         assert "empty search result alone" in write_prompt
@@ -2020,7 +2025,6 @@ class TestReadHandler:
         tool = make_read_text_tool(
             session_storage=storage,
             agent_id="agent-1",
-            user_id="",
         )
 
         result = await tool.handler(json.dumps({"path": "/workspace/agent/test.txt"}))
@@ -2043,7 +2047,6 @@ class TestWriteHandler:
         tool = make_write_tool(
             session_storage=storage,
             agent_id="agent-1",
-            user_id="",
         )
 
         result = await tool.handler(

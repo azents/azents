@@ -278,7 +278,6 @@ def _adapter_profile(
 
 def _turn_context() -> TurnContext:
     return TurnContext(
-        user_id="user-1",
         workspace_id="workspace-1",
         model="gpt-5.1",
         run_id="run-1",

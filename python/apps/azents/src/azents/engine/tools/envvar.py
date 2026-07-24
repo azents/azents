@@ -183,7 +183,6 @@ class EnvVarToolkitProvider(ToolkitProvider[EnvVarToolkitConfig]):
                 "event": "envvar_toolkit.resolved",
                 "toolkit_id": context.toolkit_id,
                 "workspace_id": context.workspace_id,
-                "user_id": context.user_id,
                 "entry_names": sorted(e.name for e in config.entries),
                 "values_count": len(values),
             },

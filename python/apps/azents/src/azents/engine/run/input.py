@@ -12,7 +12,6 @@ class InputMessage:
     """Individual input message to be converted to model input."""
 
     text: str
-    user_id: str | None
     headers: list[tuple[str, str]]
     metadata: dict[str, str]
     attachments: list[str]
@@ -27,7 +26,6 @@ class InvokeInput:
     agent_id: str
     session_id: str
     messages: list[InputMessage]
-    user_id: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)

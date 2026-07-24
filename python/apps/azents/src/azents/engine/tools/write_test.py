@@ -17,14 +17,12 @@ def _make_tool(
     *,
     raise_permission: bool = False,
     agent_id: str = "agent-1",
-    user_id: str = "user-1",
 ) -> tuple[FunctionTool, FakeSharedStorage]:
     """Create write tool and fake storage for tests."""
     storage = FakeSharedStorage(raise_permission_on_put=raise_permission)
     tool = make_write_tool(
         session_storage=storage,
         agent_id=agent_id,
-        user_id=user_id,
     )
     return tool, storage
 
@@ -61,8 +59,8 @@ class TestWriteFile:
         assert path == "/workspace/agent/output.txt"
         assert data == b"Hello, world!"
 
-    async def test_write_user_file(self) -> None:
-        """Write file to user path."""
+    async def test_write_agent_subdirectory_file(self) -> None:
+        """Write file to an Agent workspace subdirectory."""
         # Given
         tool, storage = _make_tool()
 
@@ -70,7 +68,7 @@ class TestWriteFile:
         result = await tool.handler(
             json.dumps(
                 {
-                    "path": "/workspace/agent/user/config.json",
+                    "path": "/workspace/agent/config/settings.json",
                     "content": '{"key": "value"}',
                 }
             )
@@ -80,7 +78,7 @@ class TestWriteFile:
         assert isinstance(result, str)
         assert "File written" in result
         path, _ = storage.put_calls[0]
-        assert path == "/workspace/agent/user/config.json"
+        assert path == "/workspace/agent/config/settings.json"
 
     async def test_write_nested_path(self) -> None:
         """Write file to nested path."""

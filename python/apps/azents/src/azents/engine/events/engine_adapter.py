@@ -614,7 +614,6 @@ class AgentEngineAdapter:
             candidate_catalog = await build_tool_catalog(
                 toolkit_bindings=request.toolkits,
                 context=TurnContext(
-                    user_id=context.user_id,
                     workspace_id=request.workspace_id,
                     model=model,
                     run_id=context.run_id,

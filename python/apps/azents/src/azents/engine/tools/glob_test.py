@@ -18,14 +18,12 @@ def _make_tool(
     *,
     files: dict[str, bytes] | None = None,
     agent_id: str = "agent-1",
-    user_id: str = "user-1",
 ) -> tuple[FunctionTool, FakeSharedStorage]:
     """Create glob tool and fake storage for tests."""
     storage = FakeSharedStorage(files)
     tool = make_glob_tool(
         session_storage=storage,
         agent_id=agent_id,
-        user_id=user_id,
     )
     return tool, storage
 
@@ -373,7 +371,6 @@ class TestGlobErrors:
         tool = make_glob_tool(
             session_storage=storage,
             agent_id="agent-1",
-            user_id="user-1",
         )
         result = await tool.handler(
             json.dumps({"pattern": "/workspace/agent/user/memories/*.md"})
