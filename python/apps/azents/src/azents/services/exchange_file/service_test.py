@@ -80,6 +80,7 @@ class _FakeExchangeFileRepository:
             media_type=create.media_type,
             size_bytes=create.size_bytes,
             sha256=create.sha256,
+            created_by_user_id=create.created_by_user_id,
             provenance_kind=create.provenance_kind,
             source_user_id=create.source_user_id,
             source_agent_id=create.source_agent_id,
@@ -715,8 +716,10 @@ async def test_create_image_upload_stores_preview_thumbnail() -> None:
     assert file.preview_thumbnail_width is not None
     assert file.preview_thumbnail_height is not None
     assert file.preview_generated_at is not None
+    assert file.created_by_user_id == "user-1"
     assert thumbnail.media_type == "image/jpeg"
     assert thumbnail.filename == "photo.jpg.preview.jpg"
+    assert thumbnail.created_by_user_id == "user-1"
     assert thumbnail.object_key in s3_service.objects
     assert len(s3_service.objects[thumbnail.object_key]) < len(_jpeg_bytes())
 
@@ -1021,6 +1024,7 @@ async def test_create_session_upload_uses_session_scope() -> None:
     assert file.agent_id == "agent-1"
     assert file.workspace_id == "workspace-1"
     assert file.origin_type == ExchangeFileOrigin.UPLOAD
+    assert file.created_by_user_id == "user-1"
     assert file.retention_root_session_id == "root-session-1"
     assert file.retention_bound_at is not None
     assert s3_service.objects[file.object_key] == b"a,b\n1,2\n"

@@ -848,6 +848,11 @@ class ExchangeFileService:
                     media_type=media_type,
                     size_bytes=len(body),
                     sha256=sha256,
+                    created_by_user_id=(
+                        source_user_id
+                        if provenance_kind is ExchangeFileProvenanceKind.HUMAN
+                        else None
+                    ),
                     provenance_kind=provenance_kind,
                     source_user_id=source_user_id,
                     source_agent_id=(
@@ -901,6 +906,11 @@ class ExchangeFileService:
                     media_type=_PREVIEW_THUMBNAIL_MEDIA_TYPE,
                     size_bytes=len(thumbnail_body.body),
                     sha256=hashlib.sha256(thumbnail_body.body).hexdigest(),
+                    created_by_user_id=(
+                        source_user_id
+                        if provenance_kind is ExchangeFileProvenanceKind.HUMAN
+                        else None
+                    ),
                     provenance_kind=ExchangeFileProvenanceKind.PREVIEW,
                     source_user_id=None,
                     source_agent_id=None,
