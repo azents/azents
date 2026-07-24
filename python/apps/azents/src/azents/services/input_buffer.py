@@ -731,6 +731,12 @@ class InputBufferService:
                 file_parts=file_parts,
                 created_model_file_ids=[],
             )
+        if file_parts:
+            return PreparedInputBufferFiles(
+                attachments=[],
+                file_parts=file_parts,
+                created_model_file_ids=[],
+            )
         if not buffer.attachments:
             return PreparedInputBufferFiles(
                 attachments=[],
@@ -742,10 +748,9 @@ class InputBufferService:
             agent_id=agent_session.agent_id,
             session_id=buffer.session_id,
             exchange_file_service=self.exchange_file_service,
-            model_file_service=(None if file_parts else self.model_file_service),
+            model_file_service=self.model_file_service,
         )
-        if not file_parts:
-            file_parts.extend(materialized.file_parts)
+        file_parts.extend(materialized.file_parts)
         return PreparedInputBufferFiles(
             attachments=materialized.attachments,
             file_parts=file_parts,

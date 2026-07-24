@@ -546,7 +546,7 @@ class ChatWriteService:
             raise ValueError("Subagent sessions are read-only")
         if locked.status is not AgentSessionStatus.ACTIVE:
             raise ValueError("AgentSession is not active")
-        agent = await self.agent_repository.get_by_id(session, agent_id)
+        agent = await self.agent_repository.lock_by_id(session, agent_id)
         if (
             agent is None
             or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
@@ -559,10 +559,12 @@ class ChatWriteService:
         )
         if root is None or root.agent_session_id != locked.id:
             raise ValueError("AgentSession root lineage is invalid")
-        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
-            session,
-            workspace_id=locked.workspace_id,
-            user_id=user_id,
+        workspace_user = (
+            await self.workspace_user_repository.lock_by_workspace_and_user(
+                session,
+                workspace_id=locked.workspace_id,
+                user_id=user_id,
+            )
         )
         if workspace_user is None:
             raise ValueError("Requester does not have session access")
@@ -621,6 +623,7 @@ class ChatWriteService:
             ChatWriteRequestCreate(
                 session_id=session_id,
                 requester_user_id=user_id,
+                creation_agent_id=None,
                 client_request_id=client_request_id,
                 write_type=write_type,
                 accepted_type=accepted_type,

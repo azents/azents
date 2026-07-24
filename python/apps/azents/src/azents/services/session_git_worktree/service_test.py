@@ -703,6 +703,7 @@ async def _create_ready_worktree_session(
                 starting_ref="main",
             )
         ],
+        request_payload={"request": f"worktree-{slug}"},
         client_request_id=f"worktree-{slug}",
     )
     assert isinstance(result, Success)
@@ -1081,6 +1082,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-ready",
         )
 
@@ -1145,6 +1147,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="missing",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-invalid",
         )
 
@@ -1213,6 +1216,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-branch",
         )
 
@@ -1259,6 +1263,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-path",
         )
 
@@ -1309,6 +1314,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-catalog",
         )
 
@@ -1375,6 +1381,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-warning",
         )
 

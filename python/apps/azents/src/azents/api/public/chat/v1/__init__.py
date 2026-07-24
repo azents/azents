@@ -1139,6 +1139,7 @@ async def _write_new_session_message_via_rest(
             user_id=user_id,
             existing_project_paths=request.existing_project_paths,
             setup_actions=request.setup_actions,
+            request_payload=request.model_dump(mode="json"),
             client_request_id=request.client_request_id,
         )
     )
@@ -1152,9 +1153,9 @@ async def _write_new_session_message_via_rest(
         session_id=result.agent_session.id,
         user_id=user_id,
         client_request_id=request.client_request_id,
-        accepted_input_buffer_id=result.input_buffer.id,
+        accepted_input_buffer_id=result.accepted_input_buffer_id,
         input_buffer=result.input_buffer,
-        created=True,
+        created=result.created,
     )
 
 

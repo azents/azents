@@ -56,6 +56,11 @@ class RDBChatWriteRequest(RDBModel):
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    creation_agent_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     client_request_id: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     write_type: Mapped[ChatWriteRequestType] = mapped_column(
         chat_write_request_type_enum,
@@ -82,5 +87,17 @@ class RDBChatWriteRequest(RDBModel):
         "client_request_id",
         name="uq_chat_write_requests_session_requester_client_request",
     )
+    UQ_CREATION_AGENT_REQUESTER_CLIENT_REQUEST = sa.Index(
+        "uq_chat_write_requests_creation_agent_requester_client",
+        "creation_agent_id",
+        "requester_user_id",
+        "client_request_id",
+        unique=True,
+        postgresql_where=sa.text("creation_agent_id IS NOT NULL"),
+    )
 
-    __table_args__ = (IX_SESSION_ID, UQ_SESSION_REQUESTER_CLIENT_REQUEST)
+    __table_args__ = (
+        IX_SESSION_ID,
+        UQ_SESSION_REQUESTER_CLIENT_REQUEST,
+        UQ_CREATION_AGENT_REQUESTER_CLIENT_REQUEST,
+    )

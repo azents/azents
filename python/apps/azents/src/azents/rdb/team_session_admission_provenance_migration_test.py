@@ -432,6 +432,28 @@ def test_team_session_admission_provenance_migration(
                     )
                 )
             )
+            chat_write_request_columns = set(
+                connection.scalars(
+                    sa.text(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'chat_write_requests'
+                        """
+                    )
+                )
+            )
+            chat_write_request_indexes = set(
+                connection.scalars(
+                    sa.text(
+                        """
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE tablename = 'chat_write_requests'
+                        """
+                    )
+                )
+            )
             action_sender_nullable = connection.scalar(
                 sa.text(
                     """
@@ -479,6 +501,11 @@ def test_team_session_admission_provenance_migration(
         assert action_sender is None
         assert input_buffer_columns >= {"sender_user_id"}
         assert "actor_user_id" not in input_buffer_columns
+        assert "creation_agent_id" in chat_write_request_columns
+        assert (
+            "uq_chat_write_requests_creation_agent_requester_client"
+            in chat_write_request_indexes
+        )
         assert action_sender_nullable is True
         assert {"message", "turn_action"} <= enum_values
         assert set(event_payloads) == {
@@ -493,6 +520,7 @@ def test_team_session_admission_provenance_migration(
         assert "fk_input_buffers_sender_user_id_users" in constraints
         assert "ck_input_buffers_sender_user_kind" in constraints
         assert "fk_chat_write_requests_requester_user_id_users" in constraints
+        assert "fk_chat_write_requests_creation_agent_id_agents" in constraints
         assert "uq_chat_write_requests_session_requester_client_request" in constraints
         assert (
             "fk_agent_sessions_pending_command_requester_user_id_users" in constraints

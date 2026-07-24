@@ -168,14 +168,14 @@ class _WorkspaceUserRepository:
         self.allowed = allowed
         self.calls: list[tuple[str, str]] = []
 
-    async def get_by_workspace_and_user(
+    async def lock_by_workspace_and_user(
         self,
         session: AsyncSession,
         *,
         workspace_id: str,
         user_id: str,
     ) -> object | None:
-        """Return current membership according to the test-controlled state."""
+        """Return locked membership according to the test-controlled state."""
         del session
         self.calls.append((workspace_id, user_id))
         return object() if self.allowed else None
@@ -281,6 +281,7 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
                 id="write-request-1",
                 session_id=self.existing_session_id,
                 requester_user_id=create.requester_user_id,
+                creation_agent_id=create.creation_agent_id,
                 client_request_id=create.client_request_id,
                 write_type=create.write_type,
                 accepted_type=create.accepted_type,
@@ -321,6 +322,7 @@ def _existing_record(
         id="request-1",
         session_id="session-1",
         requester_user_id="user-1",
+        creation_agent_id=None,
         client_request_id="request-1",
         write_type=write_type,
         accepted_type=write_type,
@@ -392,7 +394,7 @@ class _ControlAgentSessionRepository:
 class _ControlAgentRepository:
     """Return one active Agent whose Workspace matches the Session."""
 
-    async def get_by_id(self, db_session: AsyncSession, agent_id: str) -> object:
+    async def lock_by_id(self, db_session: AsyncSession, agent_id: str) -> object:
         del db_session
         assert agent_id == "agent-1"
         return SimpleNamespace(
@@ -408,7 +410,7 @@ class _ControlWorkspaceUserRepository:
         self.allowed = allowed
         self.calls = 0
 
-    async def get_by_workspace_and_user(
+    async def lock_by_workspace_and_user(
         self,
         db_session: AsyncSession,
         *,

@@ -1,7 +1,10 @@
 """WorkspaceUser repository tests."""
 
+import asyncio
+from uuid import uuid4
+
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.repos.user import UserRepository as UserRepo
 from azents.repos.user.data import UserCreate
@@ -41,6 +44,66 @@ async def _create_user(
 
 class TestWorkspaceUserRepository:
     """WorkspaceUserRepository tests."""
+
+    async def test_lock_waits_for_concurrent_delete_and_observes_revocation(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Admission cannot pass a membership deletion that already owns the row."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        repo = WorkspaceUserRepository()
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+            workspace = await WorkspaceRepository().create(
+                setup_session,
+                WorkspaceCreate(
+                    name="Membership lock test",
+                    handle=f"membership-lock-{suffix}",
+                ),
+            )
+            assert isinstance(workspace, Success)
+            workspace_id = await WorkspaceRepository().resolve_id(
+                setup_session,
+                f"membership-lock-{suffix}",
+            )
+            assert workspace_id is not None
+            user_id = await _create_user(
+                setup_session,
+                email=f"membership-lock-{suffix}@example.com",
+            )
+            membership = await repo.create(
+                setup_session,
+                WorkspaceUserCreate(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    name="Membership lock user",
+                    role=WorkspaceUserRole.MEMBER,
+                ),
+            )
+            assert isinstance(membership, Success)
+            await setup_session.commit()
+
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as delete_session:
+            await repo.delete(delete_session, membership.value.id)
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as admission_session:
+                admission_task = asyncio.create_task(
+                    repo.lock_by_workspace_and_user(
+                        admission_session,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                    )
+                )
+                await asyncio.sleep(0.1)
+                assert not admission_task.done()
+                await delete_session.commit()
+                admitted = await asyncio.wait_for(admission_task, timeout=5)
+                await admission_session.commit()
+
+        assert admitted is None
 
     async def test_create(self, rdb_session: AsyncSession) -> None:
         """Create WorkspaceUser."""

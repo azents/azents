@@ -87,6 +87,7 @@ from azents.services.exchange_file import (
 from azents.services.model_file import (
     ModelFileCreateError,
     ModelFileInvalidImage,
+    ModelFileOversized,
     ModelFileService,
 )
 from azents.services.vfs import VfsResolvedFile
@@ -266,7 +267,6 @@ async def _create_agent_message_buffer(
     rdb_session_manager: SessionManager[AsyncSession],
     *,
     session_id: str,
-    user_id: str,
     content: str,
     scheduling_mode: InputBufferSchedulingMode,
 ) -> str:
@@ -280,7 +280,7 @@ async def _create_agent_message_buffer(
                 scheduling_mode=scheduling_mode,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
-                sender_user_id=user_id,
+                sender_user_id=None,
                 content=content,
                 idempotency_key=None,
                 metadata={
@@ -518,6 +518,7 @@ class _ExchangeFileService(ExchangeFileService):
         self.resolve_attachment_for_agent_called = False
         self.resolve_admitted_input_attachment_metadata_called = False
         self.resolve_admitted_input_attachment_called = False
+        self.admitted_download_exception: Exception | None = None
 
     async def resolve_attachment_metadata_for_agent(
         self,
@@ -573,6 +574,8 @@ class _ExchangeFileService(ExchangeFileService):
         """Return configured root-claim authorized download result."""
         del uri, agent_id, session_id
         self.resolve_admitted_input_attachment_called = True
+        if self.admitted_download_exception is not None:
+            raise self.admitted_download_exception
         if self.download_result is None:
             return Failure(FileNotFound())
         return self.download_result
@@ -879,10 +882,8 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
     assert model_file_service.create_for_admitted_input_called
 
 
-async def test_admitted_attachment_download_failure_marks_snapshot_unavailable() -> (
-    None
-):
-    """A missing claimed object must not remain model-visible as available."""
+async def test_admitted_attachment_download_failure_is_terminal() -> None:
+    """A deterministic missing object becomes an unavailable attachment."""
     attachment_uri = "exchange://exchange/workspace-001/session/report.txt"
     exchange_file = _exchange_file(
         file_id="1234567890abcdef1234567890abcdef",
@@ -904,11 +905,40 @@ async def test_admitted_attachment_download_failure_marks_snapshot_unavailable()
     )
 
     assert materialized.file_parts == []
-    assert len(materialized.attachments) == 1
     assert materialized.attachments[0].availability == "unavailable"
-    assert materialized.attachments[0].text_preview is not None
-    assert "File unavailable" in materialized.attachments[0].text_preview
     assert not model_file_service.create_for_admitted_input_called
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ModelFileOversized(max_bytes=4, actual_bytes=5),
+        ModelFileInvalidImage(),
+    ],
+)
+async def test_admitted_attachment_model_file_failure_is_terminal(
+    error: ModelFileCreateError,
+) -> None:
+    """Deterministic rich-input conversion failures do not request retry."""
+    attachment_uri = "exchange://exchange/workspace-001/session/report.txt"
+    exchange_file = _exchange_file(
+        file_id="1234567890abcdef1234567890abcdef",
+        user_id="user-001",
+        object_key=attachment_uri.removeprefix("exchange://"),
+    )
+    materialized = await materialize_admitted_input_exchange_file_attachments(
+        [attachment_uri],
+        agent_id="agent-001",
+        session_id="session-001",
+        exchange_file_service=_ExchangeFileService(
+            Success(exchange_file),
+            Success(ExchangeFileDownload(file=exchange_file, body=b"input")),
+        ),
+        model_file_service=_ModelFileService(Failure(error)),
+    )
+
+    assert materialized.file_parts == []
+    assert materialized.attachments[0].availability == "available"
 
 
 async def test_prepare_skips_deferred_action_attachment_materialization() -> None:
@@ -1119,7 +1149,6 @@ class TestInputBufferService:
         await _create_agent_message_buffer(
             rdb_session_manager,
             session_id=session_id,
-            user_id=user_id,
             content="queued note",
             scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
         )
@@ -1683,14 +1712,13 @@ class TestInputBufferService:
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
         """Agent mailbox input is persisted as an agent_message event."""
-        session_id, user_id = await _create_fixture(
+        session_id, _user_id = await _create_fixture(
             rdb_session_manager,
             "input-buffer-agent-message",
         )
         buffer_id = await _create_agent_message_buffer(
             rdb_session_manager,
             session_id=session_id,
-            user_id=user_id,
             content="continue with the next step",
             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
         )
@@ -2216,8 +2244,95 @@ class TestInputBufferService:
         assert payload.attachments[0].preview_thumbnail_uri == thumbnail_uri
         assert len(result.events) == 1
         assert result.events[0].id == event.id
-        assert exchange_file_service.resolve_attachment_for_agent_called
-        assert model_file_service.create_for_agent_pending_input_called
+        assert exchange_file_service.resolve_admitted_input_attachment_called
+        assert model_file_service.create_for_admitted_input_called
+
+    async def test_attachment_preparation_failure_preserves_buffer_for_retry(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A transient admitted download failure leaves the FIFO input durable."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-attachment-retry",
+        )
+        attachment_uri = "exchange://exchange/workspace-001/session/retry.txt"
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="retry this attachment",
+            attachments=[attachment_uri],
+        )
+        exchange_file = _exchange_file(
+            file_id="fedcba0987654321fedcba0987654321",
+            user_id=user_id,
+            object_key=attachment_uri.removeprefix("exchange://"),
+        )
+        exchange_file_service = _ExchangeFileService(
+            Success(exchange_file),
+            Success(ExchangeFileDownload(file=exchange_file, body=b"retry")),
+        )
+        exchange_file_service.admitted_download_exception = RuntimeError(
+            "temporary object storage outage"
+        )
+        model_file = ModelFile(
+            id="model-file-from-retried-attachment",
+            workspace_id="workspace-001",
+            session_id=session_id,
+            agent_id=await _agent_id_for_session(
+                rdb_session_manager,
+                session_id,
+            ),
+            name="retry.txt",
+            media_type="text/plain",
+            kind="text",
+            size_bytes=5,
+            created_run_index=1,
+            storage_key="model-files/retry.txt",
+            status=ModelFileStatus.AVAILABLE,
+            normalized_format="original",
+            sha256="sha256",
+            metadata={"source_kind": "user_upload"},
+            created_at=tznow(),
+        )
+        model_file_service = _ModelFileService(Success(model_file))
+        service = _input_buffer_service(
+            rdb_session_manager,
+            exchange_file_service=exchange_file_service,
+            model_file_service=model_file_service,
+        )
+
+        with pytest.raises(RuntimeError, match="temporary object storage outage"):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+        async with rdb_session_manager() as session:
+            preserved = await InputBufferRepository().get_by_id(session, buffer_id)
+        assert preserved is not None
+
+        exchange_file_service.admitted_download_exception = None
+        promoted = await service.flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert promoted.deleted_buffer_ids == [buffer_id]
+        assert promoted.user_messages[0].payload.attachments[0].uri == attachment_uri
+        async with rdb_session_manager() as session:
+            consumed = await InputBufferRepository().get_by_id(session, buffer_id)
+        assert consumed is None
 
     async def test_flush_reuses_buffer_file_parts_without_rematerializing(
         self,
@@ -2274,8 +2389,11 @@ class TestInputBufferService:
         promoted = result.user_messages[0]
         assert isinstance(promoted.payload.content, list)
         assert promoted.payload.content[1] == existing_part
-        assert not model_file_service.create_for_agent_pending_input_called
-        assert not exchange_file_service.resolve_attachment_for_agent_called
+        assert not model_file_service.create_for_admitted_input_called
+        assert (
+            not exchange_file_service.resolve_admitted_input_attachment_metadata_called
+        )
+        assert not exchange_file_service.resolve_admitted_input_attachment_called
 
     async def test_deleted_buffer_is_not_promoted(
         self,

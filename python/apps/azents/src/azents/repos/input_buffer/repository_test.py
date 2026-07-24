@@ -180,6 +180,7 @@ class TestInputBufferRepository:
             update={
                 "kind": InputBufferKind.AGENT_MESSAGE,
                 "scheduling_mode": InputBufferSchedulingMode.QUEUE_ONLY,
+                "sender_user_id": None,
                 "content": "queue only",
             }
         )

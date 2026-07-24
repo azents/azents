@@ -1,14 +1,16 @@
 """AgentSessionInputService tests."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -62,6 +64,7 @@ from azents.services.root_agent_session_creation import (
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .agent_session_input import (
+    AgentSessionInputIdempotencyConflict,
     AgentSessionInputInactiveSession,
     AgentSessionInputService,
     AgentSessionInputSubagentReadOnly,
@@ -113,7 +116,7 @@ class _RuntimeRepositoryDouble(AgentRuntimeRepository):
 class _ActiveAgentRepositoryDouble(AgentRepository):
     """Repository double that returns a lifecycle-admitted Agent."""
 
-    async def get_by_id(
+    async def lock_by_id(
         self,
         session: AsyncSession,
         agent_id: str,
@@ -132,13 +135,14 @@ class _ActiveAgentRepositoryDouble(AgentRepository):
 class _WorkspaceUserRepositoryDouble(WorkspaceUserRepository):
     """Workspace membership repository for admission unit tests."""
 
-    async def get_by_workspace_and_user(
+    async def lock_by_workspace_and_user(
         self,
         session: AsyncSession,
+        *,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser:
-        """Return an admitted membership marker."""
+        """Return a locked admitted membership marker."""
         del session, workspace_id, user_id
         return cast(WorkspaceUser, object())
 
@@ -597,6 +601,7 @@ class TestAgentSessionInputService:
                 "/workspace/agent/project-a/nested",
             ],
             setup_actions=[],
+            request_payload={"request": "draft-client-1"},
             client_request_id="draft-client-1",
         )
 
@@ -604,9 +609,11 @@ class TestAgentSessionInputService:
         created = result.value.agent_session
         assert created.agent_id == agent_id
         assert created.primary_kind is None
-        assert result.value.input_buffer.session_id == created.id
-        assert result.value.input_buffer.content == "first draft message"
-        assert result.value.input_buffer.idempotency_key == "draft-client-1"
+        input_buffer = result.value.input_buffer
+        assert input_buffer is not None
+        assert input_buffer.session_id == created.id
+        assert input_buffer.content == "first draft message"
+        assert input_buffer.idempotency_key == "draft-client-1"
         async with rdb_session_manager() as session:
             sessions = await AgentSessionRepository().list_active_by_agent_id(
                 session,
@@ -641,6 +648,178 @@ class TestAgentSessionInputService:
         ]
         assert updated is not None
         assert updated.run_state == AgentSessionRunState.RUNNING
+
+    async def test_new_session_retry_reuses_admitted_session_and_input(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """One Agent-scoped client request creates exactly one Session and input."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "draft-session-idempotent",
+            )
+            user_id = await _create_user(
+                session,
+                "draft-session-idempotent@example.com",
+            )
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            agent_id = await _create_agent(
+                session,
+                workspace_id,
+                "draft-session-idempotent",
+            )
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
+            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+        message = InputMessage(
+            text="one durable first message",
+            user_id=user_id,
+            headers=[],
+            metadata={"source": "chat"},
+            attachments=[],
+        )
+        request_payload: dict[str, object] = {
+            "agent_id": agent_id,
+            "client_request_id": "draft-session-request",
+            "message": message.text,
+        }
+
+        first = await service.create_team_session_with_buffered_input(
+            agent_id=agent_id,
+            message=message,
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+            request_payload=request_payload,
+            client_request_id="draft-session-request",
+        )
+        second = await service.create_team_session_with_buffered_input(
+            agent_id=agent_id,
+            message=message,
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+            request_payload=request_payload,
+            client_request_id="draft-session-request",
+        )
+
+        assert isinstance(first, Success)
+        assert isinstance(second, Success)
+        assert first.value.created is True
+        assert second.value.created is False
+        assert second.value.agent_session.id == first.value.agent_session.id
+        assert (
+            second.value.accepted_input_buffer_id
+            == first.value.accepted_input_buffer_id
+        )
+        assert second.value.input_buffer is not None
+        async with rdb_session_manager() as session:
+            sessions = await AgentSessionRepository().list_active_by_agent_id(
+                session,
+                agent_id,
+            )
+            buffers = await InputBufferRepository().list_by_session_id(
+                session,
+                first.value.agent_session.id,
+            )
+        assert len(sessions) == 2
+        assert [item.id for item in buffers] == [first.value.accepted_input_buffer_id]
+
+    async def test_new_session_retry_rejects_changed_payload(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """An Agent-scoped client key cannot create a second changed Session."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "draft-session-idempotency-conflict",
+            )
+            user_id = await _create_user(
+                session,
+                "draft-session-idempotency-conflict@example.com",
+            )
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            agent_id = await _create_agent(
+                session,
+                workspace_id,
+                "draft-session-idempotency-conflict",
+            )
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
+            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+        message = InputMessage(
+            text="original",
+            user_id=user_id,
+            headers=[],
+            metadata={"source": "chat"},
+            attachments=[],
+        )
+        first = await service.create_team_session_with_buffered_input(
+            agent_id=agent_id,
+            message=message,
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+            request_payload={"message": "original"},
+            client_request_id="draft-session-conflict",
+        )
+        conflict = await service.create_team_session_with_buffered_input(
+            agent_id=agent_id,
+            message=message,
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+            request_payload={"message": "changed"},
+            client_request_id="draft-session-conflict",
+        )
+
+        assert isinstance(first, Success)
+        assert isinstance(conflict, Failure)
+        assert isinstance(conflict.error, AgentSessionInputIdempotencyConflict)
+        async with rdb_session_manager() as session:
+            sessions = await AgentSessionRepository().list_active_by_agent_id(
+                session,
+                agent_id,
+            )
+        assert len(sessions) == 2
 
     async def test_new_session_attachment_conflict_rolls_back_session_and_input(
         self,
@@ -703,6 +882,7 @@ class TestAgentSessionInputService:
             user_id=user_id,
             existing_project_paths=[],
             setup_actions=[],
+            request_payload={"request": "draft-claim-conflict"},
             client_request_id="draft-claim-conflict",
         )
 
@@ -865,6 +1045,11 @@ class TestAgentSessionInputService:
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(session, "buffered-chat-running")
             user_id = await _create_user(session, "buffered-running@example.com")
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
             agent_id = await _create_agent(
                 session, workspace_id, "buffered-chat-running"
             )
@@ -919,6 +1104,109 @@ class TestAgentSessionInputService:
         assert updated.run_state == AgentSessionRunState.RUNNING
         assert updated.run_heartbeat_at is not None
 
+    async def test_agent_decommission_fence_wins_before_input_admission(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Admission waits for an Agent lifecycle update and then fails closed."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+                try:
+                    yield session
+                except Exception:
+                    await session.rollback()
+                    raise
+                else:
+                    await session.commit()
+
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+            workspace_id = await _create_workspace(
+                setup_session,
+                f"input-agent-fence-{suffix}",
+            )
+            user_id = await _create_user(
+                setup_session,
+                f"input-agent-fence-{suffix}@example.com",
+            )
+            await _add_workspace_user(
+                setup_session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            agent_id = await _create_agent(
+                setup_session,
+                workspace_id,
+                f"input-agent-fence-{suffix}",
+            )
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    setup_session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            )
+            await setup_session.commit()
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
+            input_buffer_service=_input_buffer_service(session_manager),
+            session_manager=session_manager,
+        )
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as decommission_session:
+            decommissioned = await AgentRepository().mark_decommissioning(
+                decommission_session,
+                agent_id,
+            )
+            assert decommissioned is not None
+            admission_task = asyncio.create_task(
+                service.create_buffered_agent_input(
+                    agent_id=agent_id,
+                    agent_session_id=agent_session.id,
+                    message=InputMessage(
+                        text="must not cross the decommission fence",
+                        user_id=user_id,
+                        headers=[],
+                        metadata={"source": "chat"},
+                        attachments=[],
+                    ),
+                    inference_profile=_TEST_INFERENCE_PROFILE,
+                    user_id=user_id,
+                    request_payload={"request": "agent-fence"},
+                    client_request_id="agent-fence",
+                )
+            )
+            await asyncio.sleep(0.1)
+            assert not admission_task.done()
+            await decommission_session.commit()
+            result = await asyncio.wait_for(admission_task, timeout=5)
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, AgentSessionInputInactiveSession)
+        async with session_manager() as session:
+            buffers = await InputBufferRepository().list_by_session_id(
+                session,
+                agent_session.id,
+            )
+        assert buffers == []
+
     async def test_create_buffered_agent_input_dedupes_client_request_id(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -927,6 +1215,11 @@ class TestAgentSessionInputService:
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(session, "buffered-chat-idempotent")
             user_id = await _create_user(session, "buffered-idempotent@example.com")
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
             agent_id = await _create_agent(
                 session, workspace_id, "buffered-chat-idempotent"
             )

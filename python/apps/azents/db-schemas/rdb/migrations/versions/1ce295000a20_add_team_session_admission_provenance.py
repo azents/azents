@@ -76,10 +76,29 @@ def upgrade() -> None:
         ["id"],
         ondelete="RESTRICT",
     )
+    op.add_column(
+        "chat_write_requests",
+        sa.Column("creation_agent_id", sa.String(length=32), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_chat_write_requests_creation_agent_id_agents",
+        "chat_write_requests",
+        "agents",
+        ["creation_agent_id"],
+        ["id"],
+        ondelete="RESTRICT",
+    )
     op.create_unique_constraint(
         "uq_chat_write_requests_session_requester_client_request",
         "chat_write_requests",
         ["session_id", "requester_user_id", "client_request_id"],
+    )
+    op.create_index(
+        "uq_chat_write_requests_creation_agent_requester_client",
+        "chat_write_requests",
+        ["creation_agent_id", "requester_user_id", "client_request_id"],
+        unique=True,
+        postgresql_where=sa.text("creation_agent_id IS NOT NULL"),
     )
 
     _drop_fk_by_column("agent_sessions", "pending_command_user_id")
@@ -143,6 +162,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Reject rollback across the coordinated forward-only cutover."""
     raise RuntimeError(
-        "1ce295000a20 is forward-only because PostgreSQL enum expansion and "
-        "durable provenance cutover require restoring the pre-cutover backup"
+        "1ce295000a20 is an irreversible forward-only migration because PostgreSQL "
+        "enum expansion and durable provenance cutover require restoring the "
+        "pre-cutover backup"
     )

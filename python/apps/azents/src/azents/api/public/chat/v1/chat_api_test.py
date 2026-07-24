@@ -366,7 +366,9 @@ class _BufferedInputService:
                     created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                     updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 ),
-                input_buffer=input_buffer,
+                accepted_input_buffer_id=input_buffer.id,
+                input_buffer=input_buffer if self.pending else None,
+                created=self.created,
             )
         )
 
@@ -749,6 +751,7 @@ class _RestWriteIdempotencyService:
             id="write-request-1",
             session_id=str(kwargs["session_id"]),
             requester_user_id=str(kwargs["user_id"]),
+            creation_agent_id=None,
             client_request_id=str(kwargs["client_request_id"]),
             write_type=write_type,
             accepted_type=write_type,
@@ -1961,6 +1964,75 @@ class TestRestMessageWriteContract:
         assert response.session_id == "4123456789abcdef0123456789abcdef"
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
+
+    async def test_new_session_pending_retry_re_notifies_without_rebroadcast(
+        self,
+    ) -> None:
+        """A first-message retry repairs wake delivery without duplicate state."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+
+        response = await _write_new_session_message_via_rest(
+            _RestWriteChatService(session_id="4123456789abcdef0123456789abcdef"),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _BufferedInputService(created=False),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            ChatSessionCreateMessageWriteRequest(
+                client_request_id="client-new-pending-retry",
+                message="hello from retried draft",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+                existing_project_paths=[],
+                setup_actions=[],
+            ),
+            agent_id="agent-1",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert response.history_reload_required is False
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+        assert broadcast.events == []
+
+    async def test_new_session_promoted_retry_returns_history_without_wake(
+        self,
+    ) -> None:
+        """A retried first message resolves the original Session after promotion."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+
+        response = await _write_new_session_message_via_rest(
+            _RestWriteChatService(session_id="4123456789abcdef0123456789abcdef"),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _BufferedInputService(  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                created=False,
+                pending=False,
+            ),
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            ChatSessionCreateMessageWriteRequest(
+                client_request_id="client-new-promoted-retry",
+                message="hello from promoted draft",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+                existing_project_paths=[],
+                setup_actions=[],
+            ),
+            agent_id="agent-1",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert response.session_id == "4123456789abcdef0123456789abcdef"
+        assert response.history_reload_required is True
+        assert broker.messages == []
+        assert broadcast.events == []
 
     async def test_session_validation_requires_explicit_session_id(self) -> None:
         """REST write validation checks the explicit session target."""
