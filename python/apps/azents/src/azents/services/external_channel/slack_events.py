@@ -4,6 +4,7 @@ import datetime
 import hashlib
 import json
 import re
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlsplit
@@ -94,6 +95,10 @@ class SlackProviderFileTooLarge(SlackProviderError):
     """Slack returned more file bytes than the configured limit."""
 
 
+class SlackOutboundFileContentError(SlackProviderError):
+    """The run-scoped Runtime source changed or became unreadable."""
+
+
 @dataclass(frozen=True)
 class SlackConnectionRevocation:
     """Provider event that makes a Slack connection unavailable."""
@@ -161,6 +166,15 @@ class SlackFileDownloadInfo:
 
     metadata: ExternalChannelFileMetadata
     private_url: str | None
+
+
+@dataclass(frozen=True)
+class SlackOutboundFile:
+    """One known-length file source for Slack external upload."""
+
+    filename: str
+    length: int
+    content: Callable[[], AsyncIterator[bytes]]
 
 
 def normalize_slack_event(
@@ -757,6 +771,183 @@ class SlackConversationClient:
                 "unfurl_media": False,
             },
             expected_message_ts=None,
+        )
+
+    async def post_file_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
+        markdown_text: str,
+        files: Sequence[SlackOutboundFile],
+    ) -> SlackControlMessageResult:
+        """Upload ordered files and publish them through one Slack completion."""
+        if (
+            not files
+            or len(files) > MAX_EXTERNAL_CHANNEL_FILES
+            or len(markdown_text) > SLACK_MARKDOWN_TEXT_MAX_LENGTH
+        ):
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="provider_payload_invalid",
+                error_summary="Slack file reply payload is invalid.",
+            )
+        uploaded_files: list[dict[str, str]] = []
+        try:
+            for file in files:
+                upload_target = self._success_payload(
+                    await self._request(
+                        "POST",
+                        "/files.getUploadURLExternal",
+                        bot_token=bot_token,
+                        json_body={
+                            "filename": file.filename,
+                            "length": file.length,
+                        },
+                    )
+                )
+                upload_url = upload_target.get("upload_url")
+                file_id = upload_target.get("file_id")
+                if (
+                    not isinstance(upload_url, str)
+                    or not isinstance(file_id, str)
+                    or not file_id
+                ):
+                    return SlackControlMessageResult(
+                        status="unknown",
+                        provider_message_key=None,
+                        error_kind="provider_response_invalid",
+                        error_summary=(
+                            "Slack did not return a valid file upload target."
+                        ),
+                    )
+                parsed_upload_url = urlsplit(upload_url)
+                if parsed_upload_url.scheme != "https" or not parsed_upload_url.netloc:
+                    return SlackControlMessageResult(
+                        status="unknown",
+                        provider_message_key=None,
+                        error_kind="provider_response_invalid",
+                        error_summary="Slack returned an invalid file upload URL.",
+                    )
+                try:
+                    upload_response = await self.http_client.request(
+                        "POST",
+                        upload_url,
+                        headers={
+                            "Content-Type": "application/octet-stream",
+                            "Content-Length": str(file.length),
+                        },
+                        content=file.content(),
+                    )
+                except SlackOutboundFileContentError:
+                    return SlackControlMessageResult(
+                        status="failed",
+                        provider_message_key=None,
+                        error_kind="runtime_file_unavailable",
+                        error_summary=(
+                            "The Runtime file changed or became unreadable "
+                            "during upload."
+                        ),
+                    )
+                except httpx.RequestError:
+                    return SlackControlMessageResult(
+                        status="unknown",
+                        provider_message_key=None,
+                        error_kind="provider_ambiguous",
+                        error_summary="Slack file upload outcome is unknown.",
+                    )
+                if upload_response.status_code >= 500:
+                    return SlackControlMessageResult(
+                        status="unknown",
+                        provider_message_key=None,
+                        error_kind="provider_ambiguous",
+                        error_summary="Slack file upload outcome is unknown.",
+                    )
+                if upload_response.status_code == 429:
+                    return SlackControlMessageResult(
+                        status="failed",
+                        provider_message_key=None,
+                        error_kind="rate_limited",
+                        error_summary="Slack rate limited the file upload.",
+                    )
+                if upload_response.status_code != 200:
+                    return SlackControlMessageResult(
+                        status="failed",
+                        provider_message_key=None,
+                        error_kind="provider_rejected",
+                        error_summary="Slack rejected the external file upload.",
+                    )
+                uploaded_files.append({"id": file_id, "title": file.filename})
+            self._success_payload(
+                await self._request(
+                    "POST",
+                    "/files.completeUploadExternal",
+                    bot_token=bot_token,
+                    json_body={
+                        "files": uploaded_files,
+                        "channel_id": channel_id,
+                        "thread_ts": thread_ts,
+                        "initial_comment": markdown_text,
+                    },
+                )
+            )
+        except SlackProviderPermissionDenied:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="missing_scope",
+                error_summary="Slack App permissions are incomplete.",
+            )
+        except SlackProviderCredentialsInvalid:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="credentials_invalid",
+                error_summary="Slack rejected the configured credential.",
+            )
+        except SlackProviderResourceUnavailable:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="resource_unavailable",
+                error_summary="Slack cannot post to the linked conversation.",
+            )
+        except SlackProviderFileNotFound:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="provider_rejected",
+                error_summary="Slack no longer accepts one uploaded file.",
+            )
+        except SlackProviderRateLimited:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="rate_limited",
+                error_summary="Slack rate limited the file reply attempt.",
+            )
+        except SlackProviderRequestRejected as error:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="provider_rejected",
+                error_summary=f"Slack rejected the file reply ({error.error_code}).",
+            )
+        except SlackProviderTemporaryError:
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary="Slack file reply outcome is unknown.",
+            )
+        return SlackControlMessageResult(
+            status="delivered",
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
         )
 
     async def update_message(

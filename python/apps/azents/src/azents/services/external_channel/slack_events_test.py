@@ -1,6 +1,7 @@
 """Slack External Channel event normalization and API adapter tests."""
 
 import json
+from collections.abc import AsyncIterator
 
 import httpx
 import pytest
@@ -15,6 +16,8 @@ from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackEventExcluded,
     SlackNormalizedMessage,
+    SlackOutboundFile,
+    SlackOutboundFileContentError,
     SlackProviderCredentialsInvalid,
     SlackProviderFileNotFound,
     SlackProviderFileTooLarge,
@@ -1122,3 +1125,273 @@ async def test_channel_action_rejects_over_limit_markdown_without_request() -> N
     assert calls == 0
     assert result.status == "failed"
     assert result.error_kind == "provider_payload_invalid"
+
+
+@pytest.mark.asyncio
+async def test_file_reply_streams_in_order_and_completes_once() -> None:
+    """Slack receives ordered known-length streams before one visible completion."""
+    requests: list[tuple[str, str, dict[str, str], bytes]] = []
+    acquisition_index = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal acquisition_index
+        body = await request.aread()
+        requests.append(
+            (
+                request.url.host or "",
+                request.url.path,
+                dict(request.headers),
+                body,
+            )
+        )
+        if request.url.path == "/api/files.getUploadURLExternal":
+            acquisition_index += 1
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "upload_url": (
+                        f"https://upload.slack.test/upload/{acquisition_index}"
+                    ),
+                    "file_id": f"F{acquisition_index}",
+                },
+            )
+        if request.url.host == "upload.slack.test":
+            return httpx.Response(200, text="OK")
+        assert request.url.path == "/api/files.completeUploadExternal"
+        return httpx.Response(200, json={"ok": True, "files": []})
+
+    async def first_content() -> AsyncIterator[bytes]:
+        yield b"ab"
+        yield b"c"
+
+    async def second_content() -> AsyncIterator[bytes]:
+        yield b"1234"
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_file_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="Attached reports",
+            files=[
+                SlackOutboundFile(
+                    filename="first.txt",
+                    length=3,
+                    content=first_content,
+                ),
+                SlackOutboundFile(
+                    filename="second.txt",
+                    length=4,
+                    content=second_content,
+                ),
+            ],
+        )
+
+    assert result.status == "delivered"
+    assert [path for _, path, _, _ in requests] == [
+        "/api/files.getUploadURLExternal",
+        "/upload/1",
+        "/api/files.getUploadURLExternal",
+        "/upload/2",
+        "/api/files.completeUploadExternal",
+    ]
+    first_acquisition = json.loads(requests[0][3])
+    second_acquisition = json.loads(requests[2][3])
+    assert first_acquisition == {"filename": "first.txt", "length": 3}
+    assert second_acquisition == {"filename": "second.txt", "length": 4}
+    assert requests[1][3] == b"abc"
+    assert requests[1][2]["content-length"] == "3"
+    assert "authorization" not in requests[1][2]
+    assert requests[3][3] == b"1234"
+    assert requests[3][2]["content-length"] == "4"
+    completion = json.loads(requests[4][3])
+    assert completion == {
+        "files": [
+            {"id": "F1", "title": "first.txt"},
+            {"id": "F2", "title": "second.txt"},
+        ],
+        "channel_id": "C1",
+        "thread_ts": "1721600000.000100",
+        "initial_comment": "Attached reports",
+    }
+    assert requests[4][2]["authorization"] == "Bearer xoxb-secret"
+
+
+@pytest.mark.asyncio
+async def test_file_reply_stops_without_completion_when_runtime_stream_fails() -> None:
+    """A changed Runtime source never reaches Slack's publication boundary."""
+    paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/files.getUploadURLExternal":
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "upload_url": "https://upload.slack.test/upload/1",
+                    "file_id": "F1",
+                },
+            )
+        await request.aread()
+        return httpx.Response(200, text="OK")
+
+    async def failed_content() -> AsyncIterator[bytes]:
+        yield b"partial"
+        raise SlackOutboundFileContentError
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_file_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="Attached report",
+            files=[
+                SlackOutboundFile(
+                    filename="report.txt",
+                    length=10,
+                    content=failed_content,
+                )
+            ],
+        )
+
+    assert result.status == "failed"
+    assert result.error_kind == "runtime_file_unavailable"
+    assert paths == ["/api/files.getUploadURLExternal"]
+    assert "/api/files.completeUploadExternal" not in paths
+
+
+@pytest.mark.asyncio
+async def test_file_reply_completion_transport_failure_is_unknown() -> None:
+    """Completion ambiguity is terminal and never fabricated as delivered."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/files.getUploadURLExternal":
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "upload_url": "https://upload.slack.test/upload/1",
+                    "file_id": "F1",
+                },
+            )
+        if request.url.host == "upload.slack.test":
+            await request.aread()
+            return httpx.Response(200, text="OK")
+        raise httpx.ReadTimeout("timeout", request=request)
+
+    async def content() -> AsyncIterator[bytes]:
+        yield b"abc"
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_file_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="Attached report",
+            files=[
+                SlackOutboundFile(
+                    filename="report.txt",
+                    length=3,
+                    content=content,
+                )
+            ],
+        )
+
+    assert result.status == "unknown"
+    assert result.error_kind == "provider_ambiguous"
+
+
+@pytest.mark.asyncio
+async def test_file_reply_upload_server_failure_is_unknown_without_completion() -> None:
+    """A server failure after streaming bytes is treated as ambiguous."""
+    paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/files.getUploadURLExternal":
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "upload_url": "https://upload.slack.test/upload/1",
+                    "file_id": "F1",
+                },
+            )
+        await request.aread()
+        return httpx.Response(503, text="unavailable")
+
+    async def content() -> AsyncIterator[bytes]:
+        yield b"abc"
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_file_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="Attached report",
+            files=[
+                SlackOutboundFile(
+                    filename="report.txt",
+                    length=3,
+                    content=content,
+                )
+            ],
+        )
+
+    assert result.status == "unknown"
+    assert result.error_kind == "provider_ambiguous"
+    assert paths == [
+        "/api/files.getUploadURLExternal",
+        "/upload/1",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_file_reply_completion_file_rejection_is_terminal_failed() -> None:
+    """Slack rejecting a temporary file ID is a controlled failed outcome."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/files.getUploadURLExternal":
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "upload_url": "https://upload.slack.test/upload/1",
+                    "file_id": "F1",
+                },
+            )
+        if request.url.host == "upload.slack.test":
+            await request.aread()
+            return httpx.Response(200, text="OK")
+        return httpx.Response(
+            200,
+            json={"ok": False, "error": "file_not_found"},
+        )
+
+    async def content() -> AsyncIterator[bytes]:
+        yield b"abc"
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_file_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="Attached report",
+            files=[
+                SlackOutboundFile(
+                    filename="report.txt",
+                    length=3,
+                    content=content,
+                )
+            ],
+        )
+
+    assert result.status == "failed"
+    assert result.error_kind == "provider_rejected"

@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider
 from azents.core.external_channel_file import (
+    EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
     ExternalChannelFileLocator,
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
+    ExternalChannelOutboundFileManifest,
 )
 from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesConfig,
@@ -27,6 +29,7 @@ from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferError,
     ExternalChannelFileTransferService,
+    iter_external_channel_outbound_file_chunks,
 )
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,
@@ -37,7 +40,7 @@ from azents.services.external_channel.slack_events import (
     SlackProviderPermissionDenied,
     SlackProviderTemporaryError,
 )
-from azents.services.file_storage import FileStorage
+from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.system_setting.service import SystemSettingsService
 
 
@@ -113,8 +116,15 @@ class _SlackClient:
 
 
 class _SystemSettings:
-    def __init__(self, inbound_limit: int = 100) -> None:
+    def __init__(
+        self,
+        inbound_limit: int = 100,
+        outbound_file_limit: int = 100,
+        outbound_action_limit: int = 100,
+    ) -> None:
         self.inbound_limit = inbound_limit
+        self.outbound_file_limit = outbound_file_limit
+        self.outbound_action_limit = outbound_action_limit
 
     async def resolve(
         self,
@@ -127,8 +137,8 @@ class _SystemSettings:
             admin_version=0,
             config=ExternalChannelFilesConfig(
                 inbound_max_file_bytes=self.inbound_limit,
-                outbound_max_file_bytes=100,
-                outbound_max_action_bytes=100,
+                outbound_max_file_bytes=self.outbound_file_limit,
+                outbound_max_action_bytes=self.outbound_action_limit,
             ),
             secrets=ExternalChannelFilesSecrets(),
             field_sources={},
@@ -172,12 +182,50 @@ class _FileStorage:
         )
 
 
+class _OutboundStorage:
+    def __init__(
+        self,
+        files: dict[str, bytes],
+        *,
+        metadata: dict[str, dict[str, object]] | None = None,
+    ) -> None:
+        self.files = files
+        self.metadata = metadata or {
+            path: {"is_file": True, "size": len(body)} for path, body in files.items()
+        }
+        self.stat_calls: list[tuple[str, str]] = []
+        self.read_calls: list[tuple[str, str, int, int]] = []
+
+    async def stat(self, path: str, *, agent_id: str) -> dict[str, object]:
+        self.stat_calls.append((path, agent_id))
+        if path not in self.metadata:
+            raise FileNotFoundError(path)
+        return self.metadata[path]
+
+    async def read_range(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        offset: int,
+        max_bytes: int,
+    ) -> bytes:
+        self.read_calls.append((path, agent_id, offset, max_bytes))
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        return self.files[path][offset : offset + max_bytes]
+
+
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[AsyncSession]:
     yield cast(AsyncSession, object())
 
 
-def _capabilities(*, download_files: bool = True) -> dict[str, object]:
+def _capabilities(
+    *,
+    download_files: bool = True,
+    upload_files: bool = False,
+) -> dict[str, object]:
     return {
         "provider": "slack",
         "transport": "http",
@@ -187,7 +235,7 @@ def _capabilities(*, download_files: bool = True) -> dict[str, object]:
         "update_messages": True,
         "delete_messages": True,
         "download_files": download_files,
-        "upload_files": False,
+        "upload_files": upload_files,
     }
 
 
@@ -567,3 +615,183 @@ async def test_runtime_write_failure_is_not_reported_as_success() -> None:
                 _FileStorage(put_error=OSError("write failed")),
             ),
         )
+
+
+@pytest.mark.asyncio
+async def test_outbound_preflight_builds_only_bounded_runtime_manifests() -> None:
+    """Preflight stats every source and persists no bytes or provider details."""
+    storage = _OutboundStorage(
+        {
+            "/workspace/agent/report.csv": b"report",
+            "/workspace/agent/chart.png": b"png",
+        }
+    )
+    service = _service(
+        repository=_Repository(_target(capabilities=_capabilities(upload_files=True))),
+        slack_client=_SlackClient(),
+        settings=_SystemSettings(
+            outbound_file_limit=10,
+            outbound_action_limit=10,
+        ),
+    )
+
+    manifests = await service.prepare_outbound(
+        session_id="session-1",
+        agent_id="agent-1",
+        binding_id="binding-1",
+        paths=[
+            "/workspace/agent/report.csv",
+            "/workspace/agent/chart.png",
+        ],
+        file_storage=cast(FileStorage, storage),
+    )
+
+    assert [item.model_dump(mode="json") for item in manifests] == [
+        {
+            "path": "/workspace/agent/report.csv",
+            "filename": "report.csv",
+            "media_type": "text/csv",
+            "expected_size": 6,
+        },
+        {
+            "path": "/workspace/agent/chart.png",
+            "filename": "chart.png",
+            "media_type": "image/png",
+            "expected_size": 3,
+        },
+    ]
+    assert storage.stat_calls == [
+        ("/workspace/agent/report.csv", "agent-1"),
+        ("/workspace/agent/chart.png", "agent-1"),
+    ]
+    assert storage.read_calls == []
+
+
+@pytest.mark.asyncio
+async def test_outbound_preflight_fails_before_reading_unavailable_sources() -> None:
+    """Capability, path, and aggregate checks happen without whole-file reads."""
+    storage = _OutboundStorage(
+        {
+            "/workspace/agent/first.bin": b"123456",
+            "/workspace/agent/second.bin": b"123456",
+        }
+    )
+    unavailable = _service(
+        repository=_Repository(_target()),
+        slack_client=_SlackClient(),
+    )
+    with pytest.raises(ExternalChannelFileTransferError, match="cannot upload"):
+        await unavailable.prepare_outbound(
+            session_id="session-1",
+            agent_id="agent-1",
+            binding_id="binding-1",
+            paths=["/workspace/agent/first.bin"],
+            file_storage=cast(FileStorage, storage),
+        )
+
+    service = _service(
+        repository=_Repository(_target(capabilities=_capabilities(upload_files=True))),
+        slack_client=_SlackClient(),
+        settings=_SystemSettings(
+            outbound_file_limit=10,
+            outbound_action_limit=10,
+        ),
+    )
+    with pytest.raises(ExternalChannelFileTransferError, match="must be absolute"):
+        await service.prepare_outbound(
+            session_id="session-1",
+            agent_id="agent-1",
+            binding_id="binding-1",
+            paths=["relative.bin"],
+            file_storage=cast(FileStorage, storage),
+        )
+    with pytest.raises(ExternalChannelFileTransferError, match="action limit"):
+        await service.prepare_outbound(
+            session_id="session-1",
+            agent_id="agent-1",
+            binding_id="binding-1",
+            paths=[
+                "/workspace/agent/first.bin",
+                "/workspace/agent/second.bin",
+            ],
+            file_storage=cast(FileStorage, storage),
+        )
+
+    assert storage.read_calls == []
+
+
+@pytest.mark.asyncio
+async def test_outbound_iterator_reads_ordered_exact_bounded_ranges() -> None:
+    """Streaming uses 1 MiB ranges and verifies that the file did not grow."""
+    body = b"a" * (EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES + 3)
+    storage = _OutboundStorage({"/workspace/agent/large.bin": body})
+    manifest = ExternalChannelOutboundFileManifest(
+        path="/workspace/agent/large.bin",
+        filename="large.bin",
+        media_type="application/octet-stream",
+        expected_size=len(body),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in iter_external_channel_outbound_file_chunks(
+            file_storage=cast(RangedFileStorage, storage),
+            manifest=manifest,
+            agent_id="agent-1",
+        )
+    ]
+
+    assert b"".join(chunks) == body
+    assert [len(chunk) for chunk in chunks] == [
+        EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
+        3,
+    ]
+    assert storage.read_calls == [
+        (
+            "/workspace/agent/large.bin",
+            "agent-1",
+            0,
+            EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
+        ),
+        (
+            "/workspace/agent/large.bin",
+            "agent-1",
+            EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
+            3,
+        ),
+        (
+            "/workspace/agent/large.bin",
+            "agent-1",
+            len(body),
+            1,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_outbound_iterator_rejects_short_and_grown_runtime_files() -> None:
+    """Preflight size remains authoritative throughout one upload attempt."""
+    short = _OutboundStorage({"/workspace/agent/file.bin": b"short"})
+    expected = ExternalChannelOutboundFileManifest(
+        path="/workspace/agent/file.bin",
+        filename="file.bin",
+        media_type="application/octet-stream",
+        expected_size=6,
+    )
+    with pytest.raises(ExternalChannelFileTransferError, match="ended before"):
+        async for _ in iter_external_channel_outbound_file_chunks(
+            file_storage=cast(RangedFileStorage, short),
+            manifest=expected,
+            agent_id="agent-1",
+        ):
+            pass
+
+    grown = _OutboundStorage({"/workspace/agent/file.bin": b"grown!"})
+    expected = expected.model_copy(update={"expected_size": 5})
+    with pytest.raises(ExternalChannelFileTransferError, match="grew"):
+        async for _ in iter_external_channel_outbound_file_chunks(
+            file_storage=cast(RangedFileStorage, grown),
+            manifest=expected,
+            agent_id="agent-1",
+        ):
+            pass

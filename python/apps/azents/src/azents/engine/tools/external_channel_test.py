@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
+from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.hooks.types import (
     CompactionSummaryHookContext,
@@ -91,6 +92,8 @@ class _ActionService:
     def __init__(self, snapshots: list[ChannelWorkSnapshot]) -> None:
         self.snapshots = snapshots
         self.calls: list[dict[str, object]] = []
+        self.existing: tuple[ChannelActionCommit, dict[str, object]] | None = None
+        self.find_calls: list[tuple[str, str]] = []
 
     async def has_active_binding(self, *, session_id: str, agent_id: str) -> bool:
         del session_id, agent_id
@@ -104,6 +107,15 @@ class _ActionService:
     ) -> list[ChannelWorkSnapshot]:
         del session_id, agent_id
         return self.snapshots
+
+    async def find_existing_action(
+        self,
+        *,
+        session_id: str,
+        client_tool_call_id: str,
+    ) -> tuple[ChannelActionCommit, dict[str, object]] | None:
+        self.find_calls.append((session_id, client_tool_call_id))
+        return self.existing
 
     async def execute(self, **kwargs: object) -> ChannelActionCommit:
         self.calls.append(kwargs)
@@ -131,6 +143,7 @@ class _ActionService:
 class _FileTransferService:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.prepare_calls: list[dict[str, object]] = []
 
     async def download(
         self,
@@ -142,6 +155,20 @@ class _FileTransferService:
             filename="report.csv",
             media_type="text/csv",
             bytes_written=42,
+        )
+
+    async def prepare_outbound(
+        self,
+        **kwargs: object,
+    ) -> tuple[ExternalChannelOutboundFileManifest, ...]:
+        self.prepare_calls.append(kwargs)
+        return (
+            ExternalChannelOutboundFileManifest(
+                path="/workspace/agent/report.csv",
+                filename="report.csv",
+                media_type="text/csv",
+                expected_size=42,
+            ),
         )
 
 
@@ -270,6 +297,114 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_channel_action_preflights_files_with_current_runtime_storage() -> None:
+    """The Tool commits only manifests produced from the current run source."""
+    service = _ActionService([_snapshot()])
+    file_transfer_service = _FileTransferService()
+    file_storage = cast(FileStorage, object())
+    toolkit = _toolkit(
+        service,
+        file_transfer_service=file_transfer_service,
+        file_storage=file_storage,
+    )
+    state = await toolkit.update_context(_turn_context())
+
+    with client_tool_execution_context(call_id="call-files", name="channel_action"):
+        await state.tools[0].handler(
+            json.dumps(
+                {
+                    "mode": "continue",
+                    "binding": "binding-1",
+                    "message": "Attached report.",
+                    "files": ["/workspace/agent/report.csv"],
+                }
+            )
+        )
+
+    assert file_transfer_service.prepare_calls == [
+        {
+            "session_id": "session-1",
+            "agent_id": "agent-1",
+            "binding_id": "binding-1",
+            "paths": ["/workspace/agent/report.csv"],
+            "file_storage": file_storage,
+        }
+    ]
+    manifests = cast(
+        tuple[ExternalChannelOutboundFileManifest, ...],
+        service.calls[0]["files"],
+    )
+    assert manifests[0].path == "/workspace/agent/report.csv"
+    assert service.calls[0]["file_storage"] is file_storage
+
+
+@pytest.mark.asyncio
+async def test_duplicate_file_action_returns_persisted_outcome_without_preflight() -> (
+    None
+):
+    """A retry does not depend on the original Runtime source remaining available."""
+    service = _ActionService([_snapshot()])
+    service.existing = (
+        ChannelActionCommit(
+            action_id="action-existing",
+            binding_id="binding-1",
+            work_id="work-1",
+            work_status=ExternalChannelWorkStatus.ACTIVE,
+            state_revision=4,
+            deliveries=[
+                ChannelWorkDelivery(
+                    id="delivery-existing",
+                    operation=ExternalChannelDeliveryOperation.REPLY,
+                    status=ExternalChannelDeliveryStatus.DELIVERED,
+                    provider_message_key=None,
+                    error_kind=None,
+                    error_summary=None,
+                    created_at=_at(3),
+                    completed_at=_at(4),
+                )
+            ],
+        ),
+        {
+            "binding": "binding-1",
+            "mode": "continue",
+            "message": "Attached report.",
+            "files": [
+                {
+                    "path": "/workspace/agent/report.csv",
+                    "filename": "report.csv",
+                    "media_type": "text/csv",
+                    "expected_size": 42,
+                }
+            ],
+        },
+    )
+    file_transfer_service = _FileTransferService()
+    toolkit = _toolkit(
+        service,
+        file_transfer_service=file_transfer_service,
+        file_storage=cast(FileStorage, object()),
+    )
+    state = await toolkit.update_context(_turn_context())
+
+    with client_tool_execution_context(call_id="call-files", name="channel_action"):
+        output = await state.tools[0].handler(
+            json.dumps(
+                {
+                    "mode": "continue",
+                    "binding": "binding-1",
+                    "message": "Attached report.",
+                    "files": ["/workspace/agent/report.csv"],
+                }
+            )
+        )
+
+    assert json.loads(cast(str, output))["action_id"] == "action-existing"
+    assert service.find_calls == [("session-1", "call-files")]
+    assert file_transfer_service.prepare_calls == []
+    assert service.calls == []
+
+
+@pytest.mark.asyncio
 async def test_continue_requires_unfinished_work() -> None:
     """Continue cannot leave the binding with only completed tasks."""
     toolkit = _toolkit(_ActionService([_snapshot()]))
@@ -311,6 +446,19 @@ def test_continue_limits_todos_to_available_activity_blocks() -> None:
                     }
                     for index in range(50)
                 ],
+            }
+        )
+
+
+def test_channel_action_rejects_empty_file_lists() -> None:
+    """An explicit file publication contains at least one Runtime path."""
+    with pytest.raises(ValueError, match="at least 1 item"):
+        ContinueChannelActionInput.model_validate(
+            {
+                "mode": "continue",
+                "binding": "binding-1",
+                "message": "Attached report.",
+                "files": [],
             }
         )
 

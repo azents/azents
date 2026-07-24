@@ -46,6 +46,7 @@ from azents.engine.tools.builtin import (
     BuiltinToolkitProvider,
     MemoryReadToolkit,
     MemoryWriteToolkit,
+    RuntimeRunnerFileStorage,
     RuntimeToolkit,
 )
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
@@ -76,6 +77,7 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.runtime_storage_error import RuntimeStorageError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -154,7 +156,7 @@ def _make_mock_memory_repo(
     return repo
 
 
-def _make_runtime_repo(  # pyright: ignore[reportUnusedFunction] -- retained test helper
+def _make_runtime_repo(
     *,
     runtime_id: str = "runtime-1",
     desired_state: RuntimeDesiredState = RuntimeDesiredState.RUNNING,
@@ -213,12 +215,14 @@ class _FakeRunnerOperations:
         self.process_terminate_session_calls: list[dict[str, object]] = []
         self.file_operation_calls: list[tuple[str, str | None]] = []
         self.read_calls: list[str] = []
+        self.read_ranges: list[tuple[str, int, int | None]] = []
         self.stat_calls: list[str] = []
         self.stat_started_count = 0
         self.stat_started_event: asyncio.Event | None = None
         self.stat_continue_event: asyncio.Event | None = None
         self.bash_unavailable_message: str | None = None
         self.process_unavailable_message: str | None = None
+        self.read_unavailable_message: str | None = None
         self.next_process_start_result = RuntimeProcessResult(
             process_id="proc-1",
             status="exited_unread",
@@ -382,6 +386,9 @@ class _FakeRunnerOperations:
         del runtime_id, runner_generation, deadline_at
         self.file_operation_calls.append(("read", owner_session_id))
         self.read_calls.append(path)
+        self.read_ranges.append((path, offset, max_bytes))
+        if self.read_unavailable_message is not None:
+            raise RuntimeRunnerOperationUnavailable(self.read_unavailable_message)
         data = self.files[path]
         chunk = (
             data[offset:] if max_bytes is None else data[offset : offset + max_bytes]
@@ -1316,6 +1323,56 @@ class TestRuntimeToolkitUpdateContext:
         )
 
         assert decision is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_file_storage_reads_one_bounded_range() -> None:
+    """Outbound streaming forwards offset and length to one Runner read."""
+    runner_operations = _FakeRunnerOperations(
+        {"/workspace/agent/report.txt": b"abcdef"}
+    )
+    storage = RuntimeRunnerFileStorage(
+        runner_operations=cast(Any, runner_operations),
+        agent_runtime_repo=_make_runtime_repo(),
+        session_manager=cast(Any, _make_mock_session_manager()),
+        runtime_agent_id="agent-1",
+        owner_session_id="session-1",
+    )
+
+    result = await storage.read_range(
+        "/workspace/agent/report.txt",
+        agent_id="agent-1",
+        offset=2,
+        max_bytes=3,
+    )
+
+    assert result == b"cde"
+    assert runner_operations.read_ranges == [("/workspace/agent/report.txt", 2, 3)]
+    assert runner_operations.file_operation_calls == [("read", "session-1")]
+
+
+@pytest.mark.asyncio
+async def test_runtime_file_range_maps_runner_disconnect_to_storage_error() -> None:
+    """A disconnected Runner becomes a controlled outbound source failure."""
+    runner_operations = _FakeRunnerOperations(
+        {"/workspace/agent/report.txt": b"abcdef"}
+    )
+    runner_operations.read_unavailable_message = "runner disconnected"
+    storage = RuntimeRunnerFileStorage(
+        runner_operations=cast(Any, runner_operations),
+        agent_runtime_repo=_make_runtime_repo(),
+        session_manager=cast(Any, _make_mock_session_manager()),
+        runtime_agent_id="agent-1",
+        owner_session_id="session-1",
+    )
+
+    with pytest.raises(RuntimeStorageError, match="runner disconnected"):
+        await storage.read_range(
+            "/workspace/agent/report.txt",
+            agent_id="agent-1",
+            offset=0,
+            max_bytes=3,
+        )
 
 
 # ---------------------------------------------------------------------------

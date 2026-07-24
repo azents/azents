@@ -27,9 +27,11 @@ from azents.core.enums import (
     ExternalChannelWorkTaskStatus,
     LLMProvider,
 )
+from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
+    RDBExternalChannelAction,
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
@@ -233,6 +235,14 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
             status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
         )
     ]
+    files = (
+        ExternalChannelOutboundFileManifest(
+            path="/workspace/agent/report.csv",
+            filename="report.csv",
+            media_type="text/csv",
+            expected_size=42,
+        ),
+    )
 
     first = await repository.commit_action(
         rdb_session,
@@ -245,6 +255,7 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
         message="I am investigating.",
         title="Investigating the incident…",
         tasks=tasks,
+        files=files,
         now=_at(2),
     )
     duplicate = await repository.commit_action(
@@ -258,6 +269,7 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
         message="I am investigating.",
         title="Investigating the incident…",
         tasks=tasks,
+        files=files,
         now=_at(3),
     )
 
@@ -271,6 +283,26 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
         item.status is ExternalChannelDeliveryStatus.PENDING
         for item in first.deliveries
     )
+    action = await rdb_session.get(RDBExternalChannelAction, first.action_id)
+    reply = await rdb_session.get(
+        RDBExternalChannelDeliveryAttempt,
+        first.deliveries[0].id,
+    )
+    expected_manifest = [files[0].model_dump(mode="json")]
+    assert action is not None
+    assert reply is not None
+    assert action.request_payload["files"] == expected_manifest
+    assert reply.request_payload["files"] == expected_manifest
+    assert "content" not in str(action.request_payload).lower()
+    assert "upload_url" not in str(reply.request_payload).lower()
+    existing = await repository.find_action_by_client_tool_call(
+        rdb_session,
+        session_id=agent_session.id,
+        client_tool_call_id="call-1",
+    )
+    assert existing is not None
+    assert existing[0].action_id == first.action_id
+    assert existing[1]["files"] == expected_manifest
     with pytest.raises(ValueError, match="identity conflicts"):
         await repository.commit_action(
             rdb_session,
@@ -283,6 +315,7 @@ async def test_channel_action_commits_work_and_delivery_intents_idempotently(
             message="Different input.",
             title="Investigating the incident…",
             tasks=tasks,
+            files=files,
             now=_at(4),
         )
 
@@ -316,6 +349,7 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
                 status=ExternalChannelWorkTaskStatus.PENDING,
             )
         ],
+        files=(),
         now=_at(2),
     )
     update_delivery = continued.deliveries[0]
@@ -345,6 +379,7 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
         message="Done.",
         title=None,
         tasks=None,
+        files=(),
         now=_at(5),
     )
 
@@ -492,6 +527,7 @@ async def test_continue_after_finish_creates_a_new_activity_tracker(
         message="The first task is complete.",
         title=None,
         tasks=None,
+        files=(),
         now=_at(2),
     )
 
@@ -512,6 +548,7 @@ async def test_continue_after_finish_creates_a_new_activity_tracker(
                 status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
             )
         ],
+        files=(),
         now=_at(3),
     )
 
@@ -593,6 +630,7 @@ async def test_late_tracker_creation_after_delivered_finish_schedules_cleanup(
         message="Done.",
         title=None,
         tasks=None,
+        files=(),
         now=_at(2),
     )
     assert [item.operation for item in finished.deliveries] == [
@@ -687,6 +725,7 @@ async def test_missing_tracker_delete_is_reconciled_as_already_absent(
         message="Done.",
         title=None,
         tasks=None,
+        files=(),
         now=_at(2),
     )
     reply, cleanup = finished.deliveries
@@ -763,6 +802,7 @@ async def test_recovery_terminalizes_pending_and_attempting_without_execution(
                 status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
             )
         ],
+        files=(),
         now=_at(2),
     )
     await repository.start_delivery(
