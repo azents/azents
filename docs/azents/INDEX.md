@@ -62,6 +62,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Provider Tool Live Activity Historical Requirements Reconstruction](requirements/activity-260716-live-activity.md) | activity-260716 | 2026-07-16 | 2026-07-16 |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/activity-260723-slack-tracker-lifecycle.md) | activity-260723 | 2026-07-23 | - |
 | [Generalize Admin-Managed System Configuration Historical Requirements Reconstruction](requirements/admin-260718-admin-configuration.md) | admin-260718 | 2026-07-18 | - |
+| [Agent Default Projects for Automatic Sessions Requirements](requirements/agent-260724-automatic-session-default-projects.md) | agent-260724 | 2026-07-24 | - |
 | [Release and Snapshot Artifact Policy Historical Requirements Reconstruction](requirements/and-260623-and-snapshot-artifact-policy.md) | and-260623 | 2026-06-23 | - |
 | [AgentSession Archive Policy Historical Requirements Reconstruction](requirements/archive-260626-archive-policy.md) | archive-260626 | 2026-06-26 | - |
 | [Archived Session Retention and Durable Purge Historical Requirements Reconstruction](requirements/archived-260719-archived-retention-and-purge.md) | archived-260719 | 2026-07-19 | - |
@@ -390,6 +391,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Provider Tool Live Activity Historical Decision Reconstruction](adr/activity-260716-live-activity.md)
 - [Slack Activity Tracker Lifecycle](adr/activity-260723-slack-tracker-lifecycle.md)
 - [Generalize Admin-Managed System Configuration](adr/admin-260718-admin-configuration.md)
+- [Agent Default Projects for Automatic Sessions](adr/agent-260724-automatic-session-default-projects.md)
 - [Release and Snapshot Artifact Policy](adr/and-260623-and-snapshot-artifact-policy.md)
 - [AgentSession Archive Policy](adr/archive-260626-archive-policy.md)
 - [Archived Session Retention and Durable Purge](adr/archived-260719-archived-retention-and-purge.md)
