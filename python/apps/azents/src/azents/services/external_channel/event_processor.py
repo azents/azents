@@ -98,6 +98,12 @@ from azents.services.input_buffer import (
     InputBufferEnqueue,
     InputBufferService,
 )
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
+from azents.services.root_agent_session_creation.data import (
+    AgentDefaultRootWorkspaceIntent,
+)
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 logger = logging.getLogger(__name__)
@@ -212,6 +218,10 @@ class ExternalChannelEventProcessorService:
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
+    ]
+    root_agent_session_creation_service: Annotated[
+        RootAgentSessionCreationService,
+        Depends(RootAgentSessionCreationService),
     ]
     workspace_repository: Annotated[
         WorkspaceRepository,
@@ -1135,21 +1145,24 @@ class ExternalChannelEventProcessorService:
         agent = await self.agent_repository.get_by_id(session, route.agent_id)
         if agent is None or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
             raise SlackEventExcluded("The routed Agent is not active.")
-        agent_session = await self.agent_session_repository.create(
-            session,
-            AgentSessionCreate(
-                workspace_id=agent.workspace_id,
-                agent_id=agent.id,
-                title=None,
-                start_reason=AgentSessionStartReason.EXTERNAL_CHANNEL,
-            ),
+        root_session = (
+            await self.root_agent_session_creation_service.create_root_session(
+                session,
+                create=AgentSessionCreate(
+                    workspace_id=agent.workspace_id,
+                    agent_id=agent.id,
+                    title=None,
+                    start_reason=AgentSessionStartReason.EXTERNAL_CHANNEL,
+                ),
+                workspace_intent=AgentDefaultRootWorkspaceIntent(),
+            )
         )
         return await self.repository.create_binding_idempotent(
             session,
             ExternalChannelBindingCreate(
                 resource_id=resource.id,
                 route_id=route.id,
-                agent_session_id=agent_session.id,
+                agent_session_id=root_session.agent_session.id,
                 status=ExternalChannelBindingStatus.ACTIVE,
                 activation_status=(
                     ExternalChannelBindingActivationStatus.WAITING_HYDRATION

@@ -37,6 +37,12 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_automatic_project_item import (
+    RDBAgentAutomaticProjectItem,
+)
+from azents.rdb.models.agent_automatic_project_setting import (
+    RDBAgentAutomaticProjectSetting,
+)
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
@@ -49,13 +55,20 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelPendingContext,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.models.session_agent_context import (
+    RDBSessionAgentContext,
+    RDBSessionAgentContextProject,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.external_channel.data import (
+    ExternalChannelAccessGrantCreate,
     ExternalChannelAccessRequestCreate,
     ExternalChannelAgentRoute,
     ExternalChannelAgentRouteCreate,
@@ -66,6 +79,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelDeliveryAttempt,
     ExternalChannelEvent,
     ExternalChannelEventCreate,
+    ExternalChannelMessage,
     ExternalChannelMessageCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
@@ -74,6 +88,7 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.input_buffer import InputBufferRepository
+from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -100,6 +115,9 @@ from azents.services.external_channel.slack_events import (
 )
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
 from azents.testing.model_selection import make_test_model_selection_dict
 from azents.worker.session.lifecycle import SessionLifecycleService
 
@@ -136,6 +154,8 @@ def testconnection_authored_slack_messages_are_excluded_from_ingress() -> None:
 
 async def _setup_route(
     session: AsyncSession,
+    *,
+    policy_paths: tuple[str, ...] | None = None,
 ) -> tuple[str, str, str, ExternalChannelRepository]:
     workspace_result = await WorkspaceRepository().create(
         session,
@@ -171,6 +191,19 @@ async def _setup_route(
         lightweight_model_selection=selection,
     )
     session.add(agent)
+    await session.flush()
+    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
+    await session.flush()
+    session.add_all(
+        [
+            RDBAgentAutomaticProjectItem(
+                agent_id=agent.id,
+                path=path,
+                position=position,
+            )
+            for position, path in enumerate(policy_paths or ())
+        ]
+    )
     await session.flush()
     repository = ExternalChannelRepository()
     connection = await repository.create_connection(
@@ -292,6 +325,129 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             bot_token=bot_token,
         )
 
+    async def create_granted_initial_binding_for_test(
+        self,
+        session: AsyncSession,
+        *,
+        route: ExternalChannelAgentRoute,
+        resource: ExternalChannelResource,
+        trigger_message: ExternalChannelMessage,
+    ) -> ExternalChannelBinding:
+        """Expose the already-granted initial binding transaction helper."""
+        return await self._create_granted_initial_binding(
+            session,
+            route=route,
+            resource=resource,
+            trigger_message=trigger_message,
+        )
+
+
+def _root_session_creation_service() -> RootAgentSessionCreationService:
+    """Build the shared root Session service for External Channel tests."""
+    return RootAgentSessionCreationService(
+        agent_session_repository=AgentSessionRepository(),
+        automatic_project_repository=AgentAutomaticProjectRepository(),
+        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+    )
+
+
+async def _create_active_resource(
+    session: AsyncSession,
+    *,
+    repository: ExternalChannelRepository,
+    connection_id: str,
+    resource_key: str = "slack:T1:C1:1784678400.000100",
+) -> ExternalChannelResource:
+    """Create one active, hydrated resource for root Session producer tests."""
+    return await repository.create_resource_idempotent(
+        session,
+        ExternalChannelResourceCreate(
+            connection_id=connection_id,
+            resource_type=ExternalChannelResourceType.THREAD,
+            provider_resource_key=resource_key,
+            labels={
+                "provider": "slack",
+                "tenant_id": "T1",
+                "channel_id": "C1",
+                "thread_ts": "1784678400.000100",
+            },
+            status=ExternalChannelResourceStatus.ACTIVE,
+            hydration_status=ExternalChannelHydrationStatus.COMPLETE,
+            hydration_cursor=None,
+            hydration_high_watermark_position=None,
+            reconciliation_boundary_received_at=_at(1),
+            reconciliation_boundary_event_id="boundary-1",
+            hydration_error_kind=None,
+            hydration_error_summary=None,
+            hydration_started_at=_at(0),
+            hydration_completed_at=_at(1),
+            latest_activity_at=_at(1),
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+
+
+async def _create_trigger_message(
+    session: AsyncSession,
+    *,
+    repository: ExternalChannelRepository,
+    resource_id: str,
+    message_key: str = "1784678400.000100",
+) -> ExternalChannelMessage:
+    """Create a canonical trigger message for initial binding tests."""
+    principal = await repository.create_principal_idempotent(
+        session,
+        ExternalChannelPrincipalCreate(
+            provider=ExternalChannelProvider.SLACK,
+            provider_tenant_id="T1",
+            provider_user_id="U1",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            display_name=None,
+            avatar_url=None,
+            profile=None,
+        ),
+    )
+    return await repository.create_message_idempotent(
+        session,
+        ExternalChannelMessageCreate(
+            resource_id=resource_id,
+            provider_message_key=message_key,
+            provider_position=f"0000000000{message_key}",
+            principal_id=principal.id,
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            current_revision_id=None,
+            original_url=None,
+            lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+            pending_size=0,
+            provider_created_at=_at(1),
+            provider_updated_at=None,
+        ),
+    )
+
+
+async def _context_project_paths(
+    session: AsyncSession,
+    *,
+    session_id: str,
+) -> list[str]:
+    """Return persisted context Project paths for one AgentSession."""
+    result = await session.execute(
+        sa.select(RDBSessionAgentContextProject.path)
+        .join(
+            RDBSessionAgentContext,
+            RDBSessionAgentContext.id
+            == RDBSessionAgentContextProject.session_agent_context_id,
+        )
+        .join(
+            RDBSessionAgent,
+            RDBSessionAgent.id == RDBSessionAgentContext.root_session_agent_id,
+        )
+        .where(RDBSessionAgent.agent_session_id == session_id)
+        .order_by(RDBSessionAgentContextProject.path),
+    )
+    return list(result.scalars())
+
 
 def _service(
     session_manager: SessionManager[AsyncSession],
@@ -313,6 +469,7 @@ def _service(
         ),
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
+        root_agent_session_creation_service=_root_session_creation_service(),
         workspace_repository=WorkspaceRepository(),
         config=Config.model_construct(web_url="https://azents.example"),
         input_buffer_service=InputBufferService(
@@ -328,6 +485,80 @@ def _service(
             external_channel_repository=repository,
         ),
         session_lifecycle=cast(SessionLifecycleService, session_lifecycle),
+    )
+
+
+async def _prepare_allow_request(
+    session: AsyncSession,
+    *,
+    policy_paths: tuple[str, ...] | None = None,
+) -> tuple[str, str, str, ExternalChannelRepository, str, str]:
+    """Prepare one pending access request and approver for Allow tests."""
+    connection_id, route_id, agent_id, repository = await _setup_route(
+        session,
+        policy_paths=policy_paths,
+    )
+    resource = await _create_active_resource(
+        session,
+        repository=repository,
+        connection_id=connection_id,
+    )
+    message = await _create_trigger_message(
+        session,
+        repository=repository,
+        resource_id=resource.id,
+    )
+    assert message.principal_id is not None
+    request = await repository.create_access_request_idempotent(
+        session,
+        ExternalChannelAccessRequestCreate(
+            route_id=route_id,
+            resource_id=resource.id,
+            source_message_id=message.id,
+            principal_id=message.principal_id,
+            agent_session_id=None,
+            status=ExternalChannelAccessRequestStatus.PENDING,
+            decision_policy_snapshot={},
+            decided_by_user_id=None,
+            decision_summary=None,
+            expires_at=_at(10),
+            decided_at=None,
+        ),
+    )
+    approver = await UserRepository().create(
+        session,
+        UserCreate(email=f"external-channel-approver-{request.id}@example.com"),
+    )
+    await session.commit()
+    return (
+        connection_id,
+        route_id,
+        agent_id,
+        repository,
+        request.id,
+        approver.id,
+    )
+
+
+def _access_service(
+    session_manager: SessionManager[AsyncSession],
+    repository: ExternalChannelRepository,
+    *,
+    root_service: RootAgentSessionCreationService | MagicMock | None = None,
+) -> ExternalChannelAccessService:
+    """Build an access service for focused transaction tests."""
+    return ExternalChannelAccessService(
+        session_manager=session_manager,
+        repository=repository,
+        agent_repository=AgentRepository(),
+        agent_session_repository=AgentSessionRepository(),
+        root_agent_session_creation_service=(
+            _root_session_creation_service()
+            if root_service is None
+            else cast(RootAgentSessionCreationService, root_service)
+        ),
+        input_buffer_service=cast(InputBufferService, MagicMock()),
+        session_lifecycle=cast(SessionLifecycleService, MagicMock()),
     )
 
 
@@ -549,6 +780,363 @@ async def test_unlinked_message_defers_across_session_context(
     )
 
 
+async def test_allow_snapshots_ordered_automatic_projects(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Allow persists the configured ordered Project snapshot."""
+    configured_paths = (
+        "/workspace/external-channel-a",
+        "/workspace/external-channel-b",
+    )
+    async with rdb_session_manager() as session:
+        (
+            _,
+            _,
+            _,
+            repository,
+            request_id,
+            approver_id,
+        ) = await _prepare_allow_request(session, policy_paths=configured_paths)
+
+    allowed = await _access_service(
+        rdb_session_manager,
+        repository,
+    ).allow(
+        access_request_id=request_id,
+        scope=ExternalChannelAccessGrantScope.SESSION,
+        decided_by_user_id=approver_id,
+        decision_summary="Approve ordered defaults.",
+        now=_at(2),
+    )
+
+    async with rdb_session_manager() as session:
+        projects = await _context_project_paths(
+            session,
+            session_id=allowed.binding.agent_session_id,
+        )
+
+    assert projects == list(configured_paths)
+
+
+async def test_allow_empty_automatic_policy_keeps_context_empty(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Allow preserves empty automatic policies without adding Projects."""
+    async with rdb_session_manager() as session:
+        (
+            _,
+            _,
+            _,
+            repository,
+            request_id,
+            approver_id,
+        ) = await _prepare_allow_request(session)
+
+    allowed = await _access_service(
+        rdb_session_manager,
+        repository,
+    ).allow(
+        access_request_id=request_id,
+        scope=ExternalChannelAccessGrantScope.SESSION,
+        decided_by_user_id=approver_id,
+        decision_summary="Approve empty defaults.",
+        now=_at(2),
+    )
+
+    async with rdb_session_manager() as session:
+        projects = await _context_project_paths(
+            session,
+            session_id=allowed.binding.agent_session_id,
+        )
+
+    assert projects == []
+
+
+async def test_granted_initial_binding_snapshots_ordered_automatic_projects(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Already-granted initial binding persists ordered automatic Projects."""
+    configured_paths = (
+        "/workspace/external-channel-a",
+        "/workspace/external-channel-b",
+    )
+    async with rdb_session_manager() as session:
+        connection_id, route_id, agent_id, repository = await _setup_route(
+            session,
+            policy_paths=configured_paths,
+        )
+        route = await repository.get_agent_route(session, route_id=route_id)
+        agent = await AgentRepository().get_by_id(session, agent_id)
+        assert route is not None
+        assert agent is not None
+        resource = await _create_active_resource(
+            session,
+            repository=repository,
+            connection_id=connection_id,
+        )
+        trigger_message = await _create_trigger_message(
+            session,
+            repository=repository,
+            resource_id=resource.id,
+        )
+        approver = await UserRepository().create(
+            session,
+            UserCreate(email=f"external-channel-initial-{agent_id}@example.com"),
+        )
+        assert trigger_message.principal_id is not None
+        await repository.ensure_access_grant(
+            session,
+            ExternalChannelAccessGrantCreate(
+                agent_id=agent_id,
+                principal_id=trigger_message.principal_id,
+                scope=ExternalChannelAccessGrantScope.AGENT,
+                agent_session_id=None,
+                granted_by_user_id=approver.id,
+                source_access_request_id=None,
+                revoked_by_user_id=None,
+                revoked_at=None,
+            ),
+        )
+        binding = await _service(
+            rdb_session_manager,
+            repository,
+        ).create_granted_initial_binding_for_test(
+            session,
+            route=route,
+            resource=resource,
+            trigger_message=trigger_message,
+        )
+        await session.commit()
+
+    async with rdb_session_manager() as session:
+        projects = await _context_project_paths(
+            session,
+            session_id=binding.agent_session_id,
+        )
+
+    assert projects == list(configured_paths)
+
+
+async def test_granted_initial_binding_empty_policy_keeps_context_empty(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Already-granted initial binding preserves an empty policy."""
+    async with rdb_session_manager() as session:
+        connection_id, route_id, agent_id, repository = await _setup_route(session)
+        route = await repository.get_agent_route(session, route_id=route_id)
+        assert route is not None
+        resource = await _create_active_resource(
+            session,
+            repository=repository,
+            connection_id=connection_id,
+        )
+        trigger_message = await _create_trigger_message(
+            session,
+            repository=repository,
+            resource_id=resource.id,
+        )
+        approver = await UserRepository().create(
+            session,
+            UserCreate(email=f"external-channel-initial-{agent_id}@example.com"),
+        )
+        assert trigger_message.principal_id is not None
+        await repository.ensure_access_grant(
+            session,
+            ExternalChannelAccessGrantCreate(
+                agent_id=agent_id,
+                principal_id=trigger_message.principal_id,
+                scope=ExternalChannelAccessGrantScope.AGENT,
+                agent_session_id=None,
+                granted_by_user_id=approver.id,
+                source_access_request_id=None,
+                revoked_by_user_id=None,
+                revoked_at=None,
+            ),
+        )
+        binding = await _service(
+            rdb_session_manager,
+            repository,
+        ).create_granted_initial_binding_for_test(
+            session,
+            route=route,
+            resource=resource,
+            trigger_message=trigger_message,
+        )
+        await session.commit()
+
+    async with rdb_session_manager() as session:
+        projects = await _context_project_paths(
+            session,
+            session_id=binding.agent_session_id,
+        )
+
+    assert projects == []
+
+
+async def test_granted_initial_binding_reuses_existing_session_without_root_service(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Existing active binding reuse bypasses root creation and policy access."""
+    async with rdb_session_manager() as session:
+        connection_id, route_id, _, repository = await _setup_route(
+            session,
+            policy_paths=("/workspace/external-channel-existing",),
+        )
+        route = await repository.get_agent_route(session, route_id=route_id)
+        assert route is not None
+        resource = await _create_active_resource(
+            session,
+            repository=repository,
+            connection_id=connection_id,
+        )
+        trigger_message = await _create_trigger_message(
+            session,
+            repository=repository,
+            resource_id=resource.id,
+        )
+        first_service = _service(rdb_session_manager, repository)
+        first_binding = await first_service.create_granted_initial_binding_for_test(
+            session,
+            route=route,
+            resource=resource,
+            trigger_message=trigger_message,
+        )
+        await session.commit()
+
+    root_service = MagicMock(spec=RootAgentSessionCreationService)
+    root_service.create_root_session = AsyncMock(
+        side_effect=AssertionError("root creation must not run for reuse"),
+    )
+    second_service = _service(rdb_session_manager, repository)
+    second_service.root_agent_session_creation_service = cast(
+        RootAgentSessionCreationService,
+        root_service,
+    )
+
+    async with rdb_session_manager() as session:
+        route = await repository.get_agent_route(session, route_id=route_id)
+        resource = await repository.get_resource(
+            session,
+            resource_id=resource.id,
+        )
+        assert route is not None
+        assert resource is not None
+        reused = await second_service.create_granted_initial_binding_for_test(
+            session,
+            route=route,
+            resource=resource,
+            trigger_message=trigger_message,
+        )
+        await session.commit()
+
+    assert reused.id == first_binding.id
+    assert reused.agent_session_id == first_binding.agent_session_id
+    root_service.create_root_session.assert_not_awaited()
+
+
+async def test_allow_reuses_existing_binding_without_root_service(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Repeated Allow reuses its binding Session without policy access."""
+    async with rdb_session_manager() as session:
+        (
+            _,
+            _,
+            _,
+            repository,
+            request_id,
+            approver_id,
+        ) = await _prepare_allow_request(
+            session,
+            policy_paths=("/workspace/external-channel-existing",),
+        )
+
+    first = await _access_service(
+        rdb_session_manager,
+        repository,
+    ).allow(
+        access_request_id=request_id,
+        scope=ExternalChannelAccessGrantScope.SESSION,
+        decided_by_user_id=approver_id,
+        decision_summary="Initial Allow.",
+        now=_at(2),
+    )
+    root_service = MagicMock(spec=RootAgentSessionCreationService)
+    root_service.create_root_session = AsyncMock(
+        side_effect=AssertionError("root creation must not run for reuse"),
+    )
+    repeated = await _access_service(
+        rdb_session_manager,
+        repository,
+        root_service=root_service,
+    ).allow(
+        access_request_id=request_id,
+        scope=ExternalChannelAccessGrantScope.SESSION,
+        decided_by_user_id=approver_id,
+        decision_summary="Repeated Allow.",
+        now=_at(3),
+    )
+
+    assert repeated.binding.id == first.binding.id
+    assert repeated.binding.agent_session_id == first.binding.agent_session_id
+    root_service.create_root_session.assert_not_awaited()
+
+
+async def test_allow_rolls_back_session_projects_and_external_channel_writes(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Allow rollback removes root Projects and all related producer writes."""
+    configured_paths = (
+        "/workspace/external-channel-rollback-a",
+        "/workspace/external-channel-rollback-b",
+    )
+    async with rdb_session_manager() as session:
+        (
+            _,
+            _,
+            agent_id,
+            repository,
+            request_id,
+            approver_id,
+        ) = await _prepare_allow_request(session, policy_paths=configured_paths)
+
+    repository.ensure_access_grant = AsyncMock(
+        side_effect=RuntimeError("forced grant failure"),
+    )
+    with pytest.raises(RuntimeError, match="forced grant failure"):
+        await _access_service(
+            rdb_session_manager,
+            repository,
+        ).allow(
+            access_request_id=request_id,
+            scope=ExternalChannelAccessGrantScope.SESSION,
+            decided_by_user_id=approver_id,
+            decision_summary="Force rollback.",
+            now=_at(2),
+        )
+
+    async with rdb_session_manager() as session:
+        sessions = list(
+            await session.scalars(
+                sa.select(RDBAgentSession).where(
+                    RDBAgentSession.agent_id == agent_id,
+                )
+            )
+        )
+        projects = list(await session.scalars(sa.select(RDBSessionAgentContextProject)))
+        bindings = list(await session.scalars(sa.select(RDBExternalChannelBinding)))
+        grants = list(await session.scalars(sa.select(RDBExternalChannelAccessGrant)))
+        request = await session.get(RDBExternalChannelAccessRequest, request_id)
+
+    assert sessions == []
+    assert projects == []
+    assert bindings == []
+    assert grants == []
+    assert request is not None
+    assert request.status is ExternalChannelAccessRequestStatus.PENDING
+    assert request.agent_session_id is None
+
+
 async def test_unknown_human_mention_creates_request_without_session_or_wake(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -677,6 +1265,7 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
         repository=repository,
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
+        root_agent_session_creation_service=_root_session_creation_service(),
         input_buffer_service=InputBufferService(
             session_manager=rdb_session_manager,
             input_buffer_repository=InputBufferRepository(),
@@ -1374,6 +1963,7 @@ async def test_pending_allow_requires_routable_connection(
         repository=repository,
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
+        root_agent_session_creation_service=_root_session_creation_service(),
         input_buffer_service=cast(InputBufferService, MagicMock()),
         session_lifecycle=cast(SessionLifecycleService, MagicMock()),
     )
