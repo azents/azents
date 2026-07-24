@@ -164,13 +164,19 @@ and current phase execution plan as the handoff contract for every subagent.
 
 ### Mandatory delivery roles
 
-- The primary agent owns planning, interface and scope decisions, coordination,
-  implementation verification, accepted review-finding integration, and final
-  verification.
+- The primary agent is the sole orchestrator for this workflow. It owns
+  planning, interface and scope decisions, coordination, implementation
+  verification, accepted review-finding integration, and final verification.
+- The primary agent alone controls phase progression and role-level
+  orchestration. It creates, assigns, coordinates, continues, replaces, or
+  stops implementation owners and independent reviewers, and it decides
+  workstream reassignment.
 - Implementation subagents own bounded feature implementation and focused
-  validation defined by the phase execution plan.
+  validation defined by the phase execution plan and report their results to
+  the primary agent.
 - A separate subagent that did not participate in implementation performs the
-  independent code review after primary-agent verification.
+  independent code review after primary-agent verification and reports its
+  findings to the primary agent.
 - Prefer the same implementation subagent for a continuing domain or workstream
   across phases, and prefer the same independent review subagent across the
   stack. Keep review and implementation assigned to different subagents.
@@ -208,16 +214,16 @@ For each implementation phase:
 2. Read relevant project instructions and conventions.
 3. Write and report the mandatory phase execution plan.
 4. Verify that interfaces and ownership are sufficient for safe parallel work.
-5. Delegate all bounded feature implementation and phase test work to
-   implementation subagents.
+5. Have the primary agent delegate all bounded feature implementation and phase
+   test work to implementation subagents.
 6. Confirm completed workstreams satisfy their documented interfaces and
    dependency order.
 7. Update specs in the same PR only when the phase directly changes current behavior and cannot wait for the spec-promotion phase.
 8. Compare the diff against the phase deliverables, owned paths, and non-goals.
 9. Move later-phase or unrelated work out of the branch before committing.
 10. Have the primary agent run the phase's verification commands.
-11. Assign an independent review subagent that did not participate in the
-    implementation.
+11. Have the primary agent assign an independent review subagent that did not
+    participate in the implementation.
 12. Have the primary agent apply accepted review findings directly. Delegate
     only workstream-level reimplementation, preferably to the original
     implementation subagent.
@@ -329,6 +335,9 @@ For each completed phase, report:
   the mandatory phase execution plan is stored in the documentation plans
   directory and reported.
 - Keep implementation and independent review assigned to separate subagents.
+- Keep phase progression and role-level orchestration with the primary agent.
+  Implementation and review subagents do not reassign role owners, appoint
+  independent reviewers, or advance the phase workflow.
 - Use the approved documents and current phase plan as the handoff contract for
   implementation and review.
 - Do not start the next phase before the current phase PR is created.
