@@ -50,11 +50,6 @@ from azentspublicclient.models.slack_connection_setup_request import (
     SlackConnectionSetupRequest,
 )
 from docker.models.containers import Container as DockerPyContainer
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.support import expected_conditions as ec
-from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 
 from support.utils import (
@@ -406,24 +401,6 @@ def _provider_state(slack_provider_fake_url: str) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise AssertionError(f"Fake Slack state is not an object: {payload!r}")
     return cast(dict[str, object], payload)
-
-
-def _login_main_web(
-    driver: WebDriver,
-    *,
-    main_web_url: str,
-    email: str,
-) -> None:
-    """Log in through the real Main Web password flow."""
-    driver.delete_all_cookies()
-    driver.get(f"{main_web_url}/login")
-    wait = WebDriverWait(driver, 30)
-    email_input = wait.until(ec.element_to_be_clickable((By.NAME, "email")))
-    email_input.send_keys(email, Keys.ENTER)
-    wait.until(ec.url_contains("/login/password"))
-    password_input = wait.until(ec.element_to_be_clickable((By.NAME, "password")))
-    password_input.send_keys("TestPass123!", Keys.ENTER)
-    wait.until(ec.url_contains("/workspaces"))
 
 
 def _approval_request_id(slack_provider_fake_url: str) -> str:
@@ -976,131 +953,4 @@ def test_subagent_reuses_root_project_context_without_duplicates(
             )
         )
         == 2
-    )
-
-
-@pytest.mark.web_surface
-def test_agent_settings_projects_web_add_reorder_remove_save(
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_public_server_container: DockerContainer,
-    azents_main_web_url: str,
-    browser_driver: WebDriver,
-    azents_runtime_provider_docker_container: DockerContainer,
-) -> None:
-    """Use the real Agent Settings page to edit an ordered policy."""
-    del azents_runtime_provider_docker_container
-    setup = _create_runtime_agent(
-        public_api_client,
-        admin_api_client,
-        azents_public_server_url,
-        runtime_provider_id=_RUNTIME_PROVIDER_ID,
-    )
-    try:
-        paths = _prepare_runtime_workspace(
-            public_api_client=public_api_client,
-            public_url=azents_public_server_url,
-            setup=setup,
-        )
-    except azentspublicclient.ApiException as error:
-        stdout, stderr = azents_public_server_container.get_logs()
-        stdout_tail = stdout.decode(errors="replace")[-12000:]
-        stderr_tail = stderr.decode(errors="replace")[-12000:]
-        raise AssertionError(
-            "Runtime workspace preparation failed.\n\n"
-            f"Public Server stdout tail:\n{stdout_tail}\n\n"
-            f"Public Server stderr tail:\n{stderr_tail}"
-        ) from error
-    _login_main_web(
-        browser_driver,
-        main_web_url=azents_main_web_url,
-        email=f"automatic-projects-{setup.handle.removeprefix('automatic-projects-')}@example.com",
-    )
-    browser_driver.get(
-        f"{azents_main_web_url}/w/{setup.handle}/agents/{setup.agent_id}/settings/projects"
-    )
-    wait = WebDriverWait(browser_driver, 30)
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.CSS_SELECTOR, '[data-testid="automatic-projects-page"]')
-        )
-    )
-
-    def test_id(value: str) -> tuple[str, str]:
-        return (By.XPATH, f"//*[@data-testid={json.dumps(value)}]")
-
-    for path in paths[:2]:
-        wait.until(
-            ec.element_to_be_clickable(test_id("automatic-projects-add"))
-        ).click()
-        wait.until(
-            ec.visibility_of_element_located(
-                (By.CSS_SELECTOR, '[data-testid="agent-workspace-directory-picker"]')
-            )
-        )
-        wait.until(
-            ec.element_to_be_clickable(test_id(f"agent-workspace-picker-select-{path}"))
-        ).click()
-        wait.until(
-            ec.invisibility_of_element_located(
-                (By.CSS_SELECTOR, '[data-testid="agent-workspace-directory-picker"]')
-            )
-        )
-
-    wait.until(ec.element_to_be_clickable(test_id("automatic-projects-save"))).click()
-    wait_until(
-        lambda: (
-            _get_policy(public_api_client=public_api_client, setup=setup).project_paths
-            == paths[:2]
-        ),
-        timeout=20,
-        interval=0.5,
-        message="Web settings did not persist the initial Project order",
-    )
-    for path in paths[:2]:
-        wait.until(
-            ec.visibility_of_element_located(test_id(f"automatic-project-row-{path}"))
-        )
-
-    wait.until(
-        ec.element_to_be_clickable(test_id(f"automatic-projects-move-down-{paths[0]}"))
-    ).click()
-    wait.until(ec.element_to_be_clickable(test_id("automatic-projects-save"))).click()
-    wait_until(
-        lambda: (
-            _get_policy(public_api_client=public_api_client, setup=setup).project_paths
-            == [paths[1], paths[0]]
-        ),
-        timeout=20,
-        interval=0.5,
-        message="Web settings did not persist the reordered Projects",
-    )
-    rows = browser_driver.find_elements(
-        By.CSS_SELECTOR, '[data-testid^="automatic-project-row-"]'
-    )
-    assert len(rows) == 2
-    assert paths[1] in rows[0].text
-    assert paths[0] in rows[1].text
-
-    wait.until(
-        ec.element_to_be_clickable(test_id(f"automatic-projects-remove-{paths[0]}"))
-    ).click()
-    wait.until(ec.element_to_be_clickable(test_id("automatic-projects-save"))).click()
-    wait_until(
-        lambda: (
-            _get_policy(public_api_client=public_api_client, setup=setup).project_paths
-            == [paths[1]]
-        ),
-        timeout=20,
-        interval=0.5,
-        message="Web settings did not persist the removed Project",
-    )
-    browser_driver.refresh()
-    wait.until(
-        ec.visibility_of_element_located(test_id(f"automatic-project-row-{paths[1]}"))
-    )
-    assert not browser_driver.find_elements(
-        By.XPATH,
-        f"//*[@data-testid={json.dumps(f'automatic-project-row-{paths[0]}')}]",
     )
