@@ -20,6 +20,7 @@ from azents.services.exchange_file import (
     FileUnavailable,
     SessionNotFound,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
 
 
@@ -77,13 +78,13 @@ class ExchangeImportResolver:
     """Exchange URI resolver."""
 
     exchange_file_service: ExchangeFileService
-    user_id: str
+    authority: SessionResourceAuthority
 
     async def resolve(self, uri: str) -> ImportResolvedFile:
         """Resolve Exchange URI to file bytes."""
-        result = await self.exchange_file_service.resolve_attachment(
+        result = await self.exchange_file_service.resolve_for_authority(
             uri=uri,
-            user_id=self.user_id,
+            authority=self.authority,
         )
         if result.failure:
             match result.error:
@@ -119,11 +120,14 @@ class ArtifactImportResolver:
     """Artifact URI resolver."""
 
     artifact_service: ArtifactService
-    user_id: str
+    authority: SessionResourceAuthority
 
     async def resolve(self, uri: str) -> ImportResolvedFile:
         """Resolve Artifact URI to file bytes."""
-        result = await self.artifact_service.resolve(uri=uri, user_id=self.user_id)
+        result = await self.artifact_service.resolve_for_authority(
+            uri=uri,
+            authority=self.authority,
+        )
         if result.failure:
             match result.error:
                 case ArtifactSessionNotFound() | ArtifactNotFound():
@@ -158,19 +162,16 @@ class AzentsImportResolver:
     """Current-run Azents VFS URI resolver."""
 
     vfs_projection_service: VfsProjectionService
-    run_id: str
-    agent_id: str
-    session_id: str
-    workspace_id: str
+    authority: SessionResourceAuthority
 
     async def resolve(self, uri: str) -> ImportResolvedFile:
         """Resolve an authorized VFS entry to verified file bytes."""
         try:
             resolved = await self.vfs_projection_service.resolve_file(
-                run_id=self.run_id,
-                agent_id=self.agent_id,
-                session_id=self.session_id,
-                workspace_id=self.workspace_id,
+                run_id=self.authority.run_id,
+                agent_id=self.authority.agent_id,
+                session_id=self.authority.session_id,
+                workspace_id=self.authority.workspace_id,
                 uri=uri,
             )
         except VfsFileResolutionError as exc:

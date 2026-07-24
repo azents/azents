@@ -17,13 +17,14 @@ from azents.core.enums import ModelFileStatus
 from azents.repos.model_file import model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.services.model_file import (
+    ModelFileAccessDenied,
     ModelFileInvalidImage,
     ModelFileOversized,
     ModelFileService,
-    ModelFileSessionNotFound,
     model_file_size_limit_message,
     normalize_model_file_body,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 
 class _SessionBoundary:
@@ -68,6 +69,7 @@ class _ModelFileRepository:
             media_type=create.media_type,
             kind=create.kind,
             size_bytes=create.size_bytes,
+            created_run_id=create.created_run_id,
             created_run_index=create.created_run_index,
             storage_key=model_file_storage_key(
                 workspace_id=create.workspace_id,
@@ -184,14 +186,20 @@ async def test_model_file_upload_closes_db_session_before_s3_io() -> None:
     agent_session_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1",
         agent_id="agent-1",
+        owner_generation=1,
     )
-    workspace_user_repository = AsyncMock()
-    workspace_user_repository.get_by_workspace_and_user.return_value = object()
+    agent_session_repository.get_root_session_agent_by_session_id.return_value = (
+        SimpleNamespace(agent_session_id="root-session-1")
+    )
+    agent_run_repository = AsyncMock()
+    agent_run_repository.get_by_id.return_value = SimpleNamespace(
+        session_id="session-1", run_index=1
+    )
     service = ModelFileService(
         model_file_repository=cast(Any, _ModelFileRepository(boundary)),
         agent_session_repository=agent_session_repository,
-        agent_run_repository=AsyncMock(),
-        workspace_user_repository=workspace_user_repository,
+        agent_run_repository=agent_run_repository,
+        workspace_user_repository=AsyncMock(),
         session_manager=boundary.session_manager,
         s3_service=cast(Any, s3),
         config=cast(
@@ -201,9 +209,7 @@ async def test_model_file_upload_closes_db_session_before_s3_io() -> None:
     )
 
     result = await service.create(
-        session_id="session-1",
-        user_id="user-1",
-        created_run_index=1,
+        authority=_authority(),
         filename="notes.txt",
         media_type="text/plain",
         body=b"hello",
@@ -223,12 +229,15 @@ async def test_admitted_model_file_creation_ignores_workspace_membership() -> No
     agent_session_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1",
         agent_id="agent-1",
+        owner_generation=1,
     )
     agent_session_repository.get_root_session_agent_by_session_id.return_value = (
         SimpleNamespace(agent_session_id="root-session-1")
     )
     agent_run_repository = AsyncMock()
-    agent_run_repository.next_run_index.return_value = 1
+    agent_run_repository.get_by_id.return_value = SimpleNamespace(
+        session_id="session-1", run_index=1
+    )
     workspace_user_repository = AsyncMock()
     workspace_user_repository.get_by_workspace_and_user.return_value = None
     service = ModelFileService(
@@ -244,9 +253,8 @@ async def test_admitted_model_file_creation_ignores_workspace_membership() -> No
         ),
     )
 
-    result = await service.create_for_admitted_input(
-        agent_id="agent-1",
-        session_id="session-1",
+    result = await service.create(
+        authority=_authority(),
         filename="accepted.txt",
         media_type="text/plain",
         body=b"accepted",
@@ -265,8 +273,12 @@ async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> 
     s3 = _S3Service(boundary)
     agent_session_repository = AsyncMock()
     agent_session_repository.get_by_id.side_effect = [
-        SimpleNamespace(workspace_id="workspace-1", agent_id="agent-1"),
-        SimpleNamespace(workspace_id="workspace-1", agent_id="agent-1"),
+        SimpleNamespace(
+            workspace_id="workspace-1", agent_id="agent-1", owner_generation=1
+        ),
+        SimpleNamespace(
+            workspace_id="workspace-1", agent_id="agent-1", owner_generation=1
+        ),
     ]
     agent_session_repository.get_root_session_agent_by_session_id.side_effect = [
         SimpleNamespace(agent_session_id="root-session-1"),
@@ -277,7 +289,11 @@ async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> 
     service = ModelFileService(
         model_file_repository=cast(Any, model_file_repository),
         agent_session_repository=agent_session_repository,
-        agent_run_repository=AsyncMock(),
+        agent_run_repository=AsyncMock(
+            get_by_id=AsyncMock(
+                return_value=SimpleNamespace(session_id="session-1", run_index=1)
+            )
+        ),
         workspace_user_repository=workspace_user_repository,
         session_manager=boundary.session_manager,
         s3_service=cast(Any, s3),
@@ -287,16 +303,15 @@ async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> 
         ),
     )
 
-    result = await service.create_for_admitted_input(
-        agent_id="agent-1",
-        session_id="session-1",
+    result = await service.create(
+        authority=_authority(),
         filename="accepted.txt",
         media_type="text/plain",
         body=b"accepted",
     )
 
     assert isinstance(result, Failure)
-    assert isinstance(result.error, ModelFileSessionNotFound)
+    assert isinstance(result.error, ModelFileAccessDenied)
     assert s3.objects == {}
     workspace_user_repository.get_by_workspace_and_user.assert_not_awaited()
     assert model_file_repository.create_calls == 0
@@ -328,3 +343,16 @@ async def test_discard_pending_input_marks_files_for_lifecycle_cleanup() -> None
     assert discarded == 2
     assert repository.discarded_ids == ["model-file-1", "model-file-2"]
     assert boundary.active == 0
+
+
+def _authority() -> SessionResourceAuthority:
+    """Create canonical ModelFile authority for tests."""
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="root-session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
+    )

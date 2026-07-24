@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock
 import pytest
 from azcommon.result import Failure, Success
 
-from azents.core.enums import ArtifactStatus, ExchangeFileOrigin, ExchangeFileStatus
+from azents.core.enums import (
+    ArtifactStatus,
+    ExchangeFileOrigin,
+    ExchangeFileProvenanceKind,
+    ExchangeFileStatus,
+)
 from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.import_file import make_import_file_tool
@@ -16,6 +21,7 @@ from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.services.artifact import ArtifactDownload, ArtifactExpired
 from azents.services.exchange_file import ExchangeFileDownload, FileNotFound
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.vfs import VfsResolvedFile
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
@@ -89,7 +95,13 @@ def _make_exchange_file() -> ExchangeFile:
         media_type="text/csv",
         size_bytes=7,
         sha256="0" * 64,
-        created_by_user_id="user-1",
+        provenance_kind=ExchangeFileProvenanceKind.HUMAN,
+        source_user_id="user-1",
+        source_agent_id=None,
+        source_run_id=None,
+        source_tool_name=None,
+        source_provider=None,
+        source_exchange_file_id=None,
         retention_root_session_id=None,
         retention_bound_at=None,
         preview_thumbnail_file_id=None,
@@ -113,7 +125,7 @@ async def test_import_file_writes_exchange_body_to_runtime() -> None:
     storage = FakeSharedStorage()
     exchange_file = _make_exchange_file()
     service = AsyncMock()
-    service.resolve_attachment.return_value = Success(
+    service.resolve_for_authority.return_value = Success(
         ExchangeFileDownload(file=exchange_file, body=b"a,b\n1,2")
     )
     tool = make_import_file_tool(
@@ -121,11 +133,7 @@ async def test_import_file_writes_exchange_body_to_runtime() -> None:
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(
@@ -148,7 +156,7 @@ async def test_import_file_defaults_to_tmp_uploads_path() -> None:
     storage = FakeSharedStorage()
     exchange_file = _make_exchange_file()
     service = AsyncMock()
-    service.resolve_attachment.return_value = Success(
+    service.resolve_for_authority.return_value = Success(
         ExchangeFileDownload(file=exchange_file, body=b"a,b\n1,2")
     )
     tool = make_import_file_tool(
@@ -156,11 +164,7 @@ async def test_import_file_defaults_to_tmp_uploads_path() -> None:
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(json.dumps({"uri": exchange_file.uri}))
@@ -177,7 +181,7 @@ async def test_import_file_warns_for_explicit_tmp_path() -> None:
     storage = FakeSharedStorage()
     exchange_file = _make_exchange_file()
     service = AsyncMock()
-    service.resolve_attachment.return_value = Success(
+    service.resolve_for_authority.return_value = Success(
         ExchangeFileDownload(file=exchange_file, body=b"a,b\n1,2")
     )
     tool = make_import_file_tool(
@@ -185,11 +189,7 @@ async def test_import_file_warns_for_explicit_tmp_path() -> None:
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(
@@ -206,17 +206,13 @@ async def test_import_file_reports_missing_exchange_file() -> None:
     """Propagate Exchange file lookup failure as tool error."""
     storage = FakeSharedStorage()
     service = AsyncMock()
-    service.resolve_attachment.return_value = Failure(FileNotFound())
+    service.resolve_for_authority.return_value = Failure(FileNotFound())
     tool = make_import_file_tool(
         session_storage=storage,
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     with pytest.raises(FunctionToolError, match="File not found"):
@@ -231,7 +227,7 @@ async def test_import_file_allows_arbitrary_absolute_destination() -> None:
     storage = FakeSharedStorage()
     exchange_file = _make_exchange_file()
     service = AsyncMock()
-    service.resolve_attachment.return_value = Success(
+    service.resolve_for_authority.return_value = Success(
         ExchangeFileDownload(file=exchange_file, body=b"a,b\n1,2")
     )
     tool = make_import_file_tool(
@@ -239,11 +235,7 @@ async def test_import_file_allows_arbitrary_absolute_destination() -> None:
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(
@@ -267,7 +259,7 @@ async def test_import_file_writes_artifact_body_to_runtime() -> None:
     exchange_service = AsyncMock()
     artifact = _make_artifact()
     artifact_service = AsyncMock()
-    artifact_service.resolve.return_value = Success(
+    artifact_service.resolve_for_authority.return_value = Success(
         ArtifactDownload(artifact=artifact, body=b"hello world")
     )
     tool = make_import_file_tool(
@@ -275,11 +267,7 @@ async def test_import_file_writes_artifact_body_to_runtime() -> None:
         exchange_file_service=exchange_service,
         artifact_service=artifact_service,
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(json.dumps({"uri": artifact.uri}))
@@ -295,7 +283,7 @@ async def test_import_file_dedupes_default_destination() -> None:
     storage = FakeSharedStorage({"/tmp/agent/imports/report.csv": b"old"})
     exchange_file = _make_exchange_file()
     service = AsyncMock()
-    service.resolve_attachment.return_value = Success(
+    service.resolve_for_authority.return_value = Success(
         ExchangeFileDownload(file=exchange_file, body=b"a,b\n1,2")
     )
     tool = make_import_file_tool(
@@ -303,11 +291,7 @@ async def test_import_file_dedupes_default_destination() -> None:
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     await tool.handler(json.dumps({"uri": exchange_file.uri}))
@@ -321,7 +305,7 @@ async def test_import_file_fails_explicit_destination_conflict() -> None:
     storage = FakeSharedStorage({"/workspace/agent/report.csv": b"old"})
     exchange_file = _make_exchange_file()
     service = AsyncMock()
-    service.resolve_attachment.return_value = Success(
+    service.resolve_for_authority.return_value = Success(
         ExchangeFileDownload(file=exchange_file, body=b"a,b\n1,2")
     )
     tool = make_import_file_tool(
@@ -329,11 +313,7 @@ async def test_import_file_fails_explicit_destination_conflict() -> None:
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     with pytest.raises(FunctionToolError, match="File already exists"):
@@ -358,11 +338,7 @@ async def test_import_file_writes_current_run_vfs_resource() -> None:
         exchange_file_service=AsyncMock(),
         artifact_service=AsyncMock(),
         vfs_projection_service=service,  # pyright: ignore[reportArgumentType]
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(json.dumps({"uri": uri}))
@@ -380,20 +356,29 @@ async def test_import_file_reports_expired_artifact() -> None:
     """Propagate expired Artifact access failure as tool error."""
     storage = FakeSharedStorage()
     artifact_service = AsyncMock()
-    artifact_service.resolve.return_value = Failure(ArtifactExpired())
+    artifact_service.resolve_for_authority.return_value = Failure(ArtifactExpired())
     tool = make_import_file_tool(
         session_storage=storage,
         exchange_file_service=AsyncMock(),
         artifact_service=artifact_service,
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     with pytest.raises(FunctionToolError, match="no longer available"):
         await tool.handler(
             json.dumps({"uri": "artifact://artifacts/workspace-1/session-1/10/b"})
         )
+
+
+def _authority() -> SessionResourceAuthority:
+    """Create canonical Session/Run authority for tests."""
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=10,
+        owner_generation=1,
+    )

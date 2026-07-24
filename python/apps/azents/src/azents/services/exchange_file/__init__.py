@@ -18,11 +18,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import ExchangeFileOrigin, ExchangeFileStatus
+from azents.core.enums import (
+    ExchangeFileOrigin,
+    ExchangeFileProvenanceKind,
+    ExchangeFileStatus,
+)
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
 from azents.repos.exchange_file.data import (
@@ -36,6 +41,7 @@ from azents.repos.exchange_file.data import (
 )
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.file_lifecycle_policy import exchange_file_expires_at
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 
@@ -356,6 +362,7 @@ class ExchangeFileService:
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
@@ -427,6 +434,83 @@ class ExchangeFileService:
             body=body,
             origin_type=ExchangeFileOrigin.ARTIFACT,
         )
+
+    async def create_for_authority(
+        self,
+        *,
+        authority: SessionResourceAuthority,
+        provenance_kind: ExchangeFileProvenanceKind,
+        source_tool_name: str | None,
+        source_provider: str | None,
+        filename: str | None,
+        media_type: str,
+        body: bytes,
+        origin_type: ExchangeFileOrigin = ExchangeFileOrigin.ARTIFACT,
+    ) -> Result[ExchangeFile, FileAccessDenied]:
+        """Create an internal ExchangeFile under canonical Session/Run authority."""
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(FileAccessDenied())
+        prepared = self._prepare_files(
+            workspace_id=authority.workspace_id,
+            agent_id=authority.agent_id,
+            source_user_id=None,
+            source_run_id=authority.run_id,
+            source_tool_name=source_tool_name,
+            source_provider=source_provider,
+            provenance_kind=provenance_kind,
+            filename=filename,
+            media_type=media_type,
+            body=body,
+            origin_type=origin_type,
+            retention_root_session_id=authority.root_session_id,
+        )
+        succeeded = False
+        try:
+            await self._upload_prepared_files(prepared)
+            async with self.session_manager() as session:
+                if not await self._has_valid_resource_authority(session, authority):
+                    return Failure(FileAccessDenied())
+                created = await self._persist_prepared_files(session, prepared)
+            succeeded = True
+            return Success(created)
+        finally:
+            if not succeeded:
+                await self._cleanup_uploaded_objects(
+                    [file.object_key for file in prepared]
+                )
+
+    async def resolve_for_authority(
+        self,
+        *,
+        uri: str,
+        authority: SessionResourceAuthority,
+    ) -> Result[ExchangeFileDownload, ExchangeFileError]:
+        """Resolve an internal ExchangeFile under canonical Session/Run authority."""
+        object_key = exchange_object_key_from_uri(uri)
+        if object_key is None:
+            return Failure(FileNotFound())
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(FileAccessDenied())
+            file = await self.exchange_file_repository.get_by_object_key_for_agent(
+                session,
+                object_key=object_key,
+                agent_id=authority.agent_id,
+            )
+        if file is None:
+            return Failure(FileNotFound())
+        if file.retention_root_session_id != authority.root_session_id:
+            return Failure(FileAccessDenied())
+        if file.status == ExchangeFileStatus.EXPIRED:
+            return Failure(FileExpired())
+        body = await self.s3_service.download_bytes(
+            bucket=self.config.workspace_s3.bucket,
+            key=file.object_key,
+        )
+        if body is None:
+            return Failure(FileUnavailable())
+        return Success(ExchangeFileDownload(file=file, body=body))
 
     async def claim_input_attachments(
         self,
@@ -518,7 +602,11 @@ class ExchangeFileService:
         prepared = self._prepare_files(
             workspace_id=workspace_id,
             agent_id=agent_id,
-            user_id=user_id,
+            source_user_id=user_id,
+            source_run_id=None,
+            source_tool_name=None,
+            source_provider=None,
+            provenance_kind=ExchangeFileProvenanceKind.HUMAN,
             filename=filename,
             media_type=media_type,
             body=body,
@@ -581,7 +669,11 @@ class ExchangeFileService:
         prepared = self._prepare_files(
             workspace_id=workspace_id,
             agent_id=agent_id,
-            user_id=user_id,
+            source_user_id=user_id,
+            source_run_id=None,
+            source_tool_name=None,
+            source_provider=None,
+            provenance_kind=ExchangeFileProvenanceKind.HUMAN,
             filename=filename,
             media_type=media_type,
             body=body,
@@ -658,7 +750,11 @@ class ExchangeFileService:
         prepared = self._prepare_files(
             workspace_id=workspace_id,
             agent_id=agent_id,
-            user_id=user_id,
+            source_user_id=user_id,
+            source_run_id=None,
+            source_tool_name=None,
+            source_provider=None,
+            provenance_kind=ExchangeFileProvenanceKind.HUMAN,
             filename=filename,
             media_type=media_type,
             body=body,
@@ -706,7 +802,11 @@ class ExchangeFileService:
         *,
         workspace_id: str,
         agent_id: str,
-        user_id: str,
+        source_user_id: str | None,
+        source_run_id: str | None,
+        source_tool_name: str | None,
+        source_provider: str | None,
+        provenance_kind: ExchangeFileProvenanceKind,
         filename: str | None,
         media_type: str,
         body: bytes,
@@ -731,7 +831,22 @@ class ExchangeFileService:
                     media_type=media_type,
                     size_bytes=len(body),
                     sha256=sha256,
-                    created_by_user_id=user_id,
+                    provenance_kind=provenance_kind,
+                    source_user_id=source_user_id,
+                    source_agent_id=(
+                        agent_id
+                        if provenance_kind
+                        in {
+                            ExchangeFileProvenanceKind.AGENT,
+                            ExchangeFileProvenanceKind.TOOL,
+                            ExchangeFileProvenanceKind.PROVIDER,
+                        }
+                        else None
+                    ),
+                    source_run_id=source_run_id,
+                    source_tool_name=source_tool_name,
+                    source_provider=source_provider,
+                    source_exchange_file_id=None,
                     retention_root_session_id=retention_root_session_id,
                     retention_bound_at=(
                         now if retention_root_session_id is not None else None
@@ -769,7 +884,13 @@ class ExchangeFileService:
                     media_type=_PREVIEW_THUMBNAIL_MEDIA_TYPE,
                     size_bytes=len(thumbnail_body.body),
                     sha256=hashlib.sha256(thumbnail_body.body).hexdigest(),
-                    created_by_user_id=user_id,
+                    provenance_kind=ExchangeFileProvenanceKind.PREVIEW,
+                    source_user_id=None,
+                    source_agent_id=None,
+                    source_run_id=None,
+                    source_tool_name=None,
+                    source_provider=None,
+                    source_exchange_file_id=file_id,
                     retention_root_session_id=retention_root_session_id,
                     retention_bound_at=(
                         now if retention_root_session_id is not None else None
@@ -1241,6 +1362,39 @@ class ExchangeFileService:
                 return item
         return file.model_copy(
             update={"status": ExchangeFileStatus.EXPIRED, "expired_at": now}
+        )
+
+    async def _has_valid_resource_authority(
+        self,
+        session: AsyncSession,
+        authority: SessionResourceAuthority,
+    ) -> bool:
+        """Validate canonical Session/Run authority for internal file access."""
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            authority.session_id,
+        )
+        if (
+            agent_session is None
+            or agent_session.workspace_id != authority.workspace_id
+            or agent_session.agent_id != authority.agent_id
+            or agent_session.owner_generation != authority.owner_generation
+        ):
+            return False
+        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
+            session,
+            authority.session_id,
+        )
+        if root is None or root.agent_session_id != authority.root_session_id:
+            return False
+        run = await self.agent_run_repository.get_by_id(
+            session,
+            authority.run_id,
+        )
+        return (
+            run is not None
+            and run.session_id == authority.session_id
+            and run.run_index == authority.run_index
         )
 
     async def _has_workspace_access(

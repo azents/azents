@@ -160,6 +160,7 @@ from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_title import SessionTitleService
 from azents.services.vfs import VfsProjectionService
 from azents.transport.chat import (
@@ -1072,6 +1073,15 @@ class RunExecutor:
             tool_admission_barrier=tool_admission_barrier,
             model_transport_state=model_transport_state,
             publish_event=publish_event,
+            resource_authority=SessionResourceAuthority(
+                workspace_id=snapshot.workspace_id,
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
+                root_session_id=snapshot.root_session_id,
+                run_id=run_id,
+                run_index=agent_run.run_index,
+                owner_generation=owner_generation,
+            ),
         )
         context = ToolkitContext(
             session_id=snapshot.session_id,

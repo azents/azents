@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.engine.hooks.types import RuntimeHooks
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import CheckStop, FunctionTool
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 # ---------------------------------------------------------------------------
 # Toolkit State Machine types
@@ -70,6 +71,7 @@ class TurnContext:
     session_id: str = ""
     run_index: int = 1
     check_stop: CheckStop | None = None
+    resource_authority: SessionResourceAuthority | None = None
 
 
 @dataclasses.dataclass(frozen=True)
