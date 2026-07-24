@@ -1090,6 +1090,82 @@ class TestAgentRuntimeRepository:
         assert dispatched.provider_observe_requested_at is not None
         assert throttled == []
 
+    async def test_provider_observe_rechecks_stopping_runtime(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Stopped desired state is observed until the Provider reports stopped."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-observe-stopping-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-observe-stopping",
+            runtime_provider_id="provider-1",
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        runtime = await repo.record_provider_connection_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderConnectionState.CONNECTED,
+        )
+        assert runtime is not None
+        command = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.STOP,
+            RuntimeDesiredState.STOPPED,
+        )
+        assert command is not None
+        await repo.mark_lifecycle_dispatched(
+            rdb_session,
+            runtime.id,
+            command.desired_generation,
+        )
+        runtime = await repo.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.STOPPING,
+            1,
+            command.desired_generation,
+        )
+        assert runtime is not None
+        old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+            minutes=10
+        )
+        await rdb_session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(
+                provider_observed_at=old_observe_at,
+                provider_observe_requested_at=old_observe_at,
+            )
+        )
+
+        candidates = await repo.find_provider_observe_candidates(
+            rdb_session,
+            limit=10,
+            observe_interval=datetime.timedelta(minutes=1),
+        )
+        stopped_runtime = await repo.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.STOPPED,
+            1,
+            command.desired_generation,
+        )
+        converged = await repo.find_provider_observe_candidates(
+            rdb_session,
+            limit=10,
+            observe_interval=datetime.timedelta(seconds=0),
+        )
+
+        assert [candidate.id for candidate in candidates] == [runtime.id]
+        assert stopped_runtime is not None
+        assert stopped_runtime.runner_state == RuntimeRunnerState.DISCONNECTED
+        assert converged == []
+
     async def test_lifecycle_dispatch_candidates_skip_start_timeout_failure(
         self, rdb_session: AsyncSession
     ) -> None:

@@ -407,6 +407,11 @@ class AgentRuntimeRepository:
             RDBAgentRuntime.provider_generation != provider_generation,
             RDBAgentRuntime.provider_observed_generation != observed_generation,
         )
+        if observed_state == RuntimeProviderObservedState.STOPPED:
+            changed = sa.or_(
+                changed,
+                RDBAgentRuntime.runner_state != RuntimeRunnerState.DISCONNECTED,
+            )
         if workspace_path is not None:
             changed = sa.or_(
                 changed,
@@ -436,6 +441,8 @@ class AgentRuntimeRepository:
                 else_=RDBAgentRuntime.last_state_change_at,
             ),
         }
+        if observed_state == RuntimeProviderObservedState.STOPPED:
+            values["runner_state"] = RuntimeRunnerState.DISCONNECTED
         if workspace_path is not None:
             values["workspace_path"] = workspace_path
         if failure is not None:
@@ -864,7 +871,14 @@ class AgentRuntimeRepository:
             sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.runtime_provider_id.is_not(None),
-                RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
+                sa.or_(
+                    RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
+                    sa.and_(
+                        RDBAgentRuntime.desired_state == RuntimeDesiredState.STOPPED,
+                        RDBAgentRuntime.provider_observed_state
+                        != RuntimeProviderObservedState.STOPPED,
+                    ),
+                ),
                 RDBAgentRuntime.provider_connection_state
                 == RuntimeProviderConnectionState.CONNECTED,
                 RDBAgentRuntime.last_lifecycle_dispatch_generation
