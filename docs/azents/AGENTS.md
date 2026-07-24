@@ -1,7 +1,7 @@
 ---
 title: "azents documentation structure"
 created: 2026-02-25
-updated: 2026-07-21
+updated: 2026-07-24
 tags: [documentation, process]
 ---
 # azents Documentation Structure
@@ -39,6 +39,7 @@ Requirements, ADR, and design documents use their location and content as their 
 | `spec/domain/` | Current domain model specs such as Agent, Session, Team, Memory. | `agent.md`, `workspace.md` | plus `spec_type: domain`, `domain`, `code_paths`, `last_verified_at`, `spec_version` |
 | `spec/flow/` | Current flow specs such as the ReAct loop or message routing. | `agent-execution-loop.md`, `message-routing.md` | plus `spec_type: flow`, `code_paths`, `last_verified_at`, `spec_version` |
 | `design/` | Primary development-snapshot Designs and supporting design-time records. | `slack-260721-channel-agent-conversation.md`, `feature-audit-report-YYYY-MM-DD.md` | `title`, `created`, `tags`; use `updated` while drafting and add `implemented` after verified implementation |
+| `plans/` | Temporary multi-phase implementation plans and phase execution plans used while shipping a feature. Remove them in the feature cleanup phase. | `team-session-execution-boundaries-implementation-plan.md`, `team-session-execution-boundaries-phase-1.md` | `title`, `created`, `tags`; use `updated` while implementation is active |
 | `notes/` | Pre-design product/architecture blueprints, unresolved model exploration, or discussion summaries. | `agent-thread-session-blueprint.md` | `title`, `created`, `tags` |
 | `issues/` | Bug or operational issue tracking. | `2026-05-01-agent-stuck.md` | `title`, `created`, `tags` |
 
@@ -99,7 +100,6 @@ The shared format applies to the core Requirements, ADR, and primary Design for 
 | `implementation/` | Keep implemented records in `design/`; current behavior belongs in `spec/`. |
 | `misc`, `discussion/` | Confirmed intent goes to `requirements/`, decisions go to `adr/`, designs to `design/`, and current behavior to `spec/`. |
 | `research/`, `reference/`, `runbook/`, `testenv/`, `testing/` | Move only useful content into `requirements/`, `design/`, `spec/`, or `issues/`. |
-| `plans/` | Temporary implementation plans belong in PRs/issues and are deleted after completion. |
 
 ## Frontmatter Rules
 
@@ -150,14 +150,27 @@ tags: [backend, engine]
 ### `design/` Structure and Search Rules
 
 - Do **not** list `design/` documents in an index. They accumulate over time, so use structure and naming conventions for discovery.
-- Root `design/*.md` files hold feature designs, implementation plans, audit reports, QA reports, and similar feature-scoped documents.
+- Root `design/*.md` files hold feature designs, audit reports, QA reports, and
+  similar feature-scoped design-time records.
 - Add subdirectories only when a document family is large enough. Current examples include `design/agent-session-sandbox-scenarios/`.
 - Keep filenames descriptive:
   - New primary snapshot Design: `{word}-{YYMMDD}-{slug}.md`, matching Requirements and ADR
   - Existing legacy Design: keep its current descriptive filename unchanged
-  - Implementation plan: `{feature}-plan.md`, `{feature}-implementation-plan.md`
   - Audit/verification report: `{feature}-audit-report-YYYY-MM-DD.md`, `{feature}-spec-sync-YYYY-MM-DD.md`, `{feature}-testenv-report-YYYY-MM-DD.md`
 - When searching for a document, prefer filename prefix/slug and `tags` frontmatter over directory indexes.
+
+### Additional Rules for `plans/`
+
+- Store the feature's high-level multi-phase implementation plan and every
+  phase-specific execution plan under `plans/`.
+- Create `plans/` when starting a feature if cleanup from earlier features left
+  the directory absent.
+- Use descriptive filenames such as `{feature}-implementation-plan.md` and
+  `{feature}-phase-{number}-{slug}.md`.
+- Keep plan ownership, interfaces, dependencies, validation, and scope current
+  while implementation is active.
+- Remove the feature's multi-phase plan and all phase plans in its cleanup PR.
+  The directory may disappear when no tracked plans remain.
 
 ### Additional Fields for `spec/`
 
@@ -194,10 +207,12 @@ Decision tree:
 1. Confirmed feature requirements? → `requirements/{word}-{YYMMDD}-{slug}.md`.
 2. Hard-to-reverse decisions for that snapshot? → `adr/{same-basename}.md`.
 3. Primary feature design? → `design/{same-basename}.md`.
-4. Current behavior spec? → `spec/domain/{domain}.md` or `spec/flow/{flow}.md`.
-5. Bug or operational issue? → `issues/{name}.md`.
-6. Pre-design blueprint or discussion summary? → `notes/{name}.md`.
-7. Unresolved discussion? → keep discussion in GitHub Issue/Discussion, optionally summarize in `notes/`, then move confirmed intent and decisions into Requirements/ADR/design/spec when settled.
+4. Approved feature ready for phased implementation? → create the high-level
+   and phase-specific plans under `plans/`.
+5. Current behavior spec? → `spec/domain/{domain}.md` or `spec/flow/{flow}.md`.
+6. Bug or operational issue? → `issues/{name}.md`.
+7. Pre-design blueprint or discussion summary? → `notes/{name}.md`.
+8. Unresolved discussion? → keep discussion in GitHub Issue/Discussion, optionally summarize in `notes/`, then move confirmed intent and decisions into Requirements/ADR/design/spec when settled.
 
 Writing order:
 
@@ -205,13 +220,18 @@ Writing order:
 2. Write required frontmatter, including requirements- or spec-specific fields when applicable.
 3. For a new feature, choose the shared basename in Requirements and obtain requester confirmation.
 4. Create the same-basename ADR before accepting decisions, then create the same-basename Design.
-5. Validate locally with `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents --check`.
+5. For phased implementation, create `plans/` when absent, then store both the
+   multi-phase implementation plan and each phase execution plan there.
+6. Validate locally with `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents --check`.
 
 ## Deletion and Move Rules
 
 - **`requirements/`**: keep implemented snapshots in place and immutable. Later changes create a new snapshot; current behavior belongs in `spec/`.
 - **`adr/`**: keep accepted ADRs in place and append-only. Later decisions create a new snapshot rather than rewriting accepted history.
 - **`design/`**: keep documents in place after implementation. Do not use status fields to express freshness. After `implemented` is set, do not edit the document; record later changes in `spec/` or new Requirements/design/ADR documents.
+- **`plans/`**: keep implementation plans only while the feature is active.
+  Remove its multi-phase and phase execution plans in the cleanup PR. An empty
+  `plans/` directory does not need to remain.
 - **`spec/`**: keep only current behavior specs. Delete stale specs or merge them into the current spec rather than changing status.
 
 ## Frontmatter Examples
