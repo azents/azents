@@ -89,3 +89,26 @@ class SessionBroker(Protocol):
     async def purge_session_state(self, session_id: str) -> None:
         """Delete queued messages, ownership, heartbeat, and activity state."""
         ...
+
+    async def acquire_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+    ) -> str:
+        """Block ownership acquisition for the exact replay batch Sessions."""
+        ...
+
+    async def release_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+        token: str,
+    ) -> None:
+        """Release the exact cutover replay barrier token."""
+        ...
+
+    async def renew_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+        token: str,
+    ) -> bool:
+        """Renew every exact cutover barrier or report lost ownership."""
+        ...
