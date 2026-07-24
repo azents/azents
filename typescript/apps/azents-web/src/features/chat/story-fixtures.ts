@@ -24,6 +24,39 @@ export const textAttachment: FileAttachment = {
     "Build completed successfully.\nLint warnings: 0\nTests: 42 passed",
 };
 
+export const markdownAttachment: FileAttachment = {
+  attachmentId: "story-markdown",
+  uri: "exchange://exchange/story/files/markdown/original",
+  mediaType: "text/markdown",
+  size: 4096,
+  name: "README.md",
+  textPreview: `# Deployment Notes
+
+- [x] Build completed
+- [ ] Production rollout
+
+| Environment | Status |
+| --- | --- |
+| Staging | Ready |
+
+\`\`\`sh
+pnpm run build
+\`\`\`
+
+[Open documentation](https://example.com/docs)
+
+![Remote architecture](https://example.com/tracker.png)`,
+};
+
+export const emptyTextAttachment: FileAttachment = {
+  attachmentId: "story-empty-text",
+  uri: "exchange://exchange/story/files/empty-text/original",
+  mediaType: "text/plain",
+  size: 0,
+  name: "empty.txt",
+  textPreview: "",
+};
+
 export const binaryAttachment: FileAttachment = {
   attachmentId: "story-binary",
   uri: "exchange://exchange/story/files/binary/original",

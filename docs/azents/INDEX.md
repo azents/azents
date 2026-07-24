@@ -41,7 +41,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-23 | 11 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 9 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-23 | 7 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-23 | 27 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-24 | 28 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
@@ -266,6 +266,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Make PostgreSQL Authoritative for Tool Call Ownership Historical Requirements Reconstruction](requirements/postgresql-260712-postgresql-authoritative-for-call-ownership.md) | postgresql-260712 | 2026-07-12 | - |
 | [Precreate the Inherited First Subagent Run Historical Requirements Reconstruction](requirements/precreate-260710-precreate-inherited-subagent.md) | precreate-260710 | 2026-07-10 | - |
 | [User Stop Uses Preemptive Interrupt and REST Control Boundary Historical Requirements Reconstruction](requirements/preemptive-260607-preemptive-stop.md) | preemptive-260607 | 2026-06-07 | 2026-07-12 |
+| [Chat Text File Preview Requirements](requirements/preview-260724-chat-text-file-preview.md) | preview-260724 | 2026-07-24 | 2026-07-24 |
 | [Primary Agent Sessions and Team-First Multi-Session UX Historical Requirements Reconstruction](requirements/primary-260625-primary-sessions.md) | primary-260625 | 2026-06-25 | - |
 | [Agent Profile Image Historical Requirements Reconstruction](requirements/profile-260421-profile-image.md) | profile-260421 | 2026-04-21 | 2026-04-21 |
 | [Reuse the Active Run Profile for Matching Inputs Historical Requirements Reconstruction](requirements/profile-260710-profile-matching-join-policy.md) | profile-260710 | 2026-07-10 | - |
@@ -593,6 +594,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Make PostgreSQL Authoritative for Tool Call Ownership](adr/postgresql-260712-postgresql-authoritative-for-call-ownership.md)
 - [Precreate the Inherited First Subagent Run](adr/precreate-260710-precreate-inherited-subagent.md)
 - [User Stop Uses Preemptive Interrupt and REST Control Boundary](adr/preemptive-260607-preemptive-stop.md)
+- [Chat Text File Preview](adr/preview-260724-chat-text-file-preview.md)
 - [Primary Agent Sessions and Team-First Multi-Session UX](adr/primary-260625-primary-sessions.md)
 - [Agent Profile Image Historical Decision Reconstruction](adr/profile-260421-profile-image.md)
 - [Reuse the Active Run Profile for Matching Inputs](adr/profile-260710-profile-matching-join-policy.md)

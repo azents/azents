@@ -69,6 +69,37 @@ Hello from Azents!`,
   },
 } satisfies Story;
 
+export const MarkdownPreview = {
+  args: {
+    opened: true,
+    onClose: closePreview,
+    name: "README.md",
+    mediaType: "text/markdown",
+    size: 4096,
+    downloadUrl: "/api/chat/exchange-files/story-markdown/download",
+    preview: {
+      type: "markdown",
+      text: `# Markdown preview
+
+| Format | Supported |
+| --- | --- |
+| GFM | Yes |
+
+[Documentation](https://example.com/docs)`,
+    },
+  },
+  play: async () => {
+    const body = within(document.body);
+    await expect(
+      body.getByRole("heading", { name: "Markdown preview" }),
+    ).toBeVisible();
+    await expect(body.getByRole("table")).toBeVisible();
+    await expect(
+      body.getByRole("link", { name: "Documentation" }),
+    ).toHaveAttribute("rel", "noopener noreferrer");
+  },
+} satisfies Story;
+
 export const UnsupportedPreview = {
   args: {
     opened: true,

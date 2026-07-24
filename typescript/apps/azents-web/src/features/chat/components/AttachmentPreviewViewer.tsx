@@ -8,6 +8,7 @@ import {
   Code,
   Group,
   Modal,
+  Paper,
   rem,
   ScrollArea,
   Text,
@@ -27,6 +28,7 @@ import {
   useEffect,
   useRef,
 } from "react";
+import { AttachmentMarkdownPreview } from "./AttachmentMarkdownPreview";
 import { formatFileSize } from "./FileAttachmentList";
 
 export type AttachmentPreviewContent =
@@ -37,6 +39,10 @@ export type AttachmentPreviewContent =
     }
   | {
       type: "text";
+      text: string;
+    }
+  | {
+      type: "markdown";
       text: string;
     }
   | {
@@ -304,6 +310,20 @@ export function AttachmentPreviewViewer({
                 >
                   {preview.text}
                 </Code>
+              </Box>
+            </ScrollArea>
+          ) : preview.type === "markdown" ? (
+            <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+              <Box p="md">
+                <Paper
+                  withBorder
+                  maw={rem(880)}
+                  mx="auto"
+                  p={isMobile ? "md" : "xl"}
+                  radius="md"
+                >
+                  <AttachmentMarkdownPreview text={preview.text} />
+                </Paper>
               </Box>
             </ScrollArea>
           ) : preview.type === "unsupported" ? (

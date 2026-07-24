@@ -537,6 +537,83 @@ async def test_create_unknown_media_utf8_upload_stores_text_preview() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_text_filename_with_inaccurate_media_type_stores_preview() -> None:
+    """Recognized text filenames recover from generic unknown MIME types."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="settings.env",
+        media_type="application/unknown",
+        body=b"FEATURE_ENABLED=true\n",
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.preview_summary == "FEATURE_ENABLED=true\n"
+
+
+@pytest.mark.asyncio
+async def test_create_dotfile_with_inaccurate_media_type_stores_preview() -> None:
+    """Dotfile recognition uses the original name before display sanitization."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename=".env",
+        media_type="application/unknown",
+        body=b"FEATURE_ENABLED=true\n",
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.filename == "env"
+    assert result.value.preview_summary == "FEATURE_ENABLED=true\n"
+
+
+@pytest.mark.asyncio
+async def test_create_known_binary_media_with_text_filename_omits_preview() -> None:
+    """Known binary MIME types are not promoted by text-looking filenames."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="misnamed.md",
+        media_type="application/zip",
+        body=b"plain ASCII bytes are still declared as a ZIP archive",
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.preview_summary is None
+
+
+@pytest.mark.asyncio
+async def test_create_vendor_binary_media_with_text_filename_omits_preview() -> None:
+    """Vendor binary MIME types are not promoted by text-looking filenames."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="misnamed.txt",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        body=b"plain ASCII bytes are still declared as a Word document",
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.preview_summary is None
+
+
+@pytest.mark.asyncio
 async def test_create_binary_upload_omits_text_preview() -> None:
     """Unknown MIME upload does not preview binary bytes as text."""
     service, _repository, _s3_service = _make_service(

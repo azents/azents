@@ -1,0 +1,135 @@
+.markdown {
+  max-width: 100%;
+  min-width: 0;
+  color: var(--mantine-color-text);
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.markdown > *:first-child {
+  margin-top: 0;
+}
+
+.markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  line-height: 1.3;
+  margin-bottom: 0.5em;
+  margin-top: 1.2em;
+}
+
+.markdown h1 {
+  font-size: var(--mantine-font-size-xl);
+}
+
+.markdown h2 {
+  font-size: var(--mantine-font-size-lg);
+}
+
+.markdown h3 {
+  font-size: var(--mantine-font-size-md);
+}
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: var(--mantine-font-size-sm);
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre,
+.markdown table {
+  margin-bottom: 0.85em;
+  margin-top: 0.85em;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.6em;
+}
+
+.markdown li {
+  margin: 0.25em 0;
+}
+
+.markdown blockquote {
+  border-left: calc(var(--mantine-spacing-xs) / 2) solid
+    var(--mantine-color-default-border);
+  color: var(--mantine-color-dimmed);
+  padding-left: var(--mantine-spacing-md);
+}
+
+.markdown :where(pre, code) {
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.markdown pre {
+  background: var(--mantine-color-default-hover);
+  border-radius: var(--mantine-radius-sm);
+  max-width: 100%;
+  overflow-x: auto;
+  padding: var(--mantine-spacing-sm);
+}
+
+.markdown pre code {
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+}
+
+.markdown :not(pre) > code {
+  background: var(--mantine-color-default-hover);
+  border-radius: var(--mantine-radius-xs);
+  font-size: var(--mantine-font-size-xs);
+  padding: calc(var(--mantine-spacing-xs) / 4)
+    calc(var(--mantine-spacing-xs) / 2);
+}
+
+.markdown table {
+  border-collapse: collapse;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  width: 100%;
+}
+
+.markdown th,
+.markdown td {
+  border: calc(var(--mantine-spacing-xs) / 8) solid
+    var(--mantine-color-default-border);
+  padding: calc(var(--mantine-spacing-xs) / 2) var(--mantine-spacing-sm);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--mantine-color-default-hover);
+  font-weight: 600;
+}
+
+.markdown a {
+  color: var(--mantine-primary-color-filled);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.markdown hr {
+  border: 0;
+  border-top: calc(var(--mantine-spacing-xs) / 8) solid
+    var(--mantine-color-default-border);
+  margin: var(--mantine-spacing-lg) 0;
+}
+
+.markdown input[type="checkbox"] {
+  margin-right: calc(var(--mantine-spacing-xs) / 2);
+}
