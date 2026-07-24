@@ -681,6 +681,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
@@ -776,6 +777,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
@@ -1149,7 +1151,7 @@ class TestAgentSessionInputService:
                     workspace_id=workspace_id,
                     agent_id=agent_id,
                 )
-            )
+            ).session
             await setup_session.commit()
 
         service = AgentSessionInputService(
@@ -1159,6 +1161,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
@@ -1332,7 +1335,7 @@ class TestAgentSessionInputService:
                     workspace_id=workspace_id,
                     agent_id=agent_id,
                 )
-            )
+            ).session
 
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
@@ -1341,6 +1344,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
