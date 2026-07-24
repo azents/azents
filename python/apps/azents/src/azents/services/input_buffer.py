@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ActionExecutionStatus,
+    AgentRunStatus,
+    AgentSessionStatus,
     EventKind,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -70,6 +72,7 @@ from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_title import initial_title_from_event
 from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
 
@@ -464,6 +467,8 @@ class InputBufferService:
             session_id=session_id,
             expected_buffer_id=expected_buffer_id,
             include_action_messages=include_action_messages,
+            owner_generation=owner_generation,
+            active_run_id=active_run_id,
         )
         async with (
             self._discard_prepared_model_files_on_failure(prepared_files),
@@ -703,6 +708,8 @@ class InputBufferService:
         session_id: str,
         expected_buffer_id: str | None,
         include_action_messages: bool,
+        owner_generation: int,
+        active_run_id: str | None,
     ) -> PreparedInputBufferFiles:
         """Resolve the FIFO head attachments without holding a database session."""
         async with self.session_manager() as session:
@@ -752,10 +759,48 @@ class InputBufferService:
                 file_parts=file_parts,
                 created_model_file_ids=[],
             )
+        if active_run_id is None:
+            raise InputBufferPreparationStaleError(
+                "Attachment materialization requires an active AgentRun"
+            )
+        async with self.session_manager() as session:
+            repository = self.agent_session_repository
+            current_agent_session = await repository.get_by_id(
+                session,
+                session_id,
+            )
+            get_root = repository.get_root_session_agent_by_session_id
+            root = await get_root(
+                session,
+                session_id,
+            )
+            run = await self.agent_run_repository.get_by_id(session, active_run_id)
+        if (
+            current_agent_session is None
+            or root is None
+            or run is None
+            or run.session_id != session_id
+            or run.status not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+            or current_agent_session.workspace_id != agent_session.workspace_id
+            or current_agent_session.agent_id != agent_session.agent_id
+            or current_agent_session.status is not AgentSessionStatus.ACTIVE
+            or current_agent_session.owner_generation != owner_generation
+        ):
+            raise InputBufferPreparationStaleError(
+                "Canonical resource authority changed before attachment materialization"
+            )
+        authority = SessionResourceAuthority(
+            workspace_id=current_agent_session.workspace_id,
+            agent_id=current_agent_session.agent_id,
+            session_id=session_id,
+            root_session_id=root.agent_session_id,
+            run_id=run.id,
+            run_index=run.run_index,
+            owner_generation=owner_generation,
+        )
         materialized = await materialize_admitted_input_exchange_file_attachments(
             buffer.attachments,
-            agent_id=agent_session.agent_id,
-            session_id=buffer.session_id,
+            authority=authority,
             exchange_file_service=self.exchange_file_service,
             model_file_service=self.model_file_service,
         )

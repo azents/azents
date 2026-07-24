@@ -9,6 +9,7 @@ import posixpath
 from azcommon.result import Failure, Success
 from pydantic import BaseModel, Field
 
+from azents.core.enums import ExchangeFileProvenanceKind
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.run.types import (
     FunctionTool,
@@ -20,10 +21,10 @@ from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
 from azents.services.exchange_file import (
     ExchangeFileService,
     FileAccessDenied,
-    SessionNotFound,
 )
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_storage import guess_media_type
 
 logger = logging.getLogger(__name__)
@@ -51,17 +52,13 @@ def make_present_file_tool(
     *,
     session_storage: FileStorage,
     exchange_file_service: ExchangeFileService,
-    session_id: str,
-    agent_id: str,
-    user_id: str,
+    authority: SessionResourceAuthority,
 ) -> FunctionTool:
     """Create present_file tool.
 
     :param session_storage: runtime runner file storage
     :param exchange_file_service: Exchange file service
-    :param session_id: Current AgentSession ID
-    :param agent_id: Agent ID
-    :param user_id: User ID
+    :param authority: Validated Session/Run resource authority
     :return: present_file Tool instance
     """
 
@@ -85,7 +82,7 @@ def make_present_file_tool(
             try:
                 await session_storage.stat(
                     abs_path,
-                    agent_id=agent_id,
+                    agent_id=authority.agent_id,
                 )
             except RuntimeStorageError as exc:
                 raise FunctionToolError(
@@ -106,7 +103,10 @@ def make_present_file_tool(
             media_type = guess_media_type(abs_path)
             file_name = abs_path.rsplit("/", 1)[-1]
             try:
-                body = await session_storage.get(abs_path, agent_id=agent_id)
+                body = await session_storage.get(
+                    abs_path,
+                    agent_id=authority.agent_id,
+                )
             except RuntimeStorageError as exc:
                 raise FunctionToolError(f"Failed to read file: {exc.detail}") from None
             except FileNotFoundError, ValueError, OSError:
@@ -121,20 +121,21 @@ def make_present_file_tool(
                 )
                 continue
 
-            created = await exchange_file_service.create_artifact(
-                session_id=session_id,
-                user_id=user_id,
+            created = await exchange_file_service.create_for_authority(
+                authority=authority,
+                provenance_kind=ExchangeFileProvenanceKind.TOOL,
+                source_tool_name="present_file",
+                source_provider=None,
                 filename=file_name,
                 media_type=media_type,
                 body=body,
             )
             if isinstance(created, Failure):
                 error = created.error
-                if isinstance(error, SessionNotFound):
-                    errors.append("Session not found while presenting file.")
-                    continue
                 if isinstance(error, FileAccessDenied):
-                    errors.append("Session access denied while presenting file.")
+                    errors.append(
+                        "Session resource access denied while presenting file."
+                    )
                     continue
                 errors.append(f"Failed to present file: {abs_path}")
                 continue

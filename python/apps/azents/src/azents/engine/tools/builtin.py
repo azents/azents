@@ -59,6 +59,7 @@ from azents.engine.tools.delete_file import make_delete_file_tool
 from azents.engine.tools.edit import RuntimeEditTarget, make_edit_tool
 from azents.engine.tools.glob import make_glob_tool
 from azents.engine.tools.grep import make_grep_tool
+from azents.engine.tools.import_file import make_import_file_tool
 from azents.engine.tools.memory import (
     make_delete_memory_tool,
     make_get_memory_tool,
@@ -66,6 +67,8 @@ from azents.engine.tools.memory import (
     make_save_memory_tool,
     make_search_memories_tool,
 )
+from azents.engine.tools.present_file import make_present_file_tool
+from azents.engine.tools.read_image import make_read_image_tool
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContext,
@@ -714,6 +717,29 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_id=self._agent_id,
             ),
         ]
+        if context.resource_authority is not None:
+            authority = context.resource_authority
+            file_tools.extend(
+                [
+                    make_import_file_tool(
+                        session_storage=file_ss,
+                        exchange_file_service=self.exchange_file_service,
+                        artifact_service=self.artifact_service,
+                        vfs_projection_service=self.vfs_projection_service,
+                        authority=authority,
+                    ),
+                    make_present_file_tool(
+                        session_storage=file_ss,
+                        exchange_file_service=self.exchange_file_service,
+                        authority=authority,
+                    ),
+                    make_read_image_tool(
+                        session_storage=file_ss,
+                        model_file_service=self.model_file_service,
+                        authority=authority,
+                    ),
+                ]
+            )
         tools = [
             make_exec_command_tool(
                 self.runner_operations,

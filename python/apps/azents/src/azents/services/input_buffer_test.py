@@ -19,8 +19,10 @@ from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
+    AgentSessionStatus,
     EventKind,
     ExchangeFileOrigin,
+    ExchangeFileProvenanceKind,
     ExchangeFileStatus,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
@@ -90,6 +92,7 @@ from azents.services.model_file import (
     ModelFileOversized,
     ModelFileService,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.vfs import VfsResolvedFile
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
@@ -483,7 +486,13 @@ def _exchange_file(
         media_type="text/plain",
         size_bytes=11,
         sha256="sha256",
-        created_by_user_id=user_id,
+        provenance_kind=ExchangeFileProvenanceKind.HUMAN,
+        source_user_id=user_id,
+        source_agent_id=None,
+        source_run_id=None,
+        source_tool_name=None,
+        source_provider=None,
+        source_exchange_file_id=None,
         retention_root_session_id="session-root",
         retention_bound_at=tznow(),
         preview_thumbnail_file_id=preview_thumbnail_file_id,
@@ -613,18 +622,17 @@ class _ModelFileService(ModelFileService):
         self.create_for_agent_pending_input_called = True
         return self.result
 
-    async def create_for_admitted_input(
+    async def create(
         self,
         *,
-        agent_id: str,
-        session_id: str,
+        authority: SessionResourceAuthority,
         filename: str | None,
         media_type: str,
         body: bytes,
         metadata: dict[str, object] | None = None,
     ) -> Result[ModelFile, ModelFileCreateError]:
         """Record internal admitted-input materialization."""
-        del agent_id, session_id, filename, media_type, body, metadata
+        del authority, filename, media_type, body, metadata
         self.create_for_admitted_input_called = True
         return self.result
 
@@ -826,6 +834,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         media_type="image/jpeg",
         kind="image",
         size_bytes=5,
+        created_run_id="run-1",
         created_run_index=1,
         storage_key="model-files/image.jpg",
         status=ModelFileStatus.AVAILABLE,
@@ -838,7 +847,22 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
     input_buffer_repository = AsyncMock(spec=InputBufferRepository)
     input_buffer_repository.list_for_flush.return_value = [buffer]
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
-    agent_session_repository.get_by_id.return_value = SimpleNamespace(agent_id=agent_id)
+    agent_session_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-001",
+        agent_id=agent_id,
+        owner_generation=0,
+        status=AgentSessionStatus.ACTIVE,
+    )
+    agent_session_repository.get_root_session_agent_by_session_id.return_value = (
+        SimpleNamespace(agent_session_id="root-session-001")
+    )
+    agent_run_repository = AsyncMock(spec=AgentRunRepository)
+    agent_run_repository.get_by_id.return_value = SimpleNamespace(
+        id="run-1",
+        session_id=session_id,
+        run_index=1,
+        status=AgentRunStatus.RUNNING,
+    )
     service = InputBufferService(
         session_manager=cast(
             SessionManager[AsyncSession],
@@ -860,7 +884,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         ),
         agent_run_repository=cast(
             AgentRunRepository,
-            AsyncMock(spec=AgentRunRepository),
+            agent_run_repository,
         ),
         action_execution_repository=cast(
             ActionExecutionRepository,
@@ -874,6 +898,8 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         session_id=session_id,
         expected_buffer_id=buffer.id,
         include_action_messages=True,
+        owner_generation=0,
+        active_run_id="run-1",
     )
 
     assert prepared.attachments[0].uri == attachment_uri
@@ -899,8 +925,7 @@ async def test_admitted_attachment_download_failure_is_terminal() -> None:
 
     materialized = await materialize_admitted_input_exchange_file_attachments(
         [attachment_uri],
-        agent_id="agent-001",
-        session_id="session-001",
+        authority=_authority(),
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
     )
@@ -929,8 +954,7 @@ async def test_admitted_attachment_model_file_failure_is_terminal(
     )
     materialized = await materialize_admitted_input_exchange_file_attachments(
         [attachment_uri],
-        agent_id="agent-001",
-        session_id="session-001",
+        authority=_authority(),
         exchange_file_service=_ExchangeFileService(
             Success(exchange_file),
             Success(ExchangeFileDownload(file=exchange_file, body=b"input")),
@@ -1004,6 +1028,8 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         session_id=session_id,
         expected_buffer_id=buffer.id,
         include_action_messages=False,
+        owner_generation=0,
+        active_run_id="run-1",
     )
 
     assert prepared.attachments == []
@@ -1066,6 +1092,7 @@ async def test_cancelled_attachment_preparation_discards_partial_model_files() -
         media_type="image/jpeg",
         kind="image",
         size_bytes=5,
+        created_run_id="run-1",
         created_run_index=1,
         storage_key="model-files/image.jpg",
         status=ModelFileStatus.AVAILABLE,
@@ -1079,8 +1106,7 @@ async def test_cancelled_attachment_preparation_discards_partial_model_files() -
     with pytest.raises(asyncio.CancelledError):
         await materialize_admitted_input_exchange_file_attachments(
             [attachment_uri, f"{attachment_uri}.second"],
-            agent_id="agent-001",
-            session_id="session-001",
+            authority=_authority(),
             exchange_file_service=exchange_file_service,
             model_file_service=model_file_service,
         )
@@ -1488,6 +1514,7 @@ class TestInputBufferService:
             media_type="text/plain",
             kind="text",
             size_bytes=11,
+            created_run_id="run-1",
             created_run_index=1,
             storage_key="model-files/report.txt",
             status=ModelFileStatus.AVAILABLE,
@@ -2245,6 +2272,7 @@ class TestInputBufferService:
             media_type="text/plain",
             kind="text",
             size_bytes=11,
+            created_run_id="run-1",
             created_run_index=1,
             storage_key="model-files/report.txt",
             status=ModelFileStatus.AVAILABLE,
@@ -2341,6 +2369,7 @@ class TestInputBufferService:
             media_type="text/plain",
             kind="text",
             size_bytes=5,
+            created_run_id="run-1",
             created_run_index=1,
             storage_key="model-files/retry.txt",
             status=ModelFileStatus.AVAILABLE,
@@ -2635,3 +2664,16 @@ async def test_external_invocation_projection() -> None:
     assert isinstance(source_files, list)
     assert isinstance(source_files[0], dict)
     assert "file" not in source_files[0]
+
+
+def _authority() -> SessionResourceAuthority:
+    """Create canonical Session resource authority for test materialization."""
+    return SessionResourceAuthority(
+        workspace_id="workspace-001",
+        agent_id="agent-001",
+        session_id="session-001",
+        root_session_id="root-session-001",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=0,
+    )

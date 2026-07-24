@@ -3,13 +3,16 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRunStatus,
     AgentSessionKind,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -19,6 +22,7 @@ from azents.core.enums import (
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.workspace_user.data import WorkspaceUser
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 from .artifact import (
     ArtifactDownload,
@@ -146,6 +150,17 @@ class _FakeAgentSessionRepository:
         if session_id == self.agent_session.id:
             return self.agent_session
         return None
+
+    async def get_root_session_agent_by_session_id(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> object | None:
+        """Return the root SessionAgent identity."""
+        del session
+        if session_id != self.agent_session.id:
+            return None
+        return SimpleNamespace(agent_session_id=self.agent_session.id)
 
 
 class _FakeWorkspaceUserRepository:
@@ -291,6 +306,7 @@ def _make_service() -> tuple[ArtifactService, _FakeArtifactRepository, _FakeS3Se
         agent_session_repository=cast(
             Any, _FakeAgentSessionRepository(_make_agent_session())
         ),
+        agent_run_repository=cast(Any, object()),
         workspace_user_repository=cast(
             Any,
             _FakeWorkspaceUserRepository(_make_workspace_user()),
@@ -361,6 +377,62 @@ async def test_expired_artifact_is_denied_even_if_blob_exists() -> None:
 
     assert isinstance(resolved, Failure)
     assert isinstance(resolved.error, ArtifactExpired)
+
+
+@pytest.mark.asyncio
+async def test_authority_resolves_artifact_created_by_previous_session_run() -> None:
+    """A later Run can import an Artifact owned by the same exact Session."""
+    service, _, _ = _make_service()
+    created = await service.create(
+        session_id="session-1",
+        user_id="user-1",
+        created_run_id="run-1",
+        created_run_index=1,
+        filename="report.txt",
+        media_type="text/plain",
+        body=b"hello",
+    )
+    assert isinstance(created, Success)
+    run_repository = AsyncMock()
+
+    async def get_run(
+        session: AsyncSession,
+        run_id: str,
+    ) -> object | None:
+        del session
+        if run_id == "run-1":
+            return SimpleNamespace(
+                session_id="session-1",
+                run_index=1,
+                status=AgentRunStatus.COMPLETED,
+            )
+        if run_id == "run-2":
+            return SimpleNamespace(
+                session_id="session-1",
+                run_index=2,
+                status=AgentRunStatus.RUNNING,
+            )
+        return None
+
+    run_repository.get_by_id.side_effect = get_run
+    service.agent_run_repository = run_repository
+
+    resolved = await service.resolve_for_authority(
+        uri=created.value.uri,
+        authority=SessionResourceAuthority(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-2",
+            run_index=2,
+            owner_generation=0,
+        ),
+    )
+
+    assert isinstance(resolved, Success)
+    assert resolved.value.body == b"hello"
+    assert resolved.value.artifact.created_run_id == "run-1"
 
 
 def test_artifact_uri_returns_storage_key_only() -> None:

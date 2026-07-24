@@ -540,8 +540,7 @@ class AgentEngineAdapter:
         model_file_materializer = ModelFileMaterializer(
             model_file_service=self.model_file_service,
             resolver=model_file_resolver,
-            user_id=None,
-            agent_id=request.agent_id,
+            authority=context.resource_authority,
         )
         hook_dispatcher = RuntimeHookDispatcher()
         run_hook_providers = _runtime_hook_provider_refs(request.toolkits)
@@ -602,6 +601,7 @@ class AgentEngineAdapter:
                     run_id=context.run_id,
                     session_id=request.session_id,
                     run_index=run_state.run_index,
+                    resource_authority=context.resource_authority,
                     publish_event=context.publish_event,
                     check_stop=check_stop,
                 ),
@@ -961,15 +961,14 @@ class AgentEngineAdapter:
                 integration=integration_id,
             )
 
-        generated_output_materializer = ProviderOutputMaterializer(
-            exchange_file_service=self.exchange_file_service,
-            model_file_service=self.model_file_service,
-            workspace_id=request.workspace_id,
-            agent_id=request.agent_id,
-            session_id=request.session_id,
-            user_id=None,
-            run_id=context.run_id,
-            run_index=run_state.run_index,
+        generated_output_materializer = (
+            ProviderOutputMaterializer(
+                exchange_file_service=self.exchange_file_service,
+                model_file_service=self.model_file_service,
+                authority=context.resource_authority,
+            )
+            if context.resource_authority is not None
+            else None
         )
         execution = self.execution_factory(
             session_manager=self.session_manager,

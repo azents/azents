@@ -5,7 +5,11 @@ import datetime
 
 from pydantic import BaseModel, Field
 
-from azents.core.enums import ExchangeFileOrigin, ExchangeFileStatus
+from azents.core.enums import (
+    ExchangeFileOrigin,
+    ExchangeFileProvenanceKind,
+    ExchangeFileStatus,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,7 +59,17 @@ class ExchangeFile(BaseModel):
     media_type: str = Field(description="MIME type")
     size_bytes: int = Field(description="File size")
     sha256: str = Field(description="Source bytes SHA-256 digest")
-    created_by_user_id: str = Field(description="Creator user ID")
+    provenance_kind: ExchangeFileProvenanceKind = Field(
+        description="Typed file source provenance"
+    )
+    source_user_id: str | None = Field(description="Human uploader User ID")
+    source_agent_id: str | None = Field(description="Source Agent ID")
+    source_run_id: str | None = Field(description="Source AgentRun ID")
+    source_tool_name: str | None = Field(description="Source tool name")
+    source_provider: str | None = Field(description="Source provider name")
+    source_exchange_file_id: str | None = Field(
+        description="Source ExchangeFile ID for derived previews"
+    )
     retention_root_session_id: str | None = Field(
         description="Root AgentSession that owns retention cleanup",
     )
@@ -115,7 +129,17 @@ class ExchangeFileCreate(BaseModel):
     media_type: str = Field(description="MIME type")
     size_bytes: int = Field(description="File size")
     sha256: str = Field(description="Source bytes SHA-256 digest")
-    created_by_user_id: str = Field(description="Creator user ID")
+    provenance_kind: ExchangeFileProvenanceKind = Field(
+        description="Typed file source provenance"
+    )
+    source_user_id: str | None = Field(description="Human uploader User ID")
+    source_agent_id: str | None = Field(description="Source Agent ID")
+    source_run_id: str | None = Field(description="Source AgentRun ID")
+    source_tool_name: str | None = Field(description="Source tool name")
+    source_provider: str | None = Field(description="Source provider name")
+    source_exchange_file_id: str | None = Field(
+        description="Source ExchangeFile ID for derived previews"
+    )
     retention_root_session_id: str | None = Field(
         description="Root AgentSession that owns retention cleanup",
     )

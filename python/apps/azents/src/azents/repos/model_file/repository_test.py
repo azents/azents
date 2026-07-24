@@ -28,7 +28,7 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
 
-async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str]:
+async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str, str]:
     """Create AgentSession for tests."""
     await WorkspaceRepository().create(
         session,
@@ -80,12 +80,21 @@ async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str]:
             start_reason=AgentSessionStartReason.INITIAL,
         ),
     )
-    return workspace_id, agent.id, agent_session.id
+    run = await AgentRunRepository().create(
+        session,
+        AgentRunCreate(
+            session_id=agent_session.id,
+            parent_agent_run_id=None,
+        ),
+    )
+    return workspace_id, agent.id, agent_session.id, run.id
 
 
 async def test_create_model_file_metadata(rdb_session: AsyncSession) -> None:
     """Create ModelFile metadata row and storage key."""
-    workspace_id, agent_id, session_id = await _create_agent_session(rdb_session)
+    workspace_id, agent_id, session_id, run_id = await _create_agent_session(
+        rdb_session
+    )
     repo = ModelFileRepository()
 
     created = await repo.create(
@@ -99,6 +108,7 @@ async def test_create_model_file_metadata(rdb_session: AsyncSession) -> None:
             media_type="image/jpeg",
             kind="image",
             size_bytes=123,
+            created_run_id=run_id,
             created_run_index=4,
             normalized_format="jpeg",
             sha256="1" * 64,
@@ -124,7 +134,9 @@ async def test_mark_deleted_if_unpinned_updates_available_rows(
     rdb_session: AsyncSession,
 ) -> None:
     """ModelFile cleanup marks available unpinned rows as deleted."""
-    workspace_id, agent_id, session_id = await _create_agent_session(rdb_session)
+    workspace_id, agent_id, session_id, run_id = await _create_agent_session(
+        rdb_session
+    )
     repo = ModelFileRepository()
     model_file = await repo.create(
         rdb_session,
@@ -137,6 +149,7 @@ async def test_mark_deleted_if_unpinned_updates_available_rows(
             media_type="application/pdf",
             kind="document",
             size_bytes=123,
+            created_run_id=run_id,
             created_run_index=1,
             normalized_format="original",
             sha256="1" * 64,
@@ -162,7 +175,9 @@ async def test_list_statuses_for_session_returns_known_model_files(
     rdb_session: AsyncSession,
 ) -> None:
     """ModelFile status lookup returns only IDs belonging to current session."""
-    workspace_id, agent_id, session_id = await _create_agent_session(rdb_session)
+    workspace_id, agent_id, session_id, run_id = await _create_agent_session(
+        rdb_session
+    )
     repo = ModelFileRepository()
     available = await repo.create(
         rdb_session,
@@ -175,6 +190,7 @@ async def test_list_statuses_for_session_returns_known_model_files(
             media_type="image/jpeg",
             kind="image",
             size_bytes=123,
+            created_run_id=run_id,
             created_run_index=1,
             normalized_format="jpeg",
             sha256="1" * 64,
@@ -192,6 +208,7 @@ async def test_list_statuses_for_session_returns_known_model_files(
             media_type="application/pdf",
             kind="document",
             size_bytes=123,
+            created_run_id=run_id,
             created_run_index=1,
             normalized_format="original",
             sha256="2" * 64,
@@ -220,7 +237,9 @@ async def test_release_terminal_run_pins_preserves_pending(
     rdb_session: AsyncSession,
 ) -> None:
     """Release terminal pins without treating pending runs as terminal."""
-    workspace_id, agent_id, session_id = await _create_agent_session(rdb_session)
+    workspace_id, agent_id, session_id, run_id = await _create_agent_session(
+        rdb_session
+    )
     model_file = await ModelFileRepository().create(
         rdb_session,
         ModelFileCreate(
@@ -232,6 +251,7 @@ async def test_release_terminal_run_pins_preserves_pending(
             media_type="text/plain",
             kind="document",
             size_bytes=7,
+            created_run_id=run_id,
             created_run_index=1,
             normalized_format="original",
             sha256="3" * 64,

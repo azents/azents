@@ -21,6 +21,7 @@ from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.vfs import VfsProjectionService
 
 logger = logging.getLogger(__name__)
@@ -56,35 +57,32 @@ def make_import_file_tool(
     exchange_file_service: ExchangeFileService,
     artifact_service: ArtifactService,
     vfs_projection_service: VfsProjectionService | None,
-    session_id: str,
-    agent_id: str,
-    workspace_id: str,
-    run_id: str,
-    user_id: str,
+    authority: SessionResourceAuthority,
 ) -> FunctionTool:
     """Create import_file tool."""
     resolvers: dict[str, ImportFileResolver] = {
         "exchange": ExchangeImportResolver(
             exchange_file_service=exchange_file_service,
-            user_id=user_id,
+            authority=authority,
         ),
         "artifact": ArtifactImportResolver(
             artifact_service=artifact_service,
-            user_id=user_id,
+            authority=authority,
         ),
     }
     if vfs_projection_service is not None:
         resolvers["azents"] = AzentsImportResolver(
             vfs_projection_service=vfs_projection_service,
-            run_id=run_id,
-            agent_id=agent_id,
-            session_id=session_id,
-            workspace_id=workspace_id,
+            authority=authority,
         )
     resolver_registry = ImportFileResolverRegistry(resolvers)
 
     async def handler(input: ImportFileInput) -> str:
         """Copy URI file into runtime workspace."""
+        if not await exchange_file_service.validate_resource_authority(authority):
+            raise FunctionToolError(
+                "Session resource authority changed before file import."
+            )
         try:
             resolved = await resolver_registry.resolve(input.uri)
         except ImportResolveError as exc:
@@ -100,17 +98,25 @@ def make_import_file_tool(
             destination = await _dedupe_destination(
                 session_storage,
                 destination,
-                agent_id=agent_id,
+                agent_id=authority.agent_id,
             )
         elif not input.overwrite:
-            await _raise_if_exists(session_storage, destination, agent_id=agent_id)
+            await _raise_if_exists(
+                session_storage,
+                destination,
+                agent_id=authority.agent_id,
+            )
 
+        if not await exchange_file_service.validate_resource_authority(authority):
+            raise FunctionToolError(
+                "Session resource authority changed before file import."
+            )
         try:
             await session_storage.put(
                 destination,
                 resolved.body,
                 resolved.media_type,
-                agent_id=agent_id,
+                agent_id=authority.agent_id,
             )
         except PermissionError:
             raise FunctionToolError(
@@ -129,7 +135,8 @@ def make_import_file_tool(
                 extra={
                     "uri": input.uri,
                     "path": destination,
-                    "session_id": session_id,
+                    "session_id": authority.session_id,
+                    "run_id": authority.run_id,
                 },
             )
             raise FunctionToolError(

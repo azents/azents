@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import ModelFileStatus
+from azents.core.enums import AgentRunStatus, AgentSessionStatus, ModelFileStatus
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -27,6 +27,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.model_file import ModelFileRepository, model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 _IMAGE_MEDIA_PREFIX = "image/"
 _TEXT_MEDIA_PREFIX = "text/"
@@ -133,40 +134,26 @@ class ModelFileService:
     async def create(
         self,
         *,
-        session_id: str,
-        user_id: str,
-        created_run_index: int,
+        authority: SessionResourceAuthority,
         filename: str | None,
         media_type: str,
         body: bytes,
         metadata: dict[str, object] | None = None,
     ) -> Result[ModelFile, ModelFileCreateError]:
-        """Create ModelFile metadata and normalized object."""
+        """Create a ModelFile under validated Session/Run authority."""
         normalized = normalize_model_file_body(media_type=media_type, body=body)
         if isinstance(normalized, Failure):
             return Failure(normalized.error)
 
         async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if agent_session is None:
-                return Failure(ModelFileSessionNotFound())
-            if not await self._has_workspace_access(
-                session,
-                workspace_id=agent_session.workspace_id,
-                user_id=user_id,
-            ):
+            if not await self._has_valid_resource_authority(session, authority):
                 return Failure(ModelFileAccessDenied())
-            workspace_id = agent_session.workspace_id
-            agent_id = agent_session.agent_id
 
         normalized_body = normalized.value
         model_file_id = uuid7().hex
         uploaded_object_key = model_file_storage_key(
-            workspace_id=workspace_id,
-            session_id=session_id,
+            workspace_id=authority.workspace_id,
+            session_id=authority.session_id,
             model_file_id=model_file_id,
         )
         succeeded = False
@@ -178,248 +165,25 @@ class ModelFileService:
                 content_type=normalized_body.media_type,
             )
             async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
+                if not await self._has_valid_resource_authority(
                     session,
-                    session_id,
-                )
-                if agent_session is None:
-                    return Failure(ModelFileSessionNotFound())
-                if not await self._has_workspace_access(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
+                    authority,
+                    lock=True,
                 ):
                     return Failure(ModelFileAccessDenied())
-                if (
-                    agent_session.workspace_id != workspace_id
-                    or agent_session.agent_id != agent_id
-                ):
-                    return Failure(ModelFileSessionNotFound())
                 created = await self.model_file_repository.create(
                     session,
                     ModelFileCreate(
                         id=model_file_id,
-                        workspace_id=agent_session.workspace_id,
-                        session_id=session_id,
-                        agent_id=agent_session.agent_id,
+                        workspace_id=authority.workspace_id,
+                        session_id=authority.session_id,
+                        agent_id=authority.agent_id,
                         name=_sanitize_display_filename(filename),
                         media_type=normalized_body.media_type,
                         kind=normalized_body.kind,
                         size_bytes=len(normalized_body.body),
-                        created_run_index=created_run_index,
-                        normalized_format=normalized_body.normalized_format,
-                        sha256=hashlib.sha256(normalized_body.body).hexdigest(),
-                        metadata=_json_metadata(metadata),
-                    ),
-                )
-            succeeded = True
-            return Success(created)
-        finally:
-            if not succeeded:
-                await self._cleanup_uploaded_object(uploaded_object_key)
-
-    async def create_for_pending_input(
-        self,
-        *,
-        session_id: str,
-        user_id: str,
-        filename: str | None,
-        media_type: str,
-        body: bytes,
-        metadata: dict[str, object] | None = None,
-    ) -> Result[ModelFile, ModelFileCreateError]:
-        """Create ModelFile for user input that has not started yet."""
-        async with self.session_manager() as session:
-            next_run_index = await self.agent_run_repository.next_run_index(
-                session,
-                session_id=session_id,
-            )
-        return await self.create(
-            session_id=session_id,
-            user_id=user_id,
-            created_run_index=next_run_index,
-            filename=filename,
-            media_type=media_type,
-            body=body,
-            metadata=metadata,
-        )
-
-    async def create_for_agent_pending_input(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-        user_id: str,
-        filename: str | None,
-        media_type: str,
-        body: bytes,
-        metadata: dict[str, object] | None = None,
-    ) -> Result[ModelFile, ModelFileCreateError]:
-        """Create ModelFile for user input in current Agent namespace."""
-        normalized = normalize_model_file_body(media_type=media_type, body=body)
-        if isinstance(normalized, Failure):
-            return Failure(normalized.error)
-
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if agent_session is None or agent_session.agent_id != agent_id:
-                return Failure(ModelFileSessionNotFound())
-            if not await self._has_workspace_access(
-                session,
-                workspace_id=agent_session.workspace_id,
-                user_id=user_id,
-            ):
-                return Failure(ModelFileAccessDenied())
-            workspace_id = agent_session.workspace_id
-
-        normalized_body = normalized.value
-        model_file_id = uuid7().hex
-        uploaded_object_key = model_file_storage_key(
-            workspace_id=workspace_id,
-            session_id=session_id,
-            model_file_id=model_file_id,
-        )
-        succeeded = False
-        try:
-            await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
-                key=uploaded_object_key,
-                body=normalized_body.body,
-                content_type=normalized_body.media_type,
-            )
-            async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
-                    session,
-                    session_id,
-                )
-                if (
-                    agent_session is None
-                    or agent_session.agent_id != agent_id
-                    or agent_session.workspace_id != workspace_id
-                ):
-                    return Failure(ModelFileSessionNotFound())
-                if not await self._has_workspace_access(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                ):
-                    return Failure(ModelFileAccessDenied())
-                next_run_index = await self.agent_run_repository.next_run_index(
-                    session,
-                    session_id=session_id,
-                )
-
-                created = await self.model_file_repository.create(
-                    session,
-                    ModelFileCreate(
-                        id=model_file_id,
-                        workspace_id=agent_session.workspace_id,
-                        session_id=session_id,
-                        agent_id=agent_session.agent_id,
-                        name=_sanitize_display_filename(filename),
-                        media_type=normalized_body.media_type,
-                        kind=normalized_body.kind,
-                        size_bytes=len(normalized_body.body),
-                        created_run_index=next_run_index,
-                        normalized_format=normalized_body.normalized_format,
-                        sha256=hashlib.sha256(normalized_body.body).hexdigest(),
-                        metadata=_json_metadata(metadata),
-                    ),
-                )
-            succeeded = True
-            return Success(created)
-        finally:
-            if not succeeded:
-                await self._cleanup_uploaded_object(uploaded_object_key)
-
-    async def create_for_admitted_input(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-        filename: str | None,
-        media_type: str,
-        body: bytes,
-        metadata: dict[str, object] | None = None,
-    ) -> Result[ModelFile, ModelFileCreateError]:
-        """Create pending ModelFile for an already-admitted Session input.
-
-        The accepted input attachment is authorized by its ExchangeFile root
-        claim. This internal materialization path verifies stable Agent/Session/
-        root lineage before and after object upload without consulting a Human
-        sender or current Workspace membership.
-        """
-        normalized = normalize_model_file_body(media_type=media_type, body=body)
-        if isinstance(normalized, Failure):
-            return Failure(normalized.error)
-
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if agent_session is None or agent_session.agent_id != agent_id:
-                return Failure(ModelFileSessionNotFound())
-            get_root = (
-                self.agent_session_repository.get_root_session_agent_by_session_id
-            )
-            root = await get_root(session, session_id)
-            if root is None:
-                return Failure(ModelFileSessionNotFound())
-            workspace_id = agent_session.workspace_id
-            root_session_id = root.agent_session_id
-
-        normalized_body = normalized.value
-        model_file_id = uuid7().hex
-        uploaded_object_key = model_file_storage_key(
-            workspace_id=workspace_id,
-            session_id=session_id,
-            model_file_id=model_file_id,
-        )
-        succeeded = False
-        try:
-            await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
-                key=uploaded_object_key,
-                body=normalized_body.body,
-                content_type=normalized_body.media_type,
-            )
-            async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
-                    session,
-                    session_id,
-                )
-                if (
-                    agent_session is None
-                    or agent_session.agent_id != agent_id
-                    or agent_session.workspace_id != workspace_id
-                ):
-                    return Failure(ModelFileSessionNotFound())
-                get_root = (
-                    self.agent_session_repository.get_root_session_agent_by_session_id
-                )
-                root = await get_root(session, session_id)
-                if root is None or root.agent_session_id != root_session_id:
-                    return Failure(ModelFileSessionNotFound())
-                next_run_index = await self.agent_run_repository.next_run_index(
-                    session,
-                    session_id=session_id,
-                )
-                created = await self.model_file_repository.create(
-                    session,
-                    ModelFileCreate(
-                        id=model_file_id,
-                        workspace_id=agent_session.workspace_id,
-                        session_id=session_id,
-                        agent_id=agent_session.agent_id,
-                        name=_sanitize_display_filename(filename),
-                        media_type=normalized_body.media_type,
-                        kind=normalized_body.kind,
-                        size_bytes=len(normalized_body.body),
-                        created_run_index=next_run_index,
+                        created_run_id=authority.run_id,
+                        created_run_index=authority.run_index,
                         normalized_format=normalized_body.normalized_format,
                         sha256=hashlib.sha256(normalized_body.body).hexdigest(),
                         metadata=_json_metadata(metadata),
@@ -474,6 +238,46 @@ class ModelFileService:
             user_id=user_id,
         )
         return await self._download_resolved_model_file(model_file_result)
+
+    async def download_for_authority(
+        self,
+        *,
+        model_file_id: str,
+        authority: SessionResourceAuthority,
+    ) -> Result[ModelFileDownload, ModelFileResolveError]:
+        """Fetch a same-session ModelFile under canonical Session/Run authority."""
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(ModelFileAccessDenied())
+            model_file = await self.model_file_repository.get_by_id_for_agent(
+                session,
+                model_file_id=model_file_id,
+                agent_id=authority.agent_id,
+            )
+            if (
+                model_file is None
+                or model_file.workspace_id != authority.workspace_id
+                or model_file.session_id != authority.session_id
+            ):
+                return Failure(ModelFileNotFound())
+            if model_file.created_run_id is not None:
+                created_run = await self.agent_run_repository.get_by_id(
+                    session,
+                    model_file.created_run_id,
+                )
+                if (
+                    created_run is None
+                    or created_run.session_id != model_file.session_id
+                    or created_run.run_index != model_file.created_run_index
+                ):
+                    return Failure(ModelFileNotFound())
+        downloaded = await self._download_resolved_model_file(Success(model_file))
+        if isinstance(downloaded, Failure):
+            return downloaded
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(ModelFileAccessDenied())
+        return downloaded
 
     async def _download_resolved_model_file(
         self,
@@ -551,6 +355,82 @@ class ModelFileService:
         ):
             return Failure(ModelFileAccessDenied())
         return Success(model_file)
+
+    async def _has_valid_resource_authority(
+        self,
+        session: AsyncSession,
+        authority: SessionResourceAuthority,
+        *,
+        lock: bool = False,
+    ) -> bool:
+        """Validate canonical Session/Run authority for an internal operation."""
+        if lock:
+            agent_session = await self.agent_session_repository.lock_by_id(
+                session,
+                authority.session_id,
+            )
+        else:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                authority.session_id,
+            )
+        if (
+            agent_session is None
+            or agent_session.workspace_id != authority.workspace_id
+            or agent_session.agent_id != authority.agent_id
+            or agent_session.owner_generation != authority.owner_generation
+            or agent_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            return False
+        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
+            session,
+            authority.session_id,
+        )
+        if root is None or root.agent_session_id != authority.root_session_id:
+            return False
+        if authority.root_session_id == authority.session_id:
+            root_session = agent_session
+        else:
+            root_session = await self.agent_session_repository.get_by_id(
+                session,
+                authority.root_session_id,
+            )
+        if (
+            root_session is None
+            or root_session.workspace_id != authority.workspace_id
+            or root_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            return False
+        if lock:
+            run = await self.agent_run_repository.lock_by_id(
+                session,
+                authority.run_id,
+            )
+        else:
+            run = await self.agent_run_repository.get_by_id(
+                session,
+                authority.run_id,
+            )
+        return (
+            run is not None
+            and run.session_id == authority.session_id
+            and run.run_index == authority.run_index
+            and run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+        )
+
+    async def validate_resource_authority_in_session(
+        self,
+        session: AsyncSession,
+        authority: SessionResourceAuthority,
+        *,
+        lock: bool,
+    ) -> bool:
+        """Validate resource authority inside a caller-owned transaction."""
+        return await self._has_valid_resource_authority(
+            session,
+            authority,
+            lock=lock,
+        )
 
     async def _has_workspace_access(
         self,

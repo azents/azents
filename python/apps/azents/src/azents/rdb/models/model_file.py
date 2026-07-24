@@ -68,6 +68,11 @@ class RDBModelFile(RDBModel):
     kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     size_bytes: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     created_run_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    created_run_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_runs.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     storage_key: Mapped[str] = mapped_column(
         sa.String(1024), nullable=False, init=False
     )

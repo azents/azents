@@ -16,15 +16,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import ArtifactStatus
+from azents.core.enums import AgentRunStatus, AgentSessionStatus, ArtifactStatus
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.artifact import ArtifactRepository, artifact_storage_key
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.file_lifecycle_policy import artifact_expires_at
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +101,10 @@ class ArtifactService:
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
+    ]
+    agent_run_repository: Annotated[
+        AgentRunRepository,
+        Depends(AgentRunRepository),
     ]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository,
@@ -208,6 +214,120 @@ class ArtifactService:
             if not succeeded:
                 await self._cleanup_uploaded_object(uploaded_object_key)
 
+    async def create_for_authority(
+        self,
+        *,
+        authority: SessionResourceAuthority,
+        filename: str | None,
+        media_type: str,
+        body: bytes,
+        source_tool_name: str | None = None,
+        source_call_id: str | None = None,
+        source_part_index: int | None = None,
+        description: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> Result[Artifact, ArtifactAccessDenied]:
+        """Create an Artifact under validated canonical Session/Run authority."""
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(ArtifactAccessDenied())
+        artifact_id = uuid7().hex
+        object_key = artifact_storage_key(
+            workspace_id=authority.workspace_id,
+            session_id=authority.session_id,
+            created_run_index=authority.run_index,
+            artifact_id=artifact_id,
+        )
+        succeeded = False
+        try:
+            await self.s3_service.upload(
+                bucket=self.config.workspace_s3.bucket,
+                key=object_key,
+                body=body,
+                content_type=media_type,
+            )
+            async with self.session_manager() as session:
+                if not await self._has_valid_resource_authority(
+                    session,
+                    authority,
+                    lock=True,
+                ):
+                    return Failure(ArtifactAccessDenied())
+                now = datetime.datetime.now(datetime.UTC)
+                created = await self.artifact_repository.create(
+                    session,
+                    ArtifactCreate(
+                        id=artifact_id,
+                        workspace_id=authority.workspace_id,
+                        session_id=authority.session_id,
+                        agent_id=authority.agent_id,
+                        created_run_id=authority.run_id,
+                        created_run_index=authority.run_index,
+                        expires_at=artifact_expires_at(now=now, config=self.config),
+                        name=_sanitize_display_filename(filename),
+                        media_type=media_type,
+                        size_bytes=len(body),
+                        sha256=hashlib.sha256(body).hexdigest(),
+                        source_tool_name=source_tool_name,
+                        source_call_id=source_call_id,
+                        source_part_index=source_part_index,
+                        description=description,
+                        metadata=_json_metadata(metadata),
+                    ),
+                )
+            succeeded = True
+            return Success(created)
+        finally:
+            if not succeeded:
+                await self._cleanup_uploaded_object(object_key)
+
+    async def resolve_for_authority(
+        self,
+        *,
+        uri: str,
+        authority: SessionResourceAuthority,
+    ) -> Result[ArtifactDownload, ArtifactError]:
+        """Resolve an Artifact under validated canonical Session/Run authority."""
+        storage_key = artifact_storage_key_from_uri(uri)
+        if storage_key is None:
+            return Failure(ArtifactNotFound())
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(ArtifactAccessDenied())
+            artifact = await self.artifact_repository.get_by_storage_key(
+                session,
+                storage_key,
+            )
+            if (
+                artifact is None
+                or artifact.workspace_id != authority.workspace_id
+                or artifact.agent_id != authority.agent_id
+                or artifact.session_id != authority.session_id
+            ):
+                return Failure(ArtifactNotFound())
+            created_run = await self.agent_run_repository.get_by_id(
+                session,
+                artifact.created_run_id,
+            )
+            if (
+                created_run is None
+                or created_run.session_id != artifact.session_id
+                or created_run.run_index != artifact.created_run_index
+            ):
+                return Failure(ArtifactNotFound())
+        if artifact.status == ArtifactStatus.EXPIRED:
+            return Failure(ArtifactExpired())
+        body = await self.s3_service.download_bytes(
+            bucket=self.config.workspace_s3.bucket,
+            key=artifact.storage_key,
+        )
+        if body is None:
+            return Failure(ArtifactUnavailable())
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(ArtifactAccessDenied())
+        return Success(ArtifactDownload(artifact=artifact, body=body))
+
     async def resolve(
         self,
         *,
@@ -311,6 +431,68 @@ class ArtifactService:
             ):
                 return Failure(ArtifactAccessDenied())
             return Success(artifact)
+
+    async def _has_valid_resource_authority(
+        self,
+        session: AsyncSession,
+        authority: SessionResourceAuthority,
+        *,
+        lock: bool = False,
+    ) -> bool:
+        """Validate canonical identity for internal Artifact operations."""
+        if lock:
+            agent_session = await self.agent_session_repository.lock_by_id(
+                session,
+                authority.session_id,
+            )
+        else:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                authority.session_id,
+            )
+        if (
+            agent_session is None
+            or agent_session.workspace_id != authority.workspace_id
+            or agent_session.agent_id != authority.agent_id
+            or agent_session.owner_generation != authority.owner_generation
+            or agent_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            return False
+        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
+            session,
+            authority.session_id,
+        )
+        if root is None or root.agent_session_id != authority.root_session_id:
+            return False
+        if authority.root_session_id == authority.session_id:
+            root_session = agent_session
+        else:
+            root_session = await self.agent_session_repository.get_by_id(
+                session,
+                authority.root_session_id,
+            )
+        if (
+            root_session is None
+            or root_session.workspace_id != authority.workspace_id
+            or root_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            return False
+        if lock:
+            run = await self.agent_run_repository.lock_by_id(
+                session,
+                authority.run_id,
+            )
+        else:
+            run = await self.agent_run_repository.get_by_id(
+                session,
+                authority.run_id,
+            )
+        return (
+            run is not None
+            and run.session_id == authority.session_id
+            and run.run_index == authority.run_index
+            and run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+        )
 
     async def _has_workspace_access(
         self,

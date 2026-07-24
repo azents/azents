@@ -364,6 +364,18 @@ class ExchangeFileOrigin(enum.StrEnum):
     ARTIFACT = "artifact"
 
 
+class ExchangeFileProvenanceKind(enum.StrEnum):
+    """Typed source that produced ExchangeFile bytes."""
+
+    HUMAN = "human"
+    AGENT = "agent"
+    TOOL = "tool"
+    PROVIDER = "provider"
+    SYSTEM = "system"
+    PREVIEW = "preview"
+    MIGRATION = "migration"
+
+
 class ExchangeFileStatus(enum.StrEnum):
     """Exchange file lifecycle status."""
 

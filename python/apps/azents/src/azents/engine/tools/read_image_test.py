@@ -20,6 +20,7 @@ from azents.services.model_file import (
     ModelFileOversized,
     ModelFileService,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 _MODEL_FILE = ModelFile(
     id="m" * 32,
@@ -30,6 +31,7 @@ _MODEL_FILE = ModelFile(
     media_type="image/jpeg",
     kind="image",
     size_bytes=10,
+    created_run_id="run-1",
     created_run_index=7,
     storage_key="model-files/workspace-1/session-1/m",
     status=ModelFileStatus.AVAILABLE,
@@ -51,9 +53,7 @@ class _FakeModelFileService(ModelFileService):
     async def create(
         self,
         *,
-        session_id: str,
-        user_id: str,
-        created_run_index: int,
+        authority: SessionResourceAuthority,
         filename: str | None,
         media_type: str,
         body: bytes,
@@ -62,9 +62,8 @@ class _FakeModelFileService(ModelFileService):
         """Record creation input and return specified result."""
         self.calls.append(
             {
-                "session_id": session_id,
-                "user_id": user_id,
-                "created_run_index": created_run_index,
+                "authority": authority,
+                "created_run_index": authority.run_index,
                 "filename": filename,
                 "media_type": media_type,
                 "body": body,
@@ -89,10 +88,7 @@ def _make_tool(
     tool = make_read_image_tool(
         session_storage=storage,
         model_file_service=model_file_service,
-        session_id="session-1",
-        agent_id="",
-        user_id="user-1",
-        run_index=7,
+        authority=_authority(),
     )
     return tool, storage, model_file_service
 
@@ -204,10 +200,7 @@ class TestReadImageErrors:
         tool = make_read_image_tool(
             session_storage=storage,
             model_file_service=_FakeModelFileService(failure),
-            session_id="session-1",
-            agent_id="",
-            user_id="user-1",
-            run_index=7,
+            authority=_authority(),
         )
 
         result = await tool.handler(json.dumps({"path": "/workspace/agent/photo.png"}))
@@ -241,10 +234,7 @@ class TestReadImageRuntimeStorage:
         tool = make_read_image_tool(
             session_storage=session_ss,
             model_file_service=_FakeModelFileService(Success(_MODEL_FILE)),
-            session_id="session-1",
-            agent_id="",
-            user_id="user-1",
-            run_index=7,
+            authority=_authority(),
         )
 
         # When: call read_image
@@ -261,3 +251,16 @@ class TestReadImageRuntimeStorage:
 # ---------------------------------------------------------------------------
 # TestFileStorageSystemPrompt
 # ---------------------------------------------------------------------------
+
+
+def _authority() -> SessionResourceAuthority:
+    """Create canonical Session resource authority for read_image tests."""
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="root-session-1",
+        run_id="run-1",
+        run_index=7,
+        owner_generation=1,
+    )
