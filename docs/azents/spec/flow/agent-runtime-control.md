@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-07-24
-spec_version: 27
+spec_version: 28
 ---
 
 # Agent Runtime Control
@@ -102,7 +102,7 @@ Generation fencing is enforced before volatile stream messages mutate durable st
 
 Provider report framing always uses the generation accepted for the current Control stream. A Provider reconnect or leader failover may observe backend resources whose labels contain an older Provider generation; those labels are historical command metadata and must be replaced with the current connection generation before initial resync reports, watch reports, or command completion reports are sent to Control.
 
-Control periodically dispatches read-only Provider observe commands for running Runtimes and for stopped-desired Runtimes whose Provider state has not yet converged to `stopped`. This closes gaps when a backend deletion event is missed during Provider reconnect or leader handoff. A current-generation Provider `stopped` report also converges durable Runner state to `disconnected`; the stopped backend is authoritative that no Runner remains available.
+Control periodically dispatches read-only Provider observe commands for running Runtimes and for stopped-desired Runtimes whose Provider state has not yet converged to `stopped`. The live Provider connection registry, rather than a cached per-Runtime connection flag, gates dispatch; observe attempts are durably throttled while a Provider is unavailable, and a successful dispatch refreshes the cached connection flag. This closes gaps when a backend deletion event is missed during Provider reconnect or leader handoff. A current-generation Provider `stopped` report also converges durable Runner state to `disconnected`; the stopped backend is authoritative that no Runner remains available.
 
 Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed request with the stream cursor and consumer-group metadata needed to acknowledge the request only after it has been sent on the matching gRPC stream. Unacknowledged requests may be reclaimed after an idle interval so a Control replica crash or stream interruption does not strand in-flight Provider/Runner work.
 

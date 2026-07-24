@@ -1075,7 +1075,7 @@ class TestAgentRuntimeRepository:
             limit=10,
             observe_interval=datetime.timedelta(minutes=1),
         )
-        dispatched = await repo.mark_provider_observe_dispatched(
+        dispatched = await repo.mark_provider_observe_requested(
             rdb_session,
             runtime.id,
         )
@@ -1142,6 +1142,11 @@ class TestAgentRuntimeRepository:
                 provider_observe_requested_at=old_observe_at,
             )
         )
+        disconnected = await repo.record_provider_connection_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderConnectionState.DISCONNECTED,
+        )
 
         candidates = await repo.find_provider_observe_candidates(
             rdb_session,
@@ -1162,6 +1167,7 @@ class TestAgentRuntimeRepository:
         )
 
         assert [candidate.id for candidate in candidates] == [runtime.id]
+        assert disconnected is not None
         assert stopped_runtime is not None
         assert stopped_runtime.runner_state == RuntimeRunnerState.DISCONNECTED
         assert converged == []

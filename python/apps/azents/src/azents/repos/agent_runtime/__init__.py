@@ -473,12 +473,12 @@ class AgentRuntimeRepository:
         await session.flush()
         return self._build(rdb)
 
-    async def mark_provider_observe_dispatched(
+    async def mark_provider_observe_requested(
         self,
         session: AsyncSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
-        """Record Provider observe request send time."""
+        """Record Provider observe request time."""
         result = await session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime_id)
@@ -879,8 +879,6 @@ class AgentRuntimeRepository:
                         != RuntimeProviderObservedState.STOPPED,
                     ),
                 ),
-                RDBAgentRuntime.provider_connection_state
-                == RuntimeProviderConnectionState.CONNECTED,
                 RDBAgentRuntime.last_lifecycle_dispatch_generation
                 >= RDBAgentRuntime.desired_generation,
                 last_observe_at < observe_cutoff,
