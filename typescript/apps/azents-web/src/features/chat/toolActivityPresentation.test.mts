@@ -207,6 +207,25 @@ void test("groups apply_patch with file-edit activity", () => {
   assert.deepEqual(activityEvent.category, { key: "edit", label: "edit" });
 });
 
+void test("groups load_skill with Skill activity", () => {
+  const tool = clientToolMessage("tool-message", "call-1", "load_skill");
+  const items = projectChatPresentationItems(
+    [
+      event("call-1", "client_tool_call", {
+        call_id: "call-1",
+        name: "load_skill",
+        arguments:
+          '{"skill_path":"/workspace/skills/frontend-design/SKILL.md"}',
+      }),
+    ],
+    [tool],
+  );
+
+  const activityEvent = activityAt(items, 0).events[0];
+  assert.ok(activityEvent);
+  assert.deepEqual(activityEvent.category, { key: "skill", label: "skill" });
+});
+
 void test("closes Activity at an action-execution message boundary", () => {
   const firstTool = clientToolMessage("tool-message-1", "call-1");
   const secondTool = clientToolMessage("tool-message-2", "call-2");
