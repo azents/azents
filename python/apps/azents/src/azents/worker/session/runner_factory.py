@@ -19,6 +19,7 @@ from azents.worker.config import AgentWorkerConfig
 from azents.worker.deps import get_worker_config
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
+from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshotLoader
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.runner import SessionRunner
@@ -33,6 +34,9 @@ class SessionRunnerFactory:
     event_publisher: Annotated[WorkerEventPublisher, Depends(WorkerEventPublisher)]
     session_lifecycle: Annotated[
         SessionLifecycleService, Depends(SessionLifecycleService)
+    ]
+    execution_snapshot_loader: Annotated[
+        CanonicalExecutionSnapshotLoader, Depends(CanonicalExecutionSnapshotLoader)
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -57,6 +61,7 @@ class SessionRunnerFactory:
             shutdown_event=shutdown_event,
             event_publisher=self.event_publisher,
             session_lifecycle=self.session_lifecycle,
+            execution_snapshot_loader=self.execution_snapshot_loader,
             session_manager=self.session_manager,
             agent_session_repository=self.agent_session_repository,
             input_buffer_service=self.input_buffer_service,

@@ -7,6 +7,7 @@ Sticky session: manages worker ownership with per-session Redis locks so the
 same worker handles messages for the same session.
 """
 
+import json
 import logging
 import time
 from typing import Any, NamedTuple, cast
@@ -17,7 +18,12 @@ from redis.exceptions import RedisError, ResponseError
 
 from azents.core.enums import AgentRunPhase
 
-from .types import BrokerMessage, PublishedEvent, SessionActivity, SessionWakeUp
+from .types import (
+    BrokerMessage,
+    PublishedEvent,
+    SessionActivity,
+    SessionWakeUp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +91,8 @@ def encode_session_wake_up(message: SessionWakeUp) -> bytes:
 
 def decode_session_wake_up(raw: bytes) -> SessionWakeUp:
     """Deserialize JSON bytes to SessionWakeUp."""
-    return _session_wake_up_adapter.validate_json(raw)
+    _validate_routing_only_payload(raw, expected_type="session_wake_up")
+    return _session_wake_up_adapter.validate_json(raw, strict=True)
 
 
 _broker_message_adapter = TypeAdapter[BrokerMessage](BrokerMessage)
@@ -99,7 +106,35 @@ def encode_broker_message(message: BrokerMessage) -> bytes:
 
 def decode_broker_message(raw: bytes) -> BrokerMessage:
     """Deserialize JSON bytes to BrokerMessage."""
-    return _broker_message_adapter.validate_json(raw)
+    parsed = _validate_routing_only_payload(raw)
+    message_type = parsed["type"]
+    if message_type not in {"session_wake_up", "session_stop_signal"}:
+        raise ValueError("Unknown broker message type")
+    return _broker_message_adapter.validate_json(raw, strict=True)
+
+
+def _validate_routing_only_payload(
+    raw: bytes,
+    *,
+    expected_type: str | None = None,
+) -> dict[str, object]:
+    """Reject every broker payload that carries more than routing identity."""
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("Broker message is not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("Broker message must be a JSON object")
+    if set(parsed) != {"session_id", "type"}:
+        raise ValueError("Broker message must contain only session_id and type")
+    if not isinstance(parsed.get("session_id"), str):
+        raise ValueError("Broker message session_id must be a string")
+    message_type = parsed.get("type")
+    if not isinstance(message_type, str):
+        raise ValueError("Broker message type must be a string")
+    if expected_type is not None and message_type != expected_type:
+        raise ValueError("Unexpected broker message type")
+    return parsed
 
 
 class _WakeUp(NamedTuple):

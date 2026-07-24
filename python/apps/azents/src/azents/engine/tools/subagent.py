@@ -794,9 +794,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     )
             if target_session.run_state == AgentSessionRunState.RUNNING:
                 await self.broker.send_message(
-                    SessionStopSignal(
-                        session_id=target_session.id, user_id=self.user_id
-                    )
+                    SessionStopSignal(session_id=target_session.id)
                 )
             await self._publish_tree_changed(resolution.target)
             return _json({"previous_status": previous_status})
@@ -1006,17 +1004,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         )
 
     async def _wake_session(self, session: AgentSession) -> None:
-        await self.broker.send_message(
-            SessionWakeUp(
-                agent_id=session.agent_id,
-                session_id=session.id,
-                user_id=self.user_id,
-                additional_system_prompt=None,
-                interface=None,
-                workspace_id=session.workspace_id,
-                workspace_handle=None,
-            )
-        )
+        await self.broker.send_message(SessionWakeUp(session_id=session.id))
 
     async def _session_or_error(
         self,

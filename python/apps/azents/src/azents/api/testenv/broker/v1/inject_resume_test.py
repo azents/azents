@@ -31,7 +31,7 @@ class TestInjectResume:
 
         resp = client.post(
             "/broker/v1/inject-resume",
-            json={"session_id": "sess-1", "agent_id": "agent-1"},
+            json={"session_id": "sess-1"},
         )
 
         assert resp.status_code == 200
@@ -42,17 +42,16 @@ class TestInjectResume:
         message = cast(SessionWakeUp, call_args.args[0])
         assert isinstance(message, SessionWakeUp)
         assert message.session_id == "sess-1"
-        assert message.agent_id == "agent-1"
 
-    def test_missing_fields_rejected(self) -> None:
-        """Return 422 when session_id or agent_id is absent."""
+    def test_rich_payload_rejected(self) -> None:
+        """Return 422 when injection attempts to carry execution identity."""
         broker = AsyncMock()
         app = _make_app(broker)
         client = TestClient(app)
 
         resp = client.post(
             "/broker/v1/inject-resume",
-            json={"session_id": "sess-1"},
+            json={"session_id": "sess-1", "agent_id": "agent-1"},
         )
         assert resp.status_code == 422
         broker.send_message.assert_not_called()

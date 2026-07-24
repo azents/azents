@@ -129,6 +129,11 @@ from azents.worker.run.executor import (
 )
 from azents.worker.run.finalizer import FailedRunFinalizationInput
 from azents.worker.run.results import RunExecutionResult
+from azents.worker.session.execution_snapshot import (
+    CanonicalExecutionSnapshot,
+    CanonicalExecutionWorkDriftError,
+    PendingCommandSnapshot,
+)
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.supervisor import ToolAdmissionBarrier
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
@@ -242,6 +247,7 @@ class _SessionLifecycle:
         self.activation_phases: list[AgentRunPhase] = []
         self.inherited_activation_calls = 0
         self.cancelled_pending_run_ids: list[str] = []
+        self.cleared_commands: list[tuple[str, str]] = []
 
     async def set_session_activity(
         self,
@@ -259,8 +265,14 @@ class _SessionLifecycle:
         if self.order is not None:
             self.order.append("clear_session_activity")
 
-    async def mark_session_idle(self, session_id: str) -> bool:
+    async def mark_session_idle(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> bool:
         """Record session idle transitions."""
+        del owner_generation
         self.idle_session_ids.append(session_id)
         return True
 
@@ -284,34 +296,44 @@ class _SessionLifecycle:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         status: object,
     ) -> None:
         """Record terminal run updates."""
-        del session_id
+        del session_id, owner_generation
         self.terminal_runs.append((run_id, cast(AgentRunStatus, status)))
 
     async def update_agent_run_retry_state(
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         retry_state: FailedRunRetryState | None,
     ) -> None:
         """Record retry-state updates."""
-        del session_id, run_id
+        del session_id, owner_generation, run_id
         self.retry_states.append(retry_state)
 
-    async def heartbeat_session(self, session_id: str) -> None:
+    async def heartbeat_session(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
         """Record the session id passed to heartbeat."""
+        del owner_generation
         self.heartbeat_session_ids.append(session_id)
 
     async def get_running_agent_run(
         self,
         session_id: str,
+        *,
+        owner_generation: int,
     ) -> _PendingRun | None:
         """Return the configured Run only when it is active."""
-        del session_id
+        del session_id, owner_generation
         if (
             self.recoverable_run is not None
             and self.recoverable_run.status == AgentRunStatus.RUNNING
@@ -322,12 +344,14 @@ class _SessionLifecycle:
     async def claim_recoverable_agent_run(
         self,
         session_id: str,
+        *,
+        owner_generation: int,
     ) -> _PendingRun | None:
         """Return the configured recoverable run."""
-        del session_id
+        del session_id, owner_generation
         return self.recoverable_run
 
-    async def create_or_claim_pending_agent_run(
+    async def create_pending_agent_run(
         self,
         session_id: str,
         **kwargs: object,
@@ -337,14 +361,24 @@ class _SessionLifecycle:
         self.pending_run_create_calls += 1
         return _PendingRun()
 
+    async def claim_lifecycle_start(
+        self,
+        session_id: str,
+        **kwargs: object,
+    ) -> bool:
+        """Pretend the Session-start hook was already claimed."""
+        del session_id, kwargs
+        return False
+
     async def cancel_pending_agent_run(
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
     ) -> _PendingRun:
         """Record cancellation of a new pending run with no model work."""
-        del session_id
+        del session_id, owner_generation
         self.cancelled_pending_run_ids.append(run_id)
         return _PendingRun(status=AgentRunStatus.CANCELLED)
 
@@ -352,11 +386,12 @@ class _SessionLifecycle:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
         initial_phase: AgentRunPhase,
     ) -> _PendingRun:
         """Accept activation before provider invocation."""
-        del session_id, run_id
+        del session_id, owner_generation, run_id
         self.activation_calls += 1
         self.activation_phases.append(initial_phase)
         if self.order is not None:
@@ -400,6 +435,30 @@ class _SessionLifecycle:
         **kwargs: object,
     ) -> None:
         """Accept active-run input association."""
+        del session_id, kwargs
+
+    async def validate_pending_command(
+        self,
+        session_id: str,
+        **kwargs: object,
+    ) -> None:
+        """Accept exact pending-command validation."""
+        del session_id, kwargs
+
+    async def clear_pending_command(
+        self,
+        session_id: str,
+        **kwargs: object,
+    ) -> None:
+        """Accept fenced pending-command cleanup."""
+        self.cleared_commands.append((session_id, cast(str, kwargs["command_id"])))
+
+    async def set_inference_state(
+        self,
+        session_id: str,
+        **kwargs: object,
+    ) -> None:
+        """Accept fenced inference-state persistence."""
         del session_id, kwargs
 
     async def list_inference_run_event_projections(
@@ -1033,9 +1092,11 @@ class _UserStopFinalizer:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str,
     ) -> None:
         """Record one recoverable stopped Run."""
+        del owner_generation
         self.interrupted_runs.append((session_id, run_id))
 
 
@@ -1183,15 +1244,7 @@ async def test_idle_continuation_toolkits_use_persisted_session_workspace(
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", resolve_tools)
 
     await executor.resolve_idle_continuation_toolkits(
-        SessionWakeUp(
-            agent_id="agent-001",
-            session_id="session-001",
-            user_id="user-001",
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id=None,
-            workspace_handle=None,
-        ),
+        _message(),
         run_id="run-001",
         prepare_toolkits=prepare_toolkits,
         dispatch_event=_noop_dispatch_event,
@@ -1224,6 +1277,7 @@ async def test_finalize_unhandled_active_run_uses_terminal_finalizer() -> None:
         finalized_run_id = await executor.finalize_unhandled_active_run(
             "session-001",
             exc,
+            owner_generation=1,
             dispatch_event=dispatch_event,
         )
 
@@ -1263,16 +1317,43 @@ def test_matching_session_inference_state_preserves_resolved_model() -> None:
     assert matched.applied_profile.model_display_name == "gpt-5.5"
 
 
-def _message() -> SessionWakeUp:
-    """Create a standard session wake-up for executor tests."""
-    return SessionWakeUp(
-        agent_id="agent-001",
+def _message(
+    *,
+    owner_generation: int = 1,
+    recoverable_run: _PendingRun | None = None,
+    pending_command: PendingSessionCommand | None = None,
+) -> CanonicalExecutionSnapshot:
+    """Create a canonical Session execution snapshot for executor tests."""
+    return CanonicalExecutionSnapshot(
         session_id="session-001",
-        user_id="user-001",
-        additional_system_prompt=None,
-        interface=None,
+        root_session_id="session-001",
         workspace_id="workspace-001",
-        workspace_handle=None,
+        workspace_handle="workspace",
+        agent_id="agent-001",
+        session_agent_id="session-agent-001",
+        root_session_agent_id="session-agent-001",
+        session_agent_context_id="context-001",
+        execution_mode=AgentSessionKind.ROOT,
+        owner_generation=owner_generation,
+        fifo_input_buffer_id=None,
+        pending_command=(
+            PendingCommandSnapshot(
+                id=pending_command.id,
+                name=pending_command.name,
+                payload=pending_command.payload,
+                requester_user_id=pending_command.requester_user_id,
+                created_at=pending_command.created_at,
+            )
+            if pending_command is not None
+            else None
+        ),
+        recoverable_run_id=(
+            recoverable_run.id if recoverable_run is not None else None
+        ),
+        recoverable_run_status=(
+            recoverable_run.status if recoverable_run is not None else None
+        ),
+        pending_idle_continuation_run_id=None,
     )
 
 
@@ -1462,6 +1543,31 @@ def _patch_successful_resolution(
 
 
 @pytest.mark.asyncio
+async def test_execute_classifies_new_recoverable_run_as_snapshot_drift() -> None:
+    """A Run appearing after snapshot load is retried instead of finalized."""
+    lifecycle = _SessionLifecycle(
+        recoverable_run=_PendingRun(status=AgentRunStatus.RUNNING)
+    )
+    executor = _executor(session_lifecycle=lifecycle)
+
+    with pytest.raises(
+        CanonicalExecutionWorkDriftError,
+        match="recoverable AgentRun changed",
+    ):
+        await executor.execute(
+            _message(),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=_noop_dispatch_event,
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+            model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+        )
+
+
+@pytest.mark.asyncio
 async def test_execute_reports_resolve_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1499,15 +1605,7 @@ async def test_execute_reports_resolve_failure(
         dispatched.append(event)
 
     result = await executor.execute(
-        SessionWakeUp(
-            agent_id="agent-001",
-            session_id="session-001",
-            user_id=None,
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id="workspace-001",
-            workspace_handle=None,
-        ),
+        _message(),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -1618,7 +1716,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         del session_id, event
 
     result = await executor.execute(
-        _message(),
+        _message(recoverable_run=recoverable),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -1690,7 +1788,7 @@ async def test_execute_persists_recovered_profile_resolution_failure(
         dispatched.append(event)
 
     result = await executor.execute(
-        _message(),
+        _message(recoverable_run=recoverable),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -1766,7 +1864,10 @@ async def test_execute_recovers_activated_command_run(
         del session_id, event
 
     result = await executor.execute(
-        _message(),
+        _message(
+            recoverable_run=recoverable,
+            pending_command=_pending_command(),
+        ),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -1775,7 +1876,6 @@ async def test_execute_recovers_activated_command_run(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-        command=_pending_command(),
     )
 
     assert result.run_id == recoverable.id
@@ -1860,7 +1960,7 @@ async def test_execute_recovers_durable_retry_budget(
         del session_id, event
 
     result = await executor.execute(
-        _message(),
+        _message(recoverable_run=recoverable),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -1921,7 +2021,7 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
         del session_id, event
 
     result = await executor.execute(
-        _message(),
+        _message(recoverable_run=recoverable),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -2010,7 +2110,7 @@ async def test_execute_activates_pending_child_from_session_snapshot(
         del session_id, event
 
     result = await executor.execute(
-        _message(),
+        _message(recoverable_run=recoverable),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -2164,7 +2264,7 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
     )
 
     assert result.no_actionable_work is True
-    assert lifecycle.wake_ups == [message]
+    assert lifecycle.wake_ups == [SessionWakeUp(session_id=message.session_id)]
 
 
 @pytest.mark.asyncio
@@ -2239,7 +2339,7 @@ async def test_boundary_poll_processes_turn_actions(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
 
     poll = executor.make_boundary_poll(
-        message=message,
+        snapshot=message,
         model="gpt-test",
         requested_inference_profile=RequestedInferenceProfile(
             model_target_label="default",
@@ -2303,7 +2403,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
         context_invalidated = True
 
     poll = executor.make_boundary_poll(
-        message=message,
+        snapshot=message,
         model="gpt-test",
         requested_inference_profile=RequestedInferenceProfile(
             model_target_label="default",
@@ -2323,7 +2423,113 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
         context_invalidated=True,
     )
     assert context_invalidated is True
-    assert lifecycle.wake_ups == [message]
+    assert lifecycle.wake_ups == [SessionWakeUp(session_id=message.session_id)]
+
+
+@pytest.mark.asyncio
+async def test_poll_run_inputs_rejects_fifo_head_changed_from_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Initial promotion cannot substitute a newly observed FIFO head."""
+    executor = _executor()
+    promoted = False
+
+    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+        nonlocal promoted
+        del args, kwargs
+        promoted = True
+        raise AssertionError("A mismatched canonical head must not be promoted")
+
+    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+
+    with pytest.raises(CanonicalExecutionWorkDriftError):
+        await executor.poll_run_inputs(
+            agent_id="agent-1",
+            session_id="session-1",
+            model="gpt-test",
+            required_inference_profile=None,
+            active_run_id=None,
+            owner_generation=1,
+            expected_input_buffer_id="snapshot-buffer",
+            enforce_snapshot_head=True,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+            initial_turn_eligible=False,
+            poll_fn=None,
+            process_actions=False,
+            dispatch_event=_noop_dispatch_event,
+        )
+
+    assert promoted is False
+
+
+@pytest.mark.asyncio
+async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second FIFO head is not silently processed under the first snapshot."""
+    executor = _executor()
+    profiles = [
+        PendingInputInferenceProfile(
+            input_buffer_id="buffer-1",
+            requires_inference=False,
+            exists=True,
+            requested_inference_profile=None,
+        ),
+        PendingInputInferenceProfile(
+            input_buffer_id="buffer-2",
+            requires_inference=False,
+            exists=True,
+            requested_inference_profile=None,
+        ),
+    ]
+    expected_buffer_ids: list[str | None] = []
+
+    async def peek(session_id: str) -> PendingInputInferenceProfile:
+        del session_id
+        return profiles.pop(0)
+
+    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+        del args
+        expected_buffer_ids.append(cast(str | None, kwargs["expected_buffer_id"]))
+        return PromotedInputBuffers(
+            worktree_action=None,
+            turn_effect=TurnEffect.NEUTRAL,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=["buffer-1"],
+            changed_session_agent_ids=[],
+            claimed_count=1,
+            inserted_count=0,
+            deduped_count=0,
+        )
+
+    monkeypatch.setattr(
+        executor.input_buffer_service,
+        "peek_pending_inference_profile",
+        peek,
+    )
+    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+
+    with pytest.raises(CanonicalExecutionWorkDriftError):
+        await executor.poll_run_inputs(
+            agent_id="agent-1",
+            session_id="session-1",
+            model="gpt-test",
+            required_inference_profile=None,
+            active_run_id=None,
+            owner_generation=1,
+            expected_input_buffer_id="buffer-1",
+            enforce_snapshot_head=True,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+            initial_turn_eligible=False,
+            poll_fn=None,
+            process_actions=False,
+            dispatch_event=_noop_dispatch_event,
+        )
+
+    assert expected_buffer_ids == ["buffer-1"]
 
 
 @pytest.mark.asyncio
@@ -2427,6 +2633,8 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         required_inference_profile=None,
         active_run_id=None,
         owner_generation=1,
+        expected_input_buffer_id=None,
+        enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=False,
         poll_fn=None,
@@ -2522,6 +2730,8 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
         required_inference_profile=None,
         active_run_id="run-1",
         owner_generation=1,
+        expected_input_buffer_id=None,
+        enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=True,
         poll_fn=None,
@@ -2595,6 +2805,8 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         required_inference_profile=None,
         active_run_id="run-1",
         owner_generation=1,
+        expected_input_buffer_id=None,
+        enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=False,
         poll_fn=None,
@@ -2732,7 +2944,7 @@ async def test_execute_preserves_actionable_transcript_eligibility(
         del session_id, event
 
     result = await executor.execute(
-        _message(),
+        _message(recoverable_run=recoverable_run),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -2787,15 +2999,7 @@ async def test_execute_ignores_wake_up_without_runtime_input(
         dispatched.append(event)
 
     result = await executor.execute(
-        SessionWakeUp(
-            agent_id="agent-001",
-            session_id="session-001",
-            user_id=None,
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id="workspace-001",
-            workspace_handle=None,
-        ),
+        _message(),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -2846,7 +3050,7 @@ async def test_execute_runs_pending_command_inside_run_boundary(
         dispatched.append((session_id, event))
 
     result = await executor.execute(
-        _message(),
+        _message(pending_command=_pending_command()),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -2855,7 +3059,6 @@ async def test_execute_runs_pending_command_inside_run_boundary(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-        command=_pending_command(),
     )
 
     assert len(handler.requests) == 1
@@ -2880,10 +3083,10 @@ async def test_execute_runs_pending_command_inside_run_boundary(
         "RunComplete",
     ]
     assert live_event_projector.flushed_session_ids == ["session-001"]
-    assert lifecycle.cleared_session_ids == ["session-001"]
+    assert lifecycle.cleared_session_ids == []
     assert lifecycle.terminal_runs == [(run_id, AgentRunStatus.COMPLETED)]
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
-    assert session_repository.cleared_commands == [("session-001", "command-001")]
+    assert lifecycle.cleared_commands == [("session-001", "command-001")]
 
 
 @pytest.mark.asyncio
@@ -2904,7 +3107,7 @@ async def test_execute_ignores_unknown_command_without_run_boundary() -> None:
         dispatched.append(event)
 
     result = await executor.execute(
-        _message(),
+        _message(pending_command=_pending_command()),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -2913,7 +3116,6 @@ async def test_execute_ignores_unknown_command_without_run_boundary() -> None:
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-        command=_pending_command("unknown"),
     )
 
     assert result == RunExecutionResult(
@@ -2925,7 +3127,7 @@ async def test_execute_ignores_unknown_command_without_run_boundary() -> None:
     assert lifecycle.activities == []
     assert lifecycle.cleared_session_ids == []
     assert lifecycle.terminal_runs == []
-    assert session_repository.cleared_commands == [("session-001", "command-001")]
+    assert lifecycle.cleared_commands == [("session-001", "command-001")]
     assert live_event_projector.flushed_session_ids == []
 
 
@@ -2951,7 +3153,7 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
         dispatched.append((session_id, event))
 
     result = await executor.execute(
-        _message(),
+        _message(pending_command=_pending_command()),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -2960,7 +3162,6 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-        command=_pending_command(),
     )
 
     assert [type(event).__name__ for _, event in dispatched] == ["RunStarted"]
@@ -2973,7 +3174,7 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
     assert finalization_input.retry_state.last_error_type == "UserVisibleRuntimeError"
     assert finalization_input.reason == "retry_exhausted"
     assert result.terminal_run_status == AgentRunStatus.FAILED
-    assert session_repository.cleared_commands == [("session-001", "command-001")]
+    assert lifecycle.cleared_commands == [("session-001", "command-001")]
 
 
 @pytest.mark.asyncio
@@ -3003,7 +3204,7 @@ async def test_execute_preserves_compaction_timeout_failure_code(
     )
 
     result = await executor.execute(
-        _message(),
+        _message(pending_command=_pending_command()),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -3012,7 +3213,6 @@ async def test_execute_preserves_compaction_timeout_failure_code(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-        command=_pending_command(),
     )
 
     assert result.terminal_run_status is AgentRunStatus.FAILED
@@ -3025,10 +3225,10 @@ async def test_execute_preserves_compaction_timeout_failure_code(
 
 
 @pytest.mark.asyncio
-async def test_execute_clears_activity_after_run_complete(
+async def test_execute_clears_live_projection_after_run_complete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RunComplete is the boundary that clears live run activity."""
+    """RunComplete clears live projection while idle owns activity cleanup."""
     order: list[str] = []
     dispatched: list[tuple[str, PublishedEvent]] = []
     live_event_projector = _LiveEventProjector()
@@ -3048,15 +3248,7 @@ async def test_execute_clears_activity_after_run_complete(
         agent_session_repository=session_repository,
         live_event_projector=live_event_projector,
     )
-    message = SessionWakeUp(
-        agent_id="agent-001",
-        session_id="session-001",
-        user_id=None,
-        additional_system_prompt=None,
-        interface=None,
-        workspace_id="workspace-001",
-        workspace_handle=None,
-    )
+    message = _message()
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
@@ -3129,7 +3321,7 @@ async def test_execute_clears_activity_after_run_complete(
         event.changed_session_agent_id == "child-session-agent"
         for _, event in tree_changes
     )
-    assert order == ["activate_pending", "clear_session_activity"]
+    assert order == ["activate_pending"]
     assert live_event_projector.live_run_clears == [("session-001", result.run_id)]
 
 
@@ -3207,7 +3399,8 @@ async def test_run_session_heartbeat_loop_refreshes_lifecycle(
 
     task = asyncio.create_task(
         executor._run_session_heartbeat_loop(  # pyright: ignore[reportPrivateUsage]
-            "session-001"
+            "session-001",
+            owner_generation=1,
         )
     )
     try:
@@ -3262,6 +3455,7 @@ async def test_provider_failure_uses_full_budget_despite_retryability() -> None:
         retry_state = await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise durable retry policy directly.
             session_id="session-001",
             run_id="run-001",
+            owner_generation=1,
             attempt=attempt,
             previous_retry_state=retry_state,
         )
@@ -3299,6 +3493,7 @@ async def test_timeout_failure_uses_full_budget_with_stable_attempt_codes() -> N
         retry_state = await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise durable timeout history directly.
             session_id="session-001",
             run_id="run-001",
+            owner_generation=1,
             attempt=attempt,
             previous_retry_state=retry_state,
         )
@@ -3367,15 +3562,7 @@ async def test_execute_retries_failed_run_without_durable_error(
         dispatched.append(event)
 
     result = await executor.execute(
-        SessionWakeUp(
-            agent_id="agent-001",
-            session_id="session-001",
-            user_id=None,
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id="workspace-001",
-            workspace_handle=None,
-        ),
+        _message(),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -3608,6 +3795,7 @@ async def test_record_provider_failure_logs_safe_structured_attempt(
         await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
             session_id="session-001",
             run_id="run-001",
+            owner_generation=1,
             attempt=attempt,
             previous_retry_state=None,
         )
@@ -3746,15 +3934,7 @@ async def test_execute_prioritizes_stop_over_provider_failure_persistence(
         del session_id, event
 
     result = await executor.execute(
-        SessionWakeUp(
-            agent_id="agent-001",
-            session_id="session-001",
-            user_id=None,
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id="workspace-001",
-            workspace_handle=None,
-        ),
+        _message(),
         poll_fn=None,
         check_stop=check_stop,
         prepare_toolkits=None,
@@ -3890,15 +4070,7 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
         del session_id, event
 
     result = await executor.execute(
-        SessionWakeUp(
-            agent_id="agent-001",
-            session_id="session-001",
-            user_id=None,
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id="workspace-001",
-            workspace_handle=None,
-        ),
+        _message(),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -4028,15 +4200,7 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
         del session_id, event
 
     result = await executor.execute(
-        SessionWakeUp(
-            agent_id="agent-001",
-            session_id="session-001",
-            user_id=None,
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id="workspace-001",
-            workspace_handle=None,
-        ),
+        _message(),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,

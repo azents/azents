@@ -28,6 +28,10 @@ from azents.services.chat.live_events import input_buffer_to_live_event
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.worker.deps import get_worker_broker
 from azents.worker.events.publisher import WorkerEventPublisher
+from azents.worker.session.execution_snapshot import (
+    CanonicalExecutionOwnerGenerationStaleError,
+    CanonicalExecutionSnapshot,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -56,17 +60,18 @@ class IdleContinuationService:
 
     async def consume(
         self,
-        message: SessionWakeUp,
+        snapshot: CanonicalExecutionSnapshot,
         *,
         toolkits: Sequence[ToolkitBinding],
         run_id: str,
     ) -> bool:
         """Commit the idle outcome for one durable completed Run boundary."""
-        workspace_id = await self._eligible_idle_boundary_workspace_id(
-            message,
+        eligible = await self._eligible_idle_boundary(
+            snapshot.session_id,
             run_id,
+            owner_generation=snapshot.owner_generation,
         )
-        if workspace_id is None:
+        if not eligible:
             return False
         providers = [
             RuntimeHookProviderRef(slug=binding.slug, toolkit=binding.toolkit)
@@ -75,25 +80,26 @@ class IdleContinuationService:
         result = await RuntimeHookDispatcher().dispatch_session_idle(
             providers,
             SessionIdleHookContext(
-                workspace_id=workspace_id,
-                agent_id=message.agent_id,
-                session_id=message.session_id,
+                workspace_id=snapshot.workspace_id,
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
                 run_id=run_id,
                 reason="completed",
             ),
         )
         continuation_inputs = [
-            self._continuation_input(message, run_id, continuation)
+            self._continuation_input(snapshot.session_id, run_id, continuation)
             for continuation in result.continuations
         ]
         async with self.session_manager() as session:
             if (
-                await self._eligible_idle_boundary_workspace_id_in_session(
+                await self._eligible_idle_boundary_in_session(
                     session,
-                    message,
+                    snapshot.session_id,
                     run_id,
+                    owner_generation=snapshot.owner_generation,
                 )
-            ) is None:
+            ) is False:
                 return False
             enqueue_results = await self.input_buffer_service.enqueue_many(
                 session,
@@ -102,7 +108,7 @@ class IdleContinuationService:
             consumed = (
                 await self.agent_session_repository.consume_pending_idle_continuation(
                     session,
-                    session_id=message.session_id,
+                    session_id=snapshot.session_id,
                     run_id=run_id,
                     continue_running=bool(continuation_inputs),
                 )
@@ -115,64 +121,75 @@ class IdleContinuationService:
             event = input_buffer_to_live_event(enqueue_result.input_buffer)
             if event is not None:
                 await self.event_publisher.dispatch_event(
-                    message.session_id,
+                    snapshot.session_id,
                     event,
                 )
         if continuation_inputs:
-            await self.broker.send_message(message)
+            await self.broker.send_message(
+                SessionWakeUp(session_id=snapshot.session_id)
+            )
         return True
 
-    async def _eligible_idle_boundary_workspace_id(
+    async def _eligible_idle_boundary(
         self,
-        message: SessionWakeUp,
+        session_id: str,
         run_id: str,
-    ) -> str | None:
-        """Return persisted workspace ID when a boundary can enter hook evaluation."""
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Return whether a boundary can enter idle hook evaluation."""
         async with self.session_manager() as session:
-            return await self._eligible_idle_boundary_workspace_id_in_session(
+            return await self._eligible_idle_boundary_in_session(
                 session,
-                message,
+                session_id,
                 run_id,
+                owner_generation=owner_generation,
             )
 
-    async def _eligible_idle_boundary_workspace_id_in_session(
+    async def _eligible_idle_boundary_in_session(
         self,
         session: AsyncSession,
-        message: SessionWakeUp,
+        session_id: str,
         run_id: str,
-    ) -> str | None:
-        """Return persisted workspace ID after rechecking the true-idle fence."""
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Recheck the true-idle fence before committing hook output."""
         locked = await self.agent_session_repository.lock_by_id(
             session,
-            message.session_id,
+            session_id,
         )
         if locked is None:
             raise ValueError("AgentSession not found")
+        if locked.owner_generation != owner_generation:
+            raise CanonicalExecutionOwnerGenerationStaleError(
+                "Session owner generation is stale during idle continuation"
+            )
         if locked.pending_idle_continuation_run_id != run_id:
-            return None
+            return False
         if locked.pending_command_id is not None:
-            return None
+            return False
         input_buffer_repository = self.input_buffer_repository
         pending_wake_input = (
             await input_buffer_repository.has_by_session_id_and_scheduling_mode(
                 session,
-                session_id=message.session_id,
+                session_id=session_id,
                 scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             )
         )
         if pending_wake_input:
-            return None
+            return False
         active_run = await self.agent_run_repository.get_active_by_session_id(
             session,
-            session_id=message.session_id,
+            session_id=session_id,
         )
         if active_run is not None:
-            return None
-        return locked.workspace_id
+            return False
+        return True
 
     def _continuation_input(
         self,
-        message: SessionWakeUp,
+        session_id: str,
         run_id: str,
         continuation: SessionContinuationInput,
     ) -> InputBufferEnqueue:
@@ -181,7 +198,7 @@ class IdleContinuationService:
         if continuation.hook_provider_slug is not None:
             metadata["provider_slug"] = continuation.hook_provider_slug
         return InputBufferEnqueue(
-            session_id=message.session_id,
+            session_id=session_id,
             kind=InputBufferKind.GOAL_CONTINUATION,
             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
