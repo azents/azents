@@ -69,6 +69,7 @@ _SLACK_TEAM_ID = "T-E2E"
 _SLACK_CHANNEL_ID = "C-E2E"
 _SLACK_BOT_TOKEN = "xoxb-e2e-private"
 _SLACK_SIGNING_SECRET = "e2e-signing-private"
+_RUNTIME_PROVIDER_ID = "system-docker"
 
 
 @dataclass(frozen=True)
@@ -472,7 +473,6 @@ def test_automatic_session_projects_policy_and_explicit_precedence(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    runtime_provider_resource_id: str,
     azents_runtime_provider_docker_container: DockerContainer,
 ) -> None:
     """Apply defaults to automatic roots while preserving explicit intent."""
@@ -481,7 +481,7 @@ def test_automatic_session_projects_policy_and_explicit_precedence(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=runtime_provider_resource_id,
+        runtime_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
@@ -541,7 +541,6 @@ def test_automatic_session_projects_revision_missing_path_and_clear(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    runtime_provider_resource_id: str,
     azents_runtime_provider_docker_container: DockerContainer,
 ) -> None:
     """Reject invalid complete replacements without changing the prior policy."""
@@ -550,7 +549,7 @@ def test_automatic_session_projects_revision_missing_path_and_clear(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=runtime_provider_resource_id,
+        runtime_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
@@ -612,7 +611,6 @@ def test_automatic_session_projects_runtime_unavailable_and_clear(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    runtime_provider_resource_id: str,
     azents_runtime_provider_docker_container: DockerContainer,
 ) -> None:
     """Keep non-empty validation dependent on Runtime while allowing clear."""
@@ -620,7 +618,7 @@ def test_automatic_session_projects_runtime_unavailable_and_clear(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=runtime_provider_resource_id,
+        runtime_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
@@ -675,7 +673,6 @@ def test_external_channel_allow_and_granted_binding_snapshot_projects(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    runtime_provider_resource_id: str,
     azents_runtime_provider_docker_container: DockerContainer,
     azents_engine_worker_container: DockerContainer,
     slack_provider_fake_url: str,
@@ -690,7 +687,7 @@ def test_external_channel_allow_and_granted_binding_snapshot_projects(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=runtime_provider_resource_id,
+        runtime_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
@@ -883,7 +880,6 @@ def test_subagent_reuses_root_project_context_without_duplicates(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    runtime_provider_resource_id: str,
     azents_runtime_provider_docker_container: DockerContainer,
 ) -> None:
     """Spawning a child leaves the root Session Project registry unchanged."""
@@ -892,7 +888,7 @@ def test_subagent_reuses_root_project_context_without_duplicates(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=runtime_provider_resource_id,
+        runtime_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
@@ -990,7 +986,6 @@ def test_agent_settings_projects_web_add_reorder_remove_save(
     azents_public_server_url: str,
     azents_main_web_url: str,
     browser_driver: WebDriver,
-    runtime_provider_resource_id: str,
     azents_runtime_provider_docker_container: DockerContainer,
 ) -> None:
     """Use the real Agent Settings page to edit an ordered policy."""
@@ -999,7 +994,7 @@ def test_agent_settings_projects_web_add_reorder_remove_save(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=runtime_provider_resource_id,
+        runtime_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
