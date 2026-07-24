@@ -3,12 +3,13 @@
 import asyncio
 import datetime
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -26,7 +27,17 @@ from azents.core.enums import (
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_automatic_project_setting import (
+    RDBAgentAutomaticProjectSetting,
+)
+from azents.rdb.models.agent_decommission import RDBAgentDecommissionJob
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.models.session_agent_context import RDBSessionAgentContext
+from azents.rdb.models.user import RDBUser
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
@@ -351,7 +362,57 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     )
     session.add(agent)
     await session.flush()
+    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
+    await session.flush()
     return agent.id
+
+
+async def _cleanup_committed_agent_fixture(
+    session: AsyncSession,
+    *,
+    workspace_id: str | None,
+    user_id: str | None,
+    agent_id: str | None,
+) -> None:
+    """Remove the committed fixture used by the cross-transaction fence test."""
+    if agent_id is not None:
+        await session.execute(
+            sa.update(RDBSessionAgentContext)
+            .where(RDBSessionAgentContext.agent_id == agent_id)
+            .values(root_session_agent_id=None)
+        )
+        await session.execute(
+            sa.delete(RDBSessionAgent).where(
+                RDBSessionAgent.agent_session_id.in_(
+                    sa.select(RDBAgentSession.id).where(
+                        RDBAgentSession.agent_id == agent_id
+                    )
+                )
+            )
+        )
+        await session.execute(
+            sa.delete(RDBSessionAgentContext).where(
+                RDBSessionAgentContext.agent_id == agent_id
+            )
+        )
+        await session.execute(
+            sa.delete(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+        )
+        await session.execute(
+            sa.delete(RDBAgentRuntime).where(RDBAgentRuntime.agent_id == agent_id)
+        )
+        await session.execute(
+            sa.delete(RDBAgentDecommissionJob).where(
+                RDBAgentDecommissionJob.agent_id == agent_id
+            )
+        )
+        await session.execute(sa.delete(RDBAgent).where(RDBAgent.id == agent_id))
+    if workspace_id is not None:
+        await session.execute(
+            sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
+        )
+    if user_id is not None:
+        await session.execute(sa.delete(RDBUser).where(RDBUser.id == user_id))
 
 
 async def _create_user(session: AsyncSession, email: str) -> str:
@@ -1114,6 +1175,9 @@ class TestAgentSessionInputService:
         """Admission waits for an Agent lifecycle update and then fails closed."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
+        workspace_id: str | None = None
+        user_id: str | None = None
+        agent_id: str | None = None
 
         @asynccontextmanager
         async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -1126,89 +1190,111 @@ class TestAgentSessionInputService:
                 else:
                     await session.commit()
 
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
-            workspace_id = await _create_workspace(
-                setup_session,
-                f"input-agent-fence-{suffix}",
-            )
-            user_id = await _create_user(
-                setup_session,
-                f"input-agent-fence-{suffix}@example.com",
-            )
-            await _add_workspace_user(
-                setup_session,
-                workspace_id=workspace_id,
-                user_id=user_id,
-            )
-            agent_id = await _create_agent(
-                setup_session,
-                workspace_id,
-                f"input-agent-fence-{suffix}",
-            )
-            agent_session = (
-                await AgentSessionRepository().ensure_team_primary_for_agent(
+        try:
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as setup_session:
+                workspace_id = await _create_workspace(
+                    setup_session,
+                    f"input-agent-fence-{suffix}",
+                )
+                user_id = await _create_user(
+                    setup_session,
+                    f"input-agent-fence-{suffix}@example.com",
+                )
+                await _add_workspace_user(
                     setup_session,
                     workspace_id=workspace_id,
-                    agent_id=agent_id,
-                )
-            ).session
-            await setup_session.commit()
-
-        service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=_input_buffer_service(session_manager),
-            session_manager=session_manager,
-        )
-
-        async with AsyncSession(
-            rdb_engine,
-            expire_on_commit=False,
-        ) as decommission_session:
-            decommissioned = await AgentRepository().mark_decommissioning(
-                decommission_session,
-                agent_id,
-            )
-            assert decommissioned is not None
-            admission_task = asyncio.create_task(
-                service.create_buffered_agent_input(
-                    agent_id=agent_id,
-                    agent_session_id=agent_session.id,
-                    message=InputMessage(
-                        text="must not cross the decommission fence",
-                        user_id=user_id,
-                        headers=[],
-                        metadata={"source": "chat"},
-                        attachments=[],
-                    ),
-                    inference_profile=_TEST_INFERENCE_PROFILE,
                     user_id=user_id,
-                    request_payload={"request": "agent-fence"},
-                    client_request_id="agent-fence",
                 )
-            )
-            await asyncio.sleep(0.1)
-            assert not admission_task.done()
-            await decommission_session.commit()
-            result = await asyncio.wait_for(admission_task, timeout=5)
+                agent_id = await _create_agent(
+                    setup_session,
+                    workspace_id,
+                    f"input-agent-fence-{suffix}",
+                )
+                agent_session = (
+                    await AgentSessionRepository().ensure_team_primary_for_agent(
+                        setup_session,
+                        workspace_id=workspace_id,
+                        agent_id=agent_id,
+                    )
+                ).session
+                await setup_session.commit()
 
-        assert isinstance(result, Failure)
-        assert isinstance(result.error, AgentSessionInputInactiveSession)
-        async with session_manager() as session:
-            buffers = await InputBufferRepository().list_by_session_id(
-                session,
-                agent_session.id,
+            service = AgentSessionInputService(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_agent_session_creation_service=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                exchange_file_service=_ExchangeFileService(),
+                input_buffer_service=_input_buffer_service(session_manager),
+                session_manager=session_manager,
             )
-        assert buffers == []
+
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as decommission_session:
+                decommissioned = await AgentRepository().mark_decommissioning(
+                    decommission_session,
+                    agent_id,
+                )
+                assert decommissioned is not None
+                admission_task = asyncio.create_task(
+                    service.create_buffered_agent_input(
+                        agent_id=agent_id,
+                        agent_session_id=agent_session.id,
+                        message=InputMessage(
+                            text="must not cross the decommission fence",
+                            user_id=user_id,
+                            headers=[],
+                            metadata={"source": "chat"},
+                            attachments=[],
+                        ),
+                        inference_profile=_TEST_INFERENCE_PROFILE,
+                        user_id=user_id,
+                        request_payload={"request": "agent-fence"},
+                        client_request_id="agent-fence",
+                    )
+                )
+                try:
+                    await asyncio.sleep(0.1)
+                    assert not admission_task.done()
+                    await decommission_session.commit()
+                    result = await asyncio.wait_for(admission_task, timeout=5)
+                finally:
+                    if not admission_task.done():
+                        admission_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await admission_task
+
+            assert isinstance(result, Failure)
+            assert isinstance(result.error, AgentSessionInputInactiveSession)
+            async with session_manager() as session:
+                buffers = await InputBufferRepository().list_by_session_id(
+                    session,
+                    agent_session.id,
+                )
+            assert buffers == []
+        finally:
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as session:
+                await _cleanup_committed_agent_fixture(
+                    session,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                )
+                await session.commit()
 
     async def test_create_buffered_agent_input_dedupes_client_request_id(
         self,
@@ -1287,8 +1373,9 @@ class TestAgentSessionInputService:
         first_value = first.value
         second_value = second.value
         assert first_value.input_buffer is not None
-        assert second_value.input_buffer is None
+        assert second_value.input_buffer is not None
         assert second_value.accepted_input_buffer_id == first_value.input_buffer.id
+        assert second_value.input_buffer.id == first_value.input_buffer.id
         assert second_value.created is False
         async with rdb_session_manager() as session:
             buffers = await InputBufferRepository().list_by_session_id(
