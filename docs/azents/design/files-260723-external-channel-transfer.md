@@ -2,6 +2,7 @@
 title: "External Channel File Transfer Design"
 created: 2026-07-23
 updated: 2026-07-23
+implemented: 2026-07-23
 tags: [slack, external-channel, files, runtime, delivery, system-settings]
 document_role: primary
 document_type: design

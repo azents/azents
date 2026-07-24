@@ -8,6 +8,8 @@ touches_domains: [agent, conversation, workspace, toolkit]
 code_paths:
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/services/exchange_file/**
+  - python/apps/azents/src/azents/services/external_channel/file_transfer.py
+  - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/services/artifact.py
   - python/apps/azents/src/azents/services/model_file.py
   - python/apps/azents/src/azents/services/input_buffer.py
@@ -45,7 +47,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-23
-spec_version: 26
+spec_version: 27
 ---
 
 # File Exchange Storage
@@ -53,6 +55,9 @@ spec_version: 26
 ## Overview
 
 File Exchange Storage is the flow that separately stores and retrieves user-facing attachments exchanged between user and Agent, internal Artifacts for agent/tool, managed VFS files, and ModelFiles for LLM rich input. User uploads files from chat input, and Agent imports an external attachment, internal artifact, or current-run managed resource into sandbox with `import_file`, or exposes sandbox file to user with `present_file`. Generated provider image/file output is preserved as canonical file and attachment output parts on one provider tool call instead of storing raw Base64 directly in an event.
+
+External Channel file transfer is a separate explicit Runtime/provider path. It does not
+create ExchangeFile, Artifact, ModelFile, FilePart, or another durable file-body object.
 
 ## Flows
 
@@ -82,6 +87,20 @@ not.
 `exchange://{object_key}` materializes user-visible attachment into Runtime file. `artifact://{storage_key}` materializes agent/tool internal output Artifact into Runtime file. In both cases, original file body is not directly attached to LLM prompt.
 
 `azents://` materializes one immutable managed file from the current run projection. The resolver verifies run, Agent, Session, and Workspace ownership, exact projection membership, Base64 decoding, decoded size, and content hash before writing through the same Runtime FileStorage path. Ordinary Runtime file tools do not resolve the URI directly. The source entry remains in the retained AgentRun projection; only the copied Runtime path follows Runtime persistence rules, and a default `/tmp/agent/imports/` copy is temporary.
+
+### Agent transfers an External Channel file
+
+`download_external_file` accepts one opaque `external-file:v1` locator from the current
+active External Channel binding. The service resolves Slack metadata and authenticated
+private bytes only after the explicit Tool call, enforces configured declared and actual
+byte limits, and writes one bounded payload to the authorized Runtime destination through
+`FileStorage.put`. The Tool result retains only Runtime path, filename, media type, and
+actual size.
+
+A file-bearing `channel_action` selects absolute Runtime paths, stats all sources before
+commit, stores only bounded manifests, and streams each source through
+`FileStorage.iter_chunks` directly to Slack in 1 MiB chunks. The flow does not stage bytes
+in object storage or convert them into user attachments or model rich input.
 
 ### Agent/tool output artifact
 
@@ -138,6 +157,9 @@ database cascade erase the last cleanup reference before external deletion succe
 ## Storage Boundaries
 
 - Event store does not store file body. Event has only attachment/artifact metadata and URI reference, or FilePart `model_file_id`.
+- External Channel revisions store bounded provider metadata and opaque locators only.
+  External Channel actions and deliveries store bounded Runtime manifests and phase
+  evidence only; private provider URLs and transferred bytes are never durable.
 - Durable event, REST/WS projection, and frontend state do not store raw bytes, inline base64, data URL, or provider-specific file payload.
 - There is no implicit conversion among Attachment, Artifact, and ModelFile/FilePart. URI is storage location, not entity reference, so do not add logic extracting entity id from URI string. A `model_file_id` is single-event scoped; reusing the same source bytes later requires materializing a new ModelFile/FilePart.
 - Attachment ExchangeFile and Artifact have ordinary time-based retention/TTL lifecycle. ModelFile has context-owned lifecycle based on model-input head cursor reachability and active run pins. Archived-root durable purge may terminate any of these resources earlier after purge fencing.
@@ -175,6 +197,9 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ## Changelog
 
+- **2026-07-23** — v27. Distinguished explicit External Channel Runtime/provider transfer
+  from Exchange, Artifact, and ModelFile storage, including bounded inbound writes,
+  outbound chunk streaming, and no durable transferred-byte object.
 - **2026-07-23** — v26. Clarified that only required file/blob cleanup can block Session purge; Git worktree state is outside the file-storage purge boundary.
 - **2026-07-20** — v23. Unified attachment-bearing client and provider tool output as standalone deliveries that close ordered Activity without nested duplication.
 - **2026-07-20** — v22. Promoted validated generated-image attachments to standalone Agent deliverables, preserved raw diagnostic ownership, and suppressed only duplicate nested image URIs.

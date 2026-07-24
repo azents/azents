@@ -14,6 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_blocks.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
+  - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
@@ -23,7 +24,7 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
 last_verified_at: 2026-07-23
-spec_version: 6
+spec_version: 7
 ---
 
 # External Channel Provider Ingress
@@ -97,12 +98,34 @@ The worker claims admitted events in bounded batches with a claim owner and expi
 
 Activation waits until hydration is terminal and every correlated event through the persisted boundary is terminal. This prevents out-of-order or post-trigger/pre-activation message loss.
 
+## File Metadata Projection
+
+HTTP callbacks, Socket Mode envelopes, and `conversations.replies` hydration project the
+same bounded Slack `files[]` metadata. At most 20 entries are retained. Text fields are
+bounded, malformed or truncated items fail closed, and no private URL or file body enters
+the canonical revision or Agent context.
+
+Direct hosted uploads with an ID, non-negative declared size, supported mode, visible
+access, and no external or Slack Connect classification receive a provider-neutral,
+binding-scoped `external-file:v1` locator. External files, Slack Connect files, sparse
+access-check records, unsupported modes, missing IDs, and invalid sizes remain visible
+with stable unsupported reasons but cannot be downloaded.
+
+The first Agent turn, replay, filters, compaction continuity, structured visible values,
+and token accounting render the same ordered metadata and opaque locators. Rendering an
+attachment never materializes its bytes. Explicit download later rechecks active
+ownership, directional capability, `files.info` metadata, provider authorization,
+declared size, and actual streamed bytes.
+
 ## Evidence and Redaction
 
 Deterministic E2E uses signed raw callbacks and a fake HTTP/WebSocket provider through public APIs. Provider evidence records operation names, bounded metadata, acknowledgements, and state transitions only. Authorization headers, signing secrets, bot/app tokens, and Slack message text are excluded.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 7) — Added bounded Slack file projection shared by HTTP,
+  Socket, and hydration, stable unsupported reasons, opaque locators, and metadata-only
+  Agent rendering.
 - **2026-07-23** (spec_version 6) — Added bounded Block Kit and rich-text fallback normalization shared by HTTP callbacks, Socket Mode, hydration, and revision identity.
 - **2026-07-23** (spec_version 5) — Excluded connected-App authored messages from ingress and hydration, and added best-effort bounded Slack identity-reference enrichment.
 - **2026-07-23** (spec_version 4) — Removed route lifecycle state from ingress selection; active connection admission and active Agent lifecycle now determine routability.

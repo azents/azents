@@ -72,7 +72,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-23
-spec_version: 129
+spec_version: 130
 ---
 
 # Agent Execution Loop
@@ -689,6 +689,15 @@ non-null deadline and pass that deadline through the reply-stream wait path. If 
 operation times out into a failed/cancelled tool result path instead of leaving a durable
 `client_tool_call` without a corresponding `client_tool_result` forever.
 
+An active root External Channel binding may additionally expose
+`download_external_file` and file-bearing `channel_action`. The download Tool accepts one
+provider-neutral opaque locator and one Runtime destination, performs ownership and
+capability checks before provider access, and writes only the selected bounded file.
+`channel_action.files` accepts up to 20 absolute Runtime paths, requires conversational
+text, preflights all sources before the action commit, and later streams them through the
+existing run-scoped `FileStorage` dependency. The Agent never receives Slack credentials,
+private URLs, or provider transfer procedures.
+
 GPT-compatible prepared calls may expose `apply_patch` in exactly one selected wire dialect:
 `json_function` with structured `base_path` and patch fields, or `plaintext_custom` with one strict
 plaintext envelope. The Engine admits only one completed call in the dialect frozen by preparation;
@@ -1127,6 +1136,9 @@ with a channel/message icon rather than presenting it as Goal continuation.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 130) — Added the explicit External Channel file download
+  Tool and file-bearing Channel action to the run-scoped Runtime tool loop without
+  introducing durable file staging.
 - **2026-07-23** (spec_version 129) — Distinguished External Channel idle continuation from Goal continuation in chat labels and icons while retaining the common durable event kind.
 - **2026-07-23** (spec_version 128) — Added raw-ID-preserving external-channel identity mapping tables to model input lowering.
 - **2026-07-23** (spec_version 127) — Made adapter-computed `needs_follow_up` the normalized lifecycle source of truth by combining client-tool semantics with best-effort dialect signals; empty terminal output now completes the Run.
