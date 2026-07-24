@@ -5,7 +5,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import Any, cast
@@ -33,7 +33,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.tools import ToolkitProvider
+from azents.core.tools import ToolkitContext, ToolkitProvider
 from azents.core.vfs import VfsProjection, make_vfs_projection
 from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.engine.events.engine_events import (
@@ -54,7 +54,12 @@ from azents.engine.events.types import (
 )
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.run.commands import CommandHandler
-from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequest
+from azents.engine.run.contracts import (
+    AgentEngineProtocol,
+    RunContext,
+    RunRequest,
+    ToolkitBinding,
+)
 from azents.engine.run.emit import Emit, durable, ephemeral
 from azents.engine.run.errors import (
     CompactionModelStreamTimeoutError,
@@ -1147,6 +1152,52 @@ def _executor(
         subagent_toolkit_provider=cast(SubagentToolkitProvider, object()),
         broadcast=cast(WebSocketBroadcast, object()),
     )
+
+
+@pytest.mark.asyncio
+async def test_idle_continuation_toolkits_use_persisted_session_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Idle continuation ignores the transient broker workspace identifier."""
+    executor = _executor()
+    resolved_contexts: list[ToolkitContext] = []
+
+    async def resolve_tools(
+        agent_id: str,
+        context: ToolkitContext,
+        **kwargs: object,
+    ) -> list[ToolkitBinding]:
+        """Capture the toolkit resolution context."""
+        del agent_id, kwargs
+        resolved_contexts.append(context)
+        return []
+
+    async def prepare_toolkits(
+        toolkits: Sequence[ToolkitBinding],
+        user_id: str | None,
+    ) -> list[ToolkitBinding]:
+        """Return the empty prepared toolkit set."""
+        del user_id
+        return list(toolkits)
+
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", resolve_tools)
+
+    await executor.resolve_idle_continuation_toolkits(
+        SessionWakeUp(
+            agent_id="agent-001",
+            session_id="session-001",
+            user_id="user-001",
+            additional_system_prompt=None,
+            interface=None,
+            workspace_id=None,
+            workspace_handle=None,
+        ),
+        run_id="run-001",
+        prepare_toolkits=prepare_toolkits,
+        dispatch_event=_noop_dispatch_event,
+    )
+
+    assert resolved_contexts[0].workspace_id == "workspace-001"
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from azents.core.enums import AgentSessionRunState
+from azents.core.tools import TurnContext
 from azents.core.vfs import (
     VfsProjection,
     make_vfs_projection,
@@ -24,6 +25,7 @@ from azents.engine.tools.skill import (
     SkillProjectionService,
     SkillProjectionSnapshot,
     SkillProjectionState,
+    SkillToolkit,
     load_skill_projection_for_actions,
     make_load_skill_tool,
     render_skill_items,
@@ -73,6 +75,11 @@ def _project(
         created_at=now,
         updated_at=now,
     )
+
+
+async def _noop_publish_event(event: object) -> None:
+    """Ignore test-only published events."""
+    del event
 
 
 class _SkillScanRunner:
@@ -189,9 +196,12 @@ class _VfsService:
     def __init__(self, projection: VfsProjection) -> None:
         self.projection = projection
         self.action_calls: list[tuple[bool, str | None]] = []
+        self.load_calls: list[dict[str, object]] = []
+        self.resolve_calls: list[dict[str, object]] = []
 
     async def resolve_file(self, **kwargs: object) -> VfsResolvedFile:
         """Resolve one file from the configured projection."""
+        self.resolve_calls.append(kwargs)
         uri = str(kwargs["uri"])
         entry = self.projection.find(uri)
         if entry is None:
@@ -201,6 +211,11 @@ class _VfsService:
             projection_hash=self.projection.projection_hash,
             entry=entry,
         )
+
+    async def load_run_projection(self, **kwargs: object) -> VfsProjection:
+        """Return one managed projection and capture its authorization identity."""
+        self.load_calls.append(kwargs)
+        return self.projection
 
     async def projection_for_actions(self, **kwargs: object) -> VfsProjection:
         """Return configured composer projection and capture run identity."""
@@ -241,6 +256,15 @@ class _SkillStore:
 
     async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
         """Return configured state."""
+        del agent_id, session_id
+        return self.state
+
+    async def adopt_latest(
+        self,
+        agent_id: str,
+        session_id: str,
+    ) -> SkillProjectionState:
+        """Return configured state after accepting a latest projection adoption."""
         del agent_id, session_id
         return self.state
 
@@ -304,6 +328,46 @@ class TestManagedSkillProjection:
         assert prompt.count("**review**: Review code.") == 2
         assert filesystem.skill_path in prompt
         assert managed.skill_path in prompt
+
+
+class TestSkillToolkit:
+    """Skill Toolkit managed VFS authorization behavior."""
+
+    @pytest.mark.asyncio
+    async def test_turn_workspace_authorizes_managed_skill_reads(self) -> None:
+        """Managed Skill reads use the current Run workspace authorization."""
+        projection = _managed_projection()
+        service = _VfsService(projection)
+        toolkit = SkillToolkit(
+            store=_SkillStore(SkillProjectionState()),  # pyright: ignore[reportArgumentType]
+            projection_service=None,
+            vfs_projection_service=service,  # pyright: ignore[reportArgumentType]
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+        context = TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-current",
+            model="test-model",
+            run_id="run-1",
+            publish_event=_noop_publish_event,
+        )
+
+        state = await toolkit.update_context(context)
+
+        assert service.load_calls == [
+            {
+                "run_id": "run-1",
+                "agent_id": "agent-1",
+                "session_id": "session-1",
+                "workspace_id": "workspace-current",
+            }
+        ]
+        [load_skill] = state.tools
+        await load_skill.handler(
+            json.dumps({"skill_path": "azents://skills/azents/review/SKILL.md"})
+        )
+        assert service.resolve_calls[-1]["workspace_id"] == "workspace-current"
 
 
 class TestLoadSkill:

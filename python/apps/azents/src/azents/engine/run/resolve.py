@@ -1685,6 +1685,7 @@ async def resolve_agent_tools(
                 slug=_slug,
                 config=_cfg,
                 execution_mode=execution_mode,
+                context=context,
             ),
         )
         for _prov, _resolved, _cfg, _slug, _prompt, _pfx, _ttype, _modes in pending
@@ -1699,10 +1700,17 @@ def _auto_toolkit_source_revision(
     slug: str,
     config: BaseModel,
     execution_mode: ToolkitExecutionMode,
+    context: ToolkitContext,
 ) -> str:
     """Return a stable non-secret source revision for an auto-bound Toolkit."""
     payload = {
         "config": config.model_dump(mode="json"),
+        "context_identity": {
+            "agent_id": context.agent_id,
+            "session_id": context.session_id,
+            "user_id": context.user_id,
+            "workspace_id": context.workspace_id,
+        },
         "execution_mode": execution_mode.value,
         "slug": slug,
     }

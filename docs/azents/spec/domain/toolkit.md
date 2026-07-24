@@ -49,7 +49,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-23
+last_verified_at: 2026-07-24
 spec_version: 73
 ---
 

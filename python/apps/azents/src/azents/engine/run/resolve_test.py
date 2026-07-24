@@ -1,5 +1,6 @@
 """Agent run resolve tests."""
 
+import dataclasses
 import datetime
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
@@ -205,6 +206,34 @@ def _make_toolkit_context() -> ToolkitContext:
         interface_type=None,
         interface_channel_id=None,
     )
+
+
+def test_auto_toolkit_revision_changes_with_execution_context() -> None:
+    """Auto-bound Toolkits replace retained instances after scope changes."""
+    config = _TestToolkitConfig(value="same")
+    context = _make_toolkit_context()
+
+    initial = resolve_module._auto_toolkit_source_revision(  # pyright: ignore[reportPrivateUsage]
+        slug="skill",
+        config=config,
+        execution_mode=ToolkitExecutionMode.ROOT,
+        context=context,
+    )
+    changed_workspace = resolve_module._auto_toolkit_source_revision(  # pyright: ignore[reportPrivateUsage]
+        slug="skill",
+        config=config,
+        execution_mode=ToolkitExecutionMode.ROOT,
+        context=dataclasses.replace(context, workspace_id="ws-2"),
+    )
+    changed_actor = resolve_module._auto_toolkit_source_revision(  # pyright: ignore[reportPrivateUsage]
+        slug="skill",
+        config=config,
+        execution_mode=ToolkitExecutionMode.ROOT,
+        context=dataclasses.replace(context, user_id="user-2"),
+    )
+
+    assert initial != changed_workspace
+    assert initial != changed_actor
 
 
 async def _resolve_failing_registered_toolkit(

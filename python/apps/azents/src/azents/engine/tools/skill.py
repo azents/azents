@@ -523,7 +523,6 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         vfs_projection_service: VfsProjectionService | None,
         agent_id: str,
         session_id: str,
-        workspace_id: str,
     ) -> None:
         """Create Skill Toolkit."""
         self.store = store
@@ -531,7 +530,6 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         self.vfs_projection_service = vfs_projection_service
         self._agent_id = agent_id
         self._session_id = session_id
-        self._workspace_id = workspace_id
         self._adopted_run_ids: set[str] = set()
         self._adopt_latest_on_next_turn = False
 
@@ -556,13 +554,13 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Render the combined active Skill index for the current run."""
         state = await self._active_state_for_context(context)
-        managed = await self._managed_items(context.run_id)
+        managed = await self._managed_items(context.run_id, context.workspace_id)
         return render_skill_items([*state.active.items, *managed])
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return load_skill when either Skill projection contains items."""
         state = await self._active_state_for_context(context)
-        managed = await self._managed_items(context.run_id)
+        managed = await self._managed_items(context.run_id, context.workspace_id)
         if not state.active.items and not managed:
             return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
         return ToolkitState(
@@ -573,13 +571,17 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
                     vfs_projection_service=self.vfs_projection_service,
                     agent_id=self._agent_id,
                     session_id=self._session_id,
-                    workspace_id=self._workspace_id,
+                    workspace_id=context.workspace_id,
                     run_id=context.run_id,
                 )
             ],
         )
 
-    async def _managed_items(self, run_id: str) -> list[SkillProjectionItem]:
+    async def _managed_items(
+        self,
+        run_id: str,
+        workspace_id: str,
+    ) -> list[SkillProjectionItem]:
         """Load managed Skill entries from the exact current run projection."""
         if self.vfs_projection_service is None:
             return []
@@ -587,7 +589,7 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
             run_id=run_id,
             agent_id=self._agent_id,
             session_id=self._session_id,
-            workspace_id=self._workspace_id,
+            workspace_id=workspace_id,
         )
         return skill_items_from_vfs_projection(projection)
 
@@ -681,7 +683,6 @@ class SkillToolkitProvider(ToolkitProvider[SkillToolkitConfig]):
             vfs_projection_service=self.vfs_projection_service,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            workspace_id=context.workspace_id,
         )
 
 
