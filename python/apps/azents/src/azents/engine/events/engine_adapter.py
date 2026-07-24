@@ -184,6 +184,7 @@ from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.xai_imagine import XaiImagineClient
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied,
@@ -532,6 +533,23 @@ class AgentEngineAdapter:
                 raise RuntimeError(
                     "AgentRun must be activated before engine invocation"
                 )
+            root = await self.agent_session_repo.get_root_session_agent_by_session_id(
+                session,
+                request.session_id,
+            )
+            if root is None:
+                raise RuntimeError(
+                    "AgentSession root is unavailable for engine invocation"
+                )
+            resource_authority = SessionResourceAuthority(
+                workspace_id=request.workspace_id,
+                agent_id=request.agent_id,
+                session_id=request.session_id,
+                root_session_id=root.agent_session_id,
+                run_id=context.run_id,
+                run_index=run_state.run_index,
+                owner_generation=context.owner_generation,
+            )
             await session.commit()
         for event in user_message_events:
             yield durable(event)
@@ -965,12 +983,8 @@ class AgentEngineAdapter:
         generated_output_materializer = ProviderOutputMaterializer(
             exchange_file_service=self.exchange_file_service,
             model_file_service=self.model_file_service,
-            workspace_id=request.workspace_id,
-            agent_id=request.agent_id,
-            session_id=request.session_id,
-            user_id=context.user_id,
-            run_id=context.run_id,
-            run_index=run_state.run_index,
+            authority=resource_authority,
+            provider_name=provider,
         )
         execution = self.execution_factory(
             session_manager=self.session_manager,

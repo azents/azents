@@ -13,7 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.engine.events.provider_output as provider_output
 from azents.core.config import Config, FileLifecycleConfig, WorkspaceS3Config
-from azents.core.enums import EventKind
+from azents.core.enums import (
+    AgentRunStatus,
+    AgentSessionStatus,
+    EventKind,
+    ExchangeFileProvenanceKind,
+)
 from azents.engine.events.protocols import NormalizedAdapterOutput
 from azents.engine.events.provider_output import (
     ProviderOutputMaterializer,
@@ -45,6 +50,7 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 _PNG_BASE64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ"
@@ -88,6 +94,9 @@ class _SessionManager:
 class _AgentSessionRepository(AgentSessionRepository):
     """Return the provider-output Session scope."""
 
+    def __init__(self) -> None:
+        self.owner_generation = 1
+
     async def get_by_id(
         self,
         session: AsyncSession,
@@ -98,7 +107,17 @@ class _AgentSessionRepository(AgentSessionRepository):
             id="session-1",
             workspace_id="workspace-1",
             agent_id="agent-1",
+            owner_generation=self.owner_generation,
+            status=AgentSessionStatus.ACTIVE,
         )
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Lock and return the provider-output Session scope."""
+        return await self.get_by_id(session, agent_session_id)
 
     async def get_root_session_agent_by_session_id(
         self,
@@ -133,17 +152,27 @@ class _AgentRunRepository(AgentRunRepository):
     def __init__(self) -> None:
         self.lock_calls = 0
 
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Return the active synthetic Run."""
+        del session
+        return AgentRunState.model_construct(
+            id=run_id,
+            session_id="session-1",
+            run_index=3,
+            status=AgentRunStatus.RUNNING,
+        )
+
     async def lock_by_id(
         self,
         session: AsyncSession,
         run_id: str,
     ) -> AgentRunState | None:
-        del session
         self.lock_calls += 1
-        return AgentRunState.model_construct(
-            id=run_id,
-            session_id="session-1",
-        )
+        return await self.get_by_id(session, run_id)
 
 
 class _ExchangeFileRepository(ExchangeFileRepository):
@@ -393,12 +422,16 @@ def _materializer(
         ProviderOutputMaterializer(
             exchange_file_service=exchange_service,
             model_file_service=model_service,
-            workspace_id="workspace-1",
-            agent_id="agent-1",
-            session_id="session-1",
-            user_id="user-1",
-            run_id="run-1",
-            run_index=3,
+            authority=SessionResourceAuthority(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="session-1",
+                root_session_id="session-1",
+                run_id="run-1",
+                run_index=3,
+                owner_generation=1,
+            ),
+            provider_name="openai",
         ),
         exchange_repository,
         model_repository,
@@ -521,6 +554,14 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     assert len(exchange_repository.created) == 2
     assert len(exchange_repository.preview_links) == 1
     assert len(model_repository.created) == 1
+    source, preview = exchange_repository.created
+    assert source.provenance_kind is ExchangeFileProvenanceKind.PROVIDER
+    assert source.source_agent_id == "agent-1"
+    assert source.source_run_id == "run-1"
+    assert source.source_tool_name == "image_generation"
+    assert source.source_provider == "openai"
+    assert preview.provenance_kind is ExchangeFileProvenanceKind.PREVIEW
+    assert preview.source_exchange_file_id == source.id
     assert s3_service.deleted == []
 
 
@@ -560,6 +601,14 @@ async def test_materializes_client_tool_image_with_shared_storage_contract() -> 
     assert len(s3_service.uploaded) == 3
     assert len(exchange_repository.created) == 2
     assert len(model_repository.created) == 1
+    source, preview = exchange_repository.created
+    assert source.provenance_kind is ExchangeFileProvenanceKind.TOOL
+    assert source.source_agent_id == "agent-1"
+    assert source.source_run_id == "run-1"
+    assert source.source_tool_name == "image_generation"
+    assert source.source_provider is None
+    assert preview.provenance_kind is ExchangeFileProvenanceKind.PREVIEW
+    assert preview.source_exchange_file_id == source.id
     assert model_repository.created[0].metadata["source_kind"] == "client_tool"
     assert s3_service.deleted == []
 
@@ -639,14 +688,32 @@ async def test_failed_upload_compensates_prepared_object_keys() -> None:
     assert s3_service.deleted == list(s3_service.uploaded)
 
 
-async def test_requires_authenticated_actor_before_upload() -> None:
-    """Reject generated user-owned files when no authenticated actor exists."""
+async def test_allows_userless_provider_output_before_upload() -> None:
+    """Prepare provider output without synthesizing Human provenance."""
     materializer, _, _, s3_service = _materializer()
-    materializer.user_id = None
 
-    with pytest.raises(ModelCallError, match="authenticated user"):
-        await materializer.prepare(_normalized_output())
+    prepared = await materializer.prepare(_normalized_output())
 
+    assert prepared.generated_images[0].exchange_source.source_user_id is None
+    assert s3_service.uploaded == {}
+
+
+async def test_rejects_provider_output_after_owner_generation_changes() -> None:
+    """A stale worker cannot upload provider output after Session takeover."""
+    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    prepared = await materializer.prepare(_normalized_output())
+    session_repository = materializer.model_file_service.agent_session_repository
+    assert isinstance(session_repository, _AgentSessionRepository)
+    session_repository.owner_generation += 1
+
+    with pytest.raises(
+        ModelCallError,
+        match="Generated image output scope is unavailable",
+    ):
+        await prepared.persist(_Session())
+
+    assert exchange_repository.created == []
+    assert model_repository.created == []
     assert s3_service.uploaded == {}
 
 
