@@ -365,7 +365,11 @@ def _transport_key() -> ModelTransportKey:
     )
 
 
-def _sampling_context(model: str = "gpt-5.1-codex") -> ModelStreamCallContext:
+def _sampling_context(
+    model: str = "gpt-5.1-codex",
+    *,
+    attempt_number: int | None = None,
+) -> ModelStreamCallContext:
     return ModelStreamCallContext(
         call_kind="sampling",
         provider="openai",
@@ -373,7 +377,7 @@ def _sampling_context(model: str = "gpt-5.1-codex") -> ModelStreamCallContext:
         model=model,
         session_id="session-1",
         run_id="run-1",
-        attempt_number=None,
+        attempt_number=attempt_number,
         check_stop=None,
     )
 
@@ -1041,6 +1045,143 @@ async def test_unclassified_sdk_error_is_safely_normalized() -> None:
     assert raised.value.provider_message == "synthetic unclassified SDK failure"
     assert raised.value.provider_error_type == "OpenAIError"
     assert raised.value.fingerprint
+    await adapter.close()
+
+
+async def test_adapter_logs_safe_typed_terminal_error_context(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Typed terminal events retain bounded diagnostics and Run correlation."""
+    caplog.set_level(logging.WARNING)
+    raw_message = "Rejected api_key=sk-abcdefghijk"
+    stream = _FakeStream(
+        [
+            ResponseErrorEvent(
+                code="future_error",
+                message=raw_message,
+                param="input[0].tools[1].function.arguments",
+                sequence_number=42,
+                type="error",
+            )
+        ]
+    )
+    client = _FakeClient(stream)
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options={},
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model=request.model,
+        inference_profile=None,
+    )
+
+    _ = [
+        event
+        async for event in adapter.stream(
+            request,
+            watchdog=watchdog,
+            timeout_policy=policy,
+            call_context=_sampling_context(attempt_number=1),
+        )
+    ]
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "OpenAI Responses terminal provider error received"
+    )
+    fields = record.__dict__
+    assert fields["openai_responses_transport"] == "http"
+    assert fields["session_id"] == "session-1"
+    assert fields["run_id"] == "run-1"
+    assert fields["attempt_number"] == 1
+    assert fields["provider_terminal_outcome"] == "error"
+    assert fields["provider_terminal_event_type"] == "error"
+    assert fields["provider_terminal_event_sequence_number"] == 42
+    assert fields["provider_terminal_error_code"] == "future_error"
+    assert (
+        fields["provider_terminal_error_param"]
+        == "input[0].tools[1].function.arguments"
+    )
+    assert fields["provider_terminal_error_message"] == "Rejected api_key=[REDACTED]"
+    assert fields["provider_terminal_error_message_length"] == len(raw_message)
+    assert "sk-abcdefghijk" not in caplog.text
+    await adapter.close()
+
+
+async def test_adapter_maps_sdk_status_error_without_duplicate_adapter_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """SDK status failures preserve their exception context for the error boundary."""
+    caplog.set_level(logging.WARNING)
+    request_handle = httpx.Request("POST", "https://provider.example/responses")
+    error = BadRequestError(
+        "Error code: 400 - {'error': {'message': 'raw body'}}",
+        response=httpx.Response(
+            400,
+            headers={"x-request-id": "req_synthetic"},
+            request=request_handle,
+        ),
+        body={
+            "error": {
+                "code": "future_error",
+                "message": "Rejected api_key=sk-abcdefghijk",
+                "param": "input[0].tools[1]",
+                "type": "future_error_type",
+            }
+        },
+    )
+    client = _SequencedFakeClient([error])
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options={},
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model=request.model,
+        inference_profile=None,
+    )
+
+    with pytest.raises(ModelProviderFailure) as raised:
+        _ = [
+            event
+            async for event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=policy,
+                call_context=_sampling_context(),
+            )
+        ]
+
+    assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
+    assert raised.value.status_code == 400
+    assert raised.value.provider_code == "future_error"
+    assert raised.value.provider_error_type == "future_error_type"
+    assert raised.value.provider_message == "Rejected api_key=[REDACTED]"
+    assert raised.value.__cause__ is error
+    assert "OpenAI Responses SDK request failed" not in caplog.text
+    assert "sk-abcdefghijk" not in caplog.text
     await adapter.close()
 
 
