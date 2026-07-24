@@ -189,6 +189,23 @@ and current phase execution plan as the handoff contract for every subagent.
 - If an implementation or independent review role is unavailable, report the
   blocker instead of silently changing the role assignment.
 
+### Long-running subagent work
+
+- Assume implementation and review workstreams may take a long time. Never ask
+  a subagent to finalize early, shorten validation, or return a partial result
+  merely because the primary agent is waiting.
+- When coordination needs visibility, ask for a progress update covering
+  completed scope, remaining scope, current validation, and genuine blockers.
+  Explicitly tell the subagent to continue the complete written contract after
+  reporting progress.
+- While waiting, use primary-agent time to inspect repository state, research
+  the next phase, identify applicable conventions, and prepare future phase-plan
+  inputs. Do not edit later-phase implementation code, assign later-phase
+  implementation, create the next phase branch, or advance the stack before the
+  current phase PR exists.
+- Treat silence or a long runtime as ongoing work, not as evidence that scope
+  should be reduced. Wait for the complete workstream or a genuine blocker.
+
 ### Parallel implementation rules
 
 - Use implementation subagents for concrete, bounded workstreams after the phase
@@ -345,4 +362,6 @@ For each completed phase, report:
 - Do not collapse a large feature into one PR when phased delivery is expected.
 - Do not leave stale plan documents after implementation is complete.
 - Do not update generated clients manually; regenerate them from OpenAPI when API routes or schemas change.
+- Do not pressure implementation or review subagents to finish early; ask for
+  progress and research later phases while waiting.
 - Keep all tracked docs, PR titles, PR bodies, comments, and examples in English.
