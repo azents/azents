@@ -22,7 +22,6 @@ def _make_tool(
     tool = make_read_text_tool(
         session_storage=storage,
         agent_id="",
-        user_id="",
     )
     return tool, storage
 
@@ -141,8 +140,12 @@ class TestReadTextErrors:
     async def test_file_not_found(self) -> None:
         """Nonexistent file raises FunctionToolError."""
         tool, _ = _make_tool(files={})
-        with pytest.raises(FunctionToolError, match="File not found"):
+        with pytest.raises(FunctionToolError, match="File not found") as exc_info:
             await tool.handler(json.dumps({"path": "/workspace/agent/missing.txt"}))
+        message = str(exc_info.value)
+        assert "/workspace/agent" in message
+        assert "import_file" not in message
+        assert "present_file" not in message
 
     async def test_binary_file_utf8_decode_error(self) -> None:
         """Non-UTF-8 binary file raises FunctionToolError."""

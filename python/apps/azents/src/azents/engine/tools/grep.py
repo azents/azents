@@ -82,13 +82,11 @@ def make_grep_tool(
     *,
     session_storage: FileStorage,
     agent_id: str,
-    user_id: str,
 ) -> FunctionTool:
     """Create grep tool.
 
     :param session_storage: File storage client
     :param agent_id: Agent ID
-    :param user_id: User ID
     :return: grep Tool instance
     """
 

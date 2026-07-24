@@ -108,7 +108,6 @@ def _make_context(
 ) -> TurnContext:
     """Create TurnContext for tests."""
     return TurnContext(
-        user_id=user_id,
         workspace_id="ws-1",
         model="test-model",
         run_id="run-1",

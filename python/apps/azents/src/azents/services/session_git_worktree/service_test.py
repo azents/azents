@@ -690,7 +690,6 @@ async def _create_ready_worktree_session(
         agent_id=agent_id,
         message=InputMessage(
             text=f"start {slug}",
-            user_id=user_id,
             headers=[],
             metadata={"source": "chat"},
             attachments=[],
@@ -1069,7 +1068,6 @@ class TestSessionGitWorktreeService:
             agent_id=agent_id,
             message=InputMessage(
                 text="start worktree",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1134,7 +1132,6 @@ class TestSessionGitWorktreeService:
             agent_id=agent_id,
             message=InputMessage(
                 text="start invalid",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1203,7 +1200,6 @@ class TestSessionGitWorktreeService:
             agent_id=agent_id,
             message=InputMessage(
                 text="start branch",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1250,7 +1246,6 @@ class TestSessionGitWorktreeService:
             agent_id=agent_id,
             message=InputMessage(
                 text="start path",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1301,7 +1296,6 @@ class TestSessionGitWorktreeService:
             agent_id=agent_id,
             message=InputMessage(
                 text="start catalog",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],
@@ -1368,7 +1362,6 @@ class TestSessionGitWorktreeService:
             agent_id=agent_id,
             message=InputMessage(
                 text="start warning",
-                user_id=user_id,
                 headers=[],
                 metadata={"source": "chat"},
                 attachments=[],

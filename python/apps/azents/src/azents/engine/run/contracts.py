@@ -183,12 +183,10 @@ class RunContext:
     Separated from RunRequest (what to run) so worker can inject runtime information
     not yet decided at resolve time.
 
-    :param user_id: User ID; None for unlinked user or system context
     :param run_id: Unique ID for message processing unit
     :param publish_event: Engine event publish callback
     """
 
-    user_id: str | None
     run_id: str
     owner_generation: int
     tool_admission_barrier: ToolAdmissionBarrier

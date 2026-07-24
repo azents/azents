@@ -56,7 +56,6 @@ class _FakeSelectedInstallationStore:
 def _make_turn_context() -> TurnContext:
     """Create TurnContext for tests."""
     return TurnContext(
-        user_id="user-1",
         workspace_id="workspace-1",
         model="test-model",
         run_id="run-1",

@@ -59,7 +59,6 @@ from azents.engine.tools.delete_file import make_delete_file_tool
 from azents.engine.tools.edit import RuntimeEditTarget, make_edit_tool
 from azents.engine.tools.glob import make_glob_tool
 from azents.engine.tools.grep import make_grep_tool
-from azents.engine.tools.import_file import make_import_file_tool
 from azents.engine.tools.memory import (
     make_delete_memory_tool,
     make_get_memory_tool,
@@ -67,8 +66,6 @@ from azents.engine.tools.memory import (
     make_save_memory_tool,
     make_search_memories_tool,
 )
-from azents.engine.tools.present_file import make_present_file_tool
-from azents.engine.tools.read_image import make_read_image_tool
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContext,
@@ -119,7 +116,9 @@ logger = logging.getLogger(__name__)
 _MEMORY_READ_RULES_PROMPT = dedent("""\
     ### Memory Rules
 
-    Use the loaded memory summaries as the primary index. Call `get_memory` directly when a likely candidate is visible; use `list_memories` or `search_memories` only for discovery.
+    Team Session execution exposes shared Agent Memory only. User-scope Memory is unavailable.
+
+    Use the loaded Agent Memory summaries as the primary index. Call `get_memory` directly when a likely candidate is visible; use `list_memories` or `search_memories` only for discovery.
 
     #### Memory lookup
 
@@ -127,35 +126,24 @@ _MEMORY_READ_RULES_PROMPT = dedent("""\
 
     #### Types of memory
 
-    **user** — User's role, expertise, preferences.
-    - Scope: Always `user`.
+    **user** — Shared audience, role, or expertise context appropriate for every user of this Agent.
 
-    **feedback** — Behavioral corrections AND confirmations.
-    - Scope: Personal preference → `user`. Team rule → `agent`.
+    **feedback** — Shared behavioral rules and confirmations.
     - Body: Lead with the rule, then **Why:** and **When to apply:** lines.
 
     **project** — Ongoing work, decisions, deadlines.
-    - Scope: Team context → `agent`. Personal work → `user`.
     - Always convert relative dates to absolute dates.
 
     **reference** — Pointers to external systems.
-    - Scope: Almost always `agent`.
-
-    #### Scope selection
-
-    - `agent` scope: team-wide knowledge shared with ALL users of this agent.
-    - `user` scope: personal preferences and context only for this specific user.
-
-    When Agent and User memories conflict on the same topic, follow the User memory because it represents this user's specific preference.
 
     Memories are snapshots from when they were written. Before acting on a memory, verify it against current state. If stale, avoid relying on it.""")  # noqa: E501
 
 _MEMORY_WRITE_RULES_PROMPT = dedent("""\
     ### Memory Write Rules
 
-    Use `save_memory` to store durable information and `delete_memory` to remove stale or unwanted memories.
+    Use `save_memory` with `agent` scope to store durable shared information and `delete_memory` to remove stale or unwanted entries.
 
-    If the user explicitly asks you to remember something, save it immediately using the memory type and scope guidance from Memory Rules. If they ask you to forget something, use `delete_memory` to remove the relevant entry.
+    Save information only when it is appropriate for every user of this Agent. Do not store private personal preferences as shared Agent Memory.
 
     #### What NOT to save
 
@@ -174,51 +162,24 @@ async def collect_memory_prompt(
     repo: MemoryRepository,
     session: AsyncSession,
     agent_id: str,
-    user_id: str,
     rules_prompt: str,
 ) -> str:
-    """Look up memory summaries from DB and create prompt string.
-
-    When index is absent, return only rules. When agent_id or user_id is empty,
-    omit that section.
-    """
+    """Look up Agent-scope Memory summaries for Team execution."""
     parts: list[str] = [
         "## Memories",
         "",
         "You have a persistent memory system. Memories persist across conversations.",
         "",
     ]
-
-    agent_summaries: list[MemorySummary] = []
-    user_summaries: list[MemorySummary] = []
-
-    if agent_id:
-        agent_summaries = await repo.list_summaries(
-            session,
-            agent_id=agent_id,
-            user_id=None,
-        )
-    if user_id:
-        user_summaries = await repo.list_summaries(
-            session,
-            agent_id=agent_id,
-            user_id=user_id,
-        )
-
+    agent_summaries = await repo.list_summaries(
+        session,
+        agent_id=agent_id,
+        user_id=None,
+    )
     if agent_summaries:
         parts.extend(["### Agent Memories (shared with all users)", ""])
         parts.extend(_format_summaries(agent_summaries))
         if len(agent_summaries) >= _MAX_MEMORY_SUMMARIES:
-            parts.append(
-                f"(Showing {_MAX_MEMORY_SUMMARIES} memories. "
-                "Consider cleaning up old memories with delete_memory.)"
-            )
-        parts.append("")
-
-    if user_summaries:
-        parts.extend(["### Your Memories about this User", ""])
-        parts.extend(_format_summaries(user_summaries))
-        if len(user_summaries) >= _MAX_MEMORY_SUMMARIES:
             parts.append(
                 f"(Showing {_MAX_MEMORY_SUMMARIES} memories. "
                 "Consider cleaning up old memories with delete_memory.)"
@@ -386,7 +347,6 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return memory read tools."""
-        user_id = context.user_id
         tools: list[FunctionTool] = []
         if self._config.memory_enabled:
             tools.extend(
@@ -394,19 +354,16 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
                     make_list_memories_tool(
                         self.memory_repo,
                         self._agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                     make_get_memory_tool(
                         self.memory_repo,
                         self._agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                     make_search_memories_tool(
                         self.memory_repo,
                         self._agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                 ]
@@ -422,7 +379,6 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
                 self.memory_repo,
                 mem_session,
                 self._agent_id,
-                context.user_id or "",
                 _MEMORY_READ_RULES_PROMPT,
             )
 
@@ -459,7 +415,6 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return memory write tools."""
-        user_id = context.user_id
         tools: list[FunctionTool] = []
         if self._config.memory_enabled:
             tools.extend(
@@ -467,13 +422,11 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
                     make_save_memory_tool(
                         self.memory_repo,
                         self._agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                     make_delete_memory_tool(
                         self.memory_repo,
                         self._agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                 ]
@@ -527,7 +480,6 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         """Return builtin tools independent of Runtime Runner."""
         config = self._config
         agent_id = self._agent_id
-        user_id = context.user_id
 
         tools: list[FunctionTool] = []
         if config.memory_enabled:
@@ -536,31 +488,26 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
                     make_save_memory_tool(
                         self.memory_repo,
                         agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                     make_list_memories_tool(
                         self.memory_repo,
                         agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                     make_get_memory_tool(
                         self.memory_repo,
                         agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                     make_search_memories_tool(
                         self.memory_repo,
                         agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                     make_delete_memory_tool(
                         self.memory_repo,
                         agent_id,
-                        user_id,
                         self.session_manager,
                     ),
                 ]
@@ -578,7 +525,6 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
                 self.memory_repo,
                 mem_session,
                 self._agent_id,
-                context.user_id or "",
                 f"{_MEMORY_READ_RULES_PROMPT}\n\n{_MEMORY_WRITE_RULES_PROMPT}",
             )
 
@@ -702,9 +648,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         :param context: Context passed each turn
         :return: Current state (tools + prompt)
         """
-        agent_id = self._agent_id
         runtime_agent_id = self._runtime_agent_id
-        user_id = context.user_id
 
         file_ss = RuntimeRunnerFileStorage(
             runner_operations=self.runner_operations,
@@ -749,56 +693,25 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             agent_id=runtime_agent_id,
         )
         file_tools = [
-            make_read_image_tool(
-                session_storage=file_ss,
-                model_file_service=self.model_file_service,
-                session_id=self._session_id,
-                agent_id=agent_id,
-                user_id=user_id or "",
-                run_index=context.run_index,
-            ),
-            make_import_file_tool(
-                session_storage=file_ss,
-                exchange_file_service=self.exchange_file_service,
-                artifact_service=self.artifact_service,
-                vfs_projection_service=self.vfs_projection_service,
-                session_id=self._session_id,
-                agent_id=agent_id,
-                workspace_id=context.workspace_id,
-                run_id=context.run_id,
-                user_id=user_id or "",
-            ),
-            make_present_file_tool(
-                session_storage=file_ss,
-                exchange_file_service=self.exchange_file_service,
-                session_id=self._session_id,
-                agent_id=agent_id,
-                user_id=user_id or "",
-            ),
             make_read_text_tool(
                 session_storage=file_ss,
-                agent_id=agent_id,
-                user_id=user_id or "",
-            ),
-            make_delete_file_tool(
-                session_storage=file_ss,
-                agent_id=agent_id,
-                user_id=user_id or "",
+                agent_id=self._agent_id,
             ),
             make_write_tool(
                 session_storage=file_ss,
-                agent_id=agent_id,
-                user_id=user_id or "",
+                agent_id=self._agent_id,
+            ),
+            make_delete_file_tool(
+                session_storage=file_ss,
+                agent_id=self._agent_id,
             ),
             make_glob_tool(
                 session_storage=file_ss,
-                agent_id=agent_id,
-                user_id=user_id or "",
+                agent_id=self._agent_id,
             ),
             make_grep_tool(
                 session_storage=file_ss,
-                agent_id=agent_id,
-                user_id=user_id or "",
+                agent_id=self._agent_id,
             ),
         ]
         tools = [
@@ -851,9 +764,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             await self._load_projects(session_id=self._session_id),
             key=lambda project: project.path,
         )
+        del context
         return self._render_config_prompt(
-            has_agent_id=bool(self._agent_id),
-            user_id=context.user_id,
             projects=projects,
         )
 
@@ -888,53 +800,22 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     def _render_config_prompt(
         self,
         *,
-        has_agent_id: bool,
-        user_id: str | None,
         projects: list[SessionWorkspaceProject],
     ) -> str:
-        """Return domain allow/block settings and accessible scope prompt.
-
-        :param has_agent_id: Whether agent_id is present
-        :param user_id: User ID. When None, do not display user folder path
-        :return: Settings prompt
-        """
+        """Return domain allow/block settings and accessible scope prompt."""
         parts: list[str] = []
         scope_lines = [
-            "## Runtime Files",
+            "## Runtime Workspace",
             "",
             "Use absolute filesystem paths inside the runtime workspace.",
-            "Prefer the dedicated file tools for filesystem operations: use `read` "
-            "instead of `cat`, `grep` instead of shell `grep`/`rg`, and "
-            "`write`/`edit` instead of shell redirection or `sed` whenever "
-            "possible. Use `exec_command` for command execution, package "
-            "installation, and cases where no dedicated tool fits. Use "
-            "`write_stdin` with empty chars to poll a running process.",
-            "Tool results may include `<system-reminder>` blocks with relevant "
-            "AGENTS.md instructions for files you read. Follow those instructions "
-            "for the paths they apply to.",
+            "Prefer dedicated file tools for workspace operations: use `read`, "
+            "`write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as "
+            "appropriate. Use `exec_command` for command execution and "
+            "`write_stdin` to interact with a running process.",
             "Recommended locations:",
             "- `/workspace/agent/` — Durable working files for this agent runtime",
             "- `/tmp/` — Temporary scratch space for the current runtime instance",
         ]
-        if user_id:
-            scope_lines.append(
-                "Use `import_file` for user uploads and `present_file` to share "
-                "new or edited files back to the user."
-            )
-            if "import_file" not in self._excluded_tools:
-                scope_lines.extend(
-                    [
-                        "Files shared through `exchange://` or `artifact://` URIs "
-                        "are temporary and may expire.",
-                        "Do not rely on those URIs for long-term storage across "
-                        "future turns. If a file is needed for later work, use "
-                        "`import_file` and continue from the returned local path "
-                        "inside the runtime workspace.",
-                        "Managed `azents://` resources are read-only and immutable "
-                        "for the current run. Use `import_file` to materialize one "
-                        "into the runtime workspace before reading or editing it.",
-                    ]
-                )
         if projects:
             scope_lines.extend(
                 [
@@ -973,34 +854,16 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         You can execute commands, install packages, and run code.
         The runtime workspace persists across calls for this agent.
 
-        ### File Storage
+        ### Runtime Workspace
 
-        Your runtime working directory is `/workspace/agent/`. It persists across turns for this agent runtime and is the default place for files you create or edit.
+        Your runtime working directory is `/workspace/agent/`. It persists across turns for this agent runtime and is the default place for files you create or edit. `/tmp/` is temporary scratch space.
 
-        Use absolute filesystem paths inside the runtime workspace. `/workspace/agent/` is the durable working directory for this agent runtime. `/tmp/` is temporary scratch space. `/tmp/agent/imports/` is where `import_file` places attached files by default; this location is transient, so copy important files to a durable working directory before presenting them.
-
-        Prefer the dedicated file tools for filesystem operations: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, and `write`/`edit` instead of shell redirection or `sed` whenever possible. Use `exec_command` for command execution, package installation, and cases where no dedicated tool fits. Use `write_stdin` with empty chars to poll a running process.
+        Prefer dedicated file tools for filesystem operations: use `read`, `write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as appropriate. Use `exec_command` for command execution, package installation, and cases where no dedicated tool fits. Use `write_stdin` with empty chars to poll a running process.
 
         | Path | Persistence | Usage |
         |------|-------------|-------|
-        | `/workspace/agent/` | Durable for this agent runtime | Working files, outputs, edited imports |
-        | `/tmp/` | Ephemeral | Temporary files |
-        | `/tmp/agent/imports/` | Ephemeral | Default destination for imported exchange files |
-
-        To share files with the user, use `present_file` with absolute paths:
-
-        ```bash
-        cp ./output.csv /workspace/agent/output.csv
-        # Then use present_file with the full path
-        ```
-
-        Files shared through `exchange://` or `artifact://` URIs are temporary and may expire. Do not rely on those URIs for long-term storage across future turns. If a file should be kept for later work, use `import_file` and continue from the returned local path inside the runtime workspace.
-
-        Managed `azents://` resources are read-only and immutable for the current run. Use `import_file` to materialize a managed resource into the runtime workspace before reading or editing it.
-
-        When the user attaches an `exchange://...` or `artifact://...` file-location URI, use `import_file` to copy it into the runtime workspace before reading or editing it.
-
-        After creating files, use `present_file` to export them as `exchange://...` attachments for the user.""")  # noqa: E501
+        | `/workspace/agent/` | Durable for this agent runtime | Working files and outputs |
+        | `/tmp/` | Ephemeral | Temporary files |""")  # noqa: E501
     config_model = ShellToolkitConfig
 
     def __init__(

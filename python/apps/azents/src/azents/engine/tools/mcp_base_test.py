@@ -104,7 +104,6 @@ _session_manager = _FakeSessionManager()
 def _context() -> TurnContext:
     """Create turn context fixture."""
     return TurnContext(
-        user_id="user-1",
         workspace_id="workspace-1",
         model="model",
         run_id="run-1",

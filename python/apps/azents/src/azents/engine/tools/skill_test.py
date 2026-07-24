@@ -346,7 +346,6 @@ class TestSkillToolkit:
             session_id="session-1",
         )
         context = TurnContext(
-            user_id="user-1",
             workspace_id="workspace-current",
             model="test-model",
             run_id="run-1",

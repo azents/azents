@@ -45,7 +45,6 @@ from azents.engine.tools.kubernetes_discovery import ResourceDiscoveryCache
 def _make_context() -> TurnContext:
     """Create TurnContext for tests."""
     return TurnContext(
-        user_id="user-1",
         workspace_id="ws-1",
         model="test-model",
         run_id="run-1",
@@ -61,7 +60,6 @@ def _make_resolve_context(credentials_json: str) -> ResolveContext:
         credentials_json=credentials_json,
         agent_id="agent-1",
         session_id="session-1",
-        user_id="user-1",
         session=AsyncMock(spec=AsyncSession),
         web_url="https://test.example.com",
         oauth_secret_key="test-key",

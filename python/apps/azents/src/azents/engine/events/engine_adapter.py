@@ -540,7 +540,7 @@ class AgentEngineAdapter:
         model_file_materializer = ModelFileMaterializer(
             model_file_service=self.model_file_service,
             resolver=model_file_resolver,
-            user_id=context.user_id,
+            user_id=None,
             agent_id=request.agent_id,
         )
         hook_dispatcher = RuntimeHookDispatcher()
@@ -597,7 +597,6 @@ class AgentEngineAdapter:
             candidate_catalog = await build_tool_catalog(
                 toolkit_bindings=request.toolkits,
                 context=TurnContext(
-                    user_id=context.user_id,
                     workspace_id=request.workspace_id,
                     model=model,
                     run_id=context.run_id,
@@ -968,7 +967,7 @@ class AgentEngineAdapter:
             workspace_id=request.workspace_id,
             agent_id=request.agent_id,
             session_id=request.session_id,
-            user_id=context.user_id,
+            user_id=None,
             run_id=context.run_id,
             run_index=run_state.run_index,
         )

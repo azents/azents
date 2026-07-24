@@ -160,7 +160,6 @@ def _toolkit_resolve_log_extra(
         "agent_id": agent_id,
         "session_id": context.session_id,
         "workspace_id": context.workspace_id,
-        "user_id": context.user_id,
         "source": source,
         "toolkit_slug": slug,
         "toolkit_type": toolkit_type,
@@ -690,19 +689,6 @@ async def resolve_invoke_input_with_model_source(
     for msg in invoke_input.messages:
         msg_attachments: list[RuntimeAttachment] = []
         msg_file_parts: list[FileOutputPart] = list(msg.file_parts)
-        if msg.attachments and invoke_input.user_id is not None:
-            materialized = await materialize_user_input_exchange_file_attachments(
-                msg.attachments,
-                agent_id=invoke_input.agent_id,
-                session_id=invoke_input.session_id,
-                exchange_file_service=exchange_file_service,
-                model_file_service=(None if msg_file_parts else model_file_service),
-                user_id=invoke_input.user_id,
-            )
-            msg_attachments.extend(materialized.attachments)
-            if not msg_file_parts:
-                msg_file_parts.extend(materialized.file_parts)
-
         user_messages.append(
             make_run_user_message(
                 sender_user_id=None,
@@ -1212,8 +1198,8 @@ def _attachment_text_preview(
         return None
     return (
         f"File {availability} as {file.uri}. "
-        "Use the import_file tool in a runtime-enabled agent to read or edit "
-        f"this file. Filename: {file.filename}. "
+        "Its contents are unavailable to Runtime tools in this run. "
+        f"Filename: {file.filename}. "
         f"Media type: {file.media_type}. Size: {file.size_bytes} bytes."
     )
 
@@ -1378,7 +1364,6 @@ async def resolve_agent_tools(
             credentials_json=toolkit.credentials,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            user_id=context.user_id,
             session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
@@ -1451,7 +1436,6 @@ async def resolve_agent_tools(
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
-                    user_id=context.user_id,
                     session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
@@ -1494,7 +1478,6 @@ async def resolve_agent_tools(
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
-                    user_id=context.user_id,
                     session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
@@ -1539,7 +1522,6 @@ async def resolve_agent_tools(
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
-                    user_id=context.user_id,
                     session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
@@ -1598,7 +1580,6 @@ async def resolve_agent_tools(
                         credentials_json=None,
                         agent_id=context.agent_id,
                         session_id=context.session_id,
-                        user_id=context.user_id,
                         session=None,
                         web_url=web_url,
                         oauth_secret_key=oauth_secret_key,
@@ -1649,7 +1630,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            user_id=context.user_id,
             session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
@@ -1694,7 +1674,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            user_id=context.user_id,
             session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
@@ -1742,7 +1721,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            user_id=context.user_id,
             session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
@@ -1793,7 +1771,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            user_id=context.user_id,
             session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
@@ -1841,7 +1818,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            user_id=context.user_id,
             session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
@@ -1911,7 +1887,6 @@ def _auto_toolkit_source_revision(
         "context_identity": {
             "agent_id": context.agent_id,
             "session_id": context.session_id,
-            "user_id": context.user_id,
             "workspace_id": context.workspace_id,
         },
         "execution_mode": execution_mode.value,

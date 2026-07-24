@@ -954,7 +954,6 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
-                user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
@@ -1196,7 +1195,6 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
-                user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
@@ -1441,7 +1439,6 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
-                user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
@@ -1658,7 +1655,6 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
             model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-            user_id="user-1",
             run_id="0" * 32,
             publish_event=_noop_publish,
         ),
@@ -1710,7 +1706,6 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
-                user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
@@ -1760,7 +1755,6 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
             model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-            user_id="user-1",
             run_id="0" * 32,
             publish_event=_noop_publish,
         ),
@@ -1816,7 +1810,6 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
-                user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
@@ -1870,7 +1863,6 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
-                user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
@@ -1936,7 +1928,6 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
-                user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
@@ -2013,7 +2004,6 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
-                user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
@@ -2083,7 +2073,6 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
-                user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
@@ -2539,7 +2528,6 @@ def _run_context() -> RunContext:
         owner_generation=1,
         tool_admission_barrier=_OpenToolAdmissionBarrier(),
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-        user_id="user-1",
         run_id="0" * 32,
         publish_event=_noop_publish,
     )

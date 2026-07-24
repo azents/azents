@@ -29,13 +29,11 @@ def make_delete_file_tool(
     *,
     session_storage: FileStorage,
     agent_id: str,
-    user_id: str,
 ) -> FunctionTool:
     """Create delete_file tool.
 
     :param session_storage: File storage client
     :param agent_id: Agent ID
-    :param user_id: User ID
     :return: delete_file Tool instance
     """
 
