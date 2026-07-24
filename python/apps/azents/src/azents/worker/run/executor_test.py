@@ -200,6 +200,7 @@ class _PendingRun:
     """Minimal pending-run projection for executor tests."""
 
     id: str = "run-001"
+    run_index: int = 1
     requested_model_target_label: str | None = "default"
     requested_reasoning_effort: ModelReasoningEffort | None = None
     inference_profile_source: InferenceProfileSource = (

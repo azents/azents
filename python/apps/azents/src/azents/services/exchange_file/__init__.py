@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
+    AgentRunStatus,
+    AgentSessionStatus,
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
@@ -469,7 +471,11 @@ class ExchangeFileService:
         try:
             await self._upload_prepared_files(prepared)
             async with self.session_manager() as session:
-                if not await self._has_valid_resource_authority(session, authority):
+                if not await self._has_valid_resource_authority(
+                    session,
+                    authority,
+                    lock=True,
+                ):
                     return Failure(FileAccessDenied())
                 created = await self._persist_prepared_files(session, prepared)
             succeeded = True
@@ -510,7 +516,18 @@ class ExchangeFileService:
         )
         if body is None:
             return Failure(FileUnavailable())
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(FileAccessDenied())
         return Success(ExchangeFileDownload(file=file, body=body))
+
+    async def validate_resource_authority(
+        self,
+        authority: SessionResourceAuthority,
+    ) -> bool:
+        """Revalidate authority for an internal non-Exchange resource operation."""
+        async with self.session_manager() as session:
+            return await self._has_valid_resource_authority(session, authority)
 
     async def claim_input_attachments(
         self,
@@ -1368,17 +1385,26 @@ class ExchangeFileService:
         self,
         session: AsyncSession,
         authority: SessionResourceAuthority,
+        *,
+        lock: bool = False,
     ) -> bool:
         """Validate canonical Session/Run authority for internal file access."""
-        agent_session = await self.agent_session_repository.get_by_id(
-            session,
-            authority.session_id,
-        )
+        if lock:
+            agent_session = await self.agent_session_repository.lock_by_id(
+                session,
+                authority.session_id,
+            )
+        else:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                authority.session_id,
+            )
         if (
             agent_session is None
             or agent_session.workspace_id != authority.workspace_id
             or agent_session.agent_id != authority.agent_id
             or agent_session.owner_generation != authority.owner_generation
+            or agent_session.status is not AgentSessionStatus.ACTIVE
         ):
             return False
         root = await self.agent_session_repository.get_root_session_agent_by_session_id(
@@ -1387,14 +1413,34 @@ class ExchangeFileService:
         )
         if root is None or root.agent_session_id != authority.root_session_id:
             return False
-        run = await self.agent_run_repository.get_by_id(
-            session,
-            authority.run_id,
-        )
+        if authority.root_session_id == authority.session_id:
+            root_session = agent_session
+        else:
+            root_session = await self.agent_session_repository.get_by_id(
+                session,
+                authority.root_session_id,
+            )
+        if (
+            root_session is None
+            or root_session.workspace_id != authority.workspace_id
+            or root_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            return False
+        if lock:
+            run = await self.agent_run_repository.lock_by_id(
+                session,
+                authority.run_id,
+            )
+        else:
+            run = await self.agent_run_repository.get_by_id(
+                session,
+                authority.run_id,
+            )
         return (
             run is not None
             and run.session_id == authority.session_id
             and run.run_index == authority.run_index
+            and run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
         )
 
     async def _has_workspace_access(
