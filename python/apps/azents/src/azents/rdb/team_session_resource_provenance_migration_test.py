@@ -186,7 +186,11 @@ def test_team_session_resource_provenance_migrations(
             exchange_provenance = connection.execute(
                 sa.text(
                     """
-                    SELECT provenance_kind, source_user_id, source_run_id
+                    SELECT
+                        provenance_kind,
+                        source_user_id,
+                        source_run_id,
+                        created_by_user_id
                     FROM exchange_files
                     WHERE id = :exchange_file_id
                     """
@@ -208,7 +212,8 @@ def test_team_session_resource_provenance_migrations(
         assert exchange_provenance.provenance_kind == "migration"
         assert exchange_provenance.source_user_id == _USER_ID
         assert exchange_provenance.source_run_id is None
-        assert "created_by_user_id" not in exchange_columns
+        assert exchange_provenance.created_by_user_id == _USER_ID
+        assert "created_by_user_id" in exchange_columns
     finally:
         try:
             next(migration_database)
