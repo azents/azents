@@ -42,6 +42,7 @@ const meta = {
   args: {
     handle: "engineering",
     agent,
+    automaticProjectsCount: 2,
   },
 } satisfies Meta<typeof AgentSettingsHub>;
 

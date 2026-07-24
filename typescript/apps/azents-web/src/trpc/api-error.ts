@@ -11,13 +11,59 @@ export type TRPCErrorCode = ConstructorParameters<typeof TRPCError>[0]["code"];
 
 /** API server HTTP error (status code + response body included) */
 export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly body: unknown,
-  ) {
+  public readonly status: number;
+  public readonly body: unknown;
+
+  constructor(status: number, body: unknown) {
     super(extractDetail(body));
     this.name = "ApiError";
+    this.status = status;
+    this.body = body;
   }
+}
+
+export interface ApiErrorProjection {
+  code: string | null;
+  message: string;
+  path: string | null;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null
+    ? Object.fromEntries(Object.entries(value))
+    : null;
+}
+
+function detailRecord(body: unknown): Record<string, unknown> | null {
+  const bodyRecord = recordValue(body);
+  return bodyRecord ? recordValue(bodyRecord.detail) : null;
+}
+
+function detailCode(detail: Record<string, unknown> | null): string | null {
+  const code = detail?.code;
+  if (
+    typeof code === "string" &&
+    code.startsWith("automatic_session_projects_")
+  ) {
+    return code;
+  }
+  if (typeof detail?.path === "string") {
+    return "automatic_session_projects_invalid_path";
+  }
+  return null;
+}
+
+export function projectApiError(error: unknown): ApiErrorProjection | null {
+  if (!(error instanceof ApiError)) {
+    return null;
+  }
+  const detail = detailRecord(error.body);
+  const path = detail?.path;
+  return {
+    code: detailCode(detail),
+    message: error.message,
+    path: typeof path === "string" ? path : null,
+  };
 }
 
 /** Extract detail message from API error body */
@@ -45,11 +91,11 @@ function extractDetail(error: unknown): string {
           .join(", ") || "Invalid input."
       );
     }
-    // If detail is structured object, serialize JSON (downstream can parse it)
+    // Structured application errors expose their bounded user-facing message.
     if (typeof detail === "object" && detail !== null) {
       const msg = "message" in detail ? detail.message : null;
       if (typeof msg === "string") {
-        return JSON.stringify(detail);
+        return msg;
       }
     }
   }

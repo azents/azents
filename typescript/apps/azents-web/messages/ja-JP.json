@@ -672,6 +672,10 @@
           "label": "Runtime and deletion",
           "description": "Reset runtime state or delete this agent"
         },
+        "projects": {
+          "label": "デフォルトプロジェクト",
+          "description": "自動作成されるルートセッションに追加するプロジェクトです。"
+        },
         "values": {
           "active": "Active",
           "inactive": "Inactive",
@@ -679,7 +683,9 @@
           "disabled": "Disabled",
           "shellEnabled": "Shell on",
           "shellDisabled": "Shell off",
-          "subagents": "最大 {count} · 深さ {depth}"
+          "subagents": "最大 {count} · 深さ {depth}",
+          "none": "なし",
+          "projects": "{count} 件のプロジェクト"
         },
         "subagents": {
           "label": "Subagents",
@@ -688,6 +694,36 @@
         "channels": {
           "label": "外部チャンネル",
           "description": "Slack 接続、ルート、参加者アクセス"
+        }
+      },
+      "automaticProjects": {
+        "title": "デフォルトプロジェクト",
+        "description": "自動作成されるルートセッションで利用する Agent Workspace の既存フォルダーを選択します。",
+        "listTitle": "自動セッションのプロジェクト",
+        "listDescription": "明示的なワークスペース選択なしでルートセッションを作成すると、これらのフォルダーが追加されます。",
+        "addProject": "プロジェクトを追加",
+        "empty": "自動セッションは現在、登録済みプロジェクトなしで開始します。",
+        "saveChanges": "変更を保存",
+        "saved": "変更を保存しました",
+        "unsaved": "未保存の変更",
+        "moveUp": "上へ移動",
+        "moveDown": "下へ移動",
+        "removeProject": "プロジェクトを削除",
+        "errorTitle": "プロジェクトを保存できません",
+        "conflictTitle": "別の場所で設定が変更されました",
+        "runtimeUnavailableTitle": "Runtime を利用できません",
+        "missingTitle": "プロジェクトが見つかりません",
+        "missingDescription": "設定されたプロジェクトの一部が見つかりません。",
+        "validationTitle": "プロジェクトを保存できません",
+        "startRuntime": "Runtime を開始",
+        "retrySave": "保存を再試行",
+        "reloadLatest": "最新の設定を再読み込み",
+        "status": {
+          "available": "利用可能",
+          "missing": "見つかりません",
+          "unavailable": "利用不可",
+          "error": "エラー",
+          "unchecked": "未確認"
         }
       },
       "settingsLayout": {
@@ -1346,6 +1382,23 @@
     "nameRequired": "名前を入力してください",
     "connectedAccounts": "接続済みアカウント",
     "noInstalledPlatforms": "このワークスペースに接続されたチャットプラットフォームがありません。"
+  },
+  "agentWorkspacePicker": {
+    "projectPickerTitle": "Project フォルダーを選択",
+    "projectPickerDescription": "Agent Workspace のフォルダーを選択するには Runtime が実行中である必要があります。",
+    "projectPickerSelectCurrent": "現在のフォルダーを選択",
+    "projectPickerCurrentPath": "現在のパス",
+    "projectPickerNoDirectories": "子フォルダーはありません。",
+    "projectPickerSelectDirectory": "フォルダーを選択",
+    "workspacePanel": {
+      "restoringRuntime": "Runtime を準備中…",
+      "refresh": "更新",
+      "controlUnavailableTitle": "Workspace を操作できません",
+      "restartRuntime": "Runtime を再起動",
+      "inactiveTitle": "Runtime が停止しています",
+      "inactiveDescription": "Agent Workspace のフォルダーを参照するには Runtime を開始してください。"
+    },
+    "projectPickerStartRuntime": "Runtime を開始"
   },
   "chat": {
     "inheritModelProvider": "継承",

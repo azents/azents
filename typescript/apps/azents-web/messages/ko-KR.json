@@ -672,6 +672,10 @@
           "label": "Runtime 및 삭제",
           "description": "Runtime 상태를 초기화하거나 에이전트를 삭제"
         },
+        "projects": {
+          "label": "기본 프로젝트",
+          "description": "자동으로 생성되는 루트 세션에 추가할 프로젝트입니다."
+        },
         "values": {
           "active": "활성",
           "inactive": "비활성",
@@ -679,7 +683,9 @@
           "disabled": "사용 안 함",
           "shellEnabled": "Shell 켜짐",
           "shellDisabled": "Shell 꺼짐",
-          "subagents": "최대 {count}개 · 깊이 {depth}"
+          "subagents": "최대 {count}개 · 깊이 {depth}",
+          "none": "없음",
+          "projects": "프로젝트 {count}개"
         },
         "subagents": {
           "label": "서브에이전트",
@@ -688,6 +694,36 @@
         "channels": {
           "label": "외부 채널",
           "description": "Slack 연결, 라우트, 참여자 접근 권한"
+        }
+      },
+      "automaticProjects": {
+        "title": "기본 프로젝트",
+        "description": "자동으로 생성되는 루트 세션에서 사용할 Agent Workspace의 기존 폴더를 선택하세요.",
+        "listTitle": "자동 세션 프로젝트",
+        "listDescription": "명시적인 워크스페이스 선택 없이 루트 세션을 만들 때 이 기존 폴더들이 추가됩니다.",
+        "addProject": "프로젝트 추가",
+        "empty": "자동 세션은 현재 등록된 프로젝트 없이 시작합니다.",
+        "saveChanges": "변경 사항 저장",
+        "saved": "모든 변경 사항을 저장했습니다",
+        "unsaved": "저장하지 않은 변경 사항",
+        "moveUp": "위로 이동",
+        "moveDown": "아래로 이동",
+        "removeProject": "프로젝트 제거",
+        "errorTitle": "프로젝트를 저장하지 못했습니다",
+        "conflictTitle": "다른 곳에서 설정이 변경되었습니다",
+        "runtimeUnavailableTitle": "Runtime을 사용할 수 없습니다",
+        "missingTitle": "프로젝트를 찾을 수 없습니다",
+        "missingDescription": "설정된 프로젝트 중 일부를 찾을 수 없습니다.",
+        "validationTitle": "프로젝트를 저장할 수 없습니다",
+        "startRuntime": "Runtime 시작",
+        "retrySave": "저장 재시도",
+        "reloadLatest": "최신 설정 다시 불러오기",
+        "status": {
+          "available": "사용 가능",
+          "missing": "없음",
+          "unavailable": "사용 불가",
+          "error": "오류",
+          "unchecked": "확인되지 않음"
         }
       },
       "settingsLayout": {
@@ -1346,6 +1382,23 @@
     "nameRequired": "이름을 입력해 주세요",
     "connectedAccounts": "연결된 계정",
     "noInstalledPlatforms": "이 워크스페이스에 연결된 채팅 플랫폼이 없습니다."
+  },
+  "agentWorkspacePicker": {
+    "projectPickerTitle": "프로젝트 폴더 선택",
+    "projectPickerDescription": "Agent Workspace 폴더를 선택하려면 Runtime이 실행 중이어야 합니다.",
+    "projectPickerSelectCurrent": "현재 폴더 선택",
+    "projectPickerCurrentPath": "현재 경로",
+    "projectPickerNoDirectories": "하위 폴더가 없습니다.",
+    "projectPickerSelectDirectory": "폴더 선택",
+    "workspacePanel": {
+      "restoringRuntime": "Runtime 준비 중…",
+      "refresh": "새로 고침",
+      "controlUnavailableTitle": "Workspace 제어를 사용할 수 없습니다",
+      "restartRuntime": "Runtime 재시작",
+      "inactiveTitle": "Runtime이 비활성 상태입니다",
+      "inactiveDescription": "Agent Workspace 폴더를 탐색하려면 Runtime을 시작하세요."
+    },
+    "projectPickerStartRuntime": "Runtime 시작"
   },
   "chat": {
     "inheritModelProvider": "상속",
