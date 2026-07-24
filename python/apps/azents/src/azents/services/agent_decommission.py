@@ -262,7 +262,7 @@ class AgentDecommissionService:
                     session,
                     session_id=session_id,
                     stop_request_id=uuid7().hex,
-                    user_id=None,
+                    stop_requester_user_id=None,
                 )
             active = any(
                 item.run_state is AgentSessionRunState.RUNNING for item in tree

@@ -70,6 +70,7 @@ import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
 import { RunRetryCard } from "./RunRetryCard";
 import { ToolActivityGroup } from "./ToolActivityGroup";
+import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type {
   ActionExecutionProjection,
   AuthorizationRequest,
@@ -433,6 +434,8 @@ interface ChatViewProps {
   goal: GoalStateSnapshot;
   /** current session todo snapshot */
   todo: TodoStateSnapshot;
+  /** current member profile available to validate sender provenance */
+  currentWorkspaceProfile?: CurrentWorkspaceProfile | null;
   /** read-only notice shown instead of the composer */
   readOnlyNotice?: string | null;
 }
@@ -476,6 +479,7 @@ export function ChatView({
   workspacePanel,
   goal,
   todo,
+  currentWorkspaceProfile = null,
   readOnlyNotice = null,
 }: ChatViewProps): React.ReactElement {
   const t = useTranslations("chat");
@@ -1486,6 +1490,7 @@ export function ChatView({
                       ))}
                       <MessageBubble
                         message={msg}
+                        currentWorkspaceProfile={currentWorkspaceProfile}
                         dimmed={dimmedByEdit}
                         editable={editableUserMessage}
                         onEdit={() => handleStartEdit(msg)}

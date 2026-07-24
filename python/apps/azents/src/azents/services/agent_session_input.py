@@ -1,6 +1,7 @@
 """AgentSession input enqueue facade."""
 
 import dataclasses
+import hashlib
 from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
@@ -19,6 +20,7 @@ from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.engine.run.input import InputMessage
 from azents.rdb.deps import get_session_manager
+from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -29,6 +31,8 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
+from azents.repos.chat_write_request import ChatWriteRequestRepository
+from azents.repos.chat_write_request.data import ChatWriteRequestCreate
 from azents.repos.input_buffer.data import InputBuffer
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
@@ -62,7 +66,9 @@ class BufferedAgentSessionInputResult:
 
     agent_runtime_id: str
     agent_session_id: str
-    input_buffer: InputBuffer
+    accepted_input_buffer_id: str
+    input_buffer: InputBuffer | None
+    created: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -71,7 +77,9 @@ class CreatedAgentSessionInputResult:
 
     agent_runtime_id: str
     agent_session: AgentSession
-    input_buffer: InputBuffer
+    accepted_input_buffer_id: str
+    input_buffer: InputBuffer | None
+    created: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -94,11 +102,19 @@ class AgentSessionInputSubagentReadOnly:
     """Requested child subagent session does not accept direct human input."""
 
 
+@dataclasses.dataclass(frozen=True)
+class AgentSessionInputIdempotencyConflict:
+    """Client request ID was reused with incompatible input."""
+
+    reason: str
+
+
 AgentSessionInputError = (
     AgentSessionInputSessionNotFound
     | AgentSessionInputWrongAgent
     | AgentSessionInputInactiveSession
     | AgentSessionInputSubagentReadOnly
+    | AgentSessionInputIdempotencyConflict
     | ExchangeFileInputClaimError
     | InvalidProjectPath
 )
@@ -131,6 +147,9 @@ class AgentSessionInputService:
         RootAgentSessionCreationService,
         Depends(RootAgentSessionCreationService),
     ]
+    chat_write_request_repository: Annotated[
+        ChatWriteRequestRepository, Depends(ChatWriteRequestRepository)
+    ]
     session_workspace_project_repository: Annotated[
         SessionWorkspaceProjectRepository, Depends(SessionWorkspaceProjectRepository)
     ]
@@ -151,58 +170,21 @@ class AgentSessionInputService:
         message: InputMessage,
         inference_profile: RequestedInferenceProfile,
         user_id: str,
+        request_payload: dict[str, object],
         client_request_id: str | None = None,
     ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
         """Store user input as durable InputBuffer row."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.lock_by_id(
-                session, agent_session_id
-            )
-            if agent_session is None:
-                return Failure(AgentSessionInputSessionNotFound())
-            if agent_session.agent_id != agent_id:
-                return Failure(AgentSessionInputWrongAgent())
-            if agent_session.status != AgentSessionStatus.ACTIVE:
-                return Failure(AgentSessionInputInactiveSession())
-            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-                return Failure(AgentSessionInputSubagentReadOnly())
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            ):
-                return Failure(AgentSessionInputInactiveSession())
-
-            runtime = await self.agent_runtime_repository.ensure_for_agent(
-                session, agent_id
-            )
-            enqueue_result = await self._enqueue_user_message(
-                session,
-                agent_session=agent_session,
-                message=message,
-                inference_profile=inference_profile,
-                user_id=user_id,
-                client_request_id=client_request_id,
-            )
-            match enqueue_result:
-                case Success(input_buffer):
-                    pass
-                case Failure(error):
-                    await session.rollback()
-                    return Failure(error)
-                case _:
-                    assert_never(enqueue_result)
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                agent_session.id,
-            )
-
-        return Success(
-            BufferedAgentSessionInputResult(
-                agent_runtime_id=runtime.id,
-                agent_session_id=agent_session.id,
-                input_buffer=input_buffer,
-            )
+        return await self._create_buffered_human_input(
+            agent_id=agent_id,
+            agent_session_id=agent_session_id,
+            kind=InputBufferKind.USER_MESSAGE,
+            action=None,
+            message=message,
+            inference_profile=inference_profile,
+            requester_user_id=user_id,
+            request_payload=request_payload,
+            write_type=ChatWriteRequestType.MESSAGE,
+            client_request_id=client_request_id,
         )
 
     async def create_buffered_agent_action_input(
@@ -214,9 +196,38 @@ class AgentSessionInputService:
         message: InputMessage,
         inference_profile: RequestedInferenceProfile,
         user_id: str,
+        request_payload: dict[str, object],
         client_request_id: str | None = None,
     ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
         """Store user action input as durable InputBuffer row."""
+        return await self._create_buffered_human_input(
+            agent_id=agent_id,
+            agent_session_id=agent_session_id,
+            kind=InputBufferKind.ACTION_MESSAGE,
+            action=action,
+            message=message,
+            inference_profile=inference_profile,
+            requester_user_id=user_id,
+            request_payload=request_payload,
+            write_type=ChatWriteRequestType.TURN_ACTION,
+            client_request_id=client_request_id,
+        )
+
+    async def _create_buffered_human_input(
+        self,
+        *,
+        agent_id: str,
+        agent_session_id: str,
+        kind: InputBufferKind,
+        action: dict[str, JSONValue] | None,
+        message: InputMessage,
+        inference_profile: RequestedInferenceProfile,
+        requester_user_id: str,
+        request_payload: dict[str, object],
+        write_type: ChatWriteRequestType,
+        client_request_id: str | None,
+    ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
+        """Authorize and durably admit one Human input in a single transaction."""
         async with self.session_manager() as session:
             agent_session = await self.agent_session_repository.lock_by_id(
                 session, agent_session_id
@@ -229,27 +240,89 @@ class AgentSessionInputService:
                 return Failure(AgentSessionInputInactiveSession())
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(AgentSessionInputSubagentReadOnly())
-            agent = await self.agent_repository.get_by_id(session, agent_id)
+            agent = await self.agent_repository.lock_by_id(session, agent_id)
             if (
                 agent is None
                 or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+                or agent.workspace_id != agent_session.workspace_id
             ):
                 return Failure(AgentSessionInputInactiveSession())
+            if not await self._lock_workspace_access(
+                session,
+                workspace_id=agent_session.workspace_id,
+                user_id=requester_user_id,
+            ):
+                return Failure(AgentSessionInputSessionNotFound())
 
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
             )
+            canonical_request_payload = {
+                **request_payload,
+                "sender_user_id": requester_user_id,
+            }
+            if client_request_id is not None:
+                existing = (
+                    await self.chat_write_request_repository.get_by_client_request_id(
+                        session,
+                        session_id=agent_session.id,
+                        requester_user_id=requester_user_id,
+                        client_request_id=client_request_id,
+                    )
+                )
+                if existing is not None:
+                    if existing.write_type != write_type:
+                        return Failure(
+                            AgentSessionInputIdempotencyConflict(
+                                "Client request ID already used for another write type"
+                            )
+                        )
+                    if existing.payload != canonical_request_payload:
+                        return Failure(
+                            AgentSessionInputIdempotencyConflict(
+                                "Client request ID already used for another payload"
+                            )
+                        )
+                    input_buffer = await self.input_buffer_service.get_by_id(
+                        session,
+                        buffer_id=existing.accepted_id,
+                    )
+                    if (
+                        input_buffer is not None
+                        and input_buffer.session_id != agent_session.id
+                    ):
+                        raise RuntimeError(
+                            "Human input idempotency record resolved outside "
+                            "its Session"
+                        )
+                    return Success(
+                        BufferedAgentSessionInputResult(
+                            agent_runtime_id=runtime.id,
+                            agent_session_id=agent_session.id,
+                            accepted_input_buffer_id=existing.accepted_id,
+                            input_buffer=input_buffer,
+                            created=False,
+                        )
+                    )
+
             result = await self.input_buffer_service.enqueue(
                 session,
                 InputBufferEnqueue(
                     session_id=agent_session.id,
-                    kind=InputBufferKind.ACTION_MESSAGE,
+                    kind=kind,
                     scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
-                    actor_user_id=user_id,
+                    sender_user_id=requester_user_id,
                     content=message.text,
-                    idempotency_key=client_request_id,
+                    idempotency_key=(
+                        _human_input_buffer_idempotency_key(
+                            requester_user_id=requester_user_id,
+                            client_request_id=client_request_id,
+                        )
+                        if client_request_id is not None
+                        else None
+                    ),
                     metadata=message.metadata,
                     action=action,
                     attachments=message.attachments,
@@ -260,7 +333,7 @@ class AgentSessionInputService:
                 session,
                 agent_id=agent_session.agent_id,
                 session_id=agent_session.id,
-                user_id=user_id,
+                user_id=requester_user_id,
                 attachment_uris=result.input_buffer.attachments,
             )
             match claim:
@@ -271,6 +344,29 @@ class AgentSessionInputService:
                     return Failure(error)
                 case _:
                     assert_never(claim)
+            if client_request_id is not None:
+                (
+                    record,
+                    created,
+                ) = await self.chat_write_request_repository.create_idempotent(
+                    session,
+                    ChatWriteRequestCreate(
+                        session_id=agent_session.id,
+                        requester_user_id=requester_user_id,
+                        creation_agent_id=None,
+                        client_request_id=client_request_id,
+                        write_type=write_type,
+                        accepted_type=write_type,
+                        accepted_id=result.input_buffer.id,
+                        history_reload_required=False,
+                        payload=canonical_request_payload,
+                    ),
+                )
+                if not created or record.accepted_id != result.input_buffer.id:
+                    raise RuntimeError(
+                        "Session-locked Human input admission lost "
+                        "idempotency ownership"
+                    )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 agent_session.id,
@@ -280,7 +376,9 @@ class AgentSessionInputService:
             BufferedAgentSessionInputResult(
                 agent_runtime_id=runtime.id,
                 agent_session_id=agent_session.id,
+                accepted_input_buffer_id=result.input_buffer.id,
                 input_buffer=result.input_buffer,
+                created=True,
             )
         )
 
@@ -293,21 +391,97 @@ class AgentSessionInputService:
         user_id: str,
         existing_project_paths: list[str],
         setup_actions: list[CreateGitWorktreeAction],
+        request_payload: dict[str, object],
         client_request_id: str | None = None,
     ) -> Result[CreatedAgentSessionInputResult, AgentSessionInputError]:
         """Create a non-primary team AgentSession and store first user input."""
         async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
+            agent = await self.agent_repository.lock_by_id(session, agent_id)
             if agent is None:
                 return Failure(AgentSessionInputSessionNotFound())
             if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
                 return Failure(AgentSessionInputSessionNotFound())
-            if not await self._has_workspace_access(
+            if not await self._lock_workspace_access(
                 session,
                 workspace_id=agent.workspace_id,
                 user_id=user_id,
             ):
                 return Failure(AgentSessionInputSessionNotFound())
+            canonical_request_payload = {
+                **request_payload,
+                "sender_user_id": user_id,
+            }
+            if client_request_id is not None:
+                await self.chat_write_request_repository.lock_session_creation_request(
+                    session,
+                    agent_id=agent_id,
+                    requester_user_id=user_id,
+                    client_request_id=client_request_id,
+                )
+                write_requests = self.chat_write_request_repository
+                existing = await (
+                    write_requests.get_by_session_creation_client_request_id(
+                        session,
+                        agent_id=agent_id,
+                        requester_user_id=user_id,
+                        client_request_id=client_request_id,
+                    )
+                )
+                if existing is not None:
+                    if existing.write_type is not ChatWriteRequestType.MESSAGE:
+                        return Failure(
+                            AgentSessionInputIdempotencyConflict(
+                                "Client request ID already used for another write type"
+                            )
+                        )
+                    if existing.payload != canonical_request_payload:
+                        return Failure(
+                            AgentSessionInputIdempotencyConflict(
+                                "Client request ID already used for another payload"
+                            )
+                        )
+                    agent_session = await self.agent_session_repository.get_by_id(
+                        session,
+                        existing.session_id,
+                    )
+                    if (
+                        agent_session is None
+                        or agent_session.agent_id != agent_id
+                        or agent_session.workspace_id != agent.workspace_id
+                    ):
+                        raise RuntimeError(
+                            "Session creation idempotency record resolved outside "
+                            "its Agent boundary"
+                        )
+                    runtime = await self.agent_runtime_repository.get_by_agent_id(
+                        session,
+                        agent_id,
+                    )
+                    if runtime is None:
+                        raise RuntimeError(
+                            "Session creation idempotency record has no Agent runtime"
+                        )
+                    input_buffer = await self.input_buffer_service.get_by_id(
+                        session,
+                        buffer_id=existing.accepted_id,
+                    )
+                    if (
+                        input_buffer is not None
+                        and input_buffer.session_id != agent_session.id
+                    ):
+                        raise RuntimeError(
+                            "Session creation idempotency record resolved an input "
+                            "outside its Session"
+                        )
+                    return Success(
+                        CreatedAgentSessionInputResult(
+                            agent_runtime_id=runtime.id,
+                            agent_session=agent_session,
+                            accepted_input_buffer_id=existing.accepted_id,
+                            input_buffer=input_buffer,
+                            created=False,
+                        )
+                    )
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
             )
@@ -385,6 +559,28 @@ class AgentSessionInputService:
                     return Failure(error)
                 case _:
                     assert_never(enqueue_result)
+            if client_request_id is not None:
+                (
+                    record,
+                    created,
+                ) = await self.chat_write_request_repository.create_idempotent(
+                    session,
+                    ChatWriteRequestCreate(
+                        session_id=agent_session.id,
+                        requester_user_id=user_id,
+                        creation_agent_id=agent_id,
+                        client_request_id=client_request_id,
+                        write_type=ChatWriteRequestType.MESSAGE,
+                        accepted_type=ChatWriteRequestType.MESSAGE,
+                        accepted_id=input_buffer.id,
+                        history_reload_required=False,
+                        payload=canonical_request_payload,
+                    ),
+                )
+                if not created or record.accepted_id != input_buffer.id:
+                    raise RuntimeError(
+                        "Agent-scoped Session creation lost idempotency ownership"
+                    )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 agent_session.id,
@@ -394,7 +590,9 @@ class AgentSessionInputService:
             CreatedAgentSessionInputResult(
                 agent_runtime_id=runtime.id,
                 agent_session=agent_session,
+                accepted_input_buffer_id=input_buffer.id,
                 input_buffer=input_buffer,
+                created=True,
             )
         )
 
@@ -430,7 +628,7 @@ class AgentSessionInputService:
                             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                             requested_model_target_label=inference_profile.model_target_label,
                             requested_reasoning_effort=inference_profile.reasoning_effort,
-                            actor_user_id=user_id,
+                            sender_user_id=user_id,
                             content="",
                             idempotency_key=(
                                 f"{client_request_id}:setup:{index}"
@@ -465,7 +663,7 @@ class AgentSessionInputService:
                 scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=inference_profile.model_target_label,
                 requested_reasoning_effort=inference_profile.reasoning_effort,
-                actor_user_id=user_id,
+                sender_user_id=user_id,
                 content=message.text,
                 idempotency_key=client_request_id,
                 metadata=message.metadata,
@@ -618,18 +816,20 @@ class AgentSessionInputService:
             case _:
                 assert_never(workspace_result)
 
-    async def _has_workspace_access(
+    async def _lock_workspace_access(
         self,
         session: AsyncSession,
         *,
         workspace_id: str,
         user_id: str,
     ) -> bool:
-        """Return whether the user is a member of the workspace."""
-        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
-            session,
-            workspace_id=workspace_id,
-            user_id=user_id,
+        """Lock and validate current Workspace membership for admission."""
+        workspace_user = (
+            await self.workspace_user_repository.lock_by_workspace_and_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
         )
         return workspace_user is not None
 
@@ -652,6 +852,18 @@ def _dedupe_existing_project_items(
             case _:
                 assert_never(item)
     return deduped
+
+
+def _human_input_buffer_idempotency_key(
+    *,
+    requester_user_id: str,
+    client_request_id: str,
+) -> str:
+    """Derive a requester-scoped legacy InputBuffer idempotency key."""
+    digest = hashlib.sha256(
+        f"{requester_user_id}\x00{client_request_id}".encode()
+    ).hexdigest()
+    return f"human:{digest}"
 
 
 def _default_item_from_workspace_item(

@@ -219,10 +219,10 @@ def _agent_session(
         pending_command_id=None,
         pending_command_name=None,
         pending_command_payload=None,
-        pending_command_user_id=None,
+        pending_command_requester_user_id=None,
         pending_command_created_at=None,
         stop_requested_at=None,
-        stop_requested_by=None,
+        stop_requester_user_id=None,
         stop_request_id=None,
         ended_at=None,
         created_at=_NOW,
@@ -479,11 +479,11 @@ class _AgentSessionRepository:
         *,
         session_id: str,
         stop_request_id: str,
-        user_id: str | None,
+        stop_requester_user_id: str | None,
     ) -> AgentSession | None:
         """Record one target stop request."""
         del session
-        self.stop_requests.append((session_id, stop_request_id, user_id))
+        self.stop_requests.append((session_id, stop_request_id, stop_requester_user_id))
         return self.sessions.get(session_id)
 
 
@@ -1005,6 +1005,7 @@ async def test_send_message_is_queue_only() -> None:
     assert input_service.enqueued[0].kind == InputBufferKind.AGENT_MESSAGE
     assert input_service.enqueued[0].metadata["message_kind"] == "send_message"
     assert input_service.enqueued[0].content == "note"
+    assert input_service.enqueued[0].sender_user_id is None
     assert repo.last_task_updates == [("child-agent", "note")]
     assert repo.message_sent_updates == ["root-agent", "child-agent"]
     assert repo.marked_running == []
@@ -1077,6 +1078,7 @@ async def test_followup_task_wakes_target_child() -> None:
     assert input_service.enqueued[0].kind == InputBufferKind.AGENT_MESSAGE
     assert input_service.enqueued[0].metadata["message_kind"] == "followup_task"
     assert input_service.enqueued[0].content == "work"
+    assert input_service.enqueued[0].sender_user_id is None
     assert repo.last_task_updates == [("child-agent", "work")]
     assert repo.marked_running == ["child-session"]
     assert len(broker.messages) == 1
@@ -1219,7 +1221,7 @@ async def test_interrupt_agent_locks_root_before_stopping_child() -> None:
 
     assert json.loads(cast(str, result)) == {"previous_status": "running"}
     assert repo.locked_session_agents == ["root-agent"]
-    assert repo.stop_requests == [("child-session", "subagent_interrupt", "user-1")]
+    assert repo.stop_requests == [("child-session", "subagent_interrupt", None)]
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionStopSignal)
     assert broker.messages[0].session_id == "child-session"
@@ -1563,6 +1565,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     )
     assert input_service.enqueued[0].metadata["message_kind"] == "spawn_agent"
     assert input_service.enqueued[0].content == "Review it"
+    assert input_service.enqueued[0].sender_user_id is None
     assert repo.locked_session_agents == ["root-agent", "root-agent"]
     assert repo.marked_running == [child.agent_session_id]
     assert len(broker.messages) == 1
@@ -1884,7 +1887,11 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
     ) = await _make_toolkit()
     event_repo = cast(_EventTranscriptRepository, toolkit.event_transcript_repository)
     event_repo.forked_events = [
-        _event(EventKind.USER_MESSAGE, UserMessagePayload(content="Make the PR"), 1000)
+        _event(
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="Make the PR"),
+            1000,
+        )
     ]
     state = await toolkit.update_context(
         TurnContext(

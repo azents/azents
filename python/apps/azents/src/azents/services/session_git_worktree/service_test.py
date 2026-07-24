@@ -51,6 +51,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
+from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
@@ -602,6 +603,7 @@ def _input_service(
             automatic_project_repository=AgentAutomaticProjectRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         ),
+        chat_write_request_repository=ChatWriteRequestRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         exchange_file_service=_ExchangeFileService(),
@@ -701,6 +703,7 @@ async def _create_ready_worktree_session(
                 starting_ref="main",
             )
         ],
+        request_payload={"request": f"worktree-{slug}"},
         client_request_id=f"worktree-{slug}",
     )
     assert isinstance(result, Success)
@@ -753,6 +756,7 @@ class TestSessionGitWorktreeService:
             execution = await ActionExecutionRepository().create(
                 session,
                 ActionExecutionCreate(
+                    sender_user_id=None,
                     id=None,
                     session_id=agent_session.id,
                     input_buffer_id="01900000000070008000000000000002",
@@ -846,6 +850,7 @@ class TestSessionGitWorktreeService:
             execution = await ActionExecutionRepository().create(
                 session,
                 ActionExecutionCreate(
+                    sender_user_id=None,
                     id=None,
                     session_id=agent_session.id,
                     input_buffer_id="01900000000070008000000000000003",
@@ -964,6 +969,7 @@ class TestSessionGitWorktreeService:
             execution = await ActionExecutionRepository().create(
                 session,
                 ActionExecutionCreate(
+                    sender_user_id=None,
                     id=None,
                     session_id=agent_session.id,
                     input_buffer_id="01900000000070008000000000000004",
@@ -1076,6 +1082,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-ready",
         )
 
@@ -1140,6 +1147,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="missing",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-invalid",
         )
 
@@ -1208,6 +1216,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-branch",
         )
 
@@ -1254,6 +1263,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-path",
         )
 
@@ -1304,6 +1314,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-catalog",
         )
 
@@ -1370,6 +1381,7 @@ class TestSessionGitWorktreeService:
                     starting_ref="main",
                 )
             ],
+            request_payload={"request": "worktree"},
             client_request_id="worktree-warning",
         )
 

@@ -1795,6 +1795,7 @@
       "unknownProvenance": "実行の出所情報はまだ利用できません。"
     },
     "editMessage": "編集",
+    "senderUnavailable": "送信者を確認できません",
     "editingMessage": "メッセージを編集中",
     "cancelEdit": "編集をキャンセル",
     "editBlockedDuringRun": "エージェント処理中は編集の送信を停止しています。",

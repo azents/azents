@@ -113,8 +113,8 @@ class AgentSession(BaseModel):
         default=None,
         description="Pending command payload",
     )
-    pending_command_user_id: str | None = Field(
-        default=None, description="Pending command user ID"
+    pending_command_requester_user_id: str | None = Field(
+        default=None, description="Pending command requester User ID"
     )
     pending_command_created_at: datetime.datetime | None = Field(
         default=None,
@@ -124,8 +124,8 @@ class AgentSession(BaseModel):
         default=None,
         description="Stop intent timestamp",
     )
-    stop_requested_by: str | None = Field(
-        default=None, description="Stop requesting user ID"
+    stop_requester_user_id: str | None = Field(
+        default=None, description="Stop requester User ID"
     )
     stop_request_id: str | None = Field(
         default=None, description="Stop request correlation ID"
@@ -181,7 +181,7 @@ class PendingSessionCommand(BaseModel):
     id: str = Field(description="Pending command ID")
     name: str = Field(description="Command name")
     payload: dict[str, object] = Field(description="Command payload")
-    user_id: str | None = Field(description="Command requesting user ID")
+    requester_user_id: str | None = Field(description="Command requester User ID")
     created_at: datetime.datetime = Field(description="Command created timestamp")
 
 

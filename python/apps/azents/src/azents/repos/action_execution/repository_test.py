@@ -83,6 +83,7 @@ async def _create_agent_session(
 def test_validate_event_payload_accepts_create_git_worktree_action() -> None:
     """Action messages accept create_git_worktree TurnAction payloads."""
     payload = ActionMessagePayload(
+        sender_user_id=None,
         action=CreateGitWorktreeAction(
             source_project_path="/workspace/agent/repo",
             starting_ref="main",
@@ -120,6 +121,7 @@ class TestActionExecutionRepository:
         execution = await repo.create(
             rdb_session,
             ActionExecutionCreate(
+                sender_user_id=None,
                 id=None,
                 session_id=session_id,
                 input_buffer_id=input_buffer_id,
@@ -132,6 +134,7 @@ class TestActionExecutionRepository:
         same_execution = await repo.create(
             rdb_session,
             ActionExecutionCreate(
+                sender_user_id=None,
                 id=None,
                 session_id=session_id,
                 input_buffer_id=input_buffer_id,

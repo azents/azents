@@ -140,7 +140,7 @@ def test_event_accepts_matching_payload() -> None:
         id="0" * 32,
         session_id="session-1",
         kind=EventKind.USER_MESSAGE,
-        payload=UserMessagePayload(content="hello"),
+        payload=UserMessagePayload(sender_user_id=None, content="hello"),
         created_at=now,
     )
 
@@ -291,6 +291,7 @@ def test_turn_marker_decodes_historical_payload_without_provenance() -> None:
 def test_user_message_decodes_historical_payload_without_profile() -> None:
     payload = UserMessagePayload.model_validate({"content": "historical"})
 
+    assert payload.sender_user_id is None
     assert payload.applied_inference_profile is None
 
 
@@ -311,6 +312,7 @@ def test_user_message_decodes_historical_profile_without_display_name() -> None:
 
 def test_user_message_preserves_requested_inference_profile() -> None:
     payload = UserMessagePayload(
+        sender_user_id=None,
         content="use quality",
         requested_inference_profile=RequestedInferenceProfile(
             model_target_label="Quality",
@@ -326,6 +328,7 @@ def test_user_message_preserves_requested_inference_profile() -> None:
 
 def test_user_message_preserves_applied_inference_profile() -> None:
     payload = UserMessagePayload(
+        sender_user_id=None,
         content="use quality",
         applied_inference_profile=AppliedInferenceProfile(
             model_target_label="Quality",
@@ -335,6 +338,7 @@ def test_user_message_preserves_applied_inference_profile() -> None:
     )
 
     assert payload.model_dump(mode="json", exclude_none=True) == {
+        "sender_user_id": None,
         "content": "use quality",
         "attachments": [],
         "metadata": {},
@@ -348,6 +352,7 @@ def test_user_message_preserves_applied_inference_profile() -> None:
 
 def test_user_message_accepts_text_and_file_parts() -> None:
     payload = UserMessagePayload(
+        sender_user_id=None,
         content=[
             InputTextPart(text="inspect"),
             FileOutputPart(
@@ -355,7 +360,7 @@ def test_user_message_accepts_text_and_file_parts() -> None:
                 media_type="application/pdf",
                 name="file.pdf",
             ),
-        ]
+        ],
     )
 
     assert isinstance(payload.content, list)

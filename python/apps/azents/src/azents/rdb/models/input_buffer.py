@@ -67,7 +67,7 @@ class RDBInputBuffer(RDBModel):
         model_reasoning_effort_enum,
         nullable=True,
     )
-    actor_user_id: Mapped[str | None] = mapped_column(
+    sender_user_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=True,
@@ -100,6 +100,10 @@ class RDBInputBuffer(RDBModel):
         "OR requested_model_target_label IS NOT NULL",
         name="ck_input_buffers_requested_profile",
     )
+    CK_SENDER_USER_KIND = sa.CheckConstraint(
+        "sender_user_id IS NULL OR kind IN ('user_message', 'action_message')",
+        name="ck_input_buffers_sender_user_kind",
+    )
     IX_SESSION_ID = sa.Index("ix_input_buffers_session_id", "session_id")
     IX_SESSION_ID_ID = sa.Index("ix_input_buffers_session_id_id", "session_id", "id")
     IX_SESSION_ID_SCHEDULING_MODE = sa.Index(
@@ -119,6 +123,7 @@ class RDBInputBuffer(RDBModel):
 
     __table_args__ = (
         CK_REQUESTED_PROFILE,
+        CK_SENDER_USER_KIND,
         IX_SESSION_ID,
         IX_SESSION_ID_ID,
         IX_SESSION_ID_SCHEDULING_MODE,

@@ -295,6 +295,7 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event | None:
         if input_buffer.action is None:
             raise ValueError("Action message input buffer requires action payload")
         payload = ActionMessagePayload(
+            sender_user_id=input_buffer.sender_user_id,
             action=_chat_action_adapter.validate_python(input_buffer.action),
             message=input_buffer.content,
             requested_inference_profile=_input_buffer_requested_profile(input_buffer),
@@ -332,6 +333,7 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event | None:
         metadata["live_projection"] = "input_buffer"
         requested_profile = _input_buffer_requested_profile(input_buffer)
         payload = UserMessagePayload(
+            sender_user_id=input_buffer.sender_user_id,
             content=content,
             attachments=[],
             metadata=metadata,

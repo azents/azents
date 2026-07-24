@@ -38,6 +38,7 @@ class TestActionExecutionProjectionResponse(unittest.TestCase):
                 execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
                     id = '', 
                     input_buffer_id = '', 
+                    sender_user_id = '', 
                     action_type = '', 
                     action = null, 
                     status = '', 
@@ -69,6 +70,7 @@ class TestActionExecutionProjectionResponse(unittest.TestCase):
                 execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
                     id = '', 
                     input_buffer_id = '', 
+                    sender_user_id = '', 
                     action_type = '', 
                     action = null, 
                     status = '', 

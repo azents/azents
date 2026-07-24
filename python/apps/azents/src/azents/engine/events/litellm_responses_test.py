@@ -251,7 +251,7 @@ class TestLiteLLMResponsesLowerer:
         transcript = [
             _event(
                 EventKind.USER_MESSAGE,
-                UserMessagePayload(content="hello"),
+                UserMessagePayload(sender_user_id=None, content="hello"),
             ),
             _event(
                 EventKind.ASSISTANT_MESSAGE,
@@ -298,7 +298,7 @@ class TestLiteLLMResponsesLowerer:
             ),
             _event(
                 EventKind.USER_MESSAGE,
-                UserMessagePayload(content="Review this PR"),
+                UserMessagePayload(sender_user_id=None, content="Review this PR"),
             ),
         ]
 
@@ -526,8 +526,14 @@ class TestLiteLLMResponsesLowerer:
 
         request = lowerer.lower(
             [
-                _event(EventKind.USER_MESSAGE, UserMessagePayload(content="one")),
-                _event(EventKind.USER_MESSAGE, UserMessagePayload(content="two")),
+                _event(
+                    EventKind.USER_MESSAGE,
+                    UserMessagePayload(sender_user_id=None, content="one"),
+                ),
+                _event(
+                    EventKind.USER_MESSAGE,
+                    UserMessagePayload(sender_user_id=None, content="two"),
+                ),
             ],
             model="xai/grok-4.5",
         )
@@ -581,7 +587,12 @@ class TestLiteLLMResponsesLowerer:
         )
 
         request = lowerer.lower(
-            [_event(EventKind.USER_MESSAGE, UserMessagePayload(content="hello"))],
+            [
+                _event(
+                    EventKind.USER_MESSAGE,
+                    UserMessagePayload(sender_user_id=None, content="hello"),
+                )
+            ],
             model="openrouter/anthropic/claude-sonnet-4.6",
         )
 
@@ -657,8 +668,14 @@ class TestLiteLLMResponsesLowerer:
             ],
         )
         transcript = [
-            _event(EventKind.USER_MESSAGE, UserMessagePayload(content="one")),
-            _event(EventKind.USER_MESSAGE, UserMessagePayload(content="two")),
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(sender_user_id=None, content="one"),
+            ),
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(sender_user_id=None, content="two"),
+            ),
         ]
 
         request = lowerer.lower(transcript, model="claude-sonnet-4-5")
@@ -697,7 +714,12 @@ class TestLiteLLMResponsesLowerer:
         )
 
         request = lowerer.lower(
-            [_event(EventKind.USER_MESSAGE, UserMessagePayload(content="hello"))],
+            [
+                _event(
+                    EventKind.USER_MESSAGE,
+                    UserMessagePayload(sender_user_id=None, content="hello"),
+                )
+            ],
             model="claude-sonnet-4-5",
         )
 
@@ -745,7 +767,10 @@ class TestLiteLLMResponsesLowerer:
                     wire_dialect="json_function",
                 ),
             ),
-            _event(EventKind.USER_MESSAGE, UserMessagePayload(content="next")),
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(sender_user_id=None, content="next"),
+            ),
         ]
 
         request = lowerer.lower(transcript, model="claude-sonnet-4-5")
@@ -906,6 +931,7 @@ class TestLiteLLMResponsesLowerer:
             _event(
                 EventKind.GOAL_UPDATED,
                 UserMessagePayload(
+                    sender_user_id=None,
                     content="",
                     metadata={"source": "goal", "goal_objective": "Updated goal"},
                 ),
@@ -928,6 +954,7 @@ class TestLiteLLMResponsesLowerer:
             _event(
                 EventKind.GOAL_UPDATED,
                 UserMessagePayload(
+                    sender_user_id=None,
                     content="",
                     metadata={
                         "source": "goal",
@@ -960,6 +987,7 @@ class TestLiteLLMResponsesLowerer:
             _event(
                 EventKind.GOAL_CONTINUATION,
                 UserMessagePayload(
+                    sender_user_id=None,
                     content="",
                     metadata={"source": "goal", "goal_objective": "Ship the feature"},
                 ),
@@ -983,7 +1011,10 @@ class TestLiteLLMResponsesLowerer:
                 EventKind.INTERRUPTED,
                 InterruptedPayload(run_id="run-1", reason="user_requested"),
             ),
-            _event(EventKind.USER_MESSAGE, UserMessagePayload(content="next")),
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(sender_user_id=None, content="next"),
+            ),
         ]
 
         request = lowerer.lower(transcript, model="gpt-5.1")
@@ -1082,7 +1113,10 @@ class TestLiteLLMResponsesLowerer:
                 EventKind.RUN_MARKER,
                 RunMarkerPayload(run_id="run-1", status="completed"),
             ),
-            _event(EventKind.USER_MESSAGE, UserMessagePayload(content="next")),
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(sender_user_id=None, content="next"),
+            ),
         ]
 
         request = lowerer.lower(transcript, model="gpt-5.1")
@@ -1791,7 +1825,7 @@ class TestLiteLLMResponsesLowerer:
         transcript = [
             _event(
                 EventKind.USER_MESSAGE,
-                UserMessagePayload(content="hello"),
+                UserMessagePayload(sender_user_id=None, content="hello"),
             ),
             _event(
                 EventKind.ASSISTANT_MESSAGE,
@@ -1915,7 +1949,7 @@ class TestLiteLLMResponsesLowerer:
         transcript = [
             _event(
                 EventKind.USER_MESSAGE,
-                UserMessagePayload(content="hello"),
+                UserMessagePayload(sender_user_id=None, content="hello"),
             )
         ]
 
@@ -1963,7 +1997,7 @@ class TestLiteLLMResponsesLowerer:
         transcript = [
             _event(
                 EventKind.USER_MESSAGE,
-                UserMessagePayload(content="hello"),
+                UserMessagePayload(sender_user_id=None, content="hello"),
             )
         ]
 
@@ -2231,6 +2265,7 @@ class TestLiteLLMResponsesLowerer:
             _event(
                 EventKind.USER_MESSAGE,
                 UserMessagePayload(
+                    sender_user_id=None,
                     content=[
                         InputTextPart(text="inspect upload"),
                         FileOutputPart(
@@ -2241,7 +2276,7 @@ class TestLiteLLMResponsesLowerer:
                             kind="text",
                             metadata={"source": "user_upload"},
                         ),
-                    ]
+                    ],
                 ),
             )
         ]
@@ -2272,6 +2307,7 @@ class TestLiteLLMResponsesLowerer:
             _event(
                 EventKind.USER_MESSAGE,
                 UserMessagePayload(
+                    sender_user_id=None,
                     content="inspect upload",
                     attachments=[
                         Attachment(
@@ -4365,7 +4401,10 @@ def test_litellm_lowerer_keeps_noncontiguous_batch_segments_in_order(
                 message_id="1", revision_id="r1", batch_id="batch-1", body="first"
             ),
         ),
-        _event(EventKind.USER_MESSAGE, UserMessagePayload(content="middle")),
+        _event(
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="middle"),
+        ),
         _event(
             EventKind.EXTERNAL_CHANNEL_MESSAGE,
             _external_payload(

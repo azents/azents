@@ -14,6 +14,9 @@ class ActionExecution(BaseModel):
     id: str = Field(description="Action execution ID")
     session_id: str = Field(description="AgentSession ID")
     input_buffer_id: str = Field(description="Durable source input buffer ID")
+    sender_user_id: str | None = Field(
+        description="Human sender User ID, or null when unavailable",
+    )
     action_type: str = Field(description="Action discriminator")
     action: dict[str, JSONValue] = Field(description="Durable action payload")
     status: ActionExecutionStatus = Field(description="Execution status")
@@ -36,6 +39,9 @@ class ActionExecutionCreate(BaseModel):
     id: str | None = Field(description="Optional action execution ID")
     session_id: str = Field(description="AgentSession ID")
     input_buffer_id: str = Field(description="Durable source input buffer ID")
+    sender_user_id: str | None = Field(
+        description="Human sender User ID, or null when unavailable",
+    )
     action_type: str = Field(description="Action discriminator")
     action: dict[str, JSONValue] = Field(description="Durable action payload")
     status: ActionExecutionStatus = Field(description="Initial execution status")

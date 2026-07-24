@@ -364,7 +364,7 @@ class RDBAgentSession(RDBModel):
         nullable=True,
         default=None,
     )
-    pending_command_user_id: Mapped[str | None] = mapped_column(
+    pending_command_requester_user_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="SET NULL"),
         init=False,
@@ -383,7 +383,7 @@ class RDBAgentSession(RDBModel):
         nullable=True,
         default=None,
     )
-    stop_requested_by: Mapped[str | None] = mapped_column(
+    stop_requester_user_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="SET NULL"),
         init=False,

@@ -165,10 +165,10 @@ class _RootSessionRepositoryDouble:
         *,
         session_id: str,
         stop_request_id: str,
-        user_id: str | None,
+        stop_requester_user_id: str | None,
     ) -> None:
         """Record the decommission stop request."""
-        del session, session_id, stop_request_id, user_id
+        del session, session_id, stop_request_id, stop_requester_user_id
         self.events.append("stop-request")
 
     async def archive_tree(self, session: AsyncSession, **kwargs: object) -> None:

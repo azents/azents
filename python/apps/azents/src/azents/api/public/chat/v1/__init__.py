@@ -76,6 +76,7 @@ from azents.engine.tools.skill import (
 from azents.repos.input_buffer.data import InputBuffer
 from azents.services.agent_session_input import (
     AgentSessionInputError,
+    AgentSessionInputIdempotencyConflict,
     AgentSessionInputInactiveSession,
     AgentSessionInputService,
     AgentSessionInputSessionNotFound,
@@ -640,6 +641,7 @@ async def _write_message_via_rest(
         message=message,
         inference_profile=request.inference_profile,
         user_id=user_id,
+        request_payload=request.model_dump(mode="json"),
         client_request_id=request.client_request_id,
     )
     result = _handle_agent_session_input_result(input_result)
@@ -654,7 +656,9 @@ async def _write_message_via_rest(
         session_id=result.agent_session_id,
         user_id=user_id,
         client_request_id=request.client_request_id,
+        accepted_input_buffer_id=result.accepted_input_buffer_id,
         input_buffer=result.input_buffer,
+        created=result.created,
     )
 
 
@@ -690,24 +694,29 @@ async def _finalize_message_write_response(
     session_id: str,
     user_id: str,
     client_request_id: str,
-    input_buffer: InputBuffer,
+    accepted_input_buffer_id: str,
+    input_buffer: InputBuffer | None,
+    created: bool,
 ) -> ChatWriteResponse:
     """Publish live state, wake the worker, and return a snapshot."""
-    live_event = input_buffer_to_live_event(input_buffer)
+    live_event = (
+        input_buffer_to_live_event(input_buffer) if input_buffer is not None else None
+    )
     live_event_upserted = (
         chat_live_event_upserted_dump(live_event) if live_event is not None else None
     )
-    broker_message = SessionWakeUp(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=user_id,
-        additional_system_prompt=None,
-        interface=None,
-        workspace_id=None,
-        workspace_handle=None,
-    )
-    await broker.send_message(broker_message)
-    if live_event_upserted is not None:
+    if input_buffer is not None:
+        broker_message = SessionWakeUp(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            additional_system_prompt=None,
+            interface=None,
+            workspace_id=None,
+            workspace_handle=None,
+        )
+        await broker.send_message(broker_message)
+    if created and live_event_upserted is not None:
         await _publish_chat_event_best_effort(
             broadcast,
             session_id=session_id,
@@ -724,10 +733,10 @@ async def _finalize_message_write_response(
         client_request_id=client_request_id,
         accepted=ChatWriteAcceptedResponse(
             type="input_buffer",
-            id=input_buffer.id,
+            id=accepted_input_buffer_id,
         ),
         snapshot=snapshot,
-        history_reload_required=False,
+        history_reload_required=input_buffer is None,
     )
 
 
@@ -754,6 +763,8 @@ def _handle_created_agent_session_input_result(
                         status_code=409,
                         detail="Subagent sessions are read-only.",
                     )
+                case AgentSessionInputIdempotencyConflict(reason=reason):
+                    raise HTTPException(status_code=409, detail=reason)
                 case FileNotFound():
                     raise HTTPException(
                         status_code=409,
@@ -810,6 +821,8 @@ def _handle_agent_session_input_result(
                         status_code=409,
                         detail="Subagent sessions are read-only.",
                     )
+                case AgentSessionInputIdempotencyConflict(reason=reason):
+                    raise HTTPException(status_code=409, detail=reason)
                 case FileNotFound():
                     raise HTTPException(
                         status_code=409,
@@ -1014,6 +1027,7 @@ async def stop_session_run(
     match result:
         case Success(agent_session):
             stop_result = await chat_write_service.request_session_stop(
+                agent_id=agent_session.agent_id,
                 session_id=agent_session.id,
                 user_id=current_user.user_id,
             )
@@ -1125,6 +1139,7 @@ async def _write_new_session_message_via_rest(
             user_id=user_id,
             existing_project_paths=request.existing_project_paths,
             setup_actions=request.setup_actions,
+            request_payload=request.model_dump(mode="json"),
             client_request_id=request.client_request_id,
         )
     )
@@ -1138,7 +1153,9 @@ async def _write_new_session_message_via_rest(
         session_id=result.agent_session.id,
         user_id=user_id,
         client_request_id=request.client_request_id,
+        accepted_input_buffer_id=result.accepted_input_buffer_id,
         input_buffer=result.input_buffer,
+        created=result.created,
     )
 
 
@@ -1385,6 +1402,7 @@ async def _write_turn_action_via_rest(
         message=message,
         inference_profile=request.inference_profile,
         user_id=user_id,
+        request_payload=request.model_dump(mode="json"),
         client_request_id=request.client_request_id,
     )
     result = _handle_agent_session_input_result(input_result)
@@ -1397,7 +1415,9 @@ async def _write_turn_action_via_rest(
         session_id=result.agent_session_id,
         user_id=user_id,
         client_request_id=request.client_request_id,
+        accepted_input_buffer_id=result.accepted_input_buffer_id,
         input_buffer=result.input_buffer,
+        created=result.created,
     )
 
 
