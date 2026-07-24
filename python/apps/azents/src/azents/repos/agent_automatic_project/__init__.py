@@ -39,6 +39,7 @@ class AgentAutomaticProjectRepository:
             )
             .where(RDBAgentAutomaticProjectSetting.agent_id == agent_id)
             .order_by(RDBAgentAutomaticProjectItem.position.asc())
+            .execution_options(populate_existing=True)
         )
         rows = result.all()
         if not rows:
