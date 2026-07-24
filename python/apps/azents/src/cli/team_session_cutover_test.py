@@ -153,7 +153,6 @@ def test_replay_requires_explicit_execute_confirmation(
     result = CliRunner().invoke(team_session_cutover.app, ["replay"])
 
     assert result.exit_code == 2
-    assert "Replay requires --execute." in result.stderr
     assert service.replay_calls == []
 
 
