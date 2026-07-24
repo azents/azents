@@ -17,6 +17,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/external_channel.py
   - python/apps/azents/src/azents/repos/external_channel/**
   - python/apps/azents/src/azents/services/external_channel/**
+  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/api/public/external_channel/**
   - python/apps/azents/specs/public/openapi.json
   - python/libs/azents-public-client/src/azentspublicclient/api/external_channel_v1_api.py
@@ -38,8 +40,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-07-23
-spec_version: 13
+last_verified_at: 2026-07-24
+spec_version: 14
 ---
 
 # External Channel
@@ -114,6 +116,12 @@ Slack is the first provider. Each connection uses a manually configured dedicate
   already absent.
 - Message revisions never rewrite an already projected revision. Later edits or deletes remain distinct corrections.
 - A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, route relationship, and active resource. Blocks take precedence.
+- Creating a new binding Session snapshots the routed Agent's current automatic
+  Project policy into the root `SessionAgentContext` in the same transaction as
+  Session and binding creation. This applies both to an administrator Allow
+  decision and to initial binding creation for an already Agent-authorized
+  principal. Reusing an existing binding keeps its existing Session/context
+  Project snapshot; later policy changes are not retroactive.
 - Restore never reactivates a disconnected binding, ended work item, removed pending context, or connection.
 
 ## Management Surface
@@ -156,6 +164,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-24** (spec_version 14) — Added automatic Project policy snapshotting for
+  new External Channel binding Sessions and immutable snapshot reuse for existing
+  bindings.
 - **2026-07-23** (spec_version 13) — Added metadata-only provider files, binding-scoped
   locators, independent file capabilities, Runtime transfer manifests, and the
   no-durable-file-body boundary.

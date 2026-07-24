@@ -16,6 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
+  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
   - python/apps/azents/src/azents/worker/worker.py
@@ -23,8 +25,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/azents/public/test_external_channels.py
 api_routes:
   - /external-channel/v1/slack/events
-last_verified_at: 2026-07-23
-spec_version: 7
+last_verified_at: 2026-07-24
+spec_version: 8
 ---
 
 # External Channel Provider Ingress
@@ -86,6 +88,11 @@ The worker claims admitted events in bounded batches with a claim owner and expi
 - Unlinked ordinary messages wait briefly for an out-of-order correlated mention, then become ignored rather than creating a resource.
 - Messages authored by the configured Slack App or bot are ignored during ordinary event processing and history hydration, preventing provider output from re-entering Agent context.
 - Canonical principals, messages, revisions, and pending context are stored before access decisions.
+- When an eligible principal already has an Agent-scoped grant and the resource has
+  no active binding, initial binding creation uses the shared root Session boundary
+  to snapshot the Agent's current automatic Project policy into a new root
+  `SessionAgentContext`. An existing binding is returned unchanged and retains its
+  prior snapshot.
 - Slack message normalization prefers non-blank provider fallback text. When it is absent, HTTP and Socket ingestion derive the same bounded readable body from supported section, header, context, and rich-text elements. User and channel elements retain reference syntax, unsupported elements contribute no text, and edit revision identity uses the resulting normalized body.
 - Ingestion enriches revisions with bounded sender/current-channel/in-body Slack reference mappings when provider lookup succeeds. Lookup failure leaves canonical provider IDs and messages intact.
 - Provider permalink resolution is optional and occurs outside the persistence transaction. Controlled provider failures leave `original_url` null and do not hide the message.
@@ -123,6 +130,8 @@ Deterministic E2E uses signed raw callbacks and a fake HTTP/WebSocket provider t
 
 ## Changelog
 
+- **2026-07-24** (spec_version 8) — Added already-granted initial binding root
+  creation with Agent automatic Project snapshotting and existing-binding reuse.
 - **2026-07-23** (spec_version 7) — Added bounded Slack file projection shared by HTTP,
   Socket, and hydration, stable unsupported reasons, opaque locators, and metadata-only
   Agent rendering.
