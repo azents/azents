@@ -80,6 +80,7 @@ async def _create_agent(
     session.add(agent)
     await session.flush()
     session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id, revision=revision))
+    await session.flush()
     session.add_all(
         [
             RDBAgentAutomaticProjectItem(

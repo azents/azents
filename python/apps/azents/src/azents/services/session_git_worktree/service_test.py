@@ -32,6 +32,9 @@ from azents.engine.events.types import ActionExecutionResultPayload
 from azents.engine.run.input import InputMessage
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_automatic_project_setting import (
+    RDBAgentAutomaticProjectSetting,
+)
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent_context import RDBSessionAgentContextGitWorktree
 from azents.rdb.session import SessionManager
@@ -550,6 +553,8 @@ async def _create_agent_context(
         ),
     )
     session.add(agent)
+    await session.flush()
+    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id, revision=1))
     await session.flush()
     return workspace_id, user.id, agent.id
 
