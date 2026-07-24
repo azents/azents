@@ -130,6 +130,7 @@ def _agent_session_repository() -> AgentSessionRepository:
 def test_validate_event_payload_accepts_action_message() -> None:
     """Action message is a first-class persisted event payload."""
     payload = ActionMessagePayload(
+        sender_user_id=None,
         action=GoalAction(),
         message="Ship the goal",
     )
@@ -181,6 +182,7 @@ class TestEventExecutionRepositories:
                 session_id=event_session.id,
                 kind=EventKind.USER_MESSAGE,
                 payload=UserMessagePayload(
+                    sender_user_id=None,
                     content="Use the default effort",
                     requested_inference_profile=requested_profile,
                     applied_inference_profile=applied_profile,
@@ -354,7 +356,9 @@ class TestEventExecutionRepositories:
             EventCreate(
                 session_id=event_session.id,
                 kind=EventKind.USER_MESSAGE,
-                payload=UserMessagePayload(content="first").model_dump(mode="json"),
+                payload=UserMessagePayload(
+                    sender_user_id=None, content="first"
+                ).model_dump(mode="json"),
                 external_id="first-user-input",
             ),
         )
@@ -363,7 +367,9 @@ class TestEventExecutionRepositories:
             EventCreate(
                 session_id=event_session.id,
                 kind=EventKind.USER_MESSAGE,
-                payload=UserMessagePayload(content="second").model_dump(mode="json"),
+                payload=UserMessagePayload(
+                    sender_user_id=None, content="second"
+                ).model_dump(mode="json"),
             ),
         )
 
@@ -377,7 +383,7 @@ class TestEventExecutionRepositories:
         updated = await transcript_repo.update_payload(
             rdb_session,
             first.id,
-            UserMessagePayload(content="updated first"),
+            UserMessagePayload(sender_user_id=None, content="updated first"),
         )
         assert isinstance(updated.payload, UserMessagePayload)
         assert updated.payload.content == "updated first"
@@ -414,7 +420,9 @@ class TestEventExecutionRepositories:
         create = EventCreate(
             session_id=event_session.id,
             kind=EventKind.USER_MESSAGE,
-            payload=UserMessagePayload(content="first").model_dump(mode="json"),
+            payload=UserMessagePayload(sender_user_id=None, content="first").model_dump(
+                mode="json"
+            ),
             external_id="dedup-user-input",
         )
 
@@ -423,9 +431,9 @@ class TestEventExecutionRepositories:
             rdb_session,
             create.model_copy(
                 update={
-                    "payload": UserMessagePayload(content="second").model_dump(
-                        mode="json"
-                    )
+                    "payload": UserMessagePayload(
+                        sender_user_id=None, content="second"
+                    ).model_dump(mode="json")
                 }
             ),
         )
@@ -458,6 +466,7 @@ class TestEventExecutionRepositories:
             ),
         )
         payload = ActionMessagePayload(
+            sender_user_id=None,
             action=GoalAction(),
             message="Ship the goal",
         )
@@ -518,9 +527,9 @@ class TestEventExecutionRepositories:
                     EventCreate(
                         session_id=event_session.id,
                         kind=EventKind.USER_MESSAGE,
-                        payload=UserMessagePayload(content="blocked").model_dump(
-                            mode="json"
-                        ),
+                        payload=UserMessagePayload(
+                            sender_user_id=None, content="blocked"
+                        ).model_dump(mode="json"),
                         external_id="blocked-user-input",
                     ),
                 )
@@ -582,9 +591,9 @@ class TestEventExecutionRepositories:
                 EventCreate(
                     session_id=event_session.id,
                     kind=EventKind.USER_MESSAGE,
-                    payload=UserMessagePayload(content="before compaction").model_dump(
-                        mode="json"
-                    ),
+                    payload=UserMessagePayload(
+                        sender_user_id=None, content="before compaction"
+                    ).model_dump(mode="json"),
                 ),
             )
             await setup_session.commit()
@@ -606,7 +615,7 @@ class TestEventExecutionRepositories:
                             session_id=event_session.id,
                             kind=EventKind.USER_MESSAGE,
                             payload=UserMessagePayload(
-                                content="during compaction"
+                                sender_user_id=None, content="during compaction"
                             ).model_dump(mode="json"),
                         ),
                     ),
@@ -667,7 +676,9 @@ class TestEventExecutionRepositories:
             EventCreate(
                 session_id=event_session.id,
                 kind=EventKind.USER_MESSAGE,
-                payload=UserMessagePayload(content="first").model_dump(mode="json"),
+                payload=UserMessagePayload(
+                    sender_user_id=None, content="first"
+                ).model_dump(mode="json"),
                 model_order=2000,
             ),
         )
@@ -676,7 +687,9 @@ class TestEventExecutionRepositories:
             EventCreate(
                 session_id=event_session.id,
                 kind=EventKind.USER_MESSAGE,
-                payload=UserMessagePayload(content="second").model_dump(mode="json"),
+                payload=UserMessagePayload(
+                    sender_user_id=None, content="second"
+                ).model_dump(mode="json"),
                 model_order=1000,
             ),
         )
@@ -728,9 +741,9 @@ class TestEventExecutionRepositories:
             EventCreate(
                 session_id=event_session.id,
                 kind=EventKind.USER_MESSAGE,
-                payload=UserMessagePayload(content="profile input").model_dump(
-                    mode="json"
-                ),
+                payload=UserMessagePayload(
+                    sender_user_id=None, content="profile input"
+                ).model_dump(mode="json"),
             ),
         )
         repo = AgentRunRepository()
@@ -855,9 +868,9 @@ class TestEventExecutionRepositories:
             EventCreate(
                 session_id=other_session.id,
                 kind=EventKind.USER_MESSAGE,
-                payload=UserMessagePayload(content="other session").model_dump(
-                    mode="json"
-                ),
+                payload=UserMessagePayload(
+                    sender_user_id=None, content="other session"
+                ).model_dump(mode="json"),
             ),
         )
         repo = AgentRunRepository()

@@ -240,6 +240,7 @@ class TestSessionTitleHelpers:
             session_id="session-001",
             kind=EventKind.USER_MESSAGE,
             payload=UserMessagePayload(
+                sender_user_id=None,
                 content="Compare two insurance options",
                 attachments=[],
                 metadata={},
@@ -418,6 +419,7 @@ class TestSessionTitleHelpers:
             session_id="session-001",
             kind=EventKind.USER_MESSAGE,
             payload=UserMessagePayload(
+                sender_user_id=None,
                 content="Compare two insurance options",
                 attachments=[],
                 metadata={},
@@ -437,6 +439,7 @@ class TestSessionTitleHelpers:
             session_id="session-001",
             kind=EventKind.USER_MESSAGE,
             payload=UserMessagePayload(
+                sender_user_id=None,
                 content="Compare two insurance options",
                 attachments=[],
                 metadata={},

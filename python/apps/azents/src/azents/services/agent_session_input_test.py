@@ -38,6 +38,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer
@@ -48,7 +49,7 @@ from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.repos.workspace_user.data import WorkspaceUserCreate
+from azents.repos.workspace_user.data import WorkspaceUser, WorkspaceUserCreate
 from azents.services.exchange_file import (
     ExchangeFileInputClaimError,
     ExchangeFileService,
@@ -121,8 +122,25 @@ class _ActiveAgentRepositoryDouble(AgentRepository):
         del session, agent_id
         return cast(
             Agent,
-            SimpleNamespace(lifecycle_status=AgentLifecycleStatus.ACTIVE),
+            SimpleNamespace(
+                lifecycle_status=AgentLifecycleStatus.ACTIVE,
+                workspace_id="workspace-1",
+            ),
         )
+
+
+class _WorkspaceUserRepositoryDouble(WorkspaceUserRepository):
+    """Workspace membership repository for admission unit tests."""
+
+    async def get_by_workspace_and_user(
+        self,
+        session: AsyncSession,
+        workspace_id: str,
+        user_id: str,
+    ) -> WorkspaceUser:
+        """Return an admitted membership marker."""
+        del session, workspace_id, user_id
+        return cast(WorkspaceUser, object())
 
 
 class _AgentSessionRepositoryDouble(AgentSessionRepository):
@@ -200,7 +218,7 @@ class _InputBufferServiceDouble(InputBufferService):
             scheduling_mode=input.scheduling_mode,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
-            actor_user_id=input.actor_user_id,
+            sender_user_id=input.sender_user_id,
             content=input.content,
             idempotency_key=input.idempotency_key,
             metadata=input.metadata,
@@ -377,8 +395,9 @@ class TestAgentSessionInputService:
             agent_runtime_repository=runtime_repository,
             agent_session_repository=session_repository,
             root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
+            workspace_user_repository=_WorkspaceUserRepositoryDouble(),
             exchange_file_service=_ExchangeFileService(),
             input_buffer_service=input_buffer_service,
             session_manager=rdb_session_manager,
@@ -396,12 +415,14 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id="user-1",
+            request_payload={"request": "test"},
         )
 
         assert isinstance(result, Success)
         value = result.value
         assert value.agent_runtime_id == "runtime-1"
         assert value.agent_session_id == "session-1"
+        assert value.input_buffer is not None
         assert value.input_buffer.id == "buffer-1"
         assert calls == [
             "get_by_id",
@@ -435,8 +456,9 @@ class TestAgentSessionInputService:
             agent_runtime_repository=_RuntimeRepositoryDouble(calls),
             agent_session_repository=_AgentSessionRepositoryDouble(calls),
             root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
+            workspace_user_repository=_WorkspaceUserRepositoryDouble(),
             exchange_file_service=_RejectingExchangeFileService(),
             input_buffer_service=input_buffer_service,
             session_manager=session_manager,
@@ -454,6 +476,7 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id="user-1",
+            request_payload={"request": "test"},
         )
 
         assert isinstance(result, Failure)
@@ -485,8 +508,9 @@ class TestAgentSessionInputService:
             agent_runtime_repository=runtime_repository,
             agent_session_repository=session_repository,
             root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
+            workspace_user_repository=_WorkspaceUserRepositoryDouble(),
             exchange_file_service=_ExchangeFileService(),
             input_buffer_service=input_buffer_service,
             session_manager=_session_manager_double,
@@ -504,6 +528,7 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id="user-1",
+            request_payload={"request": "test"},
         )
 
         assert isinstance(result, Failure)
@@ -548,6 +573,7 @@ class TestAgentSessionInputService:
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -656,6 +682,7 @@ class TestAgentSessionInputService:
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_RejectingExchangeFileService(),
@@ -728,6 +755,7 @@ class TestAgentSessionInputService:
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -747,6 +775,7 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
+            request_payload={"request": "test"},
         )
 
         assert isinstance(result, Failure)
@@ -796,6 +825,7 @@ class TestAgentSessionInputService:
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -815,6 +845,7 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
+            request_payload={"request": "test"},
         )
 
         assert isinstance(result, Failure)
@@ -854,6 +885,7 @@ class TestAgentSessionInputService:
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -873,6 +905,7 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
+            request_payload={"request": "test"},
         )
         assert isinstance(result, Success)
 
@@ -914,6 +947,7 @@ class TestAgentSessionInputService:
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -933,6 +967,7 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
+            request_payload={"request": "test"},
             client_request_id="client-request-1",
         )
         second = await service.create_buffered_agent_input(
@@ -947,6 +982,7 @@ class TestAgentSessionInputService:
             ),
             inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
+            request_payload={"request": "test"},
             client_request_id="client-request-1",
         )
 
@@ -954,11 +990,176 @@ class TestAgentSessionInputService:
         assert isinstance(second, Success)
         first_value = first.value
         second_value = second.value
-        assert second_value.input_buffer.id == first_value.input_buffer.id
-        assert second_value.input_buffer.content == "first"
-        assert second_value.input_buffer.idempotency_key == "client-request-1"
+        assert first_value.input_buffer is not None
+        assert second_value.input_buffer is None
+        assert second_value.accepted_input_buffer_id == first_value.input_buffer.id
+        assert second_value.created is False
         async with rdb_session_manager() as session:
             buffers = await InputBufferRepository().list_by_session_id(
                 session, agent_session.id
             )
         assert [buffer.id for buffer in buffers] == [first_value.input_buffer.id]
+
+    async def test_buffered_input_idempotency_is_scoped_to_requester(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Different requesters sharing a client key retain independent inputs."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "buffered-chat-requester-idempotency",
+            )
+            first_user_id = await _create_user(
+                session,
+                "buffered-requester-first@example.com",
+            )
+            second_user_id = await _create_user(
+                session,
+                "buffered-requester-second@example.com",
+            )
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=first_user_id,
+            )
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=second_user_id,
+            )
+            agent_id = await _create_agent(
+                session,
+                workspace_id,
+                "buffered-chat-requester-idempotency",
+            )
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            )
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
+            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+
+        shared_client_request_id = "shared-client-request"
+        first_message = InputMessage(
+            text="first requester payload",
+            user_id=first_user_id,
+            headers=[],
+            metadata={"source": "chat"},
+            attachments=[],
+        )
+        second_message = InputMessage(
+            text="second requester payload",
+            user_id=second_user_id,
+            headers=[],
+            metadata={"source": "chat"},
+            attachments=[],
+        )
+        first = await service.create_buffered_agent_input(
+            agent_id=agent_id,
+            agent_session_id=agent_session.id,
+            message=first_message,
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=first_user_id,
+            request_payload={"content": first_message.text},
+            client_request_id=shared_client_request_id,
+        )
+        second = await service.create_buffered_agent_input(
+            agent_id=agent_id,
+            agent_session_id=agent_session.id,
+            message=second_message,
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=second_user_id,
+            request_payload={"content": second_message.text},
+            client_request_id=shared_client_request_id,
+        )
+
+        assert isinstance(first, Success)
+        assert isinstance(second, Success)
+        assert first.value.input_buffer is not None
+        assert second.value.input_buffer is not None
+        assert (
+            first.value.accepted_input_buffer_id
+            != second.value.accepted_input_buffer_id
+        )
+
+        async with rdb_session_manager() as session:
+            buffers = await InputBufferRepository().list_by_session_id(
+                session,
+                agent_session.id,
+            )
+
+        assert {
+            (buffer.id, buffer.sender_user_id, buffer.content) for buffer in buffers
+        } == {
+            (
+                first.value.accepted_input_buffer_id,
+                first_user_id,
+                first_message.text,
+            ),
+            (
+                second.value.accepted_input_buffer_id,
+                second_user_id,
+                second_message.text,
+            ),
+        }
+        assert len({buffer.idempotency_key for buffer in buffers}) == 2
+
+        first_retry = await service.create_buffered_agent_input(
+            agent_id=agent_id,
+            agent_session_id=agent_session.id,
+            message=first_message,
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=first_user_id,
+            request_payload={"content": first_message.text},
+            client_request_id=shared_client_request_id,
+        )
+        assert isinstance(first_retry, Success)
+        assert first_retry.value.created is False
+        assert first_retry.value.input_buffer is not None
+        assert (
+            first_retry.value.accepted_input_buffer_id
+            == first.value.accepted_input_buffer_id
+        )
+
+        async with rdb_session_manager() as session:
+            deleted = await InputBufferRepository().delete_by_session_and_id(
+                session,
+                agent_session.id,
+                first.value.accepted_input_buffer_id,
+            )
+        assert deleted
+
+        first_post_promotion_retry = await service.create_buffered_agent_input(
+            agent_id=agent_id,
+            agent_session_id=agent_session.id,
+            message=first_message,
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=first_user_id,
+            request_payload={"content": first_message.text},
+            client_request_id=shared_client_request_id,
+        )
+
+        assert isinstance(first_post_promotion_retry, Success)
+        assert first_post_promotion_retry.value.created is False
+        assert first_post_promotion_retry.value.input_buffer is None
+        assert (
+            first_post_promotion_retry.value.accepted_input_buffer_id
+            == first.value.accepted_input_buffer_id
+        )

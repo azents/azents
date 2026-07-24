@@ -2125,7 +2125,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         id="1" * 32,
         session_id="session-1",
         kind=EventKind.USER_MESSAGE,
-        payload=UserMessagePayload(content="old request"),
+        payload=UserMessagePayload(sender_user_id=None, content="old request"),
         created_at=datetime.datetime.now(datetime.UTC),
     )
     transcript_repo = _TranscriptRepo([transcript_event])
@@ -2216,7 +2216,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         id="1" * 32,
         session_id="session-1",
         kind=EventKind.USER_MESSAGE,
-        payload=UserMessagePayload(content="old request"),
+        payload=UserMessagePayload(sender_user_id=None, content="old request"),
         created_at=datetime.datetime.now(datetime.UTC),
     )
     transcript_repo = _TranscriptRepo([transcript_event])
@@ -2306,7 +2306,9 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
             [
                 (
                     EventKind.USER_MESSAGE,
-                    UserMessagePayload(content="old raw input " + ("A" * 30_000)),
+                    UserMessagePayload(
+                        sender_user_id=None, content="old raw input " + ("A" * 30_000)
+                    ),
                 ),
                 (
                     EventKind.COMPACTION_SUMMARY,
@@ -2317,7 +2319,10 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
                 ),
                 (
                     EventKind.USER_MESSAGE,
-                    UserMessagePayload(content="middle raw input " + ("B" * 30_000)),
+                    UserMessagePayload(
+                        sender_user_id=None,
+                        content="middle raw input " + ("B" * 30_000),
+                    ),
                 ),
                 (
                     EventKind.COMPACTION_SUMMARY,
@@ -2328,11 +2333,11 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
                 ),
                 (
                     EventKind.USER_MESSAGE,
-                    UserMessagePayload(content="recent tail one"),
+                    UserMessagePayload(sender_user_id=None, content="recent tail one"),
                 ),
                 (
                     EventKind.USER_MESSAGE,
-                    UserMessagePayload(content="recent tail two"),
+                    UserMessagePayload(sender_user_id=None, content="recent tail two"),
                 ),
             ],
             start=1,
@@ -2422,7 +2427,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
         id="1" * 32,
         session_id="session-1",
         kind=EventKind.USER_MESSAGE,
-        payload=UserMessagePayload(content="old request"),
+        payload=UserMessagePayload(sender_user_id=None, content="old request"),
         created_at=datetime.datetime.now(datetime.UTC),
     )
     transcript_repo = _TranscriptRepo([transcript_event])

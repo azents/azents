@@ -45,7 +45,7 @@ def _user_event(id_suffix: str, text: str, *, model_order: int) -> Event:
     return _event(
         id_suffix,
         EventKind.USER_MESSAGE,
-        UserMessagePayload(content=text),
+        UserMessagePayload(sender_user_id=None, content=text),
         model_order=model_order,
     )
 
@@ -147,6 +147,7 @@ def test_degrade_file_parts_for_fork_replaces_user_file_with_placeholder() -> No
         "a",
         EventKind.USER_MESSAGE,
         UserMessagePayload(
+            sender_user_id=None,
             content=[
                 InputTextPart(text="Please inspect this."),
                 FileOutputPart(
@@ -156,7 +157,7 @@ def test_degrade_file_parts_for_fork_replaces_user_file_with_placeholder() -> No
                     size=123,
                     kind="document",
                 ),
-            ]
+            ],
         ),
         model_order=1000,
     )

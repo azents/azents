@@ -960,6 +960,48 @@ class ExchangeFileService:
             return Failure(file.error)
         return Success(file.value)
 
+    async def resolve_admitted_input_attachment_metadata(
+        self,
+        *,
+        uri: str,
+        agent_id: str,
+        session_id: str,
+    ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
+        """Resolve an already-admitted input attachment from its root claim.
+
+        This internal execution boundary deliberately does not inspect a Human
+        sender or current Workspace membership. Admission already authorized the
+        write and claimed the attachment family for the Session tree's root.
+        """
+        object_key = exchange_object_key_from_uri(uri)
+        if object_key is None:
+            return Failure(FileNotFound())
+        return await self._get_admitted_input_file_by_object_key(
+            object_key=object_key,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+    async def resolve_admitted_input_attachment(
+        self,
+        *,
+        uri: str,
+        agent_id: str,
+        session_id: str,
+    ) -> Result[ExchangeFileDownload, ExchangeFileError]:
+        """Download one already-admitted input attachment from its root claim."""
+        object_key = exchange_object_key_from_uri(uri)
+        if object_key is None:
+            return Failure(FileNotFound())
+        file = await self._get_admitted_input_file_by_object_key(
+            object_key=object_key,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        if isinstance(file, Failure):
+            return Failure(file.error)
+        return await self._download_resolved_file(Success(file.value))
+
     async def _download_by_object_key(
         self,
         *,
@@ -1080,6 +1122,43 @@ class ExchangeFileService:
                 file=file,
                 user_id=user_id,
             )
+
+    async def _get_admitted_input_file_by_object_key(
+        self,
+        *,
+        object_key: str,
+        agent_id: str,
+        session_id: str,
+    ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
+        """Resolve a file only when its claim matches this exact Session root."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None:
+                return Failure(SessionNotFound())
+            if agent_session.agent_id != agent_id:
+                return Failure(FileAccessDenied())
+            get_root = (
+                self.agent_session_repository.get_root_session_agent_by_session_id
+            )
+            root = await get_root(session, session_id)
+            if root is None:
+                return Failure(FileAccessDenied())
+            file = await self.exchange_file_repository.get_by_object_key_for_agent(
+                session,
+                object_key=object_key,
+                agent_id=agent_id,
+            )
+            if file is None:
+                return Failure(FileNotFound())
+            if (
+                file.workspace_id != agent_session.workspace_id
+                or file.retention_root_session_id != root.agent_session_id
+            ):
+                return Failure(FileAccessDenied())
+            return Success(await self._expire_if_due(session, file))
 
     async def _authorize_and_expire_file(
         self,

@@ -9,8 +9,10 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentSessionKind,
     AgentSessionRunState,
+    AgentSessionStatus,
     EventKind,
     InputBufferKind,
     InputBufferSchedulingMode,
@@ -21,6 +23,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
@@ -31,6 +34,7 @@ from azents.repos.chat_write_request.data import (
 )
 from azents.repos.input_buffer.data import InputBuffer
 from azents.repos.message import MessageRepository
+from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.exchange_file import (
     ExchangeFileService,
     FileAccessDenied,
@@ -106,8 +110,12 @@ class AcceptedStopRequest:
 class ChatWriteService:
     """REST chat write idempotency facade."""
 
+    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
+    ]
+    workspace_user_repository: Annotated[
+        WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     chat_write_request_repository: Annotated[
@@ -137,11 +145,30 @@ class ChatWriteService:
     ) -> AcceptedEditInput:
         """Accept idle session edit idempotently and create edited buffer."""
         async with self.session_manager() as session:
-            await self._lock_session_for_idle_control(
+            locked = await self._lock_and_reauthorize_session(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
+                user_id=user_id,
             )
+            existing = await self._get_existing_idempotent_record(
+                session,
+                session_id=session_id,
+                user_id=user_id,
+                client_request_id=client_request_id,
+                write_type=ChatWriteRequestType.EDIT_MESSAGE,
+                payload=payload,
+            )
+            if existing is not None:
+                return AcceptedEditInput(
+                    request=AcceptedChatWriteRequest(
+                        session_id=existing.session_id,
+                        record=existing,
+                        created=False,
+                    ),
+                    input_buffer=None,
+                )
+            self._validate_idle_control_state(locked)
             record, created = await self._create_idempotent_record(
                 session,
                 session_id=session_id,
@@ -188,7 +215,7 @@ class ChatWriteService:
                     scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
-                    actor_user_id=user_id,
+                    sender_user_id=user_id,
                     content=text,
                     idempotency_key=client_request_id,
                     metadata=metadata,
@@ -238,11 +265,30 @@ class ChatWriteService:
     ) -> AcceptedPendingCommand:
         """Store idle session command as single pending command."""
         async with self.session_manager() as session:
-            await self._lock_session_for_idle_control(
+            locked = await self._lock_and_reauthorize_session(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
+                user_id=user_id,
             )
+            existing = await self._get_existing_idempotent_record(
+                session,
+                session_id=session_id,
+                user_id=user_id,
+                client_request_id=client_request_id,
+                write_type=ChatWriteRequestType.COMMAND,
+                payload=payload,
+            )
+            if existing is not None:
+                return AcceptedPendingCommand(
+                    request=AcceptedChatWriteRequest(
+                        session_id=existing.session_id,
+                        record=existing,
+                        created=False,
+                    ),
+                    command_id=None,
+                )
+            self._validate_idle_control_state(locked)
             pending_inputs = await self.input_buffer_service.list_by_session_id(
                 session,
                 session_id,
@@ -276,7 +322,7 @@ class ChatWriteService:
                 command_id=command_id,
                 command_name=command_name,
                 payload=payload,
-                user_id=user_id,
+                requester_user_id=user_id,
             )
             if updated is None:
                 raise ValueError("Session cannot accept command")
@@ -302,20 +348,21 @@ class ChatWriteService:
     ) -> AcceptedFailedRunRetry:
         """Accept idle failed-run retry idempotently and reopen normal dispatch."""
         async with self.session_manager() as session:
-            existing = (
-                await self.chat_write_request_repository.get_by_client_request_id(
-                    session,
-                    session_id=session_id,
-                    user_id=user_id,
-                    client_request_id=client_request_id,
-                )
+            locked = await self._lock_and_reauthorize_session(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
+            )
+            existing = await self._get_existing_idempotent_record(
+                session,
+                session_id=session_id,
+                user_id=user_id,
+                client_request_id=client_request_id,
+                write_type=ChatWriteRequestType.FAILED_RUN_RETRY,
+                payload=payload,
             )
             if existing is not None:
-                self._validate_existing_record(
-                    existing,
-                    write_type=ChatWriteRequestType.FAILED_RUN_RETRY,
-                    payload=payload,
-                )
                 return AcceptedFailedRunRetry(
                     request=AcceptedChatWriteRequest(
                         session_id=existing.session_id,
@@ -325,11 +372,7 @@ class ChatWriteService:
                     failed_event_id=existing.accepted_id,
                 )
 
-            await self._lock_session_for_idle_control(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-            )
+            self._validate_idle_control_state(locked)
             pending_inputs = await self.input_buffer_service.list_by_session_id(
                 session,
                 session_id,
@@ -414,6 +457,7 @@ class ChatWriteService:
     async def request_session_stop(
         self,
         *,
+        agent_id: str,
         session_id: str,
         user_id: str,
     ) -> AcceptedStopRequest:
@@ -421,19 +465,29 @@ class ChatWriteService:
         stop_request_id = uuid7().hex
         runtime_was_running = False
         async with self.session_manager() as session:
-            list_subtree_session_ids = (
-                self.agent_session_repository.list_session_agent_subtree_session_ids
-            )
-            stopped_session_ids = await list_subtree_session_ids(
+            locked = await self._lock_and_reauthorize_session(
                 session,
-                agent_session_id=session_id,
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
             )
+            locked_tree = await self.agent_session_repository.lock_root_tree_sessions(
+                session,
+                root_session_id=locked.id,
+            )
+            if not locked_tree or any(
+                target.agent_id != locked.agent_id
+                or target.workspace_id != locked.workspace_id
+                for target in locked_tree
+            ):
+                raise ValueError("Session subtree is outside the root tree")
+            stopped_session_ids = [target.id for target in locked_tree]
             for target_session_id in stopped_session_ids:
                 updated = await self.agent_session_repository.request_stop(
                     session,
                     session_id=target_session_id,
                     stop_request_id=stop_request_id,
-                    user_id=user_id,
+                    stop_requester_user_id=user_id,
                 )
                 runtime_was_running = runtime_was_running or updated is not None
         return AcceptedStopRequest(
@@ -471,14 +525,15 @@ class ChatWriteService:
         if record.payload != payload:
             raise ValueError("Client request ID already used for another payload")
 
-    async def _lock_session_for_idle_control(
+    async def _lock_and_reauthorize_session(
         self,
         session: AsyncSession,
         *,
         agent_id: str,
         session_id: str,
+        user_id: str,
     ) -> AgentSession:
-        """Acquire session row lock for idle-only control action."""
+        """Lock one writable root Session and reauthorize its requester."""
         locked = await self.agent_session_repository.lock_by_id(
             session,
             session_id,
@@ -489,11 +544,63 @@ class ChatWriteService:
             raise ValueError("AgentSession does not belong to the agent")
         if locked.session_kind is AgentSessionKind.SUBAGENT:
             raise ValueError("Subagent sessions are read-only")
+        if locked.status is not AgentSessionStatus.ACTIVE:
+            raise ValueError("AgentSession is not active")
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if (
+            agent is None
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or agent.workspace_id != locked.workspace_id
+        ):
+            raise ValueError("AgentSession is not active")
+        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
+            session,
+            session_id,
+        )
+        if root is None or root.agent_session_id != locked.id:
+            raise ValueError("AgentSession root lineage is invalid")
+        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
+            session,
+            workspace_id=locked.workspace_id,
+            user_id=user_id,
+        )
+        if workspace_user is None:
+            raise ValueError("Requester does not have session access")
+        return locked
+
+    @staticmethod
+    def _validate_idle_control_state(locked: AgentSession) -> None:
+        """Validate mutable idle state after authorization and idempotency."""
         if locked.run_state != AgentSessionRunState.IDLE:
             raise ValueError("Session is running")
         if locked.pending_command_id is not None:
             raise ValueError("Session has pending command")
-        return locked
+
+    async def _get_existing_idempotent_record(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        user_id: str,
+        client_request_id: str,
+        write_type: ChatWriteRequestType,
+        payload: dict[str, object],
+    ) -> ChatWriteRequest | None:
+        """Resolve a reauthorized replay before mutable state validation."""
+        existing = await self.chat_write_request_repository.get_by_client_request_id(
+            session,
+            session_id=session_id,
+            requester_user_id=user_id,
+            client_request_id=client_request_id,
+        )
+        if existing is None:
+            return None
+        self._validate_existing_record(
+            existing,
+            write_type=write_type,
+            payload=payload,
+        )
+        return existing
 
     async def _create_idempotent_record(
         self,
@@ -513,7 +620,7 @@ class ChatWriteService:
             session,
             ChatWriteRequestCreate(
                 session_id=session_id,
-                user_id=user_id,
+                requester_user_id=user_id,
                 client_request_id=client_request_id,
                 write_type=write_type,
                 accepted_type=accepted_type,

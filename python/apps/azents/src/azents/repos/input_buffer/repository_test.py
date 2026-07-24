@@ -110,7 +110,7 @@ def _create_payload(
         scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
         requested_model_target_label="Quality",
         requested_reasoning_effort=ModelReasoningEffort.HIGH,
-        actor_user_id=user_id,
+        sender_user_id=user_id,
         content=content,
         idempotency_key=None,
         metadata={"timestamp": "2026-05-19T00:00:00+00:00", "source": "chat"},
@@ -150,7 +150,7 @@ class TestInputBufferRepository:
         assert created.scheduling_mode == InputBufferSchedulingMode.WAKE_SESSION
         assert created.requested_model_target_label == "Quality"
         assert created.requested_reasoning_effort == ModelReasoningEffort.HIGH
-        assert created.actor_user_id == user_id
+        assert created.sender_user_id == user_id
         assert created.content == "hello"
         assert created.idempotency_key is None
         assert created.metadata == {

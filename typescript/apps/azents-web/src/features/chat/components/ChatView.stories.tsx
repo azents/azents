@@ -221,6 +221,7 @@ const baseArgs = {
   chatViewState: { type: "READY" },
   chatTimelineState: { type: "LATEST_FOLLOWING" },
   timelineEvents: [],
+  currentWorkspaceProfile: null,
   messages: [
     createChatMessage({
       id: "user-question",
@@ -283,6 +284,50 @@ const longConversationMessages = Array.from({ length: 28 }, (_, index) =>
 
 export const WithWorkspaceBrowser = {
   args: baseArgs,
+} satisfies Story;
+
+export const CurrentProfileSender = {
+  args: {
+    ...baseArgs,
+    currentWorkspaceProfile: { userId: "user-current", name: "Ada Lovelace" },
+    messages: [
+      createChatMessage({
+        id: "current-profile-sender",
+        role: "user",
+        content: "This sender is the current workspace profile.",
+        senderUserId: "user-current",
+      }),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText("Ada Lovelace")).toBeVisible();
+  },
+} satisfies Story;
+
+export const UnavailableHistoricalSenders = {
+  args: {
+    ...baseArgs,
+    currentWorkspaceProfile: { userId: "user-current", name: "Ada Lovelace" },
+    messages: [
+      createChatMessage({
+        id: "different-profile-sender",
+        role: "user",
+        content: "This sender is not the current workspace profile.",
+        senderUserId: "user-other",
+      }),
+      createChatMessage({
+        id: "null-profile-sender",
+        role: "user",
+        content: "This sender provenance is historical and unavailable.",
+        senderUserId: null,
+      }),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getAllByText("Sender unavailable")).toHaveLength(2);
+    await expect(canvas.queryByText("Ada Lovelace")).toBeNull();
+  },
 } satisfies Story;
 
 export const MultiTurnToolActivity = {
@@ -1196,6 +1241,7 @@ export const WithActionExecutionFailure = {
         execution: {
           id: "action-execution-1",
           input_buffer_id: "buffer-action-1",
+          sender_user_id: null,
           action_type: "create_git_worktree",
           action: {
             type: "create_git_worktree",
@@ -1302,6 +1348,7 @@ export const LiveOperationRendersAbovePendingInput = {
         execution: {
           id: "action-execution-live",
           input_buffer_id: "consumed-action-buffer",
+          sender_user_id: null,
           action_type: "create_git_worktree",
           action: {
             type: "create_git_worktree",
@@ -1343,6 +1390,7 @@ export const DetachedHistoryHidesLiveOperation = {
         execution: {
           id: "detached-action-execution-live",
           input_buffer_id: "detached-consumed-action-buffer",
+          sender_user_id: null,
           action_type: "create_git_worktree",
           action: {
             type: "create_git_worktree",

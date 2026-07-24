@@ -45,7 +45,9 @@ from azents.engine.events.types import (
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
-from azents.engine.run.resolve import materialize_user_input_exchange_file_attachments
+from azents.engine.run.resolve import (
+    materialize_admitted_input_exchange_file_attachments,
+)
 from azents.engine.tools.deps import get_vfs_projection_service
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.skill import (
@@ -89,7 +91,7 @@ class InputBufferEnqueue:
     scheduling_mode: InputBufferSchedulingMode
     requested_model_target_label: str | None
     requested_reasoning_effort: ModelReasoningEffort | None
-    actor_user_id: str | None
+    sender_user_id: str | None
     content: str
     idempotency_key: str | None
     metadata: dict[str, str]
@@ -273,7 +275,7 @@ class InputBufferService:
                 scheduling_mode=input.scheduling_mode,
                 requested_model_target_label=input.requested_model_target_label,
                 requested_reasoning_effort=input.requested_reasoning_effort,
-                actor_user_id=input.actor_user_id,
+                sender_user_id=input.sender_user_id,
                 content=input.content,
                 idempotency_key=input.idempotency_key,
                 metadata=input.metadata,
@@ -337,6 +339,15 @@ class InputBufferService:
             session,
             session_id,
         )
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        buffer_id: str,
+    ) -> InputBuffer | None:
+        """Fetch a pending InputBuffer by its durable acceptance identity."""
+        return await self.input_buffer_repository.get_by_id(session, buffer_id)
 
     async def delete_by_session_and_id(
         self,
@@ -514,6 +525,7 @@ class InputBufferService:
                         id=None,
                         session_id=session_id,
                         input_buffer_id=worktree_action.buffer.id,
+                        sender_user_id=worktree_action.buffer.sender_user_id,
                         action_type=worktree_action.action.type,
                         action=_JSON_OBJECT_ADAPTER.validate_python(
                             worktree_action.action.model_dump(mode="json")
@@ -725,15 +737,12 @@ class InputBufferService:
                 file_parts=file_parts,
                 created_model_file_ids=[],
             )
-        if buffer.actor_user_id is None:
-            raise ValueError("Input buffer attachments require an actor user")
-        materialized = await materialize_user_input_exchange_file_attachments(
+        materialized = await materialize_admitted_input_exchange_file_attachments(
             buffer.attachments,
             agent_id=agent_session.agent_id,
             session_id=buffer.session_id,
             exchange_file_service=self.exchange_file_service,
             model_file_service=(None if file_parts else self.model_file_service),
-            user_id=buffer.actor_user_id,
         )
         if not file_parts:
             file_parts.extend(materialized.file_parts)
@@ -1040,6 +1049,7 @@ class InputBufferService:
         else:
             applied_profile = None
         user_message = make_run_user_message(
+            sender_user_id=buffer.sender_user_id,
             content=buffer.content,
             metadata=buffer.metadata,
             attachments=prepared_files.attachments,
@@ -1555,6 +1565,7 @@ def _goal_updated_payload(
     """Return goal_updated event payload for a Goal side effect."""
     return _JSON_OBJECT_ADAPTER.validate_python(
         {
+            "sender_user_id": None,
             "content": "",
             "attachments": [],
             "metadata": {

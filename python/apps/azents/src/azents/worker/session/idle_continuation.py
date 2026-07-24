@@ -186,7 +186,7 @@ class IdleContinuationService:
             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
-            actor_user_id=None,
+            sender_user_id=None,
             content=continuation.content,
             idempotency_key=_continuation_idempotency_key(
                 run_id,

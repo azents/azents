@@ -425,7 +425,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     source=current,
                     target=child,
                     content=input.task,
-                    actor_user_id=self.user_id,
                 )
 
             await self._wake_session(child_session)
@@ -584,7 +583,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     source=resolution.current,
                     target=resolution.target,
                     content=input.message,
-                    actor_user_id=self.user_id,
                 )
                 session_agent_repo = self.agent_session_repository
                 await session_agent_repo.update_session_agent_last_task_message(
@@ -632,7 +630,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     source=resolution.current,
                     target=resolution.target,
                     content=input.task,
-                    actor_user_id=self.user_id,
                 )
                 session_agent_repo = self.agent_session_repository
                 await session_agent_repo.update_session_agent_last_task_message(
@@ -793,7 +790,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                         session,
                         session_id=target_session.id,
                         stop_request_id="subagent_interrupt",
-                        user_id=self.user_id,
+                        stop_requester_user_id=None,
                     )
             if target_session.run_state == AgentSessionRunState.RUNNING:
                 await self.broker.send_message(

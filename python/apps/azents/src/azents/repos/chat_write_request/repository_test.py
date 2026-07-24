@@ -100,7 +100,7 @@ def _create_payload(
     """Make ChatWriteRequest creation payload."""
     return ChatWriteRequestCreate(
         session_id=session_id,
-        user_id=user_id,
+        requester_user_id=user_id,
         client_request_id=client_request_id,
         write_type=ChatWriteRequestType.COMMAND,
         accepted_type=ChatWriteRequestType.COMMAND,
@@ -137,7 +137,7 @@ class TestChatWriteRequestRepository:
         assert created is True
         assert len(record.id) == 32
         assert record.session_id == session_id
-        assert record.user_id == user_id
+        assert record.requester_user_id == user_id
         assert record.client_request_id == "request-1"
         assert record.write_type == ChatWriteRequestType.COMMAND
         assert record.accepted_id == "compact"

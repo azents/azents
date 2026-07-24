@@ -101,6 +101,7 @@ def test_user_message_attachment_projection_preserves_download_identity() -> Non
     created_at = datetime.datetime(2026, 6, 3, tzinfo=datetime.UTC)
     payload = _JSON_PAYLOAD_ADAPTER.validate_python(
         UserMessagePayload(
+            sender_user_id=None,
             content="image please",
             attachments=[
                 Attachment(

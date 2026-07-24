@@ -20,6 +20,8 @@ def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
 class ChatWriteRequestType(enum.StrEnum):
     """REST write request type."""
 
+    MESSAGE = "message"
+    TURN_ACTION = "turn_action"
     EDIT_MESSAGE = "edit_message"
     COMMAND = "command"
     FAILED_RUN_RETRY = "failed_run_retry"
@@ -49,7 +51,7 @@ class RDBChatWriteRequest(RDBModel):
         sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
-    user_id: Mapped[str] = mapped_column(
+    requester_user_id: Mapped[str] = mapped_column(
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
@@ -74,11 +76,11 @@ class RDBChatWriteRequest(RDBModel):
     )
 
     IX_SESSION_ID = sa.Index("ix_chat_write_requests_session_id", "session_id")
-    UQ_SESSION_USER_CLIENT_REQUEST = sa.UniqueConstraint(
+    UQ_SESSION_REQUESTER_CLIENT_REQUEST = sa.UniqueConstraint(
         "session_id",
-        "user_id",
+        "requester_user_id",
         "client_request_id",
-        name="uq_chat_write_requests_session_user_client_request",
+        name="uq_chat_write_requests_session_requester_client_request",
     )
 
-    __table_args__ = (IX_SESSION_ID, UQ_SESSION_USER_CLIENT_REQUEST)
+    __table_args__ = (IX_SESSION_ID, UQ_SESSION_REQUESTER_CLIENT_REQUEST)

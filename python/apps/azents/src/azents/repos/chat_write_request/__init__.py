@@ -27,7 +27,7 @@ class ChatWriteRequestRepository:
             .values(
                 id=uuid7().hex,
                 session_id=create.session_id,
-                user_id=create.user_id,
+                requester_user_id=create.requester_user_id,
                 client_request_id=create.client_request_id,
                 write_type=create.write_type,
                 accepted_type=create.accepted_type,
@@ -36,7 +36,7 @@ class ChatWriteRequestRepository:
                 payload=create.payload,
             )
             .on_conflict_do_nothing(
-                constraint="uq_chat_write_requests_session_user_client_request"
+                constraint="uq_chat_write_requests_session_requester_client_request"
             )
             .returning(RDBChatWriteRequest)
         )
@@ -47,7 +47,7 @@ class ChatWriteRequestRepository:
         existing = await self.get_by_client_request_id(
             session,
             session_id=create.session_id,
-            user_id=create.user_id,
+            requester_user_id=create.requester_user_id,
             client_request_id=create.client_request_id,
         )
         if existing is None:
@@ -59,14 +59,14 @@ class ChatWriteRequestRepository:
         session: AsyncSession,
         *,
         session_id: str,
-        user_id: str,
+        requester_user_id: str,
         client_request_id: str,
     ) -> ChatWriteRequest | None:
         """Fetch REST write record by client request ID."""
         result = await session.execute(
             sa.select(RDBChatWriteRequest).where(
                 RDBChatWriteRequest.session_id == session_id,
-                RDBChatWriteRequest.user_id == user_id,
+                RDBChatWriteRequest.requester_user_id == requester_user_id,
                 RDBChatWriteRequest.client_request_id == client_request_id,
             )
         )
@@ -80,7 +80,7 @@ class ChatWriteRequestRepository:
         return ChatWriteRequest(
             id=rdb.id,
             session_id=rdb.session_id,
-            user_id=rdb.user_id,
+            requester_user_id=rdb.requester_user_id,
             client_request_id=rdb.client_request_id,
             write_type=rdb.write_type,
             accepted_type=rdb.accepted_type,

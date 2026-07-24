@@ -2763,6 +2763,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
                     session_id=session_id,
                     kind=EventKind.USER_MESSAGE,
                     payload=UserMessagePayload(
+                        sender_user_id=None,
                         content="Is something odd with the grep tool?",
                     ).model_dump(mode="json", exclude_none=True),
                 ),
@@ -2814,7 +2815,9 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
         isinstance(payload, ClientToolResultPayload) for payload in second_turn_payloads
     )
     assert (
-        UserMessagePayload(content="Is something odd with the grep tool?")
+        UserMessagePayload(
+            sender_user_id=None, content="Is something odd with the grep tool?"
+        )
         in second_turn_payloads
     )
 
@@ -3440,7 +3443,7 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
             id="2" * 32,
             session_id="session-1",
             kind=EventKind.USER_MESSAGE,
-            payload=UserMessagePayload(content="hello"),
+            payload=UserMessagePayload(sender_user_id=None, content="hello"),
             created_at=datetime.datetime.now(datetime.UTC),
         )
     )

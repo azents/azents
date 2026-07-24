@@ -2093,7 +2093,7 @@ class ExternalChannelEventProcessorService:
                 scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
-                actor_user_id=None,
+                sender_user_id=None,
                 content="",
                 idempotency_key=f"external-channel-invocation:{batch.id}",
                 metadata=metadata,

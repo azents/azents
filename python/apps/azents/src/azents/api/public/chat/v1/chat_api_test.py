@@ -262,10 +262,18 @@ async def test_health_check_ack_requires_current_confirmed_generation() -> None:
 class _BufferedInputService:
     """AgentSessionInputService double for tests."""
 
-    def __init__(self, target_session_id: str | None = None) -> None:
+    def __init__(
+        self,
+        target_session_id: str | None = None,
+        *,
+        created: bool = True,
+        pending: bool = True,
+    ) -> None:
         self.calls: list[str] = []
         self.kwargs: list[dict[str, object]] = []
         self.target_session_id = target_session_id
+        self.created = created
+        self.pending = pending
 
     async def create_buffered_agent_input(
         self,
@@ -280,7 +288,9 @@ class _BufferedInputService:
             BufferedAgentSessionInputResult(
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_session_id=session_id,
-                input_buffer=input_buffer,
+                accepted_input_buffer_id=input_buffer.id,
+                input_buffer=input_buffer if self.pending else None,
+                created=self.created,
             )
         )
 
@@ -300,7 +310,7 @@ class _BufferedInputService:
             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
-            actor_user_id=str(kwargs["user_id"]),
+            sender_user_id=str(kwargs["user_id"]),
             content=str(message.text),
             idempotency_key=(
                 str(kwargs["client_request_id"])
@@ -317,7 +327,9 @@ class _BufferedInputService:
             BufferedAgentSessionInputResult(
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_session_id=session_id,
+                accepted_input_buffer_id=input_buffer.id,
                 input_buffer=input_buffer,
+                created=True,
             )
         )
 
@@ -373,7 +385,7 @@ class _BufferedInputService:
             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
-            actor_user_id=str(kwargs["user_id"]),
+            sender_user_id=str(kwargs["user_id"]),
             content=str(message.text),
             idempotency_key=(
                 str(kwargs["client_request_id"])
@@ -405,6 +417,7 @@ class _RestWriteChatService:
             session_id=session_id,
             kind=EventKind.USER_MESSAGE,
             payload=UserMessagePayload(
+                sender_user_id=None,
                 content="hello",
                 attachments=[],
                 metadata={
@@ -592,6 +605,7 @@ class _GoalStatusChatService:
             session_id="1123456789abcdef0123456789abcdef",
             kind=EventKind.GOAL_UPDATED,
             payload=UserMessagePayload(
+                sender_user_id=None,
                 content="",
                 attachments=[],
                 metadata={
@@ -641,10 +655,12 @@ class _StopWriteService:
     async def request_session_stop(
         self,
         *,
+        agent_id: str,
         session_id: str,
         user_id: str,
     ) -> AcceptedStopRequest:
         """Store stop intent record requests."""
+        del agent_id
         self.session_ids.append(session_id)
         self.user_ids.append(user_id)
         return AcceptedStopRequest(
@@ -681,7 +697,7 @@ class _RestWriteIdempotencyService:
                 scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
-                actor_user_id=str(kwargs["user_id"]),
+                sender_user_id=str(kwargs["user_id"]),
                 content=str(kwargs["text"]),
                 idempotency_key=str(kwargs["client_request_id"]),
                 metadata=cast(dict[str, str], kwargs["metadata"]),
@@ -732,7 +748,7 @@ class _RestWriteIdempotencyService:
         record = ChatWriteRequest(
             id="write-request-1",
             session_id=str(kwargs["session_id"]),
-            user_id=str(kwargs["user_id"]),
+            requester_user_id=str(kwargs["user_id"]),
             client_request_id=str(kwargs["client_request_id"]),
             write_type=write_type,
             accepted_type=write_type,
@@ -777,6 +793,7 @@ class _EventService:
             session_id="1123456789abcdef0123456789abcdef",
             kind=EventKind.USER_MESSAGE,
             payload=UserMessagePayload(
+                sender_user_id=None,
                 content="hello",
                 attachments=[],
                 metadata={"source": "chat"},
@@ -1638,6 +1655,7 @@ class TestEventRoutes:
                     "session_id": "1123456789abcdef0123456789abcdef",
                     "kind": "user_message",
                     "payload": {
+                        "sender_user_id": None,
                         "content": "hello",
                         "attachments": [],
                         "metadata": {"source": "chat"},
@@ -1787,6 +1805,72 @@ class TestRestMessageWriteContract:
         assert response.accepted.type == "input_buffer"
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
+
+    async def test_pending_message_retry_re_notifies_without_rebroadcast(self) -> None:
+        """An accepted pending retry repairs a failed post-commit broker wake."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+
+        response = await _write_message_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _BufferedInputService(created=False),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            ChatMessageWriteRequest(
+                agent_id="agent-1",
+                client_request_id="client-pending-retry",
+                message="hello",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert response.history_reload_required is False
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+        assert broadcast.events == []
+
+    async def test_promoted_message_retry_does_not_re_notify(self) -> None:
+        """A retry after InputBuffer promotion returns history without a wake."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+
+        response = await _write_message_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _BufferedInputService(  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                created=False,
+                pending=False,
+            ),
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            ChatMessageWriteRequest(
+                agent_id="agent-1",
+                client_request_id="client-promoted-retry",
+                message="hello",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert response.history_reload_required is True
+        assert broker.messages == []
+        assert broadcast.events == []
 
     async def test_new_session_message_creates_session_and_returns_snapshot(
         self,

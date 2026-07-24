@@ -2,7 +2,14 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from azents.core.inference_profile import RequestedInferenceProfile
 
@@ -64,6 +71,9 @@ class ActionMessagePayload(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    sender_user_id: str | None = Field(
+        description="Human sender User ID, or null when provenance is unavailable",
+    )
     action: ChatAction = Field(description="Selected action")
     message: str = Field(description="User-authored action input")
     requested_inference_profile: RequestedInferenceProfile | None = Field(
@@ -71,3 +81,21 @@ class ActionMessagePayload(BaseModel):
         description="Requested profile for a model-producing action",
         exclude_if=lambda value: value is None,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_missing_sender_provenance(cls, data: object) -> object:
+        """Decode historical missing sender provenance as unavailable."""
+        if not isinstance(data, dict) or "sender_user_id" in data:
+            return data
+        return {**data, "sender_user_id": None}
+
+    @model_serializer(mode="wrap")
+    def serialize_sender_provenance(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """Preserve unavailable sender provenance in canonical event JSON."""
+        serialized: dict[str, object] = handler(self)
+        serialized["sender_user_id"] = self.sender_user_id
+        return serialized

@@ -12,7 +12,7 @@ class ChatWriteRequest(BaseModel):
 
     id: str = Field(description="ChatWriteRequest ID")
     session_id: str = Field(description="AgentSession ID")
-    user_id: str = Field(description="Author User ID")
+    requester_user_id: str = Field(description="Authenticated requester User ID")
     client_request_id: str = Field(description="Client-generated idempotency key")
     write_type: ChatWriteRequestType = Field(description="Write request type")
     accepted_type: ChatWriteRequestType = Field(description="Accepted target type")
@@ -28,7 +28,7 @@ class ChatWriteRequestCreate(BaseModel):
     """ChatWriteRequest creation schema."""
 
     session_id: str = Field(description="AgentSession ID")
-    user_id: str = Field(description="Author User ID")
+    requester_user_id: str = Field(description="Authenticated requester User ID")
     client_request_id: str = Field(description="Client-generated idempotency key")
     write_type: ChatWriteRequestType = Field(description="Write request type")
     accepted_type: ChatWriteRequestType = Field(description="Accepted target type")

@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **str** | Action execution ID | 
 **input_buffer_id** | **str** | Durable source input buffer ID | 
+**sender_user_id** | **str** |  | 
 **action_type** | **str** | Action discriminator | 
 **action** | [**Action**](Action.md) |  | 
 **status** | **str** | Execution status | 
