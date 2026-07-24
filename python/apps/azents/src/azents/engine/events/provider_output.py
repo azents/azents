@@ -15,7 +15,7 @@ from azcommon.types import JSONValue
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ExchangeFileOrigin
+from azents.core.enums import ExchangeFileOrigin, ExchangeFileProvenanceKind
 from azents.engine.events.generated_files import (
     GeneratedFileOutput,
     PendingGeneratedFileOutput,
@@ -390,7 +390,13 @@ class ProviderOutputMaterializer:
             or existing.media_type != expected.media_type
             or existing.size_bytes != expected.size_bytes
             or existing.sha256 != expected.sha256
-            or existing.created_by_user_id != expected.created_by_user_id
+            or existing.provenance_kind != expected.provenance_kind
+            or existing.source_user_id != expected.source_user_id
+            or existing.source_agent_id != expected.source_agent_id
+            or existing.source_run_id != expected.source_run_id
+            or existing.source_tool_name != expected.source_tool_name
+            or existing.source_provider != expected.source_provider
+            or existing.source_exchange_file_id != expected.source_exchange_file_id
             or existing.retention_root_session_id != expected.retention_root_session_id
         ):
             raise ModelCallError("Generated image output identity collided.")
@@ -433,15 +439,6 @@ class ProviderOutputMaterializer:
             or agent_session.agent_id != self.agent_id
         ):
             raise ModelCallError("Generated image output scope is unavailable.")
-        user_id = self._required_user_id()
-        repository = self.model_file_service.workspace_user_repository
-        workspace_user = await repository.get_by_workspace_and_user(
-            session,
-            workspace_id=self.workspace_id,
-            user_id=user_id,
-        )
-        if workspace_user is None:
-            raise ModelCallError("Generated image output scope is unavailable.")
         root = await (
             self.model_file_service.agent_session_repository
         ).get_root_session_agent_by_session_id(
@@ -452,14 +449,6 @@ class ProviderOutputMaterializer:
             raise ModelCallError("Generated image output scope is unavailable.")
         return root.agent_session_id
 
-    def _required_user_id(self) -> str:
-        """Return the actor required for user-owned file metadata."""
-        if self.user_id is None:
-            raise ModelCallError(
-                "Generated image output requires an authenticated user."
-            )
-        return self.user_id
-
     def _prepare_generated_image(
         self,
         pending: PendingGeneratedFileOutput,
@@ -468,7 +457,6 @@ class ProviderOutputMaterializer:
         retention_root_session_id: str,
     ) -> _PreparedGeneratedImage:
         """Prepare dual resource metadata and bytes for one pending image."""
-        user_id = self._required_user_id()
         normalized_result = normalize_model_file_body(
             media_type=pending.media_type,
             body=pending.body,
@@ -499,7 +487,13 @@ class ProviderOutputMaterializer:
             media_type=pending.media_type,
             size_bytes=len(pending.body),
             sha256=pending.sha256,
-            created_by_user_id=user_id,
+            provenance_kind=ExchangeFileProvenanceKind.PROVIDER,
+            source_user_id=None,
+            source_agent_id=self.agent_id,
+            source_run_id=self.run_id,
+            source_tool_name=None,
+            source_provider=source_kind,
+            source_exchange_file_id=None,
             retention_root_session_id=retention_root_session_id,
             retention_bound_at=now,
             expires_at=expires_at,
@@ -535,7 +529,13 @@ class ProviderOutputMaterializer:
                 media_type=preview_media_type,
                 size_bytes=len(preview_body.body),
                 sha256=hashlib.sha256(preview_body.body).hexdigest(),
-                created_by_user_id=user_id,
+                provenance_kind=ExchangeFileProvenanceKind.PREVIEW,
+                source_user_id=None,
+                source_agent_id=None,
+                source_run_id=None,
+                source_tool_name=None,
+                source_provider=None,
+                source_exchange_file_id=exchange_id,
                 retention_root_session_id=retention_root_session_id,
                 retention_bound_at=now,
                 expires_at=expires_at,
@@ -582,6 +582,7 @@ class ProviderOutputMaterializer:
             media_type=normalized.media_type,
             kind=normalized.kind,
             size_bytes=len(normalized.body),
+            created_run_id=self.run_id,
             created_run_index=self.run_index,
             normalized_format=normalized.normalized_format,
             sha256=hashlib.sha256(normalized.body).hexdigest(),

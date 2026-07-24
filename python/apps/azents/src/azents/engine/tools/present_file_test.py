@@ -7,11 +7,16 @@ from unittest.mock import AsyncMock
 import pytest
 from azcommon.result import Success
 
-from azents.core.enums import ExchangeFileOrigin, ExchangeFileStatus
+from azents.core.enums import (
+    ExchangeFileOrigin,
+    ExchangeFileProvenanceKind,
+    ExchangeFileStatus,
+)
 from azents.engine.run.types import FunctionToolResult
 from azents.engine.tools.present_file import make_present_file_tool
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.exchange_file.data import ExchangeFile
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
@@ -29,7 +34,13 @@ def _make_artifact_file() -> ExchangeFile:
         media_type="text/plain",
         size_bytes=12,
         sha256="1" * 64,
-        created_by_user_id="user-1",
+        provenance_kind=ExchangeFileProvenanceKind.HUMAN,
+        source_user_id="user-1",
+        source_agent_id=None,
+        source_run_id=None,
+        source_tool_name=None,
+        source_provider=None,
+        source_exchange_file_id=None,
         retention_root_session_id="session-1",
         retention_bound_at=_NOW,
         preview_thumbnail_file_id=None,
@@ -53,13 +64,11 @@ async def test_present_file_exports_runtime_file_as_exchange_artifact() -> None:
     storage = FakeSharedStorage(files={"/workspace/agent/result.txt": b"hello world!"})
     artifact = _make_artifact_file()
     service = AsyncMock()
-    service.create_artifact.return_value = Success(artifact)
+    service.create_for_authority.return_value = Success(artifact)
     tool = make_present_file_tool(
         session_storage=storage,
         exchange_file_service=service,
-        session_id="session-1",
-        agent_id="agent-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(json.dumps({"paths": ["/workspace/agent/result.txt"]}))
@@ -70,9 +79,11 @@ async def test_present_file_exports_runtime_file_as_exchange_artifact() -> None:
     assert attachment["type"] == "attachment"
     assert attachment["uri"] == artifact.uri
     assert attachment["preview_summary"] == "stored preview"
-    service.create_artifact.assert_awaited_once_with(
-        session_id="session-1",
-        user_id="user-1",
+    service.create_for_authority.assert_awaited_once_with(
+        authority=_authority(),
+        provenance_kind=ExchangeFileProvenanceKind.TOOL,
+        source_tool_name="present_file",
+        source_provider=None,
         filename="result.txt",
         media_type="text/plain",
         body=b"hello world!",
@@ -87,9 +98,7 @@ async def test_present_file_reports_missing_path() -> None:
     tool = make_present_file_tool(
         session_storage=storage,
         exchange_file_service=service,
-        session_id="session-1",
-        agent_id="agent-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(json.dumps({"paths": ["/workspace/agent/missing.txt"]}))
@@ -99,7 +108,7 @@ async def test_present_file_reports_missing_path() -> None:
     text = result.output[0]
     assert isinstance(text["text"], str)
     assert "File not found or inaccessible" in text["text"]
-    service.create_artifact.assert_not_awaited()
+    service.create_for_authority.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -110,9 +119,7 @@ async def test_present_file_rejects_tmp_path() -> None:
     tool = make_present_file_tool(
         session_storage=storage,
         exchange_file_service=service,
-        session_id="session-1",
-        agent_id="agent-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(json.dumps({"paths": ["/tmp/output.txt"]}))
@@ -122,7 +129,7 @@ async def test_present_file_rejects_tmp_path() -> None:
     text = result.output[0]
     assert isinstance(text["text"], str)
     assert "Only files under /workspace/agent can be presented" in text["text"]
-    service.create_artifact.assert_not_awaited()
+    service.create_for_authority.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -133,9 +140,7 @@ async def test_present_file_rejects_root_escape() -> None:
     tool = make_present_file_tool(
         session_storage=storage,
         exchange_file_service=service,
-        session_id="session-1",
-        agent_id="agent-1",
-        user_id="user-1",
+        authority=_authority(),
     )
 
     result = await tool.handler(
@@ -147,4 +152,17 @@ async def test_present_file_rejects_root_escape() -> None:
     text = result.output[0]
     assert isinstance(text["text"], str)
     assert "Only files under /workspace/agent can be presented" in text["text"]
-    service.create_artifact.assert_not_awaited()
+    service.create_for_authority.assert_not_awaited()
+
+
+def _authority() -> SessionResourceAuthority:
+    """Create canonical Session/Run authority for tests."""
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
+    )

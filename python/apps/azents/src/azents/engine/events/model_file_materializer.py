@@ -20,6 +20,7 @@ from azents.services.model_file import (
     ModelFileResolveError,
     ModelFileUnavailable,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 
@@ -27,14 +28,13 @@ logger = logging.getLogger(__name__)
 class ModelFileDownloader(Protocol):
     """ModelFile blob download dependency."""
 
-    async def download_for_agent(
+    async def download_for_authority(
         self,
         *,
         model_file_id: str,
-        agent_id: str,
-        user_id: str,
+        authority: SessionResourceAuthority,
     ) -> Result[ModelFileDownload, ModelFileResolveError]:
-        """Fetch ModelFile normalized blob within current Agent namespace."""
+        """Fetch ModelFile normalized blob within Session/Run authority."""
         ...
 
 
@@ -46,14 +46,12 @@ class ModelFileMaterializer:
         *,
         model_file_service: ModelFileDownloader,
         resolver: RequestLocalModelFileResolver,
-        user_id: str | None,
-        agent_id: str,
+        authority: SessionResourceAuthority | None,
     ) -> None:
         """Store ModelFileService and resolver."""
         self.model_file_service = model_file_service
         self.resolver = resolver
-        self._user_id = user_id
-        self._agent_id = agent_id
+        self._authority = authority
 
     async def materialize(
         self,
@@ -62,13 +60,12 @@ class ModelFileMaterializer:
     ) -> None:
         """Make Transcript FilePart blobs available only within current request."""
         self.resolver.clear()
-        if self._user_id is None:
+        if self._authority is None:
             return
         for model_file_id in unique_model_file_ids(transcript):
-            resolved = await self.model_file_service.download_for_agent(
+            resolved = await self.model_file_service.download_for_authority(
                 model_file_id=model_file_id,
-                agent_id=self._agent_id,
-                user_id=self._user_id,
+                authority=self._authority,
             )
             if isinstance(resolved, Failure):
                 _log_unavailable_model_file(model_file_id, resolved.error)

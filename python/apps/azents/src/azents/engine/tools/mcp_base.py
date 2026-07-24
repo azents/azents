@@ -60,6 +60,7 @@ from azents.engine.tooling.toolkit_state import (
 )
 from azents.rdb.session import SessionManager
 from azents.services.artifact import ArtifactService
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +74,7 @@ class McpArtifactSink:
     """Run context for storing MCP binary output in ArtifactStore."""
 
     artifact_service: ArtifactService
-    session_id: str
-    user_id: str
-    run_id: str
-    run_index: int
+    authority: SessionResourceAuthority
 
 
 ArtifactSinkGetter = Callable[[], McpArtifactSink | None]
@@ -116,8 +114,12 @@ def build_mcp_artifact_sink(
     artifact_service: ArtifactService | None,
 ) -> McpArtifactSink | None:
     """Configure MCP artifact storage context from TurnContext."""
-    del context, artifact_service
-    return None
+    if artifact_service is None or context.resource_authority is None:
+        return None
+    return McpArtifactSink(
+        artifact_service=artifact_service,
+        authority=context.resource_authority,
+    )
 
 
 def _build_mcp_tool_snapshot(
@@ -334,11 +336,8 @@ async def _create_artifact_output_part_from_body(
     body: bytes,
 ) -> dict[str, object] | None:
     """Store MCP content bytes in ArtifactStore and return output part."""
-    created = await sink.artifact_service.create(
-        session_id=sink.session_id,
-        user_id=sink.user_id,
-        created_run_id=sink.run_id,
-        created_run_index=sink.run_index,
+    created = await sink.artifact_service.create_for_authority(
+        authority=sink.authority,
         filename=filename,
         media_type=media_type,
         body=body,

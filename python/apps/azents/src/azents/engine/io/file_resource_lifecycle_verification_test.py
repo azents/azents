@@ -40,6 +40,7 @@ from azents.repos.agent_session.data import AgentSession
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.artifact import ArtifactService
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
@@ -259,10 +260,36 @@ class _StaticModelFileResolver:
         return ModelFileLoweringContent(data_url="data:image/png;base64,abc")
 
 
+class _AuthorityArtifactService(ArtifactService):
+    """Artifact service that accepts fixture authority without a database Run."""
+
+    async def _has_valid_resource_authority(
+        self,
+        session: AsyncSession,
+        authority: SessionResourceAuthority,
+    ) -> bool:
+        """Accept the test fixture's explicit canonical authority."""
+        del session
+        return authority == _authority()
+
+
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
     """Session manager for tests."""
     yield cast(AsyncSession, object())
+
+
+def _authority() -> SessionResourceAuthority:
+    """Create canonical Session/Run authority for resource imports."""
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
+    )
 
 
 def _artifact(
@@ -311,7 +338,7 @@ def _artifact_service() -> tuple[
     """Configure ArtifactService for tests."""
     artifact_repo = _FakeArtifactRepository()
     s3_service = _FakeS3Service()
-    service = ArtifactService(
+    service = _AuthorityArtifactService(
         artifact_repository=cast(Any, artifact_repo),
         agent_session_repository=cast(Any, _FakeAgentSessionRepository()),
         workspace_user_repository=cast(Any, _FakeWorkspaceUserRepository()),
@@ -386,11 +413,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
         exchange_file_service=AsyncMock(),
         artifact_service=service,
         vfs_projection_service=None,
-        session_id="session-1",
-        agent_id="agent-1",
-        workspace_id="workspace-1",
-        run_id="run-1",
-        user_id="user-1",
+        authority=_authority(),
     )
     await import_tool.handler(json.dumps({"uri": artifact.uri}))
     assert storage.put_calls == [

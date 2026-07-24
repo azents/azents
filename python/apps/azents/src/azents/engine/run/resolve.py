@@ -104,6 +104,7 @@ from azents.services.model_file import (
     ModelFileSessionNotFound,
     model_file_size_limit_message,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiOAuthProviderEntitlementDenied,
 )
@@ -850,8 +851,7 @@ async def materialize_user_input_exchange_file_attachments(
 async def materialize_admitted_input_exchange_file_attachments(
     attachment_uris: list[str],
     *,
-    agent_id: str,
-    session_id: str,
+    authority: SessionResourceAuthority,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService | None,
 ) -> MaterializedUserInputAttachments:
@@ -868,8 +868,7 @@ async def materialize_admitted_input_exchange_file_attachments(
         for uri in attachment_uris:
             materialized = await _materialize_admitted_input_exchange_file_attachment(
                 uri=uri,
-                agent_id=agent_id,
-                session_id=session_id,
+                authority=authority,
                 exchange_file_service=exchange_file_service,
                 model_file_service=model_file_service,
             )
@@ -902,8 +901,7 @@ async def materialize_admitted_input_exchange_file_attachments(
 async def _materialize_admitted_input_exchange_file_attachment(
     *,
     uri: str,
-    agent_id: str,
-    session_id: str,
+    authority: SessionResourceAuthority,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService | None,
 ) -> _MaterializedUserInputAttachment | None:
@@ -911,8 +909,8 @@ async def _materialize_admitted_input_exchange_file_attachment(
     metadata_result = (
         await exchange_file_service.resolve_admitted_input_attachment_metadata(
             uri=uri,
-            agent_id=agent_id,
-            session_id=session_id,
+            agent_id=authority.agent_id,
+            session_id=authority.session_id,
         )
     )
     if isinstance(metadata_result, Failure):
@@ -920,8 +918,8 @@ async def _materialize_admitted_input_exchange_file_attachment(
             "Failed to resolve admitted attachment metadata",
             extra={
                 "uri": uri,
-                "session_id": session_id,
-                "agent_id": agent_id,
+                "session_id": authority.session_id,
+                "agent_id": authority.agent_id,
                 "error": metadata_result.error.__class__.__name__,
             },
         )
@@ -957,16 +955,16 @@ async def _materialize_admitted_input_exchange_file_attachment(
 
     download_result = await exchange_file_service.resolve_admitted_input_attachment(
         uri=uri,
-        agent_id=agent_id,
-        session_id=session_id,
+        agent_id=authority.agent_id,
+        session_id=authority.session_id,
     )
     if isinstance(download_result, Failure):
         logger.warning(
             "Failed to download admitted attachment for input FilePart",
             extra={
                 "uri": uri,
-                "session_id": session_id,
-                "agent_id": agent_id,
+                "session_id": authority.session_id,
+                "agent_id": authority.agent_id,
                 "error": download_result.error.__class__.__name__,
             },
         )
@@ -984,9 +982,8 @@ async def _materialize_admitted_input_exchange_file_attachment(
         )
 
     download = download_result.value
-    model_file_result = await model_file_service.create_for_admitted_input(
-        agent_id=agent_id,
-        session_id=session_id,
+    model_file_result = await model_file_service.create(
+        authority=authority,
         filename=download.file.filename,
         media_type=download.file.media_type,
         body=download.body,
@@ -1001,8 +998,8 @@ async def _materialize_admitted_input_exchange_file_attachment(
             "Failed to create ModelFile for admitted input attachment",
             extra={
                 "uri": uri,
-                "session_id": session_id,
-                "agent_id": agent_id,
+                "session_id": authority.session_id,
+                "agent_id": authority.agent_id,
                 "reason": _model_file_creation_failure_reason(model_file_result.error),
             },
         )
@@ -1093,45 +1090,9 @@ async def _materialize_user_input_exchange_file_attachment(
             file_part=None,
         )
 
-    download = download_result.value
-    model_file_result = await model_file_service.create_for_agent_pending_input(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=user_id,
-        filename=download.file.filename,
-        media_type=download.file.media_type,
-        body=download.body,
-        metadata={
-            "source_kind": "user_upload",
-            "source_attachment_id": download.file.id,
-            "source_attachment_uri": download.file.uri,
-        },
-    )
-    if isinstance(model_file_result, Failure):
-        logger.warning(
-            "Failed to create ModelFile for user input attachment",
-            extra={
-                "uri": uri,
-                "session_id": session_id,
-                "agent_id": agent_id,
-                "reason": _model_file_creation_failure_reason(model_file_result.error),
-            },
-        )
-        return _MaterializedUserInputAttachment(
-            attachment=attachment,
-            file_part=None,
-        )
-
     return _MaterializedUserInputAttachment(
         attachment=attachment,
-        file_part=file_output_part_from_model_file(
-            model_file_result.value,
-            metadata={
-                "source_kind": "user_upload",
-                "source_attachment_id": download.file.id,
-                "source_attachment_uri": download.file.uri,
-            },
-        ),
+        file_part=None,
     )
 
 

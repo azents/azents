@@ -5,6 +5,7 @@ import datetime
 from contextlib import AbstractAsyncContextManager
 from io import BytesIO
 from typing import IO, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.infra.s3.service import S3Service
@@ -375,6 +376,7 @@ def _materializer(
         exchange_file_repository=exchange_repository,
         agent_repository=AgentRepository(),
         agent_session_repository=session_repository,
+        agent_run_repository=AsyncMock(),
         workspace_user_repository=workspace_user_repository,
         session_manager=session_manager,
         s3_service=s3_service,
@@ -639,14 +641,14 @@ async def test_failed_upload_compensates_prepared_object_keys() -> None:
     assert s3_service.deleted == list(s3_service.uploaded)
 
 
-async def test_requires_authenticated_actor_before_upload() -> None:
-    """Reject generated user-owned files when no authenticated actor exists."""
+async def test_allows_userless_provider_output_before_upload() -> None:
+    """Prepare provider output without synthesizing Human provenance."""
     materializer, _, _, s3_service = _materializer()
     materializer.user_id = None
 
-    with pytest.raises(ModelCallError, match="authenticated user"):
-        await materializer.prepare(_normalized_output())
+    prepared = await materializer.prepare(_normalized_output())
 
+    assert prepared.generated_images[0].exchange_source.source_user_id is None
     assert s3_service.uploaded == {}
 
 

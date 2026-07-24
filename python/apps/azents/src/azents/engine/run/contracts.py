@@ -24,6 +24,7 @@ from azents.engine.run.types import (
     CheckStop,
     PollMessages,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,7 @@ class RunContext:
     tool_admission_barrier: ToolAdmissionBarrier
     model_transport_state: ModelTransportState
     publish_event: PublishEventFn
+    resource_authority: SessionResourceAuthority | None = None
 
 
 class AgentEngineProtocol(Protocol):

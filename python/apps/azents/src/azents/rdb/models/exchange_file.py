@@ -7,7 +7,11 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
-from azents.core.enums import ExchangeFileOrigin, ExchangeFileStatus
+from azents.core.enums import (
+    ExchangeFileOrigin,
+    ExchangeFileProvenanceKind,
+    ExchangeFileStatus,
+)
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -26,6 +30,13 @@ def _exchange_file_status_values(
     return [v.value for v in enum_cls]
 
 
+def _exchange_file_provenance_kind_values(
+    enum_cls: type[ExchangeFileProvenanceKind],
+) -> list[str]:
+    """Return provenance enum values stored in the DB."""
+    return [v.value for v in enum_cls]
+
+
 exchange_file_origin_enum = ENUM(
     ExchangeFileOrigin,
     name="exchange_file_origin",
@@ -38,6 +49,12 @@ exchange_file_status_enum = ENUM(
     name="exchange_file_status",
     create_type=False,
     values_callable=_exchange_file_status_values,
+)
+exchange_file_provenance_kind_enum = ENUM(
+    ExchangeFileProvenanceKind,
+    name="exchange_file_provenance_kind",
+    create_type=False,
+    values_callable=_exchange_file_provenance_kind_values,
 )
 
 
@@ -68,6 +85,30 @@ class RDBExchangeFile(RDBModel):
         "object_key",
         name="uq_exchange_files_object_key",
     )
+    CK_PROVENANCE = sa.CheckConstraint(
+        """
+        (provenance_kind = 'human' AND source_user_id IS NOT NULL)
+        OR (provenance_kind = 'agent' AND source_agent_id IS NOT NULL)
+        OR (
+            provenance_kind = 'tool'
+            AND source_agent_id IS NOT NULL
+            AND source_run_id IS NOT NULL
+            AND source_tool_name IS NOT NULL
+        )
+        OR (
+            provenance_kind = 'provider'
+            AND source_agent_id IS NOT NULL
+            AND source_run_id IS NOT NULL
+            AND source_provider IS NOT NULL
+        )
+        OR (provenance_kind IN ('system', 'migration'))
+        OR (
+            provenance_kind = 'preview'
+            AND source_exchange_file_id IS NOT NULL
+        )
+        """,
+        name="ck_exchange_files_provenance",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -94,10 +135,31 @@ class RDBExchangeFile(RDBModel):
     media_type: Mapped[str] = mapped_column(sa.String(255), nullable=False)
     size_bytes: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     sha256: Mapped[str] = mapped_column(sa.String(64), nullable=False)
-    created_by_user_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="CASCADE"),
+    provenance_kind: Mapped[ExchangeFileProvenanceKind] = mapped_column(
+        exchange_file_provenance_kind_enum,
         nullable=False,
+    )
+    source_user_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    source_agent_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    source_run_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_runs.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    source_tool_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    source_provider: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    source_exchange_file_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("exchange_files.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     retention_root_session_id: Mapped[str | None] = mapped_column(
         sa.String(32),
@@ -180,4 +242,5 @@ class RDBExchangeFile(RDBModel):
         IX_PREVIEW_THUMBNAIL_FILE_ID,
         IX_RETENTION_ROOT_STATUS,
         UQ_OBJECT_KEY,
+        CK_PROVENANCE,
     )
