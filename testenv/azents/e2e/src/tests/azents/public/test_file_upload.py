@@ -264,12 +264,6 @@ def _wait_for_rest_message(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason=(
-        "Phase 1 does not include AgentSession-aware chat bootstrap "
-        "for file upload e2e."
-    )
-)
 class TestFileUpload:
     """file upload API test."""
 
@@ -280,7 +274,7 @@ class TestFileUpload:
         azents_public_server_url: str,
     ) -> None:
         """file upload success t URI, media_type, sizet returnt."""
-        token, session_id, agent_id = create_chat_session_with_agent(
+        token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
@@ -291,7 +285,6 @@ class TestFileUpload:
             azents_public_server_url,
             token,
             agent_id,
-            session_id,
             filename="photo.png",
             content=content,
         )
@@ -307,22 +300,23 @@ class TestFileUpload:
         self,
         azents_public_server_url: str,
     ) -> None:
-        """auth t upload t 401t returnt."""
+        """Unauthenticated Agent upload returns 401."""
         response = requests.post(
-            f"{azents_public_server_url}/chat/v1/sessions/{unique()}/upload",
+            f"{azents_public_server_url}/chat/v1/agents/"
+            "00000000000000000000000000000000/upload",
             files={"file": ("test.txt", b"hello", "text/plain")},
             timeout=10,
         )
         assert response.status_code == 401
 
-    def test_upload_to_nonexistent_session_returns_404(
+    def test_upload_to_nonexistent_agent_returns_404(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """existst t sessiont upload t 404t returnt."""
-        token, _, agent_id = create_chat_session_with_agent(
+        """Uploading to a nonexistent Agent returns 404."""
+        token, _, _ = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
@@ -331,7 +325,6 @@ class TestFileUpload:
         response = upload_file(
             azents_public_server_url,
             token,
-            agent_id,
             "00000000000000000000000000000000",
             filename="test.txt",
             content=b"hello",
@@ -339,14 +332,14 @@ class TestFileUpload:
         )
         assert response.status_code == 404
 
-    def test_upload_to_other_users_session_returns_403(
+    def test_upload_to_other_users_agent_returns_403(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """t usert sessiont upload t 403t returnt."""
-        _, session_id, agent_id = create_chat_session_with_agent(
+        """Uploading to another user's Agent returns 403."""
+        _, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
@@ -358,7 +351,6 @@ class TestFileUpload:
             azents_public_server_url,
             other_token,
             agent_id,
-            session_id,
             filename="test.txt",
             content=b"hello",
             media_type="text/plain",
@@ -372,7 +364,7 @@ class TestFileUpload:
         azents_public_server_url: str,
     ) -> None:
         """20MB t file upload t 413t returnt."""
-        token, session_id, agent_id = create_chat_session_with_agent(
+        token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
@@ -384,7 +376,6 @@ class TestFileUpload:
             azents_public_server_url,
             token,
             agent_id,
-            session_id,
             filename="large.bin",
             content=large_content,
             media_type="application/octet-stream",
@@ -397,12 +388,7 @@ class TestFileUpload:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason=(
-        "Phase 1 does not include AgentSession-aware chat bootstrap "
-        "for file upload e2e."
-    )
-)
+@pytest.mark.skip(reason="Session-scoped Exchange file listing API is not available.")
 class TestExchangeFiles:
     """Exchange file API test."""
 
@@ -477,7 +463,6 @@ class TestExchangeFiles:
             azents_public_server_url,
             token,
             agent_id,
-            session_id,
             filename="test.txt",
             content=content,
             media_type="text/plain",
@@ -501,7 +486,7 @@ class TestExchangeFiles:
         azents_public_server_url: str,
     ) -> None:
         """file upload t Exchange filet downloadt t t checkt."""
-        token, session_id, agent_id = create_chat_session_with_agent(
+        token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
@@ -512,7 +497,6 @@ class TestExchangeFiles:
             azents_public_server_url,
             token,
             agent_id,
-            session_id,
             filename="download.txt",
             content=content,
             media_type="text/plain",
@@ -531,7 +515,7 @@ class TestExchangeFiles:
         azents_public_server_url: str,
     ) -> None:
         """file upload t Exchange filet deletet t t checkt."""
-        token, session_id, agent_id = create_chat_session_with_agent(
+        token, _, agent_id = create_chat_session_with_agent(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
@@ -542,7 +526,6 @@ class TestExchangeFiles:
             azents_public_server_url,
             token,
             agent_id,
-            session_id,
             filename="deletable.txt",
             content=content,
             media_type="text/plain",
@@ -581,7 +564,6 @@ class TestUploadMessagePath:
             azents_public_server_url,
             token,
             agent_id,
-            session_id,
             filename="nul-image.png",
             content=image_content,
             media_type="image/png",
@@ -590,7 +572,6 @@ class TestUploadMessagePath:
             azents_public_server_url,
             token,
             agent_id,
-            session_id,
             filename="notes.txt",
             content=text_content,
             media_type="text/plain",
