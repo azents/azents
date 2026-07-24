@@ -46,6 +46,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
+  - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/chat_write.py
@@ -53,6 +54,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
+  - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
@@ -101,8 +103,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-23
-spec_version: 130
+last_verified_at: 2026-07-24
+spec_version: 131
 ---
 
 # Conversation & Events
@@ -122,10 +124,11 @@ erDiagram
     AgentRuntime }o--|| Workspace : "scoped to"
     AgentSession ||--|| SessionAgent : "linked participant"
     SessionAgent ||--o{ SessionAgent : "child participants"
+    SessionAgent }o--|| SessionAgentContext : "shares"
+    SessionAgentContext ||--o{ SessionWorkspaceProject : "owns working projects"
     AgentSession ||--o{ Event : "event transcript"
     AgentSession ||--o{ AgentRun : "durable execution runs"
     AgentSession ||--o{ ExchangeFile : "shows uploads and artifacts"
-    AgentSession ||--o{ SessionWorkspaceProject : "working projects"
     AgentSession ||--o{ SessionGitWorktree : "owned worktrees"
     AgentSession ||--o{ ActionExecution : "operation TurnAction executions"
     AgentRuntime ||--o{ ExchangeFile : "owns sandbox artifacts"
@@ -146,6 +149,13 @@ command, stop intent, or run heartbeat.
 `AgentSession`; every participant links one-to-one to an `AgentSession`, and the linked session owns
 that participant's transcript, runs, input buffers, Goal, Todo, Toolkit State, Skill projection,
 ModelFiles, artifacts, and exchange files.
+
+`SessionAgentContext` is the shared root-tree working-context boundary. The root
+`SessionAgent` and every descendant subagent retain the same `context_id`.
+`session_agent_context_projects` therefore owns authoritative Project membership;
+the Session-scoped Project APIs resolve the selected Session to that context and
+return compatibility projections. A subagent never reapplies Agent defaults or
+creates duplicate Project rows independently.
 
 ## 2. AgentSession
 
@@ -190,6 +200,22 @@ ordered `action_message` input before the first user message; the action executi
 Azents-owned Git worktree from the source Project path and starting ref before registering the created
 worktree as a session Project. Legacy `workspace_items`, `workspace_mode`, and `project_paths` request
 fields are not part of the current contract.
+
+Every root creation call selects exactly one workspace intent. Explicit intent uses
+the caller's normalized `existing_project_paths`, including an explicitly empty
+list, and never merges the Agent policy. Agent-default intent reads the current
+ordered automatic Project policy and snapshots it into the new
+`SessionAgentContext`. Root creation writes the AgentSession, root SessionAgent,
+context, and context Projects in the caller-owned transaction without Runtime I/O.
+The creation result may report the source policy revision for transaction-local
+provenance; the durable authority is the context Project snapshot.
+
+Team-primary ensure applies Agent-default intent only to the unique insert winner.
+A concurrent loser or any later ensure reuses the existing team-primary Session and
+its immutable context snapshot rather than rereading policy. External Channel root
+creation also uses Agent-default intent. Ordinary Public API/Web non-primary
+creation remains explicit.
+
 `POST /chat/v1/agents/{agent_id}/sessions/messages` creates the same kind of non-primary team session
 and enqueues setup action inputs plus the first user message in one write boundary. Setup action inputs
 remain ahead of the user message in FIFO order. Successful Project-mutating action execution gates the
@@ -384,14 +410,14 @@ and progress rows. Terminal state is therefore owned only by transcript history.
 cancels leftover active operations before new work and never replays their potentially completed side
 effects. Failed and cancelled actions are not retried or discarded through a separate mutation API.
 
-`session_git_worktrees` is the cleanup authority for Azents-owned worktrees. It stores the source
+`session_agent_context_git_worktrees` is the cleanup authority for Azents-owned worktrees. It stores the source
 Project path, starting ref, generated worktree path, generated branch name, base commit, status,
 failure summary, cleanup summary, and the owning action execution when the worktree came from a
 TurnAction. Worktree creation uses typed Runner Git operations, registers exactly the created path in
-`session_workspace_projects`, and upserts the Agent Project catalog entry without updating
+`session_agent_context_projects`, and upserts the Agent Project catalog entry without updating
 last-created-session defaults. Existing Project selections still refresh presets/defaults directly;
 worktree actions refresh source-path presets and register only the created worktree path as prompt
-context. The ownership row, not reserved-root membership or `session_workspace_projects`, is required
+context. The ownership row, not reserved-root membership or `session_agent_context_projects`, is required
 before destructive cleanup can remove a path or branch.
 
 ## 3. AgentRun
@@ -984,6 +1010,9 @@ participant.
 
 ## 12. Changelog
 
+- **2026-07-24** — v131. Added explicit versus Agent-default root workspace intent,
+  winner-only team-primary policy snapshotting, Runtime-free root initialization,
+  and shared `SessionAgentContext` Project ownership/subagent inheritance.
 - **2026-07-23** — v130. Made archive the only best-effort Runtime/Git worktree cleanup point and made retention purge database-only with ordinary convergence for existing worktree participant failures.
 - **2026-07-23** — v129. Added external-message ID-to-display-name mapping projection while preserving canonical provider text and action identifiers.
 - **2026-07-22** — v126. Added External Channel batch InputBuffer promotion, source-attributed transcript events, stable live/durable identity, and revision/lifecycle ownership.

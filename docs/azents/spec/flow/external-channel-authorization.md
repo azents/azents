@@ -9,6 +9,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
   - python/apps/azents/src/azents/services/external_channel/management.py
+  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
@@ -19,8 +21,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-07-23
-spec_version: 4
+last_verified_at: 2026-07-24
+spec_version: 5
 ---
 
 # External Channel Authorization
@@ -51,6 +53,14 @@ Supported decisions are `allow_session`, `allow_agent`, `deny`, and `block`.
 
 The decision transaction locks the route connection, active binding, resource, and request in that order, verifies an `active` or `degraded` connection plus the route relationship, active resource, and Agent lifecycle state, creates the External Channel AgentSession only when no active binding exists, and writes the binding, grant, and decision atomically. Repeating the same compatible Allow decision returns the existing binding and grant. Conflicting or stale decisions return a conflict instead of creating parallel state.
 
+When Allow needs a new binding, the shared root Session creation boundary reads the
+routed Agent's current automatic Project policy and creates the root
+`SessionAgentContext` Project snapshot before the binding commit. It performs no
+Runtime validation or filesystem access in this transaction; policy save-time
+validation is authoritative. If the resource already has an active binding, Allow
+reuses that binding's Session and context snapshot instead of rereading or merging
+the current policy.
+
 When the original approval control message has a delivered provider identity, every
 compatible final decision also creates one idempotent access-request-origin delete
 intent in the decision transaction. The provider delete is attempted only after the
@@ -74,6 +84,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-24** (spec_version 5) — Added atomic Agent automatic Project policy
+  snapshotting for Allow-created binding Sessions and existing-binding snapshot
+  reuse.
 - **2026-07-23** (spec_version 4) — Added complete participant identity in approval controls, atomic post-decision control-message deletion intents, and hard removal of revoked grants.
 - **2026-07-23** (spec_version 3) — Rendered Slack approval control messages as accessible Block Kit button actions.
 - **2026-07-23** (spec_version 2) — Removed route lifecycle state from authorization admission; route identity remains while Agent lifecycle and resource state determine eligibility.

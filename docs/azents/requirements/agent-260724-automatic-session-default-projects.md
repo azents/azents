@@ -2,6 +2,7 @@
 title: "Agent Default Projects for Automatic Sessions Requirements"
 created: 2026-07-24
 updated: 2026-07-24
+implemented: 2026-07-24
 tags: [agent, session, workspace, project]
 document_role: primary
 document_type: requirements
