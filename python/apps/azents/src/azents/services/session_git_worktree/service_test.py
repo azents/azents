@@ -32,12 +32,16 @@ from azents.engine.events.types import ActionExecutionResultPayload
 from azents.engine.run.input import InputMessage
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_automatic_project_setting import (
+    RDBAgentAutomaticProjectSetting,
+)
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent_context import RDBSessionAgentContextGitWorktree
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.action_execution.data import ActionExecutionCreate
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogEntry
@@ -78,6 +82,9 @@ from azents.services.agent_session_input import AgentSessionInputService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
 from azents.services.session_git_worktree import (
     GitWorktreeCleanupNotFound,
     GitWorktreeCleanupSubagentReadOnly,
@@ -547,6 +554,8 @@ async def _create_agent_context(
     )
     session.add(agent)
     await session.flush()
+    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id, revision=1))
+    await session.flush()
     return workspace_id, user.id, agent.id
 
 
@@ -588,6 +597,11 @@ def _input_service(
         agent_project_default_repository=AgentProjectDefaultRepository(),
         agent_runtime_repository=_RuntimeRepository(),
         agent_session_repository=AgentSessionRepository(),
+        root_agent_session_creation_service=RootAgentSessionCreationService(
+            agent_session_repository=AgentSessionRepository(),
+            automatic_project_repository=AgentAutomaticProjectRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+        ),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         exchange_file_service=_ExchangeFileService(),

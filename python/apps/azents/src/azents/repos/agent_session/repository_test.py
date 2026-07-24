@@ -291,13 +291,21 @@ class TestAgentSessionRepository:
         agent_id = await _create_agent(rdb_session, workspace_id, "agent-session-model")
         repo = AgentSessionRepository()
 
-        first = await repo.ensure_team_primary_for_agent(
-            rdb_session, workspace_id=workspace_id, agent_id=agent_id
+        first_result = await repo.ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
         )
-        second = await repo.ensure_team_primary_for_agent(
-            rdb_session, workspace_id=workspace_id, agent_id=agent_id
+        second_result = await repo.ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
         )
+        first = first_result.session
+        second = second_result.session
 
+        assert first_result.created is True
+        assert second_result.created is False
         assert first.id == second.id
         assert first.status == AgentSessionStatus.ACTIVE
         assert first.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
@@ -357,9 +365,11 @@ class TestAgentSessionRepository:
         workspace_id = await _create_workspace(rdb_session, "agent-session-title-ws")
         agent_id = await _create_agent(rdb_session, workspace_id, "agent-session-title")
         repo = AgentSessionRepository()
-        agent_session = await repo.ensure_team_primary_for_agent(
-            rdb_session, workspace_id=workspace_id, agent_id=agent_id
-        )
+        agent_session = (
+            await repo.ensure_team_primary_for_agent(
+                rdb_session, workspace_id=workspace_id, agent_id=agent_id
+            )
+        ).session
 
         titled = await repo.update_title(
             rdb_session,
@@ -388,18 +398,22 @@ class TestAgentSessionRepository:
             rdb_session, workspace_id, "agent-session-archive-model"
         )
         repo = AgentSessionRepository()
-        first = await repo.ensure_team_primary_for_agent(
-            rdb_session, workspace_id=workspace_id, agent_id=agent_id
-        )
+        first = (
+            await repo.ensure_team_primary_for_agent(
+                rdb_session, workspace_id=workspace_id, agent_id=agent_id
+            )
+        ).session
         await repo.archive(
             rdb_session,
             first.id,
             ended_at=datetime.datetime.now(datetime.timezone.utc),
         )
 
-        second = await repo.ensure_team_primary_for_agent(
-            rdb_session, workspace_id=workspace_id, agent_id=agent_id
-        )
+        second = (
+            await repo.ensure_team_primary_for_agent(
+                rdb_session, workspace_id=workspace_id, agent_id=agent_id
+            )
+        ).session
 
         assert second.id != first.id
         assert second.status == AgentSessionStatus.ACTIVE
@@ -423,9 +437,12 @@ class TestAgentSessionRepository:
 
         repo = AgentSessionRepository()
         async with AsyncSession(rdb_engine, expire_on_commit=False) as first_session:
-            first = await repo.ensure_team_primary_for_agent(
-                first_session, workspace_id=workspace_id, agent_id=agent_id
+            first_result = await repo.ensure_team_primary_for_agent(
+                first_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
             )
+            first = first_result.session
 
             async with AsyncSession(
                 rdb_engine, expire_on_commit=False
@@ -437,9 +454,12 @@ class TestAgentSessionRepository:
                 )
                 await asyncio.sleep(0.1)
                 await first_session.commit()
-                second = await asyncio.wait_for(second_task, timeout=5)
+                second_result = await asyncio.wait_for(second_task, timeout=5)
+                second = second_result.session
                 await second_session.commit()
 
+        assert first_result.created is True
+        assert second_result.created is False
         assert second.id == first.id
         assert second.status == AgentSessionStatus.ACTIVE
 
@@ -454,9 +474,11 @@ class TestAgentSessionRepository:
             rdb_session, workspace_id, "agent-session-lifecycle-model"
         )
         repo = AgentSessionRepository()
-        agent_session = await repo.ensure_team_primary_for_agent(
-            rdb_session, workspace_id=workspace_id, agent_id=agent_id
-        )
+        agent_session = (
+            await repo.ensure_team_primary_for_agent(
+                rdb_session, workspace_id=workspace_id, agent_id=agent_id
+            )
+        ).session
         first_claimed_at = datetime.datetime.now(datetime.timezone.utc)
         second_claimed_at = first_claimed_at + datetime.timedelta(seconds=1)
 

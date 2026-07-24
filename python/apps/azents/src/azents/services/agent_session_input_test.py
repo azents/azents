@@ -29,6 +29,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
@@ -54,6 +55,9 @@ from azents.services.exchange_file import (
     FileRetentionOwnerConflict,
 )
 from azents.services.model_file import ModelFileService
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .agent_session_input import (
@@ -257,6 +261,15 @@ class _RejectingExchangeFileService(_ExchangeFileService):
         return Failure(FileRetentionOwnerConflict())
 
 
+def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
+    """Build root Session creation service for tests."""
+    return RootAgentSessionCreationService(
+        agent_session_repository=AgentSessionRepository(),
+        automatic_project_repository=AgentAutomaticProjectRepository(),
+        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+    )
+
+
 def _input_buffer_service(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> InputBufferService:
@@ -363,6 +376,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=runtime_repository,
             agent_session_repository=session_repository,
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -420,6 +434,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=_RuntimeRepositoryDouble(calls),
             agent_session_repository=_AgentSessionRepositoryDouble(calls),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_RejectingExchangeFileService(),
@@ -469,6 +484,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=runtime_repository,
             agent_session_repository=session_repository,
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -509,11 +525,13 @@ class TestAgentSessionInputService:
                 user_id=user_id,
             )
             agent_id = await _create_agent(session, workspace_id, "draft-session-input")
-            primary = await AgentSessionRepository().ensure_team_primary_for_agent(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
+            primary = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            ).session
             await SessionWorkspaceProjectRepository().create_project(
                 session,
                 SessionWorkspaceProjectCreate(
@@ -529,6 +547,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -621,11 +640,13 @@ class TestAgentSessionInputService:
                 workspace_id,
                 "draft-session-claim-conflict",
             )
-            primary = await AgentSessionRepository().ensure_team_primary_for_agent(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
+            primary = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            ).session
 
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
@@ -634,6 +655,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_RejectingExchangeFileService(),
@@ -685,11 +707,13 @@ class TestAgentSessionInputService:
                 session, workspace_id, "agent-session-stale-buffer"
             )
             runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-            old_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-                session,
-                workspace_id=runtime.workspace_id,
-                agent_id=runtime.agent_id,
-            )
+            old_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=runtime.workspace_id,
+                    agent_id=runtime.agent_id,
+                )
+            ).session
             await AgentSessionRepository().archive(
                 session,
                 old_session.id,
@@ -703,6 +727,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -742,11 +767,13 @@ class TestAgentSessionInputService:
             workspace_id = await _create_workspace(session, "subagent-input-readonly")
             user_id = await _create_user(session, "subagent-readonly@example.com")
             agent_id = await _create_agent(session, workspace_id, "subagent-readonly")
-            root_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
+            root_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            ).session
             root_agent = await AgentSessionRepository().get_session_agent_by_session_id(
                 session,
                 root_session.id,
@@ -768,6 +795,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -816,7 +844,7 @@ class TestAgentSessionInputService:
                     workspace_id=runtime.workspace_id,
                     agent_id=runtime.agent_id,
                 )
-            )
+            ).session
 
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
@@ -825,6 +853,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
@@ -875,7 +904,7 @@ class TestAgentSessionInputService:
                     workspace_id=runtime.workspace_id,
                     agent_id=runtime.agent_id,
                 )
-            )
+            ).session
 
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
@@ -884,6 +913,7 @@ class TestAgentSessionInputService:
             agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),

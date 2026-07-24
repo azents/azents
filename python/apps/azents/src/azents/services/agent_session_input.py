@@ -38,6 +38,12 @@ from azents.services.exchange_file import (
     ExchangeFileService,
 )
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
+from azents.services.root_agent_session_creation.data import (
+    ExplicitRootWorkspaceIntent,
+)
 from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
     GitWorktreeWorkspaceItem,
@@ -120,6 +126,10 @@ class AgentSessionInputService:
     ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
+    ]
+    root_agent_session_creation_service: Annotated[
+        RootAgentSessionCreationService,
+        Depends(RootAgentSessionCreationService),
     ]
     session_workspace_project_repository: Annotated[
         SessionWorkspaceProjectRepository, Depends(SessionWorkspaceProjectRepository)
@@ -301,8 +311,7 @@ class AgentSessionInputService:
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
             )
-            ensure_primary = self.agent_session_repository.ensure_team_primary_for_agent
-            await ensure_primary(
+            await self.root_agent_session_creation_service.ensure_team_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
@@ -318,21 +327,31 @@ class AgentSessionInputService:
                     return Failure(error)
                 case _:
                     assert_never(workspace_items_result)
-            agent_session = await self.agent_session_repository.create(
+            root_session_creation = self.root_agent_session_creation_service
+            root_result = await root_session_creation.create_root_session(
                 session,
-                AgentSessionCreate(
+                create=AgentSessionCreate(
                     workspace_id=agent.workspace_id,
                     agent_id=agent_id,
                     title=None,
                     primary_kind=None,
                 ),
+                workspace_intent=ExplicitRootWorkspaceIntent(
+                    existing_project_paths=[
+                        item.path
+                        for item in workspace_items
+                        if isinstance(item, ExistingProjectWorkspaceItem)
+                    ],
+                ),
             )
+            agent_session = root_result.agent_session
             workspace_result = await self._create_session_workspace_items(
                 session,
                 agent_id=agent_id,
                 session_id=agent_session.id,
                 session_handle=agent_session.handle,
                 workspace_items=workspace_items,
+                create_direct_projects=False,
             )
             match workspace_result:
                 case Success():
@@ -523,6 +542,7 @@ class AgentSessionInputService:
         session_id: str,
         session_handle: str,
         workspace_items: list[NewSessionWorkspaceItem],
+        create_direct_projects: bool,
     ) -> Result[None, InvalidProjectPath]:
         """Create direct Project rows and queue selected worktree items."""
         existing_project_paths = [
@@ -537,13 +557,14 @@ class AgentSessionInputService:
         ]
         project_repository = self.session_workspace_project_repository
         for path in existing_project_paths:
-            await project_repository.create_project(
-                session,
-                SessionWorkspaceProjectCreate(
-                    session_id=session_id,
-                    path=path,
-                ),
-            )
+            if create_direct_projects:
+                await project_repository.create_project(
+                    session,
+                    SessionWorkspaceProjectCreate(
+                        session_id=session_id,
+                        path=path,
+                    ),
+                )
             await self.agent_project_preset_repository.upsert_preset(
                 session,
                 agent_id=agent_id,
@@ -587,6 +608,7 @@ class AgentSessionInputService:
             workspace_items=[
                 ExistingProjectWorkspaceItem(path=path) for path in project_paths
             ],
+            create_direct_projects=True,
         )
         match workspace_result:
             case Success():

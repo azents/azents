@@ -89,9 +89,11 @@ async def _create_agent_session(
     user_id = await _create_user(session, f"{handle}@example.com")
     agent_id = await _create_agent(session, workspace_id, slug)
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-        session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
-    )
+    agent_session = (
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
+        )
+    ).session
     return agent_session.id, user_id, workspace_id
 
 

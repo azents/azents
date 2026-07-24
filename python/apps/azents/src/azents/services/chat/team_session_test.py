@@ -24,6 +24,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -53,6 +54,9 @@ from azents.services.external_channel.channel_action import (
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
@@ -152,6 +156,11 @@ def _service(
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
+        root_agent_session_creation_service=RootAgentSessionCreationService(
+            agent_session_repository=AgentSessionRepository(),
+            automatic_project_repository=AgentAutomaticProjectRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+        ),
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -511,11 +520,13 @@ class TestChatSessionTeamSessions:
             user_id=user_id,
         )
         agent_id = await _create_agent(rdb_session, workspace_id, "team-title-agent")
-        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-        )
+        agent_session = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
         await rdb_session.commit()
 
         titled = await _service(rdb_session_manager).update_session_title(
@@ -543,11 +554,13 @@ class TestChatSessionTeamSessions:
         """Initial automatic titles do not overwrite manual titles."""
         workspace_id = await _create_workspace(rdb_session, "team-session-auto-title")
         agent_id = await _create_agent(rdb_session, workspace_id, "team-auto-title")
-        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-        )
+        agent_session = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
         event = await EventTranscriptRepository().append(
             rdb_session,
             EventCreate(
@@ -593,11 +606,13 @@ class TestChatSessionTeamSessions:
         """LLM-generated titles only replace the initial automatic title state."""
         workspace_id = await _create_workspace(rdb_session, "team-session-gen-title")
         agent_id = await _create_agent(rdb_session, workspace_id, "team-gen-title")
-        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-        )
+        agent_session = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
         event = await EventTranscriptRepository().append(
             rdb_session,
             EventCreate(
@@ -643,11 +658,13 @@ class TestChatSessionTeamSessions:
         """LLM-generated titles can apply after later assistant activity."""
         workspace_id = await _create_workspace(rdb_session, "team-session-stale-title")
         agent_id = await _create_agent(rdb_session, workspace_id, "team-stale-title")
-        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-        )
+        agent_session = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
         first_event = await EventTranscriptRepository().append(
             rdb_session,
             EventCreate(
@@ -714,11 +731,13 @@ class TestChatSessionTeamSessions:
             user_id=user_id,
         )
         agent_id = await _create_agent(rdb_session, workspace_id, "team-title-empty")
-        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-        )
+        agent_session = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
         await rdb_session.commit()
 
         result = await _service(rdb_session_manager).update_session_title(
@@ -746,11 +765,13 @@ class TestChatSessionTeamSessions:
             user_id=user_id,
         )
         agent_id = await _create_agent(rdb_session, workspace_id, "team-list-agent")
-        primary = await AgentSessionRepository().ensure_team_primary_for_agent(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-        )
+        primary = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
         await rdb_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
@@ -794,11 +815,13 @@ class TestChatSessionTeamSessions:
         agent_id = await _create_agent(
             rdb_session, workspace_id, "team-user-input-sort-agent"
         )
-        primary = await AgentSessionRepository().ensure_team_primary_for_agent(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-        )
+        primary = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
         await rdb_session.commit()
 
         first_result = await _service(rdb_session_manager).create_team_session(
@@ -918,11 +941,13 @@ class TestChatSessionTeamSessions:
             user_id=user_id,
         )
         agent_id = await _create_agent(rdb_session, workspace_id, "team-archive-agent")
-        primary = await AgentSessionRepository().ensure_team_primary_for_agent(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-        )
+        primary = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
         await rdb_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
@@ -1074,11 +1099,13 @@ class TestChatSessionTeamSessions:
             user_id=user_id,
         )
         agent_id = await _create_agent(rdb_session, workspace_id, "team-primary-agent")
-        primary = await AgentSessionRepository().ensure_team_primary_for_agent(
-            rdb_session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-        )
+        primary = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
         await rdb_session.commit()
 
         archive_result = await _service(rdb_session_manager).archive_agent_session(

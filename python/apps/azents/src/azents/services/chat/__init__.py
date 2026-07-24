@@ -62,6 +62,12 @@ from azents.repos.session_workspace_project.data import SessionWorkspaceProjectC
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
+from azents.services.root_agent_session_creation.data import (
+    ExplicitRootWorkspaceIntent,
+)
 from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
     GitWorktreeWorkspaceItem,
@@ -319,6 +325,10 @@ class ChatSessionService:
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
+    root_agent_session_creation_service: Annotated[
+        RootAgentSessionCreationService,
+        Depends(RootAgentSessionCreationService),
+    ]
     archived_session_retention_repository: Annotated[
         ArchivedSessionRetentionRepository,
         Depends(ArchivedSessionRetentionRepository),
@@ -375,14 +385,13 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            agent_session = (
-                await self.agent_session_repository.ensure_team_primary_for_agent(
-                    session,
-                    workspace_id=agent.workspace_id,
-                    agent_id=agent_id,
-                )
+            root_session_creation = self.root_agent_session_creation_service
+            root_result = await root_session_creation.ensure_team_primary(
+                session,
+                workspace_id=agent.workspace_id,
+                agent_id=agent_id,
             )
-            return Success(agent_session)
+            return Success(root_result.agent_session)
 
     async def get_session(
         self,
@@ -630,8 +639,7 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            ensure_primary = self.agent_session_repository.ensure_team_primary_for_agent
-            await ensure_primary(
+            await self.root_agent_session_creation_service.ensure_team_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
@@ -662,8 +670,7 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            ensure_primary = self.agent_session_repository.ensure_team_primary_for_agent
-            await ensure_primary(
+            await self.root_agent_session_creation_service.ensure_team_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
@@ -698,8 +705,7 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            ensure_primary = self.agent_session_repository.ensure_team_primary_for_agent
-            await ensure_primary(
+            await self.root_agent_session_creation_service.ensure_team_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
@@ -715,21 +721,31 @@ class ChatSessionService:
                     return Failure(error)
                 case _:
                     assert_never(workspace_items_result)
-            created = await self.agent_session_repository.create(
+            root_session_creation = self.root_agent_session_creation_service
+            root_result = await root_session_creation.create_root_session(
                 session,
-                AgentSessionCreate(
+                create=AgentSessionCreate(
                     workspace_id=agent.workspace_id,
                     agent_id=agent_id,
                     title=None,
                     primary_kind=None,
                 ),
+                workspace_intent=ExplicitRootWorkspaceIntent(
+                    existing_project_paths=[
+                        item.path
+                        for item in workspace_items
+                        if isinstance(item, ExistingProjectWorkspaceItem)
+                    ],
+                ),
             )
+            created = root_result.agent_session
             workspace_result = await self._create_session_workspace_items(
                 session,
                 agent_id=agent_id,
                 session_id=created.id,
                 session_handle=created.handle,
                 workspace_items=workspace_items,
+                create_direct_projects=False,
             )
             match workspace_result:
                 case Success():
@@ -828,6 +844,7 @@ class ChatSessionService:
         session_id: str,
         session_handle: str,
         workspace_items: list[NewSessionWorkspaceItem],
+        create_direct_projects: bool,
     ) -> Result[None, InvalidProjectPath]:
         """Create direct Project rows and queue selected worktree items."""
         existing_project_paths = [
@@ -842,10 +859,11 @@ class ChatSessionService:
         ]
         default_items: list[AgentProjectDefaultCreate] = []
         for path in existing_project_paths:
-            await self.session_workspace_project_repository.create_project(
-                session,
-                SessionWorkspaceProjectCreate(session_id=session_id, path=path),
-            )
+            if create_direct_projects:
+                await self.session_workspace_project_repository.create_project(
+                    session,
+                    SessionWorkspaceProjectCreate(session_id=session_id, path=path),
+                )
             await self.agent_project_catalog_repository.upsert_entry(
                 session,
                 agent_id=agent_id,
@@ -947,6 +965,7 @@ class ChatSessionService:
             workspace_items=[
                 ExistingProjectWorkspaceItem(path=path) for path in project_paths
             ],
+            create_direct_projects=True,
         )
         match workspace_result:
             case Success():
