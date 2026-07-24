@@ -47,11 +47,13 @@ code_paths:
   - python/apps/azents/src/azents/services/xai_oauth/runtime.py
   - python/apps/azents/src/azents/services/kimi_oauth/runtime.py
   - python/apps/azents/src/azents/services/session_title.py
+  - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/repos/input_buffer/**
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/model_file/**
+  - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/rdb/models/event.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
@@ -72,7 +74,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-24
-spec_version: 131
+spec_version: 132
 ---
 
 # Agent Execution Loop
@@ -110,6 +112,23 @@ Main steps:
 12. The adapter computes normalized `needs_follow_up` from provider-neutral client-tool semantics and
     best-effort provider-dialect signals. When it is false, the runner observes the terminal
     `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
+
+### Team Session authority boundary
+
+The broker receives and sends only `SessionWakeUp(session_id)` and
+`SessionStopSignal(session_id)`. These are routing notifications, not execution envelopes: they
+contain no User, sender, requester, Agent, Workspace, interface, prompt, capability, or resource
+identity. Before any run, Toolkit, model, or resource operation, the Worker claims the Session owner
+generation and loads one immutable canonical PostgreSQL snapshot. That snapshot validates the active
+Session, Agent, Workspace, current/root SessionAgent lineage and context, exact owner generation, and
+expected FIFO InputBuffer, pending command, recoverable Run, or idle-continuation work.
+
+All currently implemented sessions execute as Team Sessions. `InputMessage`, `InvokeInput`,
+`RunRequest`, generic resolve contexts, and Toolkit/turn contexts contain no execution User. A Human
+`sender_user_id` remains only on the admitted input/event provenance. A public requester/auditor and
+an External Channel provider principal remain admission/provenance facts, never an execution
+identity. Mutable promotion, resource, and completion steps re-lock their exact durable rows and
+validated owner generation before commit; snapshot drift fails closed.
 
 ### Run-scoped managed-file projection
 
@@ -1143,6 +1162,8 @@ with a channel/message icon rather than presenting it as Goal continuation.
 
 ## Changelog
 
+- **2026-07-24** (spec_version 132) — Promoted routing-only broker signals,
+  owner-generation-first canonical PostgreSQL snapshots, and Userless Team Session execution.
 - **2026-07-24** (spec_version 131) — Added safe structured OpenAI Responses terminal-event
   observations with physical transport and Run correlation while excluding raw payloads.
 - **2026-07-23** (spec_version 130) — Added the explicit External Channel file download

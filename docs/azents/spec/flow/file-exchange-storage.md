@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/services/artifact.py
   - python/apps/azents/src/azents/services/model_file.py
+  - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/repos/artifact/**
@@ -48,7 +49,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-24
-spec_version: 28
+spec_version: 29
 ---
 
 # File Exchange Storage
@@ -59,6 +60,28 @@ File Exchange Storage is the flow that separately stores and retrieves user-faci
 
 External Channel file transfer is a separate explicit Runtime/provider path. It does not
 create ExchangeFile, Artifact, ModelFile, FilePart, or another durable file-body object.
+
+### Team Session resource authority and provenance
+
+Public upload, download, and delete operations authenticate and authorize the current requester
+before they disclose or mutate a resource. Internal promotion, materialization, import,
+presentation, provider output, and Artifact operations instead require a validated
+`SessionResourceAuthority` containing canonical Workspace, Agent, exact Session/root Session, Run,
+run index, and owner generation. Internal operations never call a public method with a borrowed,
+synthetic, nullable, or inferred User.
+
+ExchangeFile ownership is Workspace/Agent scope plus root-session retention binding; provenance is
+typed and separate. `source_user_id` records only a Human uploader. Agent, Tool, provider, system,
+derived-preview, and historical migration sources use their own typed fields. Source provenance does
+not grant execution, retention, or public access. `created_by_user_id` is not an ownership
+requirement.
+
+New ModelFiles require exact `created_run_id` together with their Session/run-index lineage. Historical
+rows resolve a Run only from the exact `(session_id, created_run_index)` match; unresolved historical
+lineage remains null rather than being inferred from a User, owner, uploader, or adjacent resource.
+Public ExchangeFile reads remain requester-authorized independently of any stored source, sender,
+creator, or Run. ModelFile and Artifact have no public read routes; their internal resolution uses
+Session/Run authority.
 
 ## Flows
 
@@ -129,7 +152,13 @@ A completed `image_generation` result creates two resources from one transient v
 
 Provider-hosted execution stores both references in the durable provider call semantic output as `FileOutputPart` and `AttachmentOutputPart`. xAI Imagine execution stores the same output-part kinds on the durable client tool result after its transient generated-file bytes are admitted. Neither event contains Base64, a data URL, raw bytes, provider-native result bytes, or credentials. Exchange and ModelFile media type, size, hash, storage key, authorization, and lifecycle remain independent; neither identity is inferred from the other URI or metadata.
 
-The Engine validates Session, Agent, Workspace, and authenticated actor ownership before object upload, closes that session, uploads the original, optional preview, and normalized ModelFile object, then revalidates ownership while admitting all metadata and the updated tool result in the owning output transaction. Partial materialization is failure. Failed admission compensation deletes only unowned prepared keys. Deterministic run/call/output identities make retry admission idempotent, reject identity collisions, and preserve objects already referenced by committed metadata.
+The Engine validates canonical Session/Run resource authority before object upload, closes that
+database session, uploads the original, optional preview, and normalized ModelFile object, then
+revalidates the same authority while admitting all metadata and the updated tool result in the owning
+output transaction. No authenticated actor is required for this internal output path. Partial
+materialization is failure. Failed admission compensation deletes only unowned prepared keys.
+Deterministic run/call/output identities make retry admission idempotent, reject identity collisions,
+and preserve objects already referenced by committed metadata.
 
 Compatible Responses replay of a provider-hosted call resolves the ModelFile and reconstructs provider-native Base64 only inside the outbound request, while a separate bounded item carries canonical Exchange URI context. Cross-adapter provider replay and later-model use of an xAI client result lower the FileOutputPart through normal rich-image input or the explicit unavailable-image placeholder and retain attachment URI metadata. Request-local bytes are never copied back into durable history.
 
@@ -198,6 +227,9 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ## Changelog
 
+- **2026-07-24** — v29. Separated requester-authorized public file access from
+  Session/Run-authorized internal resource operations; added typed Exchange provenance and exact or
+  explicitly unresolved ModelFile Run lineage.
 - **2026-07-24** — v28. Added formatted safe Markdown attachment preview, empty-text
   preview support, and conservative filename-assisted safe text recognition.
 - **2026-07-23** — v27. Distinguished explicit External Channel Runtime/provider transfer

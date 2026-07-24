@@ -25,8 +25,8 @@ code_paths:
   - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-07-23
-spec_version: 9
+last_verified_at: 2026-07-24
+spec_version: 10
 ---
 
 # Periodic Execution Flow Spec
@@ -176,6 +176,12 @@ marks available unpinned ModelFiles deleted, attempts blob deletion, and advance
 only through the processed range. Access denial is metadata-driven; failed blob deletion is logged and
 can be retried by a later pass.
 
+Cleanup treats Exchange source provenance and ModelFile Run lineage as descriptive durable metadata,
+not User or execution authority. It never chooses a sender, uploader, creator, requester, Workspace
+owner, or viewer to decide resource ownership. Historical ModelFiles whose exact Run lineage could not
+be resolved remain nullable and are cleaned by their existing Session/lifecycle state rather than a
+fabricated Run or User.
+
 The successful task result and completion log include these lifecycle counters:
 
 - `artifacts_expired`, `exchange_files_expired`, and `model_files_deleted` count metadata transitions in the current pass;
@@ -271,6 +277,8 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-07-24** — v10. Clarified that lifecycle cleanup treats typed file provenance and nullable
+  unresolved ModelFile Run lineage as metadata, never as User or execution authority.
 - **2026-07-23** — v9. Made existing Git worktree participant retries database-only so they converge without Runtime availability.
 - **2026-07-19** — v4. Added the durable archived-session retention recalculation and purge tasks, including intervals, leases, bounded batching, stale-job reconciliation, fencing, retry, and cleanup ordering.
 - **2026-07-21** — v5. Isolated ordinary scheduler task lifecycle failures so one task cannot terminate the scheduler process; cancellation remains a scheduler shutdown signal.

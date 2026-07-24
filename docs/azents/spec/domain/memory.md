@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/agent/v1/__init__.py
   - python/apps/azents/src/azents/api/public/agent/v1/data.py
   - python/apps/azents/src/azents/engine/tools/memory.py
+  - python/apps/azents/src/azents/engine/tools/builtin.py
   - python/apps/azents/src/azents/engine/tools/shell.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/agents/AgentMemorySettingsPage.tsx
@@ -21,8 +22,8 @@ code_paths:
 api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
-last_verified_at: 2026-07-17
-spec_version: 5
+last_verified_at: 2026-07-24
+spec_version: 6
 ---
 
 # Memory
@@ -35,6 +36,12 @@ Memory belongs to Agent. Even within same Workspace, Memory is not shared when A
 
 - `agent` scope — team/project knowledge shared with all users of that Agent.
 - `user` scope — personal preferences/feedback visible only to specific user. Cannot be read or stored in executions without user context.
+
+Every currently implemented AgentSession is a Team Session. Team execution projects only Agent-scope
+Memory and always uses `user_id = null` for those repository operations. User-scope Memory remains a
+requester-authorized management/API concern for a future User Session capability boundary; it is not
+selected from the current requester, message sender, broker wake-up, or any other Team execution
+input.
 
 ## Domain Model
 
@@ -72,18 +79,28 @@ Main constraints of `agent_memories` are:
 
 ### Tool exposure
 
-During AgentRuntime resolve, Agent with `memory_enabled` enabled receives Memory tools and Memory index prompt. If user context exists, both agent scope and user scope summaries are exposed; if user context does not exist, only agent scope is exposed. If `memory_enabled=false`, neither Memory tools nor prompt are exposed.
+During Team Session resolve, an Agent with `memory_enabled` enabled receives the five shared
+Agent-scope Memory tools and an Agent Memory index prompt. User-scope arguments are rejected with a
+tool error, and no generic execution context contains a User identity from which they could be
+resolved. If `memory_enabled=false`, neither Memory tools nor prompt are exposed.
 
 ### Save / upsert
 
-`save_memory` uses `name` as upsert key within same scope. If existing row exists, update `description`, `content`, `type`, and `scope`; otherwise create new row. If tool input has `scope=user` but execution context has no `user_id`, raise `FunctionToolError("Cannot save user-scope memory: no user context")`.
+`save_memory` uses `name` as upsert key within Agent scope. If an existing Agent-scope row exists,
+it updates `description`, `content`, and `type`; otherwise it creates one. A `scope=user` request is
+rejected because User-scope Memory is unavailable in Team Sessions.
 
 ### Tool list / get / search / delete
 
-- `list_memories(scope=None, type=None)` returns agent scope summary and user scope summary grouped by type as markdown list. It queries sorted up to 100 rows per scope.
-- `get_memory(scope, name)` returns full `content` of a single Memory. Missing row is handled as tool error.
-- `search_memories(query, scope=None)` first splits `query` into distinct whitespace terms and performs case-insensitive `ILIKE` matching over `name`, `description`, and `content`; every term must match at least one searchable field. If the exact all-term search returns no rows, the runtime tool performs an any-term fallback, ranks up to 10 candidates by the number of distinct matched terms, and labels them as partial matches. If neither search finds candidates, the tool directs the model back to the loaded Memory summary index before creating a new Memory. `scope=None` searches agent scope plus the current user's scope when user context exists; an explicit scope searches only that scope.
-- `delete_memory(scope, name)` deletes by scope/name and returns existence result as JSON.
+- `list_memories(scope=None, type=None)` returns only Agent-scope summaries grouped by type as a
+  Markdown list.
+- `get_memory(scope, name)` returns full content of one Agent-scope Memory. A missing row is a tool
+  error.
+- `search_memories(query, scope=None)` splits distinct whitespace terms and performs case-insensitive
+  `ILIKE` matching over `name`, `description`, and `content`; every term must match at least one
+  searchable field. If exact all-term search finds no rows, it ranks up to 10 any-term partial
+  matches by distinct matched-term count. User scope is unavailable even when explicitly requested.
+- `delete_memory(scope, name)` deletes by Agent scope/name and returns existence result as JSON.
 
 ### Public API and settings UI
 
@@ -107,11 +124,15 @@ The Agent Memory settings page exposes the Agent `memory_enabled` toggle and man
 - Output of Memory tools is normal tool output, so it may remain as conversation event. Whether to save credentials, secrets, or personally identifiable information depends on Agent tool-use policy and user instruction.
 - Search is lexical `ILIKE`. Runtime partial fallback ranks only by distinct matched query-term count; current implementation has no embedding similarity, semantic relevance ranking, or automatic compaction-to-memory promotion.
 - Runtime tool `save_memory` is upsert-by-name, while human-facing API create/update uses strict duplicate conflict semantics.
+- Team execution never infers a User for Memory from sender provenance, requester authorization,
+  wake-up routing, ownership, or any fallback. A future User Session must resolve its durable
+  associated User through a separate explicit capability boundary.
 
 ## Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-24 | 6 | Restricted current Team Session runtime projection to shared Agent Memory and made User-scope Memory unavailable without a separate User Session capability boundary |
 | 2026-07-17 | 5 | Added runtime exact-to-partial lexical search fallback and index-first duplicate prevention guidance |
 | 2026-07-09 | 3 | Clarified model-facing Memory search guidance to use short keyword queries instead of full sentences |
 | 2026-07-02 | 2 | Added public Agent Memory settings API/UI behavior and permission semantics |
