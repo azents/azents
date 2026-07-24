@@ -39,7 +39,7 @@ Requirements, ADR, and design documents use their location and content as their 
 | `spec/domain/` | Current domain model specs such as Agent, Session, Team, Memory. | `agent.md`, `workspace.md` | plus `spec_type: domain`, `domain`, `code_paths`, `last_verified_at`, `spec_version` |
 | `spec/flow/` | Current flow specs such as the ReAct loop or message routing. | `agent-execution-loop.md`, `message-routing.md` | plus `spec_type: flow`, `code_paths`, `last_verified_at`, `spec_version` |
 | `design/` | Primary development-snapshot Designs and supporting design-time records. | `slack-260721-channel-agent-conversation.md`, `feature-audit-report-YYYY-MM-DD.md` | `title`, `created`, `tags`; use `updated` while drafting and add `implemented` after verified implementation |
-| `plans/` | Temporary multi-phase implementation plans and phase execution plans used while shipping a feature. Remove them in the feature cleanup phase. | `team-session-execution-boundaries-implementation-plan.md`, `team-session-execution-boundaries-phase-1.md` | `title`, `created`, `tags`; use `updated` while implementation is active |
+| `plans/` | Temporary multi-phase implementation plans and phase execution plans used while shipping a feature. Remove them in the feature cleanup phase. | `feature-implementation-plan.md`, `feature-phase-1.md` | `title`, `created`, `tags`; use `updated` while implementation is active |
 | `notes/` | Pre-design product/architecture blueprints, unresolved model exploration, or discussion summaries. | `agent-thread-session-blueprint.md` | `title`, `created`, `tags` |
 | `issues/` | Bug or operational issue tracking. | `2026-05-01-agent-stuck.md` | `title`, `created`, `tags` |
 
