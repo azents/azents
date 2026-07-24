@@ -706,15 +706,7 @@ async def _finalize_message_write_response(
         chat_live_event_upserted_dump(live_event) if live_event is not None else None
     )
     if input_buffer is not None:
-        broker_message = SessionWakeUp(
-            agent_id=agent_id,
-            session_id=session_id,
-            user_id=user_id,
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id=None,
-            workspace_handle=None,
-        )
+        broker_message = SessionWakeUp(session_id=session_id)
         await broker.send_message(broker_message)
     if created and live_event_upserted is not None:
         await _publish_chat_event_best_effort(
@@ -906,17 +898,7 @@ async def update_session_goal(
     match result:
         case Success(update_result):
             if update_result.wake_up:
-                await broker.send_message(
-                    SessionWakeUp(
-                        agent_id=update_result.agent_id,
-                        session_id=session_id,
-                        user_id=current_user.user_id,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=update_result.workspace_id,
-                        workspace_handle=None,
-                    )
-                )
+                await broker.send_message(SessionWakeUp(session_id=session_id))
             if update_result.event is not None:
                 await _publish_chat_event_best_effort(
                     broadcast,
@@ -970,17 +952,7 @@ async def update_session_goal_status(
     match result:
         case Success(update_result):
             if update_result.wake_up:
-                await broker.send_message(
-                    SessionWakeUp(
-                        agent_id=update_result.agent_id,
-                        session_id=session_id,
-                        user_id=current_user.user_id,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=update_result.workspace_id,
-                        workspace_handle=None,
-                    )
-                )
+                await broker.send_message(SessionWakeUp(session_id=session_id))
             if update_result.event is not None:
                 await _publish_chat_event_best_effort(
                     broadcast,
@@ -1033,10 +1005,7 @@ async def stop_session_run(
             )
             for stopped_session_id in stop_result.stopped_session_ids:
                 await broker.send_message(
-                    SessionStopSignal(
-                        session_id=stopped_session_id,
-                        user_id=current_user.user_id,
-                    )
+                    SessionStopSignal(session_id=stopped_session_id)
                 )
             return ChatStopResponse(session_id=agent_session.id)
         case Failure(error):
@@ -1204,17 +1173,7 @@ async def _write_edit_message_via_rest(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if accepted.request.created:
         if accepted.input_buffer is not None:
-            await broker.send_message(
-                SessionWakeUp(
-                    agent_id=request.agent_id,
-                    session_id=resolved_session_id,
-                    user_id=user_id,
-                    additional_system_prompt=None,
-                    interface=None,
-                    workspace_id=None,
-                    workspace_handle=None,
-                )
-            )
+            await broker.send_message(SessionWakeUp(session_id=resolved_session_id))
     snapshot = await _build_chat_write_snapshot(
         chat_service,
         live_event_store,
@@ -1260,17 +1219,7 @@ async def _write_failed_run_retry_via_rest(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if accepted.request.created:
-        await broker.send_message(
-            SessionWakeUp(
-                agent_id=request.agent_id,
-                session_id=resolved_session_id,
-                user_id=user_id,
-                additional_system_prompt=None,
-                interface=None,
-                workspace_id=None,
-                workspace_handle=None,
-            )
-        )
+        await broker.send_message(SessionWakeUp(session_id=resolved_session_id))
     snapshot = await _build_chat_write_snapshot(
         chat_service,
         live_event_store,
@@ -1324,17 +1273,7 @@ async def _write_command_via_rest(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if accepted.request.created:
-        await broker.send_message(
-            SessionWakeUp(
-                agent_id=request.agent_id,
-                session_id=resolved_session_id,
-                user_id=user_id,
-                additional_system_prompt=None,
-                interface=None,
-                workspace_id=None,
-                workspace_handle=None,
-            )
-        )
+        await broker.send_message(SessionWakeUp(session_id=resolved_session_id))
     snapshot = await _build_chat_write_snapshot(
         chat_service,
         live_event_store,
@@ -1776,17 +1715,7 @@ async def create_team_agent_session(
     match result:
         case Success(session):
             if request.setup_actions:
-                await broker.send_message(
-                    SessionWakeUp(
-                        agent_id=agent_id,
-                        session_id=session.id,
-                        user_id=current_user.user_id,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=None,
-                        workspace_handle=None,
-                    )
-                )
+                await broker.send_message(SessionWakeUp(session_id=session.id))
             return AgentSessionResponse.from_domain(
                 session,
                 unread_terminal_run_id=None,

@@ -4,7 +4,7 @@ import asyncio
 import dataclasses
 import logging
 from collections.abc import Sequence
-from typing import Protocol, assert_never
+from typing import assert_never
 
 from azcommon.logging import bind_extra
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,13 +20,20 @@ from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session.data import PendingSessionCommand
+from azents.repos.agent_session import AgentSessionRepository
 from azents.services.input_buffer import InputBufferService
 from azents.services.subagent_terminal_result import SubagentTerminalResultService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.errors import SessionRunnerErrorReporter
+from azents.worker.session.execution_snapshot import (
+    CanonicalExecutionOwnerGenerationStaleError,
+    CanonicalExecutionSnapshot,
+    CanonicalExecutionSnapshotError,
+    CanonicalExecutionSnapshotLoader,
+    CanonicalExecutionWorkDriftError,
+)
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.inbox import SessionRunnerInbox
 from azents.worker.session.lifecycle import SessionLifecycleService
@@ -47,23 +54,12 @@ from azents.worker.session.waiter import (
 logger = logging.getLogger(__name__)
 
 
-class AgentSessionCommandReader(Protocol):
-    """Read pending commands for a session runner."""
-
-    async def get_pending_command_by_session_id(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> PendingSessionCommand | None:
-        """Fetch a pending command for a session."""
-        ...
-
-
 @dataclasses.dataclass(frozen=True)
 class _PendingIdleBoundary:
     """Terminal run boundary to close after a stale wake-up."""
 
     message: SessionWakeUp
+    snapshot: CanonicalExecutionSnapshot
     toolkits: list[ToolkitBinding]
     run_id: str | None
     run_status: AgentRunStatus | None
@@ -89,8 +85,9 @@ class SessionRunner:
         shutdown_event: asyncio.Event,
         event_publisher: WorkerEventPublisher,
         session_lifecycle: SessionLifecycleService,
+        execution_snapshot_loader: CanonicalExecutionSnapshotLoader,
         session_manager: SessionManager[AsyncSession],
-        agent_session_repository: AgentSessionCommandReader,
+        agent_session_repository: AgentSessionRepository,
         input_buffer_service: InputBufferService,
         subagent_terminal_result_service: SubagentTerminalResultService,
         idle_continuation_service: IdleContinuationService,
@@ -102,6 +99,7 @@ class SessionRunner:
         self.shutdown_event = shutdown_event
         self.event_publisher = event_publisher
         self.session_lifecycle = session_lifecycle
+        self.execution_snapshot_loader = execution_snapshot_loader
         self.session_manager = session_manager
         self.agent_session_repository = agent_session_repository
         self.input_buffer_service = input_buffer_service
@@ -116,6 +114,7 @@ class SessionRunner:
         self.stop_controller = RunStopController()
         self.running_session_id: str | None = None
         self.owner_generation: int | None = None
+        self.execution_snapshot: CanonicalExecutionSnapshot | None = None
         self.toolkit_scope = SessionToolkitScope()
         self.waiter = SessionRunnerWaiter()
         self.run_supervisor = RunTaskSupervisor(
@@ -132,6 +131,7 @@ class SessionRunner:
         )
         self.run_active = False
         self.handover_wake_up: SessionWakeUp | None = None
+        self.handover_required = False
 
     @property
     def terminated(self) -> bool:
@@ -242,21 +242,18 @@ class SessionRunner:
     async def _run_with_timeout(
         self,
         message: SessionWakeUp,
-        *,
-        command: PendingSessionCommand | None = None,
+        snapshot: CanonicalExecutionSnapshot,
     ) -> RunExecutionResult:
         """Delegate engine execution to stop/shutdown supervisor."""
         if self.owner_generation is None:
             raise RuntimeError("Session ownership generation was not claimed")
         return await self.run_supervisor.run(
-            message,
+            snapshot,
             poll_fn=self._make_poll_fn(),
             check_stop=self._make_check_stop_fn(message.session_id),
             prepare_toolkits=self.prepare_toolkits,
             drain_stop_signals=self._drain_stop_signals,
-            owner_generation=self.owner_generation,
             model_transport_state=self.model_transport_state,
-            command=command,
         )
 
     async def _clear_activity_after_failed_message(
@@ -307,7 +304,12 @@ class SessionRunner:
             "Session runner marking session idle after no-actionable wake-up",
             extra={"session_id": session_id},
         )
-        marked_idle = await self.session_lifecycle.mark_session_idle(session_id)
+        if self.owner_generation is None:
+            raise RuntimeError("Session ownership generation was not claimed")
+        marked_idle = await self.session_lifecycle.mark_session_idle(
+            session_id,
+            owner_generation=self.owner_generation,
+        )
         if not marked_idle:
             return False
         await self.session_lifecycle.clear_session_activity(session_id)
@@ -329,7 +331,7 @@ class SessionRunner:
             if boundary.run_id is None:
                 raise RuntimeError("Completed run has no idle continuation boundary ID")
             consumed = await self.idle_continuation_service.consume(
-                boundary.message,
+                boundary.snapshot,
                 toolkits=boundary.toolkits,
                 run_id=boundary.run_id,
             )
@@ -341,7 +343,8 @@ class SessionRunner:
             return True
 
         marked_idle = await self.session_lifecycle.mark_session_idle(
-            boundary.message.session_id
+            boundary.message.session_id,
+            owner_generation=boundary.snapshot.owner_generation,
         )
         if not marked_idle:
             return False
@@ -365,6 +368,11 @@ class SessionRunner:
         wake_up = self.handover_wake_up
         if wake_up is None:
             await self.session_lifecycle.release_session_lock(session_id)
+            return
+
+        if self.handover_required:
+            await self.session_lifecycle.release_session_lock(session_id)
+            await self.session_lifecycle.send_session_wake_up(wake_up)
             return
 
         should_handover = await self.session_lifecycle.has_active_agent_run(session_id)
@@ -403,7 +411,17 @@ class SessionRunner:
         )
         try:
             while state is not None:
-                state = await self._tick(state)
+                try:
+                    state = await self._tick(state)
+                except CanonicalExecutionSnapshotError as exc:
+                    session_id = self.running_session_id
+                    if session_id is None:
+                        raise
+                    self._handle_canonical_execution_error(
+                        SessionWakeUp(session_id=session_id),
+                        exc,
+                    )
+                    state = None
         finally:
             toolkit_cleanup_error: Exception | None = None
             try:
@@ -448,14 +466,15 @@ class SessionRunner:
                 return None
             case MessageResult(message):
                 if self.running_session_id is None:
+                    self.running_session_id = message.session_id
                     self.owner_generation = (
                         await self.session_lifecycle.claim_owner_generation(
                             message.session_id
                         )
                     )
-                self.running_session_id = message.session_id
                 self.stop_controller.clear_for_next_run()
                 self.handover_wake_up = None
+                self.handover_required = False
                 message_started_at = self._monotonic_time()
                 L = bind_extra(
                     logger,
@@ -493,8 +512,14 @@ class SessionRunner:
                 marked_idle = False
                 if result.terminal_event_observed:
                     if isinstance(message, SessionWakeUp):
+                        snapshot = self.execution_snapshot
+                        if snapshot is None:
+                            raise RuntimeError(
+                                "Session execution snapshot was not loaded"
+                            )
                         boundary = _PendingIdleBoundary(
                             message=message,
+                            snapshot=snapshot,
                             toolkits=result.toolkits,
                             run_id=result.run_id,
                             run_status=result.terminal_run_status,
@@ -502,19 +527,17 @@ class SessionRunner:
                         if not await self._has_follow_up_work(message.session_id):
                             marked_idle = await self._mark_idle_after_boundary(boundary)
                 elif result.no_actionable_work and isinstance(message, SessionWakeUp):
-                    lifecycle = self.session_lifecycle
-                    pending_run_id = (
-                        await lifecycle.get_pending_idle_continuation_run_id(
-                            message.session_id
-                        )
-                    )
+                    snapshot = self.execution_snapshot
+                    if snapshot is None:
+                        raise RuntimeError("Session execution snapshot was not loaded")
+                    pending_run_id = snapshot.pending_idle_continuation_run_id
                     if (
                         pending_run_id is not None
                         and not await self._has_follow_up_work(message.session_id)
                     ):
                         toolkits = (
                             await self.run_executor.resolve_idle_continuation_toolkits(
-                                message,
+                                snapshot,
                                 run_id=pending_run_id,
                                 prepare_toolkits=self.prepare_toolkits,
                                 dispatch_event=self.event_publisher.dispatch_event,
@@ -522,6 +545,7 @@ class SessionRunner:
                         )
                         boundary = _PendingIdleBoundary(
                             message=message,
+                            snapshot=snapshot,
                             toolkits=toolkits,
                             run_id=pending_run_id,
                             run_status=AgentRunStatus.COMPLETED,
@@ -569,12 +593,20 @@ class SessionRunner:
                     assert_never(message)
         except asyncio.CancelledError:
             raise
+        except CanonicalExecutionSnapshotError as exc:
+            return self._handle_canonical_execution_error(message, exc)
         except UserVisibleRuntimeError as exc:
-            finalized_run_id = await self.run_executor.finalize_unhandled_active_run(
-                message.session_id,
-                exc,
-                dispatch_event=self.event_publisher.dispatch_event,
-            )
+            try:
+                finalized_run_id = (
+                    await self.run_executor.finalize_unhandled_active_run(
+                        message.session_id,
+                        exc,
+                        owner_generation=self._required_owner_generation(),
+                        dispatch_event=self.event_publisher.dispatch_event,
+                    )
+                )
+            except CanonicalExecutionOwnerGenerationStaleError as stale:
+                return self._handle_canonical_execution_error(message, stale)
             if finalized_run_id is not None:
                 return RunExecutionResult(
                     toolkits=[],
@@ -594,11 +626,17 @@ class SessionRunner:
                 no_actionable_work=False,
             )
         except Exception as exc:
-            finalized_run_id = await self.run_executor.finalize_unhandled_active_run(
-                message.session_id,
-                exc,
-                dispatch_event=self.event_publisher.dispatch_event,
-            )
+            try:
+                finalized_run_id = (
+                    await self.run_executor.finalize_unhandled_active_run(
+                        message.session_id,
+                        exc,
+                        owner_generation=self._required_owner_generation(),
+                        dispatch_event=self.event_publisher.dispatch_event,
+                    )
+                )
+            except CanonicalExecutionOwnerGenerationStaleError as stale:
+                return self._handle_canonical_execution_error(message, stale)
             if finalized_run_id is not None:
                 return RunExecutionResult(
                     toolkits=[],
@@ -618,16 +656,58 @@ class SessionRunner:
                 no_actionable_work=False,
             )
 
+    def _required_owner_generation(self) -> int:
+        """Return the claimed generation for the current Runner."""
+        if self.owner_generation is None:
+            raise RuntimeError("Session ownership generation was not claimed")
+        return self.owner_generation
+
+    def _handle_canonical_execution_error(
+        self,
+        message: BrokerMessage,
+        exc: CanonicalExecutionSnapshotError,
+    ) -> RunExecutionResult:
+        """Stop stale authority without finalizing or reporting another owner's Run."""
+        reload_required = isinstance(
+            exc,
+            CanonicalExecutionOwnerGenerationStaleError
+            | CanonicalExecutionWorkDriftError,
+        )
+        logger.info(
+            "Session execution snapshot rejected",
+            extra={
+                "session_id": message.session_id,
+                "error_type": exc.__class__.__name__,
+                "reload_required": reload_required,
+            },
+        )
+        self.runner_shutdown.set()
+        if reload_required:
+            self.handover_wake_up = SessionWakeUp(session_id=message.session_id)
+            self.handover_required = True
+        return RunExecutionResult(
+            toolkits=[],
+            terminal_event_observed=False,
+            no_actionable_work=False,
+        )
+
     async def _process_wake_up(self, message: SessionWakeUp) -> RunExecutionResult:
         """Handle command/run/continuation lifecycle for one SessionWakeUp."""
+        if self.owner_generation is None:
+            raise RuntimeError("Session ownership generation was not claimed")
+        self.execution_snapshot = None
+        snapshot = await self.execution_snapshot_loader.load(
+            message.session_id,
+            owner_generation=self.owner_generation,
+        )
+        self.execution_snapshot = snapshot
         await self.subagent_terminal_result_service.deliver_pending_for_source_session(
             message.session_id,
             repair_source="source_session_reuse",
         )
-        command = await self._get_pending_command(message.session_id)
         self.run_active = True
         try:
-            result = await self._run_with_timeout(message, command=command)
+            result = await self._run_with_timeout(message, snapshot)
         finally:
             self.run_active = False
             if (
@@ -639,16 +719,3 @@ class SessionRunner:
         if self.shutdown_event.is_set():
             self._drain_stop_signals()
         return result
-
-    async def _get_pending_command(
-        self,
-        session_id: str,
-    ) -> PendingSessionCommand | None:
-        """Fetch pending runtime command, if one exists."""
-        async with self.session_manager() as db_session:
-            return (
-                await self.agent_session_repository.get_pending_command_by_session_id(
-                    db_session,
-                    session_id,
-                )
-            )

@@ -27,6 +27,9 @@ from azents.worker.run.finalizer import (
     FailedRunErrorFinalizer,
     FailedRunFinalizationInput,
 )
+from azents.worker.session.execution_snapshot import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -128,12 +131,24 @@ class _FailedRunEventStore:
 class _SessionLifecycle:
     """SessionLifecycleService test double."""
 
-    def __init__(self) -> None:
-        self.cleared_session_ids: list[str] = []
+    def __init__(self, *, owner_generation: int = 1) -> None:
+        self.owner_generation = owner_generation
+        self.assertions: list[tuple[str, int]] = []
 
-    async def clear_session_activity(self, session_id: str) -> None:
-        """Record session activity clear request."""
-        self.cleared_session_ids.append(session_id)
+    async def assert_owner_generation(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        owner_generation: int,
+    ) -> None:
+        """Reject stale failed-run finalization."""
+        del session
+        self.assertions.append((session_id, owner_generation))
+        if owner_generation != self.owner_generation:
+            raise CanonicalExecutionOwnerGenerationStaleError(
+                "Session owner generation is stale"
+            )
 
 
 def _payload_from_create(create: EventCreate) -> SystemErrorPayload | RunMarkerPayload:
@@ -180,6 +195,7 @@ async def test_failed_run_finalizer_appends_error_marker_and_run_complete() -> N
     result = await finalizer.finalize(
         FailedRunFinalizationInput(
             session_id="session-001",
+            owner_generation=1,
             run_id="run-001".rjust(32, "0"),
             user_message="temporary failure",
             retry_state=_retry_state(),
@@ -206,4 +222,36 @@ async def test_failed_run_finalizer_appends_error_marker_and_run_complete() -> N
     terminal_event = dispatched[-1][1]
     assert isinstance(terminal_event, RunComplete)
     assert terminal_event.run_id == "run-001".rjust(32, "0")
-    assert lifecycle.cleared_session_ids == ["session-001"]
+    assert lifecycle.assertions == [("session-001", 1)]
+
+
+@pytest.mark.asyncio
+async def test_failed_run_finalizer_rejects_stale_owner_before_mutation() -> None:
+    """A stale Worker cannot append terminal output for a successor owner."""
+    event_store = _FailedRunEventStore()
+    lifecycle = _SessionLifecycle(owner_generation=2)
+    dispatched: list[tuple[str, PublishedEvent]] = []
+    finalizer = FailedRunErrorFinalizer(
+        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
+        event_store=cast(FailedRunEventStore, event_store),
+        session_lifecycle=cast(SessionLifecycleService, lifecycle),
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        dispatched.append((session_id, event))
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await finalizer.finalize(
+            FailedRunFinalizationInput(
+                session_id="session-001",
+                owner_generation=1,
+                run_id="run-001".rjust(32, "0"),
+                user_message="temporary failure",
+                retry_state=_retry_state(),
+                reason="retry_exhausted",
+            ),
+            dispatch_event=dispatch_event,
+        )
+
+    assert event_store.calls == []
+    assert dispatched == []

@@ -21,6 +21,7 @@ from azents.broker.types import (
 )
 from azents.core.enums import (
     AgentRunStatus,
+    AgentSessionKind,
     EventKind,
 )
 from azents.core.inference_profile import (
@@ -50,7 +51,12 @@ from azents.engine.run.types import (
     PollMessages,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
+from azents.repos.session_execution.data import (
+    CanonicalExecutionSnapshot,
+    PendingCommandSnapshot,
+)
 from azents.services.input_buffer import (
     InputBufferService,
     PendingInputInferenceProfile,
@@ -67,6 +73,12 @@ from azents.worker.run.helpers import (
 )
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.contracts import PrepareToolkits
+from azents.worker.session.execution_snapshot import (
+    CanonicalExecutionOwnerGenerationStaleError,
+    CanonicalExecutionSnapshotError,
+    CanonicalExecutionSnapshotLoader,
+    CanonicalExecutionWorkDriftError,
+)
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.runner import SessionRunner
@@ -135,6 +147,7 @@ class _InputBufferService:
         self,
         *,
         session_id: str,
+        owner_generation: int,
         model: str | None,
         required_inference_profile: RequestedInferenceProfile | None,
         expected_buffer_id: str | None,
@@ -146,6 +159,7 @@ class _InputBufferService:
     ) -> PromotedInputBuffers:
         """Store flush call arguments and return specified result."""
         del (
+            owner_generation,
             required_inference_profile,
             expected_buffer_id,
             prepared_inference_state,
@@ -350,28 +364,30 @@ class _RunExecutor:
         session_id: str,
         exc: Exception,
         *,
+        owner_generation: int,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> str | None:
         """Report that command-only test failures have no active Run."""
-        del session_id, exc, dispatch_event
+        del owner_generation, dispatch_event
+        self.host.finalize_unhandled_calls.append((session_id, exc))
         return None
 
     async def resolve_idle_continuation_toolkits(
         self,
-        message: SessionWakeUp,
+        snapshot: CanonicalExecutionSnapshot,
         *,
         run_id: str,
         prepare_toolkits: PrepareToolkits,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> list[ToolkitBinding]:
         """Return the configured recovered idle hook toolkit snapshot."""
-        del message, prepare_toolkits, dispatch_event
+        del snapshot, prepare_toolkits, dispatch_event
         self.host.idle_continuation_resolution_run_ids.append(run_id)
         return []
 
     async def execute(
         self,
-        message: SessionWakeUp,
+        snapshot: CanonicalExecutionSnapshot,
         *,
         poll_fn: PollMessages | None,
         check_stop: CheckStop | None,
@@ -381,7 +397,6 @@ class _RunExecutor:
         owner_generation: int,
         tool_admission_barrier: object,
         model_transport_state: object,
-        command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Delegate to Host message handling fake."""
         del (
@@ -391,8 +406,16 @@ class _RunExecutor:
             tool_admission_barrier,
             model_transport_state,
         )
-        if command is not None:
-            self.host.commands.append(command)
+        if snapshot.pending_command is not None:
+            self.host.commands.append(
+                PendingSessionCommand(
+                    id=snapshot.pending_command.id,
+                    name=snapshot.pending_command.name,
+                    payload=snapshot.pending_command.payload,
+                    requester_user_id=snapshot.pending_command.requester_user_id,
+                    created_at=snapshot.pending_command.created_at,
+                )
+            )
             self.host.command_processed.set()
             if self.host.command_error is not None:
                 raise self.host.command_error
@@ -406,7 +429,7 @@ class _RunExecutor:
                 terminal_run_status=AgentRunStatus.COMPLETED,
             )
         return await self.host.process_message(
-            message,
+            SessionWakeUp(session_id=snapshot.session_id),
             poll_fn=poll_fn,
             check_stop=check_stop,
             prepare_toolkits=prepare_toolkits,
@@ -454,25 +477,27 @@ class _IdleContinuationService:
 
     def __init__(self, host: "_Host") -> None:
         self.host = host
-        self.calls: list[tuple[SessionWakeUp, list[ToolkitBinding]]] = []
+        self.calls: list[tuple[CanonicalExecutionSnapshot, list[ToolkitBinding]]] = []
 
     async def consume(
         self,
-        message: SessionWakeUp,
+        snapshot: CanonicalExecutionSnapshot,
         *,
         toolkits: Sequence[ToolkitBinding],
         run_id: str,
     ) -> bool:
         """Record one durable idle continuation outcome."""
-        self.calls.append((message, list(toolkits)))
-        self.host.idle_continuation_calls.append((message, list(toolkits)))
+        self.calls.append((snapshot, list(toolkits)))
+        self.host.idle_continuation_calls.append((snapshot, list(toolkits)))
+        if self.host.idle_continuation_error is not None:
+            raise self.host.idle_continuation_error
         if self.host.pending_idle_continuation_run_id != run_id:
             return False
         self.host.idle_mark_attempted.set()
         if not self.host.idle_transition_allowed:
             return False
         self.host.pending_idle_continuation_run_id = None
-        self.host.idle_session_ids.append(message.session_id)
+        self.host.idle_session_ids.append(snapshot.session_id)
         self.host.lifecycle_events.append("idle_continuation")
         return True
 
@@ -487,10 +512,12 @@ class _UserStopFinalizer:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
     ) -> None:
         """Delegate to Host user stop finalization fake."""
+        del owner_generation
         await self.host.finalize_user_stop(
             session_id,
             run_id=run_id,
@@ -509,7 +536,7 @@ class _Host:
         self.finalized_user_stop_session_ids: list[str] = []
         self.idle_session_ids: list[str] = []
         self.idle_continuation_calls: list[
-            tuple[SessionWakeUp, list[ToolkitBinding]]
+            tuple[CanonicalExecutionSnapshot, list[ToolkitBinding]]
         ] = []
         self.idle_continuation_result = False
         self.lifecycle_events: list[str] = []
@@ -541,7 +568,11 @@ class _Host:
         self.dispatched_events: list[tuple[str, PublishedEvent]] = []
         self.event_dispatched = asyncio.Event()
         self.owner_generation_claims = 0
+        self.owner_generation_error: Exception | None = None
         self.idle_continuation_resolution_run_ids: list[str] = []
+        self.idle_continuation_error: CanonicalExecutionSnapshotError | None = None
+        self.finalize_unhandled_calls: list[tuple[str, Exception]] = []
+        self.snapshot_error: CanonicalExecutionSnapshotError | None = None
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -551,6 +582,8 @@ class _Host:
     async def claim_owner_generation(self, session_id: str) -> int:
         """Return one durable ownership generation for the test runner."""
         del session_id
+        if self.owner_generation_error is not None:
+            raise self.owner_generation_error
         self.owner_generation_claims += 1
         return self.owner_generation_claims
 
@@ -644,8 +677,14 @@ class _Host:
         """This test does not change run state."""
         _ = session_id
 
-    async def mark_session_idle(self, session_id: str) -> bool:
+    async def mark_session_idle(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> bool:
         """Store session for idle transition call."""
+        del owner_generation
         self.idle_mark_attempted.set()
         if not self.idle_transition_allowed:
             return False
@@ -671,8 +710,14 @@ class _Host:
         del session_id
         return self.pending_idle_continuation_run_id is not None
 
-    async def heartbeat_session(self, session_id: str) -> None:
+    async def heartbeat_session(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
         """Store session for active owner lease refresh calls."""
+        del owner_generation
         self.heartbeat_session_ids.append(session_id)
 
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:
@@ -682,6 +727,72 @@ class _Host:
     async def has_stop_request(self, session_id: str) -> bool:
         """Return stop intent existence specified by test."""
         return session_id in self.stop_request_session_ids
+
+
+def _execution_snapshot(
+    *,
+    session_id: str = "session-001",
+    agent_id: str = "agent-001",
+    owner_generation: int = 1,
+    pending_command: PendingCommandSnapshot | None = None,
+    pending_idle_continuation_run_id: str | None = None,
+) -> CanonicalExecutionSnapshot:
+    """Create a canonical execution snapshot for worker tests."""
+    return CanonicalExecutionSnapshot(
+        session_id=session_id,
+        root_session_id=session_id,
+        workspace_id="workspace-001",
+        workspace_handle="workspace",
+        agent_id=agent_id,
+        session_agent_id="session-agent-001",
+        root_session_agent_id="session-agent-001",
+        session_agent_context_id="context-001",
+        execution_mode=AgentSessionKind.ROOT,
+        owner_generation=owner_generation,
+        fifo_input_buffer_id=None,
+        pending_command=pending_command,
+        recoverable_run_id=None,
+        recoverable_run_status=None,
+        pending_idle_continuation_run_id=pending_idle_continuation_run_id,
+    )
+
+
+class _ExecutionSnapshotLoader:
+    """Canonical execution snapshot loader test double."""
+
+    def __init__(self, host: _Host) -> None:
+        self.host = host
+        self.load_calls: list[tuple[str, int]] = []
+
+    async def load(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> CanonicalExecutionSnapshot:
+        """Build a snapshot from the test host's durable fixture state."""
+        self.load_calls.append((session_id, owner_generation))
+        if self.host.snapshot_error is not None:
+            raise self.host.snapshot_error
+        pending_command = (
+            PendingCommandSnapshot(
+                id="command-001",
+                name="compact",
+                payload={},
+                requester_user_id="user-001",
+                created_at=datetime.now(timezone.utc),
+            )
+            if self.host.pending_command_result
+            else None
+        )
+        return _execution_snapshot(
+            session_id=session_id,
+            owner_generation=owner_generation,
+            pending_command=pending_command,
+            pending_idle_continuation_run_id=(
+                self.host.pending_idle_continuation_run_id
+            ),
+        )
 
 
 async def _wait_for_owner_heartbeat(host: _Host) -> None:
@@ -722,8 +833,15 @@ def _make_session_runner(host: _Host) -> SessionRunner:
             _SessionRunnerEventPublisher(host),
         ),
         session_lifecycle=cast(SessionLifecycleService, host),
+        execution_snapshot_loader=cast(
+            CanonicalExecutionSnapshotLoader,
+            _ExecutionSnapshotLoader(host),
+        ),
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
-        agent_session_repository=_AgentSessionRepository(host),
+        agent_session_repository=cast(
+            AgentSessionRepository,
+            _AgentSessionRepository(host),
+        ),
         input_buffer_service=cast(
             InputBufferService,
             _PendingInputBufferService(host),
@@ -753,19 +871,9 @@ def _start_session_runner(host: _Host) -> SessionRunner:
 def _wake_up(
     *,
     session_id: str = "session-001",
-    agent_id: str = "agent-001",
-    user_id: str | None = "user-001",
 ) -> SessionWakeUp:
     """Create wake-up envelope for tests."""
-    return SessionWakeUp(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=user_id,
-        additional_system_prompt=None,
-        interface=None,
-        workspace_id="workspace-001",
-        workspace_handle=None,
-    )
+    return SessionWakeUp(session_id=session_id)
 
 
 def _make_worker_event_publisher(
@@ -916,7 +1024,7 @@ async def test_idle_stop_does_not_latch_next_run() -> None:
     message = _wake_up()
 
     try:
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(SessionStopSignal(session_id="session-001"))
         await asyncio.sleep(0)
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
@@ -941,7 +1049,10 @@ async def test_terminal_run_marks_idle_before_idle_continuation() -> None:
         await runner.shutdown()
 
     assert host.idle_session_ids == ["session-001"]
-    assert host.idle_continuation_calls == [(message, [])]
+    assert len(host.idle_continuation_calls) == 1
+    snapshot, toolkits = host.idle_continuation_calls[0]
+    assert snapshot.session_id == message.session_id
+    assert toolkits == []
     assert host.terminal_result_delivery_calls == [
         ("session-001", "source_session_reuse"),
         ("session-001", "terminal_boundary"),
@@ -985,7 +1096,10 @@ async def test_recovered_no_actionable_wake_up_consumes_durable_idle_boundary() 
         await runner.shutdown()
 
     assert host.idle_continuation_resolution_run_ids == ["run-001"]
-    assert host.idle_continuation_calls == [(message, [])]
+    assert len(host.idle_continuation_calls) == 1
+    snapshot, toolkits = host.idle_continuation_calls[0]
+    assert snapshot.session_id == message.session_id
+    assert toolkits == []
     assert host.pending_idle_continuation_run_id is None
     assert host.idle_session_ids == ["session-001"]
 
@@ -1032,6 +1146,60 @@ async def test_failed_terminal_run_marks_idle_without_goal_continuation() -> Non
 
 
 @pytest.mark.asyncio
+async def test_snapshot_work_drift_requeues_without_finalizing_active_run() -> None:
+    """Stale canonical work hands over instead of failing the current owner's Run."""
+    host = _Host()
+    host.snapshot_error = CanonicalExecutionWorkDriftError(
+        "canonical FIFO head changed"
+    )
+    runner = _start_session_runner(host)
+    message = _wake_up()
+
+    runner.enqueue(message)
+    await asyncio.wait_for(runner.terminated_event.wait(), timeout=1)
+
+    assert host.finalize_unhandled_calls == []
+    assert host.processed_messages == []
+    assert host.released_session_ids == ["session-001"]
+    assert host.handover_messages == [message]
+
+
+@pytest.mark.asyncio
+async def test_owner_generation_claim_failure_releases_session_lock() -> None:
+    """A failed durable owner claim releases the already-acquired broker lock."""
+    host = _Host()
+    host.owner_generation_error = ValueError("AgentSession not found")
+    runner = _make_session_runner(host)
+    message = _wake_up()
+    runner.enqueue(message)
+
+    with pytest.raises(ValueError, match="AgentSession not found"):
+        await runner.run()
+
+    assert host.released_session_ids == ["session-001"]
+    assert host.handover_messages == []
+
+
+@pytest.mark.asyncio
+async def test_idle_owner_generation_takeover_requeues_session() -> None:
+    """A stale idle boundary releases ownership and wakes a fresh Worker."""
+    host = _Host()
+    host.idle_continuation_error = CanonicalExecutionOwnerGenerationStaleError(
+        "Session owner generation is stale during idle continuation"
+    )
+    runner = _start_session_runner(host)
+    message = _wake_up()
+
+    runner.enqueue(message)
+    await asyncio.wait_for(runner.terminated_event.wait(), timeout=1)
+
+    assert host.finalize_unhandled_calls == []
+    assert host.cleared_session_ids == []
+    assert host.released_session_ids == ["session-001"]
+    assert host.handover_messages == [message]
+
+
+@pytest.mark.asyncio
 async def test_no_actionable_wake_up_marks_session_idle_without_continuation() -> None:
     """No-actionable wake-ups clear RUNNING state without idle continuation."""
     host = _Host()
@@ -1060,8 +1228,8 @@ async def test_noop_wake_up_after_terminal_run_finishes_delayed_idle() -> None:
     host = _Host()
     host.no_actionable_message_numbers.add(2)
     runner = _start_session_runner(host)
-    first = _wake_up(user_id="user-001")
-    stale = _wake_up(user_id="user-002")
+    first = _wake_up()
+    stale = _wake_up()
 
     try:
         runner.enqueue(first)
@@ -1074,7 +1242,10 @@ async def test_noop_wake_up_after_terminal_run_finishes_delayed_idle() -> None:
     assert host.processed_messages == [first, stale]
     assert host.owner_generation_claims == 1
     assert host.idle_session_ids == ["session-001"]
-    assert host.idle_continuation_calls == [(stale, [])]
+    assert len(host.idle_continuation_calls) == 1
+    snapshot, toolkits = host.idle_continuation_calls[0]
+    assert snapshot.session_id == stale.session_id
+    assert toolkits == []
     assert host.lifecycle_events == [
         "idle_continuation",
         "clear_session_activity",
@@ -1088,8 +1259,8 @@ async def test_session_runner_carries_idle_baseline_across_explicit_transitions(
     """Completed messages reset idle time while heartbeats preserve the baseline."""
     host = _Host()
     runner = _make_session_runner(host)
-    first = _wake_up(user_id="user-001")
-    follow_up = _wake_up(user_id="user-002")
+    first = _wake_up()
+    follow_up = _wake_up()
     waiter = _ScriptedSessionRunnerWaiter(
         [
             MessageResult(first),
@@ -1205,7 +1376,11 @@ async def test_session_command_runs_without_event_adapter() -> None:
 
     assert host.cleared_session_ids == ["session-001"]
     assert host.idle_session_ids == ["session-001"]
-    assert host.idle_continuation_calls == [(message, [])]
+    assert len(host.idle_continuation_calls) == 1
+    snapshot, toolkits = host.idle_continuation_calls[0]
+    assert snapshot.session_id == message.session_id
+    assert snapshot.pending_command is not None
+    assert toolkits == []
     assert host.lifecycle_events == [
         "idle_continuation",
         "clear_session_activity",
@@ -1485,7 +1660,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
         del session_id, event
 
     poll = executor.make_boundary_poll(
-        message=_wake_up(session_id="session-1", agent_id="agent-1"),
+        snapshot=_execution_snapshot(session_id="session-1", agent_id="agent-1"),
         model="gpt-test",
         requested_inference_profile=RequestedInferenceProfile(
             model_target_label="default",
@@ -1801,7 +1976,7 @@ async def test_stop_restarts_turn_when_pending_buffer_remains() -> None:
     try:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(SessionStopSignal(session_id="session-001"))
         while len(host.processed_messages) < 2:
             await asyncio.sleep(0)
     finally:
@@ -1823,7 +1998,7 @@ async def test_stop_does_not_duplicate_existing_resume_wake_up() -> None:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
         runner.enqueue(message)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(SessionStopSignal(session_id="session-001"))
         while len(host.processed_messages) < 2:
             await asyncio.sleep(0)
         await asyncio.sleep(0)
@@ -1845,7 +2020,7 @@ async def test_stop_discards_existing_wake_up_when_no_pending_buffer() -> None:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
         runner.enqueue(message)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(SessionStopSignal(session_id="session-001"))
         await asyncio.wait_for(
             _wait_until(lambda: host.idle_session_ids == ["session-001"]),
             timeout=2,
@@ -1868,7 +2043,7 @@ async def test_session_stop_signal_cancels_blocked_engine_task() -> None:
     try:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(SessionStopSignal(session_id="session-001"))
         await asyncio.wait_for(host.message_cancelled.wait(), timeout=2)
     finally:
         await runner.shutdown()
@@ -1910,7 +2085,7 @@ async def test_user_stop_waits_for_engine_cleanup_before_session_boundary() -> N
     try:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(SessionStopSignal(session_id="session-001"))
         await asyncio.wait_for(host.message_cancelled.wait(), timeout=2)
         await asyncio.wait_for(
             _wait_until(
@@ -1927,6 +2102,7 @@ async def test_user_stop_waits_for_engine_cleanup_before_session_boundary() -> N
             _wait_until(lambda: host.idle_session_ids == ["session-001"]),
             timeout=2,
         )
+        assert host.cleared_session_ids == ["session-001"]
     finally:
         host.cancel_cleanup_release.set()
         await runner.shutdown()

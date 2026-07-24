@@ -1553,7 +1553,6 @@ class TestStopSessionRun:
         message = broker.messages[0]
         assert isinstance(message, SessionStopSignal)
         assert message.session_id == "1123456789abcdef0123456789abcdef"
-        assert message.user_id == "user-1"
 
     async def test_sends_stop_signal_for_each_subtree_session(self) -> None:
         """REST stop endpoint publishes stop signals for the requested subtree."""
