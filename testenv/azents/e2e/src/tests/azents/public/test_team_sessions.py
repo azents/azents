@@ -7,7 +7,12 @@ import azentspublicclient
 import requests
 from pydantic import TypeAdapter, ValidationError
 
-from support.utils import create_chat_session_with_agent, unique
+from support.utils import (
+    create_chat_session_with_agent,
+    create_two_member_team_session,
+    unique,
+    wait_until,
+)
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
@@ -199,6 +204,29 @@ def _snapshot_input_contents(write_response: dict[str, object]) -> list[str]:
     return _event_contents(events)
 
 
+def _history_user_message_payload(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    content: str,
+) -> dict[str, object]:
+    """Return one durable UserMessage payload from Session history."""
+    history = _get_json(
+        server_url=server_url,
+        token=token,
+        path=f"/chat/v1/sessions/{session_id}/history?limit=100",
+    )
+    events = _object_items(history.get("items"), label="history items")
+    for event in events:
+        if event.get("kind") != "user_message":
+            continue
+        payload = _response_payload(event.get("payload"))
+        if payload.get("content") == content:
+            return payload
+    raise AssertionError(f"History did not include UserMessage: {content!r}")
+
+
 def _live_input_contents(
     *,
     server_url: str,
@@ -342,3 +370,70 @@ def test_secondary_team_session_write_is_session_isolated(
         token=setup.token,
         session_id=setup.primary_session_id,
     )
+
+
+def test_two_members_retain_independent_sender_provenance_in_one_team_session(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+) -> None:
+    """Two members write to one Team Session without sharing sender identity."""
+    setup = create_two_member_team_session(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+    )
+    owner_message = f"Owner Team Session message {unique()}"
+    member_message = f"Member Team Session message {unique()}"
+
+    owner_write = _write_message(
+        server_url=azents_public_server_url,
+        token=setup.owner_access_token,
+        session_id=setup.session_id,
+        agent_id=setup.agent_id,
+        message=owner_message,
+        client_request_id=f"team-session-owner-{unique()}",
+    )
+    member_write = _write_message(
+        server_url=azents_public_server_url,
+        token=setup.member_access_token,
+        session_id=setup.session_id,
+        agent_id=setup.agent_id,
+        message=member_message,
+        client_request_id=f"team-session-member-{unique()}",
+    )
+
+    assert owner_write.get("session_id") == setup.session_id
+    assert member_write.get("session_id") == setup.session_id
+    owner_payload = wait_until(
+        lambda: _history_user_message_payload(
+            server_url=azents_public_server_url,
+            token=setup.owner_access_token,
+            session_id=setup.session_id,
+            content=owner_message,
+        ),
+        timeout=30,
+        interval=0.2,
+        message="Owner message did not reach durable history",
+    )
+    member_payload = wait_until(
+        lambda: _history_user_message_payload(
+            server_url=azents_public_server_url,
+            token=setup.owner_access_token,
+            session_id=setup.session_id,
+            content=member_message,
+        ),
+        timeout=30,
+        interval=0.2,
+        message="Member message did not reach durable history",
+    )
+    assert owner_payload.get("sender_user_id") == setup.owner_user_id
+    assert member_payload.get("sender_user_id") == setup.member_user_id
+    assert owner_payload.get("sender_user_id") != member_payload.get("sender_user_id")
+
+    member_sessions = _session_items(
+        server_url=azents_public_server_url,
+        token=setup.member_access_token,
+        agent_id=setup.agent_id,
+    )
+    assert any(item.get("id") == setup.session_id for item in member_sessions)

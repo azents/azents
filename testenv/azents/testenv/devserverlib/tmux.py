@@ -25,6 +25,9 @@ def require_tmux() -> None:
 
 
 def has_session(name: str) -> bool:
+    """Return whether a named tmux session exists when tmux is available."""
+    if shutil.which("tmux") is None:
+        return False
     completed = subprocess.run(
         ["tmux", "has-session", "-t", name],
         capture_output=True,
