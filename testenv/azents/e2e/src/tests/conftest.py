@@ -35,6 +35,10 @@ from testcontainers.postgres import PostgresContainer
 from types_boto3_s3.client import S3Client
 
 from support.consts import REPOSITORY_ROOT
+from support.runtime_provider_auth import (
+    RuntimeProviderAuthenticationError,
+    issue_runtime_provider_credential,
+)
 from support.system_bootstrap import SystemBootstrapEvidence
 
 _AIMOCK_FIXTURE_DIR = REPOSITORY_ROOT / "testenv/azents/e2e/src/support/aimock_fixtures"
@@ -1040,7 +1044,6 @@ def azents_runtime_provider_docker_container(
     container_network: Network,
     azents_runtime_control_container: DockerContainer,
     azents_runtime_provider_docker_image: str,
-    runtime_provider_resource_id: str,
     runtime_provider_credential: str,
 ) -> Generator[DockerContainer, None, None]:
     """Docker Runtime Provider container."""
@@ -1060,7 +1063,7 @@ def azents_runtime_provider_docker_container(
             .with_volume_mapping(data_root, data_root, "rw")
             .with_env("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
             .with_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
-            .with_env("AZ_RUNTIME_PROVIDER_ID", runtime_provider_resource_id)
+            .with_env("AZ_RUNTIME_PROVIDER_ID", _RUNTIME_PROVIDER_ID)
             .with_env("AZ_RUNTIME_PROVIDER_DOCKER_NETWORK", container_network.name)
             .with_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT", data_root)
             .with_env(
@@ -1073,7 +1076,7 @@ def azents_runtime_provider_docker_container(
         with container:
             _wait_for_runtime_provider_registered(
                 container,
-                provider_id=runtime_provider_resource_id,
+                provider_id=_RUNTIME_PROVIDER_ID,
                 secret_values=(runtime_provider_credential,),
             )
             yield container
@@ -1287,50 +1290,18 @@ def runtime_provider_credential(
     runtime_provider_resource_id: str,
 ) -> str:
     """Enroll the E2E Docker Provider through the supported HTTP APIs."""
-    authorization = {
-        "Authorization": f"Bearer {system_bootstrap_evidence.access_token}"
-    }
-
     expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5)
-    grant_response = requests.post(
-        (
-            f"{azents_admin_server_url}/runtime-provider-enrollment/v1/"
-            f"runtime-providers/{runtime_provider_resource_id}/enrollment-grants"
-        ),
-        headers=authorization,
-        json={"expires_at": expires_at.isoformat()},
-        timeout=10,
-    )
-    if grant_response.status_code != 201:
-        pytest.fail(
-            "Runtime Provider enrollment grant request failed with HTTP "
-            f"{grant_response.status_code}"
+    try:
+        credential = issue_runtime_provider_credential(
+            admin_server_url=azents_admin_server_url,
+            public_server_url=azents_public_server_url,
+            admin_access_token=system_bootstrap_evidence.access_token,
+            provider_id=_RUNTIME_PROVIDER_ID,
+            subject=f"e2e:{runtime_provider_resource_id}",
+            expires_at=expires_at,
         )
-    grant_payload = _JSON_OBJECT_ADAPTER.validate_python(grant_response.json())
-    grant_id = grant_payload.get("grant_id")
-    grant_secret = grant_payload.get("secret")
-    if not isinstance(grant_id, str) or not isinstance(grant_secret, str):
-        pytest.fail("Runtime Provider enrollment grant response was incomplete")
-
-    credential_response = requests.post(
-        (
-            f"{azents_public_server_url}/runtime-provider-enrollment/v1/"
-            "credentials/exchange"
-        ),
-        json={"grant_id": grant_id, "secret": grant_secret},
-        timeout=10,
-    )
-    if credential_response.status_code != 200:
-        pytest.fail(
-            "Runtime Provider credential exchange failed with HTTP "
-            f"{credential_response.status_code}"
-        )
-    credential_payload = _JSON_OBJECT_ADAPTER.validate_python(
-        credential_response.json()
-    )
-    credential = credential_payload.get("credential")
-    if not isinstance(credential, str):
-        pytest.fail("Runtime Provider credential exchange response was incomplete")
+    except RuntimeProviderAuthenticationError as error:
+        pytest.fail(str(error))
     return _RedactedSecret(credential)
 
 
