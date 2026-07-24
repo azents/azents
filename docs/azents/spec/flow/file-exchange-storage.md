@@ -40,14 +40,15 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/hooks/useFileUpload.ts
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
+  - typescript/apps/azents-web/src/features/chat/components/AttachmentMarkdownPreview.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewViewer.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/components/ProviderToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-23
-spec_version: 27
+last_verified_at: 2026-07-24
+spec_version: 28
 ---
 
 # File Exchange Storage
@@ -181,8 +182,8 @@ database cascade erase the last cleanup reference before external deletion succe
 - The attachment-bearing tool call is not duplicated inside Activity. Raw diagnostic cards remain available for non-delivery tool activity, while the standalone attachment group owns preview/download interaction for every visible delivery file.
 - Agent-originated non-image files use the compact strip. Mixed Agent output groups the image gallery and compact file strip inside one bordered attachment group.
 - Every available sent attachment opens `AttachmentPreviewViewer` from its tile body or gallery cell. The trailing tile download action downloads the original without opening the viewer.
-- Exchange-file creation stores a bounded `preview_summary` for safe UTF-8 text. Supported payloads include `text/*`, common textual `application/*` media types, structured media types ending in `+json`, `+xml`, or `+yaml`, and `application/octet-stream` content that decodes as UTF-8 without binary control characters. Invalid UTF-8 and binary-control content do not receive a text preview. User uploads and Agent-presented files use this same preview path while retaining the complete original for download.
-- `AttachmentPreviewViewer` selects image or text rendering from available preview capability data and shows a download-guidance fallback for other file types. It uses a full-screen mobile overlay and a bounded centered desktop modal with persistent close, metadata, file-position, previous/next, and download controls. Images remain fitted inside the viewer; selecting an image opens the original with inline disposition in the browser's native image viewer. Text previews scroll inside a pre-wrapped monospaced surface.
+- Exchange-file creation stores a bounded `preview_summary` for safe UTF-8 text. Supported payloads include `text/*`, common textual `application/*` media types, structured media types ending in `+json`, `+xml`, or `+yaml`, `application/octet-stream`, and conservatively recognized text/source/configuration filenames whose declared media type is empty or explicitly generic/unknown. Specific non-text media types are not promoted by filename. Every candidate must decode as UTF-8 without binary control characters. Invalid UTF-8 and binary-control content do not receive a text preview. User uploads and Agent-presented files use this same preview path while retaining the complete original for download.
+- `AttachmentPreviewViewer` selects image, Markdown, or plain-text rendering from available preview capability data and shows a download-guidance fallback for other file types. It uses a full-screen mobile overlay and a bounded centered desktop modal with persistent close, metadata, file-position, previous/next, and download controls. Images remain fitted inside the viewer; selecting an image opens the original with inline disposition in the browser's native image viewer. Markdown identified by media type or filename renders GFM without raw HTML, executable custom renderers, or automatic remote-image loading. Other text previews scroll inside a pre-wrapped monospaced surface, and an empty stored preview remains a valid text preview.
 - A preview navigates across every available attachment in the rendered attachment group without closing. Users can use the previous/next controls, keyboard arrow keys, a horizontal wheel gesture, or a horizontal touch swipe. Gallery count cells open the first hidden image so every item represented by `+N` remains reachable.
 - Opening a preview adds a same-URL browser history entry. Browser Back closes the preview before leaving the conversation, while the close control and Escape consume the same entry.
 - Expired or unavailable attachments retain their metadata tile but disable preview and download.
@@ -197,6 +198,8 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ## Changelog
 
+- **2026-07-24** — v28. Added formatted safe Markdown attachment preview, empty-text
+  preview support, and conservative filename-assisted safe text recognition.
 - **2026-07-23** — v27. Distinguished explicit External Channel Runtime/provider transfer
   from Exchange, Artifact, and ModelFile storage, including bounded inbound writes,
   outbound chunk streaming, and no durable transferred-byte object.

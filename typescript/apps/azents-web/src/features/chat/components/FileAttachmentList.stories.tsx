@@ -2,8 +2,10 @@ import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   binaryAttachment,
+  emptyTextAttachment,
   expiredAttachment,
   imageAttachment,
+  markdownAttachment,
   textAttachment,
   unavailableAttachment,
   unsupportedUriAttachment,
@@ -139,6 +141,46 @@ export const GenericFileCardInteraction = {
 export const TextPreviewOnly = {
   args: {
     files: [textAttachment],
+  },
+} satisfies Story;
+
+export const MarkdownPreview = {
+  args: {
+    files: [markdownAttachment],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /README\.md/u }));
+
+    const dialog = within(document.body).getByRole("dialog");
+    const preview = within(dialog);
+    await expect(
+      preview.getByRole("heading", { name: "Deployment Notes" }),
+    ).toBeVisible();
+    await expect(preview.getByRole("table")).toBeVisible();
+    await expect(preview.getByText("pnpm run build")).toBeVisible();
+    await expect(
+      preview.getByRole("link", { name: "Open documentation" }),
+    ).toHaveAttribute("target", "_blank");
+    await expect(
+      preview.getByRole("link", { name: "Remote architecture" }),
+    ).toBeVisible();
+    await expect(
+      preview.queryByRole("img", { name: "Remote architecture" }),
+    ).toBeNull();
+  },
+} satisfies Story;
+
+export const EmptyTextPreview = {
+  args: {
+    files: [emptyTextAttachment],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /empty\.txt/u }));
+    const dialog = within(document.body).getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(within(dialog).queryByText("Preview unavailable")).toBeNull();
   },
 } satisfies Story;
 

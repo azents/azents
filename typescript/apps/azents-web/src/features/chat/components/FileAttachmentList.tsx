@@ -78,6 +78,18 @@ function isImageFile(mediaType: string): boolean {
   return mediaType.startsWith("image/");
 }
 
+function isMarkdownFile(file: FileAttachment): boolean {
+  const mediaType = file.mediaType.split(";", 1)[0]?.trim().toLowerCase();
+  if (mediaType === "text/markdown") {
+    return true;
+  }
+  const name = file.name ?? extractFilename(file.uri);
+  const normalizedName = name.toLowerCase();
+  return [".md", ".markdown", ".mdx"].some((extension) =>
+    normalizedName.endsWith(extension),
+  );
+}
+
 function fileAvailability(file: FileAttachment): FileAvailability {
   return file.availability ?? "available";
 }
@@ -151,12 +163,12 @@ function previewSelection(file: FileAttachment): PreviewSelection | null {
       },
     };
   }
-  if (file.textPreview) {
+  if (file.textPreview != null) {
     return {
       file,
       downloadUrl,
       preview: {
-        type: "text",
+        type: isMarkdownFile(file) ? "markdown" : "text",
         text: file.textPreview,
       },
     };

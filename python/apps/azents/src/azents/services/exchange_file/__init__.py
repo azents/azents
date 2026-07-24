@@ -118,6 +118,111 @@ _TEXT_PREVIEW_MEDIA_TYPES = {
 }
 _TEXT_PREVIEW_MEDIA_TYPE_SUFFIXES = ("+json", "+xml", "+yaml")
 _UNKNOWN_MEDIA_TYPE = "application/octet-stream"
+_TEXT_PREVIEW_EXTENSIONS = {
+    ".adoc",
+    ".asciidoc",
+    ".bash",
+    ".bib",
+    ".c",
+    ".cc",
+    ".cfg",
+    ".clj",
+    ".cljs",
+    ".cljc",
+    ".conf",
+    ".config",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".csv",
+    ".cts",
+    ".cxx",
+    ".dart",
+    ".edn",
+    ".env",
+    ".erl",
+    ".ex",
+    ".exs",
+    ".fish",
+    ".fs",
+    ".fsx",
+    ".gitattributes",
+    ".gitignore",
+    ".gql",
+    ".go",
+    ".graphql",
+    ".h",
+    ".hpp",
+    ".hrl",
+    ".htm",
+    ".html",
+    ".ini",
+    ".java",
+    ".js",
+    ".json",
+    ".json5",
+    ".jsonc",
+    ".jsx",
+    ".kt",
+    ".kts",
+    ".less",
+    ".log",
+    ".lua",
+    ".markdown",
+    ".md",
+    ".mdx",
+    ".mjs",
+    ".mts",
+    ".npmrc",
+    ".php",
+    ".pl",
+    ".pm",
+    ".properties",
+    ".ps1",
+    ".py",
+    ".pyi",
+    ".r",
+    ".rb",
+    ".rst",
+    ".sass",
+    ".scala",
+    ".scss",
+    ".sh",
+    ".sql",
+    ".svelte",
+    ".swift",
+    ".tcl",
+    ".tex",
+    ".text",
+    ".toml",
+    ".ts",
+    ".tsv",
+    ".tsx",
+    ".txt",
+    ".vb",
+    ".vue",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".yarnrc",
+    ".zsh",
+}
+_TEXT_PREVIEW_FILENAMES = {
+    "cmakelists.txt",
+    "dockerfile",
+    "gemfile",
+    "justfile",
+    "makefile",
+    "pipfile",
+    "procfile",
+    "rakefile",
+}
+_FILENAME_TEXT_FALLBACK_MEDIA_TYPES = {
+    "",
+    "application/unknown",
+    "application/x-unknown",
+    "binary/octet-stream",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -162,7 +267,15 @@ def sanitize_exchange_filename(filename: str | None) -> str:
     return "upload"
 
 
-def _make_text_preview(body: bytes, media_type: str) -> str | None:
+def _filename_supports_text_preview(filename: str) -> bool:
+    """Return whether a filename conventionally identifies readable text."""
+    normalized = filename.lower()
+    return normalized in _TEXT_PREVIEW_FILENAMES or any(
+        normalized.endswith(extension) for extension in _TEXT_PREVIEW_EXTENSIONS
+    )
+
+
+def _make_text_preview(body: bytes, media_type: str, filename: str) -> str | None:
     """Create a bounded preview when attachment bytes are safe UTF-8 text."""
     normalized_media_type = media_type.partition(";")[0].strip().lower()
     supported = (
@@ -170,6 +283,10 @@ def _make_text_preview(body: bytes, media_type: str) -> str | None:
         or normalized_media_type in _TEXT_PREVIEW_MEDIA_TYPES
         or normalized_media_type.endswith(_TEXT_PREVIEW_MEDIA_TYPE_SUFFIXES)
         or normalized_media_type == _UNKNOWN_MEDIA_TYPE
+        or (
+            normalized_media_type in _FILENAME_TEXT_FALLBACK_MEDIA_TYPES
+            and _filename_supports_text_preview(filename)
+        )
     )
     if not supported:
         return None
@@ -598,6 +715,7 @@ class ExchangeFileService:
     ) -> list[_PreparedExchangeFile]:
         """Prepare stable metadata and object keys before external upload."""
         safe_filename = sanitize_exchange_filename(filename)
+        preview_filename = filename if filename is not None else safe_filename
         sha256 = hashlib.sha256(body).hexdigest()
         now = datetime.datetime.now(datetime.UTC)
         expires_at = exchange_file_expires_at(now=now, config=self.config)
@@ -620,7 +738,11 @@ class ExchangeFileService:
                     ),
                     expires_at=expires_at,
                     preview_title=safe_filename,
-                    preview_summary=_make_text_preview(body, media_type),
+                    preview_summary=_make_text_preview(
+                        body,
+                        media_type,
+                        preview_filename,
+                    ),
                     preview_generated_at=now,
                 ),
                 object_key=exchange_file_object_key(
