@@ -672,6 +672,10 @@
           "label": "Runtime and deletion",
           "description": "Reset runtime state or delete this agent"
         },
+        "projects": {
+          "label": "Projets par défaut",
+          "description": "Projets ajoutés lors de la création automatique d’une session racine."
+        },
         "values": {
           "active": "Active",
           "inactive": "Inactive",
@@ -679,7 +683,9 @@
           "disabled": "Disabled",
           "shellEnabled": "Shell on",
           "shellDisabled": "Shell off",
-          "subagents": "{count} max · profondeur {depth}"
+          "subagents": "{count} max · profondeur {depth}",
+          "none": "Aucun",
+          "projects": "{count} projets"
         },
         "subagents": {
           "label": "Sous-agents",
@@ -688,6 +694,36 @@
         "channels": {
           "label": "Canaux externes",
           "description": "Connexions Slack, routes et accès des participants"
+        }
+      },
+      "automaticProjects": {
+        "title": "Projets par défaut",
+        "description": "Choisissez les dossiers Agent Workspace existants disponibles pour les sessions racines créées automatiquement.",
+        "listTitle": "Projets des sessions automatiques",
+        "listDescription": "Ces dossiers existants sont ajoutés lorsqu’Azents crée une session racine sans sélection explicite.",
+        "addProject": "Ajouter un projet",
+        "empty": "Les sessions automatiques commencent actuellement sans projet enregistré.",
+        "saveChanges": "Enregistrer",
+        "saved": "Modifications enregistrées",
+        "unsaved": "Modifications non enregistrées",
+        "moveUp": "Monter",
+        "moveDown": "Descendre",
+        "removeProject": "Supprimer le projet",
+        "errorTitle": "Impossible d’enregistrer les projets",
+        "conflictTitle": "Les paramètres ont changé ailleurs",
+        "runtimeUnavailableTitle": "Runtime indisponible",
+        "missingTitle": "Projet indisponible",
+        "missingDescription": "Un ou plusieurs projets configurés sont manquants.",
+        "validationTitle": "Projet non enregistré",
+        "startRuntime": "Démarrer le Runtime",
+        "retrySave": "Réessayer l’enregistrement",
+        "reloadLatest": "Recharger les dernières valeurs",
+        "status": {
+          "available": "Disponible",
+          "missing": "Manquant",
+          "unavailable": "Indisponible",
+          "error": "Erreur",
+          "unchecked": "Non vérifié"
         }
       },
       "settingsLayout": {
@@ -1346,6 +1382,23 @@
     "nameRequired": "Veuillez saisir un nom",
     "connectedAccounts": "Comptes connectés",
     "noInstalledPlatforms": "Aucune plateforme de chat connectée à cet espace de travail."
+  },
+  "agentWorkspacePicker": {
+    "projectPickerTitle": "Sélectionner un dossier Project",
+    "projectPickerDescription": "Le Runtime doit être en cours d’exécution pour choisir un dossier Agent Workspace.",
+    "projectPickerSelectCurrent": "Sélectionner le dossier actuel",
+    "projectPickerCurrentPath": "Chemin actuel",
+    "projectPickerNoDirectories": "Aucun sous-dossier.",
+    "projectPickerSelectDirectory": "Sélectionner le dossier",
+    "workspacePanel": {
+      "restoringRuntime": "Préparation du Runtime…",
+      "refresh": "Actualiser",
+      "controlUnavailableTitle": "Contrôle du Workspace indisponible",
+      "restartRuntime": "Redémarrer le Runtime",
+      "inactiveTitle": "Runtime inactif",
+      "inactiveDescription": "Démarrez le Runtime pour parcourir les dossiers Agent Workspace."
+    },
+    "projectPickerStartRuntime": "Démarrer le Runtime"
   },
   "chat": {
     "inheritModelProvider": "Hérite",

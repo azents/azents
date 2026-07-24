@@ -2,6 +2,7 @@
 title: "Agent Default Projects for Automatic Sessions Design"
 created: 2026-07-24
 updated: 2026-07-24
+implemented: 2026-07-24
 tags: [agent, session, workspace, project, backend, frontend, api, testenv]
 document_role: primary
 document_type: design

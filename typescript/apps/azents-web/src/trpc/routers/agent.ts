@@ -16,11 +16,13 @@ import {
   agentV1FinalizeAvatar,
   agentV1GetAgent,
   agentV1GetAgentMemory,
+  agentV1GetAutomaticSessionProjects,
   agentV1ListAgentAdmins,
   agentV1ListAgentMemories,
   agentV1ListAgents,
   agentV1RemoveAgentAdmin,
   agentV1RemoveAvatar,
+  agentV1ReplaceAutomaticSessionProjects,
   agentV1RequestAvatarUpload,
   agentV1UpdateAgent,
   agentV1UpdateAgentMemory,
@@ -604,6 +606,64 @@ export const agentRouter = router({
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  /** Read Agent-admin-managed automatic Session Project policy */
+  getAutomaticSessionProjects: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1GetAutomaticSessionProjects({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  /** Replace Agent-admin-managed automatic Session Project policy */
+  replaceAutomaticSessionProjects: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        expectedRevision: z.number().int().min(1),
+        projectPaths: z.array(z.string().min(1)),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1ReplaceAutomaticSessionProjects({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: {
+            expected_revision: input.expectedRevision,
+            project_paths: input.projectPaths,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

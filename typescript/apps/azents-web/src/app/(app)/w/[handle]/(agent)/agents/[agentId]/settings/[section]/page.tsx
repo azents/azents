@@ -1,12 +1,18 @@
 import { TRPCError } from "@trpc/server";
 import { notFound } from "next/navigation";
+import { AgentAutomaticProjectsPage } from "@/features/agents/AgentAutomaticProjectsPage";
 import { AgentMemorySettingsPage } from "@/features/agents/AgentMemorySettingsPage";
 import { AgentSettingsPage } from "@/features/agents/AgentSettingsPage";
 import { ExternalChannelSettingsPage } from "@/features/external-channel-management/ExternalChannelSettingsPage";
 import { trpc } from "@/trpc/server";
 import type { AgentFormSection } from "@/features/agents/components/AgentForm";
 
-type SettingsSection = AgentFormSection | "memory" | "channels" | "danger";
+type SettingsSection =
+  | AgentFormSection
+  | "memory"
+  | "channels"
+  | "projects"
+  | "danger";
 
 function parseSection(value: string): SettingsSection | null {
   switch (value) {
@@ -17,6 +23,7 @@ function parseSection(value: string): SettingsSection | null {
     case "subagents":
     case "memory":
     case "channels":
+    case "projects":
     case "danger":
       return value;
     default:
@@ -41,6 +48,9 @@ export default async function Page({
     }
     if (section === "channels") {
       return <ExternalChannelSettingsPage handle={handle} agent={agent} />;
+    }
+    if (section === "projects") {
+      return <AgentAutomaticProjectsPage handle={handle} agent={agent} />;
     }
     return (
       <AgentSettingsPage handle={handle} agent={agent} section={section} />

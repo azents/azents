@@ -6,6 +6,7 @@ spec_type: domain
 domain: agent
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/db-schemas/rdb/migrations/versions/995d915ed6d6_add_agent_automatic_project_policy.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/credentials.py
@@ -14,20 +15,25 @@ code_paths:
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/src/azents/rdb/models/agent_admin.py
+  - python/apps/azents/src/azents/rdb/models/agent_automatic_project_item.py
+  - python/apps/azents/src/azents/rdb/models/agent_automatic_project_setting.py
   - python/apps/azents/src/azents/rdb/models/agent_decommission.py
   - python/apps/azents/src/azents/rdb/models/llm_provider_integration.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/repos/agent/**
   - python/apps/azents/src/azents/repos/agent_admin/**
+  - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/agent_decommission/**
   - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/repos/workspace_model_settings/**
   - python/apps/azents/src/azents/services/agent/**
+  - python/apps/azents/src/azents/services/agent_automatic_project/**
   - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
+  - python/apps/azents/src/azents/services/runtime_directory_validation.py
   - python/apps/azents/src/azents/services/builtin_capabilities.py
   - python/apps/azents/src/azents/services/workspace_model_settings/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -38,6 +44,11 @@ code_paths:
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/worker/run/**
+  - typescript/apps/azents-web/src/features/agents/AgentAutomaticProjectsPage.tsx
+  - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
+  - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
+  - typescript/apps/azents-web/src/trpc/routers/agent.ts
 api_routes:
   - /agent/v1/workspaces/{handle}/agents
   - /agent/v1/workspaces/{handle}/agents/{agent_id}
@@ -45,14 +56,15 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar
+  - /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/models
   - /workspace-model-settings/v1/workspaces/{handle}
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-22
-spec_version: 53
+last_verified_at: 2026-07-24
+spec_version: 54
 ---
 
 # Agent Domain Spec
@@ -153,6 +165,19 @@ Rules:
 The stable `xai` provider uses generic encrypted API-key secrets with no plaintext provider config. It remains a separate integration identity from experimental `xai_oauth`. Generic integration CRUD persists fake or real keys without calling xAI for validation, omits secrets from every public response, and preserves the encrypted key when an alias or enabled-state update omits `secrets`.
 
 Agent/Workspace settings API resolves each client-sent `{ llm_provider_integration_id, model_identifier }` through the stored model catalog projection and normalizes it into an `AgentModelSelection` snapshot. This applies both to direct transition fields and to every selectable model option entry.
+
+### 1.4 Automatic root Session Project policy
+
+Every Agent owns one `agent_automatic_project_settings` row, created with revision 1
+and an empty item set when the Agent is created. Its
+`agent_automatic_project_items` rows store a unique ordered list of normalized
+absolute Agent Workspace directory paths. Position and path are both unique within
+one Agent policy.
+
+The policy is administrator-managed configuration for automatic root Session
+creation. It is distinct from `agent_project_defaults`, presets, and catalog
+projections used by the explicit new-Session draft UI. Replacing the policy does
+not mutate existing root Sessions or their shared context Projects.
 
 ## 2. API Contract
 
@@ -265,7 +290,42 @@ GET /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{
 
 After verifying integration ownership and enabled state, returns normalized model candidate list. This endpoint is picker source for Agent/Workspace settings UI.
 
-### 2.4 Agent Memory management
+### 2.4 Automatic root Session Projects
+
+```http
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
+PUT /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
+```
+
+Only an explicit AgentAdmin may read or replace this policy. Workspace ownership or
+membership alone does not grant policy management.
+
+- GET returns the complete ordered `project_paths`, current `revision`, updater, and
+  timestamps without Runtime I/O.
+- PUT is a complete replacement with `expected_revision` optimistic concurrency.
+  Paths are normalized, duplicate normalized paths keep their first position, and
+  an accepted replacement increments the revision exactly once.
+- A non-empty replacement validates every path as an existing directory through the
+  Agent Runtime before opening the final replacement transaction. Missing files,
+  non-directories, Agent Workspace root, and out-of-root paths are rejected without
+  changing the policy.
+- An empty replacement clears the policy without requiring Runtime availability.
+- A stale revision returns `409` with
+  `automatic_session_projects_revision_conflict`; unavailable Runtime validation
+  returns `409` with `automatic_session_projects_runtime_unavailable`.
+- Successfully validated paths also refresh their Agent Project Catalog projection
+  to available. Catalog status remains a UI projection and is not the policy source
+  of truth.
+
+Azents Web exposes this policy under the Agent Settings Projects page. The editor
+maintains an ordered draft with add, remove, and move controls backed by the shared
+Agent Workspace directory picker. Background query refresh does not replace an
+initialized draft. Save sends the complete draft with its baseline revision;
+success adopts the returned paths and revision, while validation, Runtime, generic,
+and revision-conflict failures preserve the draft. Reload latest is an explicit
+action that replaces the draft after a conflict.
+
+### 2.5 Agent Memory management
 
 ```http
 GET /agent/v1/workspaces/{handle}/agents/{agent_id}/memories?scope={agent|user}
@@ -281,7 +341,7 @@ Public integration model listing uses stored model catalog projections. The pick
 
 Deterministic fixture in local/test environment is development/QA support path activated only by integration name marker. It can sync deterministic catalog entries for product tests.
 
-### 2.5 Agent decommission
+### 2.6 Agent decommission
 
 `DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}` is an asynchronous decommission
 request, not immediate row deletion. An Agent administrator or Workspace owner can request it only
@@ -363,6 +423,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-24 | 54 | Added AgentAdmin-managed revisioned automatic root Session Project policy, Runtime-backed non-empty replacement validation, empty clear, and stable conflict semantics |
 | 2026-07-22 | 52 | Integrated External Channel route, binding, Channel Work, cleanup-intent, authorization, and restrictive ownership behavior into Agent decommission |
 | 2026-07-21 | 51 | Added durable finite-retention Agent decommission, admission fencing, and Runtime acknowledgement-gated finalization |
 | 2026-07-18 | 50 | Resolved semantic built-ins to provider-hosted or client-executed ownership per selected model provider |

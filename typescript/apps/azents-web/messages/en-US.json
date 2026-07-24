@@ -672,6 +672,10 @@
           "label": "Runtime and deletion",
           "description": "Reset runtime state or delete this agent"
         },
+        "projects": {
+          "label": "Default projects",
+          "description": "Projects added when a root session is created automatically."
+        },
         "values": {
           "active": "Active",
           "inactive": "Inactive",
@@ -679,7 +683,9 @@
           "disabled": "Disabled",
           "shellEnabled": "Shell on",
           "shellDisabled": "Shell off",
-          "subagents": "{count} max · depth {depth}"
+          "subagents": "{count} max · depth {depth}",
+          "none": "None",
+          "projects": "{count} projects"
         },
         "subagents": {
           "label": "Subagents",
@@ -688,6 +694,36 @@
         "channels": {
           "label": "External channels",
           "description": "Slack connections, routes, and participant access"
+        }
+      },
+      "automaticProjects": {
+        "title": "Default projects",
+        "description": "Choose the existing Agent Workspace folders available to automatically created root sessions.",
+        "listTitle": "Automatic session projects",
+        "listDescription": "These existing folders are added when Azents creates a root session without an explicit workspace selection.",
+        "addProject": "Add project",
+        "empty": "Automatic sessions currently start without registered projects.",
+        "saveChanges": "Save changes",
+        "saved": "All changes saved",
+        "unsaved": "Unsaved changes",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "removeProject": "Remove project",
+        "errorTitle": "Could not save projects",
+        "conflictTitle": "Settings changed elsewhere",
+        "runtimeUnavailableTitle": "Runtime unavailable",
+        "missingTitle": "Project unavailable",
+        "missingDescription": "One or more configured projects are missing.",
+        "validationTitle": "Project could not be saved",
+        "startRuntime": "Start Runtime",
+        "retrySave": "Retry save",
+        "reloadLatest": "Reload latest",
+        "status": {
+          "available": "Available",
+          "missing": "Missing",
+          "unavailable": "Unavailable",
+          "error": "Error",
+          "unchecked": "Unchecked"
         }
       },
       "settingsLayout": {
@@ -1346,6 +1382,23 @@
     "nameRequired": "Please enter a name",
     "connectedAccounts": "Connected Accounts",
     "noInstalledPlatforms": "No chat platforms connected to this workspace."
+  },
+  "agentWorkspacePicker": {
+    "projectPickerTitle": "Select Project folder",
+    "projectPickerDescription": "The Runtime must be running to pick a folder from Agent Workspace.",
+    "projectPickerSelectCurrent": "Select current folder",
+    "projectPickerCurrentPath": "Current path",
+    "projectPickerNoDirectories": "No child folders.",
+    "projectPickerSelectDirectory": "Select folder",
+    "workspacePanel": {
+      "restoringRuntime": "Preparing Runtime…",
+      "refresh": "Refresh",
+      "controlUnavailableTitle": "Workspace control unavailable",
+      "restartRuntime": "Restart Runtime",
+      "inactiveTitle": "Runtime inactive",
+      "inactiveDescription": "Start the Runtime to browse Agent Workspace folders."
+    },
+    "projectPickerStartRuntime": "Start Runtime"
   },
   "chat": {
     "inheritModelProvider": "Inherits",
