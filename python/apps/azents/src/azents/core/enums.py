@@ -747,11 +747,73 @@ class ExternalChannelConnectionStatus(enum.StrEnum):
     DISCONNECTED = "disconnected"
 
 
+class ExternalChannelAppMode(enum.StrEnum):
+    """Immutable product administration mode for an external connection."""
+
+    SINGLE = "single"
+    MULTI = "multi"
+
+
 class ExternalChannelRouteMode(enum.StrEnum):
     """External connection routing behavior."""
 
     DEDICATED = "dedicated"
     PLATFORM = "platform"
+
+
+class ExternalChannelRouteCatalogStatus(enum.StrEnum):
+    """Catalog availability for one connection-to-Agent route."""
+
+    AVAILABLE = "available"
+    REMOVED = "removed"
+
+
+class ExternalChannelInteractionType(enum.StrEnum):
+    """Provider interaction callback category."""
+
+    SHORTCUT = "shortcut"
+    BLOCK_ACTION = "block_action"
+    OPTIONS = "options"
+    VIEW_SUBMISSION = "view_submission"
+    MANAGEMENT_ACTION = "management_action"
+
+
+class ExternalChannelInteractionStatus(enum.StrEnum):
+    """Durable provider interaction admission lifecycle."""
+
+    ACCEPTED = "accepted"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+class ExternalChannelConversationAdmissionOrigin(enum.StrEnum):
+    """Route-resolution origin for an unbound conversation."""
+
+    SINGLE_ROUTE = "single_route"
+    CHANNEL_DEFAULT = "channel_default"
+    SHORTCUT = "shortcut"
+    MENTION_SELECTOR = "mention_selector"
+
+
+class ExternalChannelConversationAdmissionStatus(enum.StrEnum):
+    """Route-neutral conversation admission lifecycle."""
+
+    PENDING_SELECTION = "pending_selection"
+    SELECTED = "selected"
+    AWAITING_ACCESS = "awaiting_access"
+    BOUND = "bound"
+    EXPIRED = "expired"
+    REJECTED = "rejected"
+
+
+class ExternalChannelChannelDefaultStatus(enum.StrEnum):
+    """Lifecycle state of a Multi App channel route default."""
+
+    ACTIVE = "active"
+    INVALIDATED = "invalidated"
 
 
 class ExternalChannelResourceType(enum.StrEnum):

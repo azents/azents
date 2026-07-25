@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
+    ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelProvider,
     ExternalChannelTransport,
@@ -111,6 +112,7 @@ class _RepositoryDouble:
             provider=self.configuration.provider,
             transport=self.configuration.transport,
             status=status,
+            app_mode=self.configuration.app_mode,
             provider_app_id=self.configuration.provider_app_id,
             provider_tenant_id=tenant_id,
             provider_bot_user_id=bot_user_id,
@@ -176,6 +178,7 @@ def _connection_from_create(
         provider=create.provider,
         transport=create.transport,
         status=create.status,
+        app_mode=create.app_mode,
         provider_app_id=create.provider_app_id,
         provider_tenant_id=create.provider_tenant_id,
         provider_bot_user_id=create.provider_bot_user_id,
@@ -203,6 +206,7 @@ def _configuration(
         workspace_id="workspace-1",
         provider=ExternalChannelProvider.SLACK,
         transport=ExternalChannelTransport.HTTP,
+        app_mode=ExternalChannelAppMode.SINGLE,
         status=ExternalChannelConnectionStatus.CONFIGURING,
         provider_app_id="A-1",
         provider_tenant_id=None,
@@ -365,6 +369,7 @@ def test_legacy_capability_snapshot_defaults_file_directions_to_unavailable() ->
             workspace_id="workspace-1",
             provider=ExternalChannelProvider.SLACK,
             transport=ExternalChannelTransport.HTTP,
+            app_mode=ExternalChannelAppMode.SINGLE,
             status=ExternalChannelConnectionStatus.ACTIVE,
             provider_app_id="A-1",
             provider_tenant_id="T-1",

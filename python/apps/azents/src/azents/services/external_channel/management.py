@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAccessGrantScope,
+    ExternalChannelAppMode,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
 )
@@ -168,6 +170,10 @@ class ExternalChannelManagementService:
                     connection_id=setup.connection.id,
                     agent_id=agent_id,
                     route_mode=ExternalChannelRouteMode.DEDICATED,
+                    connection_app_mode=ExternalChannelAppMode.SINGLE,
+                    catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
+                    catalog_removed_at=None,
+                    catalog_removed_by_user_id=None,
                 ),
             )
             await session.commit()
