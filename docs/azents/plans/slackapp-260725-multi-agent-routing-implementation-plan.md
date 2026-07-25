@@ -45,6 +45,37 @@ All PR titles use the exact `Slack multi-agent apps [N/10]: ...` prefix. All des
 branches remain based on the preceding stack branch until front-to-back merge and
 retargeting.
 
+## Stable Delivery Team
+
+| Role | Assigned subagent | Persistent ownership | Planned phases |
+| --- | --- | --- | --- |
+| Implementation owner | `slack-app-impl-v3` | Phase-plan-bounded implementation and focused validation across backend, API, Web, testenv, documentation promotion, and cleanup paths | PR 3 through PR 10 |
+| Independent reviewer | `slack-app-review-v2` | Read-only independent review against the approved documents, current phase execution plan, diff, migration safety, runtime correctness, authorization, UI behavior, and validation evidence | PR 3 through PR 10 |
+
+The primary agent is the sole orchestrator and integration owner. It creates and
+updates phase execution plans, assigns and continues the stable role owners, verifies
+their output, applies accepted localized review findings, controls phase progression,
+creates PRs, and monitors CI. Implementation remains owned by the implementation
+subagent. Workstream-level reimplementation returns to that owner.
+
+The original implementation assignment `slack-app-impl-v2` became unavailable before
+producing an implementation artifact and was replaced by `slack-app-impl-v3`.
+`slack-app-impl-v3` is the continuing implementation owner; a phase change is not a
+reason to replace it. The independent reviewer did not participate in implementation.
+
+## Dependency and Parallelization Map
+
+- PRs 1 through 10 are sequential stack dependencies and no later-phase
+  implementation starts before the preceding PR exists.
+- Within a phase, work may run in parallel only when the phase execution plan assigns
+  non-overlapping paths and all required interfaces already exist.
+- Shared schema, generated artifacts, routing contracts, and integration files have
+  one implementation owner at a time.
+- The independent reviewer starts only after primary verification of the complete
+  phase diff.
+- Every implementation PR adds and reports its own tracked phase execution plan
+  before implementation work begins.
+
 ## Cross-Phase Invariants
 
 The following invariants apply to every phase:
