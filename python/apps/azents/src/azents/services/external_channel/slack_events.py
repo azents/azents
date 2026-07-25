@@ -276,14 +276,6 @@ def _normalize_slack_event(
 
     subtype = _optional_string(event, "subtype")
     if event_type == "app_mention":
-        if subtype not in {None, "bot_message"}:
-            raise SlackEventExcluded("Slack mention subtype is not supported.")
-        message = event
-        revision_kind = ExternalChannelMessageRevisionKind.ORIGINAL
-        lifecycle = ExternalChannelMessageLifecycle.CURRENT
-        message_ts = _required_string(message, "ts")
-        provider_updated_at = None
-    elif subtype in {None, "bot_message"}:
         message = event
         revision_kind = ExternalChannelMessageRevisionKind.ORIGINAL
         lifecycle = ExternalChannelMessageLifecycle.CURRENT
@@ -311,9 +303,16 @@ def _normalize_slack_event(
             _optional_string(event, "event_ts") or message_ts
         )
     else:
-        raise SlackEventExcluded(
-            "Slack message subtype is outside the configured scope."
+        raw_message = event.get("message")
+        message = (
+            raw_message
+            if _optional_string(event, "ts") is None and isinstance(raw_message, dict)
+            else event
         )
+        revision_kind = ExternalChannelMessageRevisionKind.ORIGINAL
+        lifecycle = ExternalChannelMessageLifecycle.CURRENT
+        message_ts = _required_string(message, "ts")
+        provider_updated_at = None
 
     root_thread_ts = _optional_string(message, "thread_ts") or message_ts
     author_type, provider_user_id = _author(message)
