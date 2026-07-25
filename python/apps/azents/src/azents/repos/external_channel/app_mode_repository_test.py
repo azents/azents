@@ -311,11 +311,20 @@ async def _cleanup_committed_workspace(
         WHERE workspace_id = :workspace_id
         """,
         """
+        UPDATE session_agent_contexts
+        SET root_session_agent_id = NULL
+        WHERE workspace_id = :workspace_id
+        """,
+        """
         DELETE FROM session_agents
         WHERE agent_session_id IN (
             SELECT id FROM agent_sessions
             WHERE workspace_id = :workspace_id
         )
+        """,
+        """
+        DELETE FROM session_agent_contexts
+        WHERE workspace_id = :workspace_id
         """,
         "DELETE FROM agent_sessions WHERE workspace_id = :workspace_id",
         "DELETE FROM agents WHERE workspace_id = :workspace_id",
@@ -1702,7 +1711,10 @@ async def test_agent_decommission_detaches_routes_before_agent_delete(
         assert route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED
         assert route.agent_id is None
         assert route.agent_id_snapshot == agent.id
-    assert single.status is ExternalChannelConnectionStatus.DISCONNECTED
+    assert (
+        persisted_single_connection.status
+        is ExternalChannelConnectionStatus.DISCONNECTED
+    )
     assert persisted_single_connection.encrypted_credentials == "ciphertext"
     assert multi.status is ExternalChannelConnectionStatus.ACTIVE
     assert cleanup.provider_state_purge_connection_ids == (single.id,)
