@@ -14,28 +14,30 @@ import {
 } from "./elapsedDuration";
 
 interface AgentRunIndicatorProps {
-  modelCallStartedAt: string | null;
+  lastEventReceivedAt: string | null;
 }
 
-function useVisibleModelCallDuration(startedAt: string | null): number | null {
+function useVisibleEventSilenceDuration(
+  lastEventReceivedAt: string | null,
+): number | null {
   const [, setTick] = useState(0);
 
   useEffect(() => {
     return startElapsedDurationTimer(
-      startedAt,
+      lastEventReceivedAt,
       () => setTick((tick) => tick + 1),
       (callback, delay) => window.setInterval(callback, delay),
       (timerId) => window.clearInterval(timerId),
     );
-  }, [startedAt]);
+  }, [lastEventReceivedAt]);
 
-  return visibleElapsedDurationSeconds(startedAt, Date.now(), 10);
+  return visibleElapsedDurationSeconds(lastEventReceivedAt, Date.now(), 10);
 }
 
 export function AgentRunIndicator({
-  modelCallStartedAt,
+  lastEventReceivedAt,
 }: AgentRunIndicatorProps): React.ReactElement {
-  const durationSeconds = useVisibleModelCallDuration(modelCallStartedAt);
+  const durationSeconds = useVisibleEventSilenceDuration(lastEventReceivedAt);
 
   return (
     <Box className={styles.root}>

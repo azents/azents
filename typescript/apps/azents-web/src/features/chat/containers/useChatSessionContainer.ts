@@ -121,6 +121,8 @@ export interface ChatSessionContainerOutput {
   isWritePending: boolean;
   /** whether to show model response waiting/streaming indicator */
   isModelResponsePending: boolean;
+  /** browser timestamp for the most recently received chat event */
+  lastEventReceivedAt: string | null;
   /** current live run snapshot, including retry recovery state */
   liveRun: ChatLiveRunState | null;
   /** whether older messages exist */
@@ -1510,6 +1512,7 @@ interface ManagedLiveState {
   liveRunPhase: AgentRunPhase | null;
   sessionRunState: SessionRunState;
   isResponsePending: boolean;
+  lastEventReceivedAt: string | null;
   isCompacting: boolean;
   isStopPending: boolean;
   todo: TodoStateSnapshot;
@@ -1571,6 +1574,7 @@ function emptyManagedLiveState(): ManagedLiveState {
     liveRunPhase: null,
     sessionRunState: "idle",
     isResponsePending: false,
+    lastEventReceivedAt: null,
     isCompacting: false,
     isStopPending: false,
     todo: emptyTodoState(),
@@ -1706,6 +1710,9 @@ function replaceLiveStateFromSnapshot(
         ? (previous?.liveRun ?? null)
         : null;
   const currentLiveRunPhase = liveRunPhase(liveRun);
+  const isResponsePending =
+    isUserBlockingRunPhase(currentLiveRunPhase) ||
+    partialHistory.order.length > 0;
   return {
     state: {
       ...emptyManagedLiveState(),
@@ -1722,9 +1729,10 @@ function replaceLiveStateFromSnapshot(
         liveRun?.status === "running"
           ? "running"
           : sessionRunStateFromResponse(live),
-      isResponsePending:
-        isUserBlockingRunPhase(currentLiveRunPhase) ||
-        partialHistory.order.length > 0,
+      isResponsePending,
+      lastEventReceivedAt: isResponsePending
+        ? (previous?.lastEventReceivedAt ?? new Date().toISOString())
+        : null,
       isCompacting: currentLiveRunPhase === "compacting",
       isStopPending:
         runSnapshot.type === "INVALID"
@@ -2113,6 +2121,7 @@ export function useChatSessionContainer(
   );
   const isResponsePending = managedLiveState.isResponsePending;
   const isModelResponsePending = isModelRunPhase(managedLiveState.liveRunPhase);
+  const lastEventReceivedAt = managedLiveState.lastEventReceivedAt;
   const sessionRunState = managedLiveState.sessionRunState;
 
   // WebSocket connection text (ticket + wsUrl)
@@ -2212,6 +2221,11 @@ export function useChatSessionContainer(
           return;
         }
       }
+      const receivedAt = new Date().toISOString();
+      setManagedLiveState((prev) => ({
+        ...prev,
+        lastEventReceivedAt: receivedAt,
+      }));
       const markRunActive = (
         runId: string,
         phase: AgentRunPhase | null,
@@ -2250,6 +2264,7 @@ export function useChatSessionContainer(
             liveRunPhase: null,
             sessionRunState: "idle",
             isResponsePending: false,
+            lastEventReceivedAt: null,
             isCompacting: false,
             isStopPending: false,
           };
@@ -3263,6 +3278,7 @@ export function useChatSessionContainer(
     isResponsePending,
     isWritePending,
     isModelResponsePending,
+    lastEventReceivedAt,
     liveRun,
     defaultInferenceProfile,
     hasMore,
