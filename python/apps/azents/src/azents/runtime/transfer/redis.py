@@ -17,6 +17,7 @@ from redis.exceptions import WatchError
 
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCancellationReason,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
@@ -28,14 +29,16 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
+    cancellation_settlement,
     logical_expiry,
     terminal_expiry,
+    valid_settlement,
     validate_admission_time,
 )
 from azents.runtime.transfer.policy import phase_transition_allowed
 
 _DEFAULT_NAMESPACE = "azents:runtime:transfer"
-_RECORD_SCHEMA_VERSION = 2
+_RECORD_SCHEMA_VERSION = 5
 _MAX_SERIALIZED_RECORD_BYTES = 16 * 1024
 _LOCK_TTL_MILLISECONDS = 5_000
 _LOCK_ACQUIRE_TIMEOUT_SECONDS = 5.0
@@ -143,8 +146,12 @@ _RECORD_FIELDS = frozenset(
         "stream_owner_replica_id",
         "stream_lease_expires_at",
         "multipart_cleanup_handle",
+        "completed_object_cleanup_required",
         "progress",
+        "upload_response_committed_at",
+        "runner_result_confirmed_at",
         "cancellation_requested_at",
+        "cancellation_reason",
         "consumer_claim_id",
         "consumer_lease_expires_at",
         "consumer_acknowledged_at",
@@ -365,11 +372,23 @@ def _record_to_value(record: RuntimeTransferRecord) -> dict[str, object]:
             record.stream_lease_expires_at
         ),
         "multipart_cleanup_handle": record.multipart_cleanup_handle,
+        "completed_object_cleanup_required": (record.completed_object_cleanup_required),
         "progress": None
         if record.progress is None
         else _progress_to_value(record.progress),
+        "upload_response_committed_at": _optional_datetime_to_value(
+            record.upload_response_committed_at
+        ),
+        "runner_result_confirmed_at": _optional_datetime_to_value(
+            record.runner_result_confirmed_at
+        ),
         "cancellation_requested_at": _optional_datetime_to_value(
             record.cancellation_requested_at
+        ),
+        "cancellation_reason": (
+            None
+            if record.cancellation_reason is None
+            else record.cancellation_reason.value
         ),
         "consumer_claim_id": record.consumer_claim_id,
         "consumer_lease_expires_at": _optional_datetime_to_value(
@@ -435,10 +454,32 @@ def _record_from_value(value: object) -> RuntimeTransferRecord:
             record["multipart_cleanup_handle"],
             "multipart_cleanup_handle",
         ),
+        completed_object_cleanup_required=_require_bool(
+            record["completed_object_cleanup_required"],
+            "completed_object_cleanup_required",
+        ),
         progress=_optional_progress_from_value(record["progress"]),
+        upload_response_committed_at=_optional_datetime_from_value(
+            record["upload_response_committed_at"],
+            "upload_response_committed_at",
+        ),
+        runner_result_confirmed_at=_optional_datetime_from_value(
+            record["runner_result_confirmed_at"],
+            "runner_result_confirmed_at",
+        ),
         cancellation_requested_at=_optional_datetime_from_value(
             record["cancellation_requested_at"],
             "cancellation_requested_at",
+        ),
+        cancellation_reason=(
+            None
+            if record["cancellation_reason"] is None
+            else RuntimeTransferCancellationReason(
+                _require_string(
+                    record["cancellation_reason"],
+                    "cancellation_reason",
+                )
+            )
         ),
         consumer_claim_id=_optional_string(
             record["consumer_claim_id"],
@@ -733,8 +774,12 @@ class RedisRuntimeTransferStateStore:
                 stream_owner_replica_id=None,
                 stream_lease_expires_at=None,
                 multipart_cleanup_handle=None,
+                completed_object_cleanup_required=False,
                 progress=None,
+                upload_response_committed_at=None,
+                runner_result_confirmed_at=None,
                 cancellation_requested_at=None,
+                cancellation_reason=None,
                 consumer_claim_id=None,
                 consumer_lease_expires_at=None,
                 consumer_acknowledged_at=None,
@@ -1081,7 +1126,7 @@ class RedisRuntimeTransferStateStore:
     async def list_stale_stream_claims(
         self, *, cursor: str | None, limit: int
     ) -> RuntimeTransferPage:
-        """List expired owner leases without automatically settling attempts."""
+        """List expired owners and retained terminal multipart cleanup evidence."""
         now = self._now()
         return await self._list_stream_lease_records(
             cursor=cursor,
@@ -1089,6 +1134,16 @@ class RedisRuntimeTransferStateStore:
             selected=lambda record: (
                 record.stream_lease_expires_at is not None
                 and record.stream_lease_expires_at <= now
+                and (
+                    record.phase is RuntimeTransferPhase.STREAMING
+                    or (
+                        record.phase is RuntimeTransferPhase.TERMINAL
+                        and (
+                            record.multipart_cleanup_handle is not None
+                            or record.completed_object_cleanup_required
+                        )
+                    )
+                )
             ),
         )
 
@@ -1188,7 +1243,6 @@ class RedisRuntimeTransferStateStore:
             assert key is not None and envelope is not None
             updated = dataclasses.replace(
                 envelope.record,
-                revision=envelope.record.revision + 1,
                 updated_at=now,
                 stream_lease_expires_at=now + self.config.stream_lease,
             )
@@ -1253,7 +1307,12 @@ class RedisRuntimeTransferStateStore:
             return updated
 
     async def request_cancellation(
-        self, transfer_id: str, *, attempt_id: str, expected_revision: int
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        reason: RuntimeTransferCancellationReason,
     ) -> RuntimeTransferRecord | None:
         """Record idempotent cancellation evidence for one exact attempt."""
         now = self._now()
@@ -1273,6 +1332,7 @@ class RedisRuntimeTransferStateStore:
                 return (
                     envelope.record
                     if expected_revision <= envelope.record.revision
+                    and envelope.record.cancellation_reason is reason
                     else None
                 )
             if envelope.record.revision != expected_revision:
@@ -1281,16 +1341,60 @@ class RedisRuntimeTransferStateStore:
             if envelope.record.phase is RuntimeTransferPhase.TERMINAL:
                 await self._commit(token, entries, now)
                 return envelope.record
+            if envelope.record.upload_response_committed_at is not None:
+                await self._commit(token, entries, now)
+                return None
             assert key is not None
             record = dataclasses.replace(
                 envelope.record,
                 revision=envelope.record.revision + 1,
                 updated_at=now,
                 cancellation_requested_at=now,
+                cancellation_reason=reason,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
             await self._commit(token, entries, now)
             return record
+
+    async def get_verified_object(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Read one exact live consumer claim under the mutation lock."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.CONSUMING,
+                now,
+            ) or (
+                envelope is not None
+                and (
+                    envelope.record.consumer_claim_id != claim_id
+                    or envelope.record.consumer_lease_expires_at is None
+                    or envelope.record.consumer_lease_expires_at <= now
+                    or envelope.record.object is None
+                )
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert envelope is not None
+            await self._commit(token, entries, now)
+            return envelope.record
 
     async def begin_verification(
         self,
@@ -1347,6 +1451,128 @@ class RedisRuntimeTransferStateStore:
             accepted_runner_generation=accepted_runner_generation,
             claim_id=claim_id,
         )
+
+    async def confirm_upload_result(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Confirm one upload result after the authoritative response barrier."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if (
+                envelope is None
+                or key is None
+                or await self._current_key(transfer_id) != key
+                or envelope.record.revision != expected_revision
+                or envelope.record.phase
+                not in {
+                    RuntimeTransferPhase.AVAILABLE,
+                    RuntimeTransferPhase.CONSUMING,
+                    RuntimeTransferPhase.CONSUMED,
+                }
+                or envelope.admission_released
+                or envelope.record.lease_expires_at <= now
+                or envelope.record.logical_expires_at <= now
+                or envelope.record.cancellation_requested_at is not None
+                or envelope.record.admission.direction
+                is not RuntimeTransferDirection.UPLOAD
+                or envelope.record.actual_size != actual_size
+                or envelope.record.actual_sha256 != actual_sha256
+                or envelope.record.upload_response_committed_at is None
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            if envelope.record.runner_result_confirmed_at is not None:
+                await self._commit(token, entries, now)
+                return (
+                    envelope.record
+                    if expected_revision <= envelope.record.revision
+                    else None
+                )
+            record = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                runner_result_confirmed_at=now,
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries, now)
+            return record
+
+    async def commit_upload_response(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Atomically make upload success authoritative over later cancellation."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.AVAILABLE,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            ) or (
+                envelope is not None
+                and (
+                    envelope.record.admission.direction
+                    is not RuntimeTransferDirection.UPLOAD
+                    or envelope.record.actual_size != actual_size
+                    or envelope.record.actual_sha256 != actual_sha256
+                    or envelope.record.multipart_cleanup_handle is not None
+                    or not envelope.record.completed_object_cleanup_required
+                    or envelope.record.cleanup_status
+                    is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+                )
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            record = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                upload_response_committed_at=now,
+                cleanup_status=RuntimeTransferCleanupStatus.COMPLETE,
+                completed_object_cleanup_required=False,
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries, now)
+            return record
 
     async def mark_committed(
         self,
@@ -1477,6 +1703,22 @@ class RedisRuntimeTransferStateStore:
                 await self._commit(token, entries, now)
                 return None
             record = envelope.record
+            if record.cancellation_reason is not None:
+                settlement = cancellation_settlement(record.cancellation_reason)
+                if (
+                    outcome is not settlement.outcome
+                    or failure is not settlement.failure
+                ):
+                    await self._commit(token, entries, now)
+                    return None
+            elif (
+                record.admission.deadline_at <= now or record.logical_expires_at <= now
+            ):
+                outcome = RuntimeTransferOutcome.EXPIRED
+                failure = RuntimeTransferFailure.EXPIRED
+            elif not valid_settlement(outcome, failure):
+                await self._commit(token, entries, now)
+                return None
             if record.phase is RuntimeTransferPhase.TERMINAL:
                 await self._commit(token, entries, now)
                 return (
@@ -1487,12 +1729,6 @@ class RedisRuntimeTransferStateStore:
                     else None
                 )
             if record.revision != expected_revision:
-                await self._commit(token, entries, now)
-                return None
-            if (
-                record.cancellation_requested_at is not None
-                and outcome is RuntimeTransferOutcome.SUCCEEDED
-            ):
                 await self._commit(token, entries, now)
                 return None
             if outcome is RuntimeTransferOutcome.SUCCEEDED and (
@@ -1544,7 +1780,7 @@ class RedisRuntimeTransferStateStore:
                 attempt_id,
                 now,
             )
-            if envelope is None:
+            if envelope is None or envelope.record.completed_object_cleanup_required:
                 await self._commit(token, entries, now)
                 return None
             if envelope.record.cleanup_status is status:
@@ -1568,6 +1804,78 @@ class RedisRuntimeTransferStateStore:
                     if status is RuntimeTransferCleanupStatus.COMPLETE
                     else envelope.record.multipart_cleanup_handle
                 ),
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries, now)
+            return record
+
+    async def record_completed_object_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        status: RuntimeTransferCleanupStatus,
+        multipart_cleanup_required: bool,
+        completed_object_cleanup_required: bool,
+    ) -> RuntimeTransferRecord | None:
+        """Record exact completed-object deletion retry evidence."""
+        if status not in {
+            RuntimeTransferCleanupStatus.COMPLETE,
+            RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        }:
+            raise ValueError("completed object cleanup status is invalid")
+        if (
+            status is RuntimeTransferCleanupStatus.COMPLETE
+            and (multipart_cleanup_required or completed_object_cleanup_required)
+        ) or (
+            status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+            and not (multipart_cleanup_required or completed_object_cleanup_required)
+        ):
+            raise ValueError("cleanup status does not match required artifacts")
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if envelope is None or envelope.record.object is None:
+                await self._commit(token, entries, now)
+                return None
+            target_handle = (
+                envelope.record.multipart_cleanup_handle
+                if multipart_cleanup_required
+                else None
+            )
+            if multipart_cleanup_required and target_handle is None:
+                await self._commit(token, entries, now)
+                return None
+            if (
+                envelope.record.cleanup_status is status
+                and envelope.record.completed_object_cleanup_required
+                is completed_object_cleanup_required
+                and envelope.record.multipart_cleanup_handle == target_handle
+            ):
+                await self._commit(token, entries, now)
+                return (
+                    envelope.record
+                    if expected_revision <= envelope.record.revision
+                    else None
+                )
+            if envelope.record.revision != expected_revision:
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None
+            record = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                cleanup_status=status,
+                multipart_cleanup_handle=target_handle,
+                completed_object_cleanup_required=(completed_object_cleanup_required),
             )
             entries[key] = dataclasses.replace(envelope, record=record)
             await self._commit(token, entries, now)
@@ -2159,13 +2467,26 @@ class RedisRuntimeTransferStateStore:
             record.phase is not RuntimeTransferPhase.TERMINAL
             and record.logical_expires_at <= now
         ):
+            settlement = (
+                cancellation_settlement(record.cancellation_reason)
+                if record.cancellation_reason is not None
+                else None
+            )
             record = dataclasses.replace(
                 record,
                 phase=RuntimeTransferPhase.TERMINAL,
                 revision=record.revision + 1,
                 updated_at=now,
-                terminal_outcome=RuntimeTransferOutcome.EXPIRED,
-                failure=RuntimeTransferFailure.EXPIRED,
+                terminal_outcome=(
+                    RuntimeTransferOutcome.EXPIRED
+                    if settlement is None
+                    else settlement.outcome
+                ),
+                failure=(
+                    RuntimeTransferFailure.EXPIRED
+                    if settlement is None
+                    else settlement.failure
+                ),
                 terminal_expires_at=terminal_expiry(now, self.config.terminal_ttl),
             )
             admission_released = True
@@ -2215,6 +2536,7 @@ class RedisRuntimeTransferStateStore:
             and envelope.record.revision == expected_revision
             and envelope.record.phase is phase
             and envelope.record.lease_expires_at > now
+            and envelope.record.admission.deadline_at > now
             and envelope.record.logical_expires_at > now
             and envelope.record.cancellation_requested_at is None
             and (
@@ -2553,10 +2875,10 @@ class RedisRuntimeTransferStateStore:
             )
         else:
             pipeline.zrem(self.keys.consumer_lease_index(), key)
-        if (
-            active
-            and record.phase is RuntimeTransferPhase.STREAMING
-            and record.stream_lease_expires_at is not None
+        if record.stream_lease_expires_at is not None and (
+            (active and record.phase is RuntimeTransferPhase.STREAMING)
+            or record.multipart_cleanup_handle is not None
+            or record.completed_object_cleanup_required
         ):
             pipeline.zadd(
                 self.keys.stream_lease_index(),

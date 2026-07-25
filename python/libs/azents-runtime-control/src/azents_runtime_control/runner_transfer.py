@@ -97,6 +97,21 @@ class RunnerTransferResult:
 
     def __post_init__(self) -> None:
         """Reject contradictory optional-field and outcome combinations."""
+        _validate_id(self.identity.transfer_id, "transfer_id")
+        _validate_id(self.identity.attempt_id, "attempt_id")
+        _validate_id(self.identity.runtime_id, "runtime_id")
+        _validate_id(self.operation_id, "operation_id")
+        _validate_id(self.dispatch_id, "dispatch_id")
+        if self.identity.runner_generation <= 0:
+            raise ValueError("runner_generation must be positive")
+        if self.actual_size is not None and self.actual_size < 0:
+            raise ValueError("actual_size must not be negative")
+        if self.sha256 is not None and (
+            len(self.sha256) != 64
+            or self.sha256.lower() != self.sha256
+            or any(character not in "0123456789abcdef" for character in self.sha256)
+        ):
+            raise ValueError("sha256 must be lowercase hexadecimal")
         paired_manifest = (self.actual_size is None) == (self.sha256 is None)
         if not paired_manifest:
             raise ValueError("Runner transfer result manifest fields must be paired")
@@ -131,3 +146,9 @@ class RunnerTransferResult:
             and self.direction is not RunnerTransferDirection.DOWNLOAD
         ):
             raise ValueError("Destination failure is download-only")
+
+
+def _validate_id(value: str, name: str) -> None:
+    size = len(value.encode())
+    if size < 1 or size > 128:
+        raise ValueError(f"{name} must be between 1 and 128 UTF-8 bytes")

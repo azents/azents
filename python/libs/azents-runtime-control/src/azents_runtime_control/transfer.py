@@ -21,6 +21,17 @@ class TransferIdentity:
     runtime_id: str
     runner_generation: int
 
+    def __post_init__(self) -> None:
+        """Validate bounded Runner-visible identity metadata."""
+        for value, name in (
+            (self.transfer_id, "transfer_id"),
+            (self.attempt_id, "attempt_id"),
+            (self.runtime_id, "runtime_id"),
+        ):
+            _bounded(value, name, 128)
+        if self.runner_generation <= 0:
+            raise ValueError("runner_generation must be positive")
+
 
 @dataclass(frozen=True)
 class CoordinatorTransferIdentity:
@@ -34,3 +45,28 @@ class CoordinatorTransferIdentity:
     operation_id: str
     session_id: str | None
     agent_id: str | None
+
+    def __post_init__(self) -> None:
+        """Validate bounded trusted coordinator identity metadata."""
+        for value, name in (
+            (self.transfer_id, "transfer_id"),
+            (self.attempt_id, "attempt_id"),
+            (self.runtime_id, "runtime_id"),
+            (self.operation_id, "operation_id"),
+        ):
+            _bounded(value, name, 128)
+        if self.session_id is not None:
+            _bounded(self.session_id, "session_id", 128)
+        if self.agent_id is not None:
+            _bounded(self.agent_id, "agent_id", 128)
+        if self.desired_generation <= 0:
+            raise ValueError("desired_generation must be positive")
+        if self.direction not in {"download", "upload"}:
+            raise ValueError("direction must be download or upload")
+
+
+def _bounded(value: str, name: str, maximum_bytes: int) -> None:
+    if not value:
+        raise ValueError(f"{name} must not be empty")
+    if len(value.encode("utf-8")) > maximum_bytes:
+        raise ValueError(f"{name} exceeds {maximum_bytes} UTF-8 bytes")

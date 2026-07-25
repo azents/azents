@@ -8,6 +8,7 @@ import pytest
 
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCancellationReason,
     RuntimeTransferCleanupStatus,
     RuntimeTransferDirection,
     RuntimeTransferDispatchStatus,
@@ -73,8 +74,12 @@ def _record() -> RuntimeTransferRecord:
         stream_owner_replica_id="replica",
         stream_lease_expires_at=_NOW + timedelta(seconds=30),
         multipart_cleanup_handle="cleanup",
+        completed_object_cleanup_required=False,
         progress=RuntimeTransferProgress(2, _NOW + timedelta(seconds=30)),
+        upload_response_committed_at=None,
+        runner_result_confirmed_at=None,
         cancellation_requested_at=_NOW + timedelta(seconds=10),
+        cancellation_reason=RuntimeTransferCancellationReason.CALLER,
         consumer_claim_id="consumer",
         consumer_lease_expires_at=_NOW + timedelta(minutes=1),
         consumer_acknowledged_at=_NOW + timedelta(minutes=1, seconds=30),
@@ -209,7 +214,7 @@ def test_record_codec_rejects_schema_and_domain_failures() -> None:
         _decode_record_envelope(json.dumps(missing).encode())
 
     wrong_version = _json_payload(record)
-    wrong_version["version"] = 3
+    wrong_version["version"] = 6
     with pytest.raises(ValueError, match="version"):
         _decode_record_envelope(json.dumps(wrong_version).encode())
 
@@ -239,10 +244,7 @@ def test_record_codec_rejects_oversized_serialization() -> None:
     record = _record()
     oversized = replace(
         record,
-        admission=replace(
-            record.admission,
-            runtime_path="/" + "x" * _MAX_SERIALIZED_RECORD_BYTES,
-        ),
+        lease_id="x" * _MAX_SERIALIZED_RECORD_BYTES,
     )
 
     with pytest.raises(ValueError, match="maximum size"):

@@ -197,9 +197,19 @@ async def runtime_control_server_lifespan(
         redis=redis,
         clock=clock,
     )
+    resources = AsyncExitStack()
+    transfer_s3 = await resources.enter_async_context(
+        _runtime_transfer_s3_service(settings)
+    )
+    transfer_cleanup = RuntimeTransferS3Cleanup(
+        object_store=transfer_s3,
+        bucket=settings.runtime_control_workspace_s3_bucket,
+        object_prefix=_transfer_object_prefix(settings),
+    )
     transfer_coordinator = RuntimeTransferCoordinator(
         state_store=transfer_state,
         coordination_store=coordination_store,
+        cleanup=transfer_cleanup,
         clock=clock,
     )
     control_protocol = RuntimeControlProtocolService(
@@ -210,6 +220,7 @@ async def runtime_control_server_lifespan(
         state_store=transfer_state,
         coordination_store=coordination_store,
         control_protocol=control_protocol,
+        terminal_coordinator=transfer_coordinator,
         clock=clock,
     )
     coordinator_credential_verifier = RuntimeTransferCoordinatorCredentialVerifier(
@@ -219,15 +230,6 @@ async def runtime_control_server_lifespan(
             seconds=settings.runtime_control_transfer_coordinator_credential_skew_seconds
         ),
         maximum_lifetime=_coordinator_credential_lifetime(settings),
-    )
-    resources = AsyncExitStack()
-    transfer_s3 = await resources.enter_async_context(
-        _runtime_transfer_s3_service(settings)
-    )
-    transfer_cleanup = RuntimeTransferS3Cleanup(
-        object_store=transfer_s3,
-        bucket=settings.runtime_control_workspace_s3_bucket,
-        object_prefix=_transfer_object_prefix(settings),
     )
     transport = runtime_control_transport(settings)
     engine = _create_engine(settings)
@@ -351,6 +353,7 @@ async def runtime_control_server_lifespan(
         state_store=transfer_state,
         coordination_store=coordination_store,
         object_store=transfer_s3,
+        terminal_sink=transfer_coordinator,
         bucket=settings.runtime_control_workspace_s3_bucket,
         object_prefix=_transfer_object_prefix(settings),
         owner_replica_id=settings.runtime_control_instance_id,
@@ -495,13 +498,14 @@ async def repair_transfer_once(
     """
     if page_size <= 0:
         raise ValueError("Runtime transfer repair page size must be positive")
+    terminals = await coordinator.repair_terminal_correlations(page_size=page_size)
     pending = await coordinator.repair_pending(page_size=page_size)
     generations = await coordinator.reconcile_generations(page_size=page_size)
     stale = await coordinator.repair_stale_stream_claims(
         cleanup=cleanup,
         page_size=page_size,
     )
-    return pending + generations + stale
+    return terminals + pending + generations + stale
 
 
 @asynccontextmanager

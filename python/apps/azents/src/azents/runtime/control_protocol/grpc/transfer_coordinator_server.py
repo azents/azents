@@ -22,6 +22,7 @@ from azents_runtime_control.proto import (
 from azents_runtime_control.proto import (
     runtime_transfer_coordinator_pb2_grpc as pb_grpc,
 )
+from azents_runtime_control.transfer import CoordinatorTransferIdentity
 from google.protobuf import timestamp_pb2
 from google.protobuf.message import Message
 
@@ -36,6 +37,7 @@ from azents.runtime.transfer.coordinator import (
 )
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCancellationReason,
     RuntimeTransferCleanupStatus,
     RuntimeTransferDirection,
     RuntimeTransferDispatchStatus,
@@ -79,7 +81,8 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         try:
             admission = _admission_from_request(request)
-        except ValueError as exc:
+            _bounded(request.lease_id, "lease_id", 128)
+        except (KeyError, ValueError) as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
         record = await self._coordinator.admit(admission, lease_id=request.lease_id)
         if record is None:
@@ -111,6 +114,8 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         record = await self._record(context, request.identity)
         try:
+            _positive_revision(request.expected_revision)
+            _bounded(request.object_handle.value, "object_handle", 512)
             manifest = request.object_manifest
             if not manifest.HasField("size"):
                 raise ValueError("Object manifest size is required")
@@ -141,6 +146,8 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         record = await self._record(context, request.identity)
         try:
+            _positive_revision(request.expected_revision)
+            _bounded(request.dispatch_id, "dispatch_id", 128)
             dispatch = await self._coordinator.dispatch(
                 record,
                 expected_revision=request.expected_revision,
@@ -165,11 +172,17 @@ class RuntimeTransferCoordinatorGrpcServicer(
             request,
         )
         record = await self._record(context, request.identity)
-        _cancellation_reason(request.reason)
-        updated = await self._coordinator.state_store.request_cancellation(
-            record.admission.transfer_id,
-            attempt_id=record.admission.attempt_id,
+        try:
+            _positive_revision(request.expected_revision)
+            reason = RuntimeTransferCancellationReason(
+                _cancellation_reason(request.reason).value
+            )
+        except (KeyError, ValueError) as exc:
+            await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        updated = await self._coordinator.cancel(
+            record,
             expected_revision=request.expected_revision,
+            reason=reason,
         )
         return await _status_response_or_abort(context, updated)
 
@@ -188,22 +201,31 @@ class RuntimeTransferCoordinatorGrpcServicer(
             request,
         )
         record = await self._record(context, request.identity)
-        if (
-            record.phase is not RuntimeTransferPhase.CONSUMING
-            or record.consumer_claim_id != request.consumer_claim_id
-            or record.object is None
-        ):
+        try:
+            _positive_revision(request.expected_revision)
+            _bounded(request.consumer_claim_id, "consumer_claim_id", 128)
+        except ValueError as exc:
+            await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        verified = await self._coordinator.state_store.get_verified_object(
+            record.admission.transfer_id,
+            attempt_id=record.admission.attempt_id,
+            expected_revision=request.expected_revision,
+            claim_id=request.consumer_claim_id,
+        )
+        if verified is None or verified.object is None:
             await _abort(
                 context,
                 grpc.StatusCode.FAILED_PRECONDITION,
                 "Verified object is unavailable",
             )
         return pb.GetVerifiedObjectResponse(
-            status=_status_message(record),
-            verified_object_handle=pb.OpaqueObjectHandle(value=record.object.key),
+            status=_status_message(verified),
+            verified_object_handle=pb.OpaqueObjectHandle(value=verified.object.key),
             actual_manifest=pb.ObjectManifest(
-                size=record.actual_size or record.object.size,
-                sha256=record.actual_sha256 or record.object.sha256,
+                size=verified.actual_size
+                if verified.actual_size is not None
+                else verified.object.size,
+                sha256=verified.actual_sha256 or verified.object.sha256,
             ),
         )
 
@@ -220,6 +242,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             context, "RuntimeTransferCoordinator/ClaimConsumer", request
         )
         record = await self._record(context, request.identity)
+        await _validate_consumer_request(context, request)
         updated = await self._coordinator.state_store.claim_consumer(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
@@ -243,6 +266,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             request,
         )
         record = await self._record(context, request.identity)
+        await _validate_consumer_request(context, request)
         updated = await self._coordinator.state_store.acknowledge_consumer(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
@@ -266,6 +290,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
             request,
         )
         record = await self._record(context, request.identity)
+        await _validate_consumer_request(context, request)
         updated = await self._coordinator.state_store.abandon_consumer(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
@@ -288,17 +313,20 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         record = await self._record(context, request.identity)
         try:
+            _positive_revision(request.expected_revision)
             outcome = _outcome(request.outcome)
             failure = _settlement_failure(request, outcome)
-        except ValueError as exc:
+        except (KeyError, ValueError) as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        updated = await self._coordinator.state_store.settle(
-            record.admission.transfer_id,
-            attempt_id=record.admission.attempt_id,
-            expected_revision=request.expected_revision,
-            outcome=outcome,
-            failure=failure,
-        )
+        if record.revision != request.expected_revision:
+            updated = None
+        else:
+            updated = await self._coordinator.settle_terminal(
+                record,
+                outcome=outcome,
+                failure=failure,
+                cleanup_completed=False,
+            )
         return await _status_response_or_abort(context, updated)
 
     async def RecordCleanup(
@@ -315,10 +343,11 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         record = await self._record(context, request.identity)
         try:
+            _positive_revision(request.expected_revision)
             status = RuntimeTransferCleanupStatus(
                 CoordinatorCleanupStatus(_cleanup_status(request.cleanup_status)).value
             )
-        except ValueError as exc:
+        except (KeyError, ValueError) as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
         updated = await self._coordinator.state_store.record_cleanup(
             record.admission.transfer_id,
@@ -362,7 +391,11 @@ class RuntimeTransferCoordinatorGrpcServicer(
         context: GrpcAbortContext,
         identity: Message,
     ) -> RuntimeTransferRecord:
-        requested = coordinator_identity_from_message(identity)
+        try:
+            requested = coordinator_identity_from_message(identity)
+            _validate_identity(requested)
+        except (KeyError, ValueError) as exc:
+            await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
         record = await self._coordinator.state_store.get(requested.transfer_id)
         if record is None:
             await _abort(
@@ -410,6 +443,7 @@ def _admission_from_request(
     request: pb.AdmitTransferRequest,
 ) -> RuntimeTransferAdmission:
     identity = coordinator_identity_from_message(request.identity)
+    _validate_identity(identity)
     if (
         not request.HasField("overwrite")
         or not request.expected_manifest.HasField("size")
@@ -654,3 +688,42 @@ def _cancellation_reason(value: int) -> CoordinatorCancellationReason:
         pb.COORDINATOR_CANCELLATION_REASON_SUPERSEDED: CoordinatorCancellationReason.SUPERSEDED,
         pb.COORDINATOR_CANCELLATION_REASON_SHUTDOWN: CoordinatorCancellationReason.SHUTDOWN,
     }[value]
+
+
+async def _validate_consumer_request(
+    context: GrpcAbortContext,
+    request: Message,
+) -> None:
+    try:
+        _positive_revision(request.expected_revision)
+        _bounded(request.consumer_claim_id, "consumer_claim_id", 128)
+    except ValueError as exc:
+        await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+
+
+def _validate_identity(identity: CoordinatorTransferIdentity) -> None:
+    for value, name in (
+        (identity.transfer_id, "transfer_id"),
+        (identity.attempt_id, "attempt_id"),
+        (identity.runtime_id, "runtime_id"),
+        (identity.operation_id, "operation_id"),
+    ):
+        _bounded(value, name, 128)
+    if identity.session_id is not None:
+        _bounded(identity.session_id, "session_id", 128)
+    if identity.agent_id is not None:
+        _bounded(identity.agent_id, "agent_id", 128)
+    if identity.desired_generation <= 0:
+        raise ValueError("desired_generation must be positive")
+
+
+def _positive_revision(value: int) -> None:
+    if value <= 0:
+        raise ValueError("expected_revision must be positive")
+
+
+def _bounded(value: str, name: str, maximum_bytes: int) -> None:
+    if not value:
+        raise ValueError(f"{name} must not be empty")
+    if len(value.encode("utf-8")) > maximum_bytes:
+        raise ValueError(f"{name} exceeds {maximum_bytes} UTF-8 bytes")

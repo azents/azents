@@ -48,10 +48,15 @@ from azents.runtime.control_protocol.grpc.runner_transfer_server import (
     RuntimeRunnerTransferGrpcServicer,
 )
 from azents.runtime.control_protocol.service import RuntimeControlProtocolService
-from azents.runtime.coordination.data import RuntimeReplyRecord
+from azents.runtime.coordination.data import (
+    RuntimeOperationStatus,
+    RuntimeReplyRecord,
+)
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
+from azents.runtime.transfer.coordinator import RuntimeTransferCoordinator
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCancellationReason,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
@@ -86,6 +91,21 @@ class _StateSink:
     ) -> bool:
         del registration
         return True
+
+
+class _TransferResultSink:
+    async def handle(self, result: object, *, request_id: str) -> None:
+        del result, request_id
+
+    async def handle_failure(
+        self,
+        operation: object,
+        *,
+        request_id: str,
+        error_code: str,
+        failure: object,
+    ) -> None:
+        del operation, request_id, error_code, failure
 
 
 class _ObjectStore:
@@ -184,9 +204,20 @@ class _ObjectStore:
         del destination, transfer_metadata
         return object()  # type: ignore[return-value]
 
+    async def delete_verified_transfer_object(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> None:
+        del expected_size, expected_sha256
+        self.uploads.pop(identity.key, None)
+
 
 class _RecordingRunnerServicer(RuntimeRunnerControlGrpcServicer):
     def __init__(self, **kwargs: object) -> None:
+        kwargs["transfer_result_sink"] = _TransferResultSink()
         super().__init__(**kwargs)  # type: ignore[arg-type]
         self.peers: list[str] = []
 
@@ -257,6 +288,12 @@ async def test_default_limit_channels_keep_control_healthy_during_large_transfer
         state_store=state,
         coordination_store=coordination,
         object_store=object_store,
+        terminal_sink=RuntimeTransferCoordinator(
+            state_store=state,
+            coordination_store=coordination,
+            cleanup=None,
+            clock=lambda: _NOW,
+        ),
         bucket="bucket",
         owner_replica_id="replica-1",
         runner_authenticator=authenticator,
@@ -369,6 +406,12 @@ async def test_backpressured_transfer_keeps_runner_operation_control_healthy() -
         state_store=state,
         coordination_store=coordination,
         object_store=object_store,
+        terminal_sink=RuntimeTransferCoordinator(
+            state_store=state,
+            coordination_store=coordination,
+            cleanup=None,
+            clock=lambda: _NOW,
+        ),
         bucket="bucket",
         owner_replica_id="replica-1",
         runner_authenticator=authenticator,
@@ -474,14 +517,23 @@ async def test_backpressured_transfer_keeps_runner_operation_control_healthy() -
 async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy() -> (
     None
 ):
-    """Cancelling an active upload aborts multipart state without harming Control."""
+    """Typed cancellation aborts one active upload without harming Control."""
     upload = b"u" * MULTIPART_PART_BYTES
-    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    state = InMemoryRuntimeTransferStateStore(
+        config=_config(maximum_attempts=1),
+        clock=lambda: _NOW,
+    )
     coordination = InMemoryRuntimeCoordinationStore()
     control = RuntimeControlProtocolService(coordination)
     authenticator = _Authenticator()
     object_store = _ObjectStore(b"")
     object_store.block_upload_part = True
+    transfer_coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=coordination,
+        cleanup=None,
+        clock=lambda: _NOW,
+    )
     runner = _RecordingRunnerServicer(
         control_protocol=control,
         coordination_store=coordination,
@@ -495,6 +547,7 @@ async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy(
         state_store=state,
         coordination_store=coordination,
         object_store=object_store,
+        terminal_sink=transfer_coordinator,
         bucket="bucket",
         owner_replica_id="replica-1",
         runner_authenticator=authenticator,
@@ -523,7 +576,41 @@ async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy(
         await inbound.put(_register())
         accepted = await stream.read()
         assert accepted.register_accepted.generation == 1
-        await _ready(state, RuntimeTransferDirection.UPLOAD, "cancelled-upload", upload)
+        admission = _transfer_admission(
+            RuntimeTransferDirection.UPLOAD,
+            "cancelled-upload",
+            upload,
+        )
+        admitted = await transfer_coordinator.admit(
+            admission,
+            lease_id="cancelled-upload-lease",
+        )
+        assert admitted is not None
+        ready = await state.mark_ready(
+            admission.transfer_id,
+            attempt_id=admission.attempt_id,
+            runtime_id=admission.runtime_id,
+            desired_generation=admission.desired_generation,
+            expected_revision=admitted.revision,
+            object=RuntimeTransferObject(
+                f"transfer-object:{admission.transfer_id}",
+                len(upload),
+                hashlib.sha256(upload).hexdigest(),
+            ),
+        )
+        assert ready is not None
+        dispatched = await transfer_coordinator.dispatch(
+            ready,
+            expected_revision=ready.revision,
+            dispatch_id="cancelled-upload-dispatch",
+        )
+        intent = await asyncio.wait_for(stream.read(), timeout=1)
+        assert intent.transfer_intent.identity.transfer_id == "cancelled-upload"
+        assert (
+            intent.transfer_intent.dispatch_id
+            == dispatched.record.dispatch_id
+            == "cancelled-upload-dispatch"
+        )
 
         upload_call = transfer_grpc.RuntimeRunnerTransferStub(
             transfer_channel
@@ -531,6 +618,23 @@ async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy(
             _upload_frames("cancelled-upload", upload), metadata=_metadata()
         )
         await asyncio.wait_for(object_store.upload_part_blocked.wait(), timeout=2)
+        current = await state.get("cancelled-upload")
+        assert current is not None
+        cancelled = await transfer_coordinator.cancel(
+            current,
+            expected_revision=current.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
+        )
+        assert cancelled is not None
+        cancellation = await asyncio.wait_for(stream.read(), timeout=1)
+        assert cancellation.transfer_cancel.identity.transfer_id == "cancelled-upload"
+        assert cancellation.transfer_cancel.dispatch_id == "cancelled-upload-dispatch"
+        assert (
+            cancellation.transfer_cancel.reason
+            == control_pb.RUNNER_TRANSFER_CANCEL_REASON_CALLER
+        )
+
+        # The synthetic Runner applies the typed cancel to its active data RPC.
         upload_call.cancel()
         with pytest.raises(asyncio.CancelledError):
             await upload_call
@@ -542,6 +646,22 @@ async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy(
         assert record.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
         assert record.multipart_cleanup_handle is None
         assert object_store.aborted_upload_ids == ["upload-1"]
+        operation = await coordination.get_operation(admission.operation_id)
+        assert operation is not None
+        assert operation.status is RuntimeOperationStatus.FINAL
+        replies = await _wait_for_replies(control, dispatched.reply_stream_id)
+        assert replies[-1].event.final
+        assert replies[-1].event.payload["outcome"] == "cancelled"
+
+        replacement = await state.admit(
+            _transfer_admission(
+                RuntimeTransferDirection.UPLOAD,
+                "replacement-upload",
+                upload,
+            ),
+            lease_id="replacement-upload-lease",
+        )
+        assert replacement is not None
 
         await inbound.put(
             control_pb.RunnerMessage(
@@ -553,6 +673,47 @@ async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy(
         )
         heartbeat = await asyncio.wait_for(stream.read(), timeout=1)
         assert heartbeat.heartbeat_ack.monotonic_sequence == 1
+
+        followup = await control.dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id="runtime-1",
+                runner_generation=1,
+                operation_type="bash",
+                owner_session_id="session-after-cancellation",
+                payload={"command": "echo transfer-cancel-isolated"},
+                deadline_at=datetime.now(UTC) + timedelta(minutes=1),
+                body_stream_id=None,
+            ),
+            created_at=datetime.now(UTC),
+        )
+        assert isinstance(followup, RuntimeDispatchResult)
+        request = await asyncio.wait_for(stream.read(), timeout=1)
+        assert request.operation_request.bash.command == "echo transfer-cancel-isolated"
+        await inbound.put(
+            control_pb.RunnerMessage(
+                connection_id="connection-1",
+                request_id=f"start:{followup.request_id}",
+                generation=1,
+                operation_start=control_pb.RunnerOperationStart(
+                    runtime_id="runtime-1",
+                    operation_id=followup.operation_id,
+                ),
+            )
+        )
+        started = await asyncio.wait_for(stream.read(), timeout=1)
+        assert started.operation_start_ack.allowed
+        await inbound.put(
+            _final_bash_event(
+                request_id=followup.request_id,
+                operation_id=followup.operation_id,
+            )
+        )
+        followup_reply = await _wait_for_reply_request(
+            control,
+            followup.reply_stream_id,
+            followup.request_id,
+        )
+        assert followup_reply.event.payload == {"exit_code": 0}
         assert runner.peers[0] != transfer.peers[0]
     finally:
         object_store.resume_upload_part.set()
@@ -599,26 +760,7 @@ async def _ready(
     transfer_id: str,
     data: bytes,
 ) -> None:
-    digest = hashlib.sha256(data).hexdigest()
-    admission = RuntimeTransferAdmission(
-        transfer_id=transfer_id,
-        attempt_id=f"{transfer_id}-attempt",
-        direction=direction,
-        runtime_id="runtime-1",
-        desired_generation=1,
-        operation_id=f"{transfer_id}-operation",
-        session_id=None,
-        agent_id=None,
-        runtime_path="/workspace/file",
-        overwrite=False,
-        expected_size=len(data),
-        expected_sha256=digest,
-        product_maximum_size=len(data),
-        provider_maximum_size=len(data),
-        deadline_at=_NOW + timedelta(minutes=5),
-        source_expires_at=None,
-        resource_class="file",
-    )
+    admission = _transfer_admission(direction, transfer_id, data)
     admitted = await state.admit(admission, lease_id=f"{transfer_id}-lease")
     assert admitted is not None
     ready = await state.mark_ready(
@@ -628,7 +770,9 @@ async def _ready(
         desired_generation=1,
         expected_revision=admitted.revision,
         object=RuntimeTransferObject(
-            f"transfer-object:{transfer_id}", len(data), digest
+            f"transfer-object:{transfer_id}",
+            len(data),
+            hashlib.sha256(data).hexdigest(),
         ),
     )
     assert ready is not None
@@ -651,6 +795,33 @@ async def _ready(
         dispatch_request_id=bound.dispatch_request_id or "",
     )
     assert deliverable is not None
+
+
+def _transfer_admission(
+    direction: RuntimeTransferDirection,
+    transfer_id: str,
+    data: bytes,
+) -> RuntimeTransferAdmission:
+    digest = hashlib.sha256(data).hexdigest()
+    return RuntimeTransferAdmission(
+        transfer_id=transfer_id,
+        attempt_id=f"{transfer_id}-attempt",
+        direction=direction,
+        runtime_id="runtime-1",
+        desired_generation=1,
+        operation_id=f"{transfer_id}-operation",
+        session_id=None,
+        agent_id=None,
+        runtime_path="/workspace/file",
+        overwrite=False,
+        expected_size=len(data),
+        expected_sha256=digest,
+        product_maximum_size=len(data),
+        provider_maximum_size=len(data),
+        deadline_at=_NOW + timedelta(minutes=5),
+        source_expires_at=None,
+        resource_class="file",
+    )
 
 
 def _download_request(transfer_id: str) -> transfer_pb.DownloadTransferRequest:
@@ -742,6 +913,31 @@ async def _wait_for_replies(
     return replies
 
 
+async def _wait_for_reply_request(
+    control: RuntimeControlProtocolService,
+    reply_stream_id: str,
+    request_id: str,
+) -> RuntimeReplyRecord:
+    matching: RuntimeReplyRecord | None = None
+
+    async def read() -> bool:
+        nonlocal matching
+        replies = await control.read_replies(
+            reply_stream_id=reply_stream_id,
+            after_cursor=None,
+            limit=10,
+        )
+        matching = next(
+            (reply for reply in replies if reply.event.request_id == request_id),
+            None,
+        )
+        return matching is not None
+
+    await _wait_for(read)
+    assert matching is not None
+    return matching
+
+
 async def _read_remaining_download_frames(
     stream: grpc.aio.UnaryStreamCall[
         transfer_pb.DownloadTransferRequest,
@@ -775,12 +971,12 @@ def _metadata() -> tuple[tuple[str, str], ...]:
     return (("authorization", "Bearer token"),)
 
 
-def _config() -> RuntimeTransferConfig:
+def _config(*, maximum_attempts: int = 4) -> RuntimeTransferConfig:
     maximum = 16 * 1024 * 1024
     return RuntimeTransferConfig(
-        per_runtime_attempts=4,
+        per_runtime_attempts=maximum_attempts,
         per_runtime_bytes=maximum,
-        deployment_attempts=4,
+        deployment_attempts=maximum_attempts,
         deployment_bytes=maximum,
         admission_lease=timedelta(minutes=5),
         consumer_lease=timedelta(minutes=1),

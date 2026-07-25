@@ -23,7 +23,9 @@ _DIGEST = "a" * 64
 
 
 def _admission(
-    *, source_expires_at: datetime | None = None
+    *,
+    deadline_at: datetime = _NOW + timedelta(minutes=5),
+    source_expires_at: datetime | None = None,
 ) -> RuntimeTransferAdmission:
     return RuntimeTransferAdmission(
         transfer_id="transfer",
@@ -40,7 +42,7 @@ def _admission(
         expected_sha256=_DIGEST,
         product_maximum_size=2,
         provider_maximum_size=2,
-        deadline_at=_NOW + timedelta(minutes=5),
+        deadline_at=deadline_at,
         source_expires_at=source_expires_at,
         resource_class="default",
     )
@@ -59,6 +61,8 @@ def test_admission_rejects_expired_source_and_invalid_hash() -> None:
     """Admission metadata fails closed for source expiry and invalid SHA values."""
     with pytest.raises(ValueError, match="future"):
         validate_admission_time(_admission(source_expires_at=_NOW), _NOW)
+    with pytest.raises(ValueError, match="deadline_at"):
+        validate_admission_time(_admission(deadline_at=_NOW), _NOW)
     with pytest.raises(ValueError, match="SHA-256"):
         _admission.__func__ if False else RuntimeTransferAdmission(
             transfer_id="t",
@@ -105,8 +109,12 @@ def test_record_enforces_authoritative_expiry_and_terminal_ceiling() -> None:
             stream_owner_replica_id=None,
             stream_lease_expires_at=None,
             multipart_cleanup_handle=None,
+            completed_object_cleanup_required=False,
             progress=None,
+            upload_response_committed_at=None,
+            runner_result_confirmed_at=None,
             cancellation_requested_at=None,
+            cancellation_reason=None,
             consumer_claim_id=None,
             consumer_lease_expires_at=None,
             consumer_acknowledged_at=None,
@@ -146,8 +154,12 @@ def test_progress_is_timezone_aware_and_bounded_by_expected_size() -> None:
             stream_owner_replica_id="replica",
             stream_lease_expires_at=_NOW + timedelta(seconds=30),
             multipart_cleanup_handle=None,
+            completed_object_cleanup_required=False,
             progress=RuntimeTransferProgress(bytes_transferred=2, observed_at=_NOW),
+            upload_response_committed_at=None,
+            runner_result_confirmed_at=None,
             cancellation_requested_at=None,
+            cancellation_reason=None,
             consumer_claim_id=None,
             consumer_lease_expires_at=None,
             consumer_acknowledged_at=None,

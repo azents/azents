@@ -12,6 +12,7 @@ import pytest
 from azents.core.redis import create_redis_client
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCancellationReason,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
@@ -242,6 +243,13 @@ async def test_rejects_invalid_size_and_expired_source_without_record(
     )
     assert await store_harness.store.admit(expired, lease_id="lease") is None
     assert await store_harness.store.get("expired") is None
+    expired_deadline = replace(
+        _admission(),
+        transfer_id="expired-deadline",
+        deadline_at=store_harness.clock.now,
+    )
+    assert await store_harness.store.admit(expired_deadline, lease_id="lease") is None
+    assert await store_harness.store.get("expired-deadline") is None
 
 
 @pytest.mark.asyncio
@@ -355,14 +363,311 @@ async def test_dispatch_indexes_stream_lease_and_cleanup_handle(
         )
         is None
     )
-    cleared = await store.record_cleanup(
+    completed_cleanup = await store.record_completed_object_cleanup(
         "dispatch",
         attempt_id="attempt",
         expected_revision=handled.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        multipart_cleanup_required=True,
+        completed_object_cleanup_required=True,
+    )
+    assert completed_cleanup is not None
+    assert completed_cleanup.multipart_cleanup_handle == "multipart-handle"
+    assert completed_cleanup.completed_object_cleanup_required is True
+    multipart_only = await store.record_completed_object_cleanup(
+        "dispatch",
+        attempt_id="attempt",
+        expected_revision=completed_cleanup.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        multipart_cleanup_required=True,
+        completed_object_cleanup_required=False,
+    )
+    assert multipart_only is not None
+    assert multipart_only.multipart_cleanup_handle == "multipart-handle"
+    assert multipart_only.completed_object_cleanup_required is False
+    cleared = await store.record_cleanup(
+        "dispatch",
+        attempt_id="attempt",
+        expected_revision=multipart_only.revision,
         status=RuntimeTransferCleanupStatus.COMPLETE,
     )
     assert cleared is not None
     assert cleared.multipart_cleanup_handle is None
+    assert cleared.completed_object_cleanup_required is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("multipart", [False, True], ids=["empty", "multipart"])
+async def test_upload_completion_cleanup_responsibility_precedes_external_write(
+    store_harness: _StoreHarness,
+    *,
+    multipart: bool,
+) -> None:
+    """A crash before S3 completion return still leaves exact cleanup evidence."""
+    transfer_id = f"precompletion-{multipart}"
+    size = 1 if multipart else 0
+    sha256 = (
+        "a" * 64
+        if multipart
+        else "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )
+    admitted = await store_harness.store.admit(
+        replace(
+            _admission(),
+            transfer_id=transfer_id,
+            expected_size=size,
+            expected_sha256=sha256,
+        ),
+        lease_id=f"{transfer_id}-lease",
+    )
+    assert admitted is not None
+    ready = await store_harness.store.mark_ready(
+        transfer_id,
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject(f"{transfer_id}-object", size, sha256),
+    )
+    assert ready is not None
+    stream = await _claim_stream(
+        store_harness.store,
+        transfer_id,
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        claim_id=f"{transfer_id}-claim",
+    )
+    assert stream is not None
+    current = stream
+    if multipart:
+        handled = await store_harness.store.record_multipart_cleanup_handle(
+            transfer_id,
+            attempt_id="attempt",
+            accepted_runner_generation=2,
+            expected_revision=current.revision,
+            claim_id=f"{transfer_id}-claim",
+            owner_replica_id="test-replica",
+            cleanup_handle=f"{transfer_id}-upload",
+        )
+        assert handled is not None
+        current = handled
+    responsibility = await store_harness.store.record_completed_object_cleanup(
+        transfer_id,
+        attempt_id="attempt",
+        expected_revision=current.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        multipart_cleanup_required=multipart,
+        completed_object_cleanup_required=True,
+    )
+    assert responsibility is not None
+    assert responsibility.completed_object_cleanup_required is True
+    assert (responsibility.multipart_cleanup_handle is not None) is multipart
+
+    store_harness.clock.now += store_harness.config.stream_lease
+    stale = await store_harness.store.list_stale_stream_claims(cursor=None, limit=2)
+    assert stale.records == (responsibility,)
+
+
+@pytest.mark.asyncio
+async def test_upload_response_commit_is_atomic_with_cancellation(
+    store_harness: _StoreHarness,
+) -> None:
+    """Whichever durable mutation wins exclusively owns upload disposition."""
+
+    async def prepare(transfer_id: str) -> RuntimeTransferRecord:
+        admitted = await store_harness.store.admit(
+            replace(_admission(), transfer_id=transfer_id),
+            lease_id=f"{transfer_id}-lease",
+        )
+        assert admitted is not None
+        ready = await store_harness.store.mark_ready(
+            transfer_id,
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            expected_revision=admitted.revision,
+            object=RuntimeTransferObject(f"{transfer_id}-object", 1, "a" * 64),
+        )
+        assert ready is not None
+        stream = await _claim_stream(
+            store_harness.store,
+            transfer_id,
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            expected_revision=ready.revision,
+            claim_id=f"{transfer_id}-claim",
+        )
+        assert stream is not None
+        responsibility = await store_harness.store.record_completed_object_cleanup(
+            transfer_id,
+            attempt_id="attempt",
+            expected_revision=stream.revision,
+            status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+            multipart_cleanup_required=False,
+            completed_object_cleanup_required=True,
+        )
+        assert responsibility is not None
+        verifying = await store_harness.store.begin_verification(
+            transfer_id,
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=f"{transfer_id}-claim",
+            expected_revision=responsibility.revision,
+        )
+        assert verifying is not None
+        available = await store_harness.store.publish_available(
+            transfer_id,
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=f"{transfer_id}-claim",
+            expected_revision=verifying.revision,
+            actual_size=1,
+            actual_sha256="a" * 64,
+        )
+        assert available is not None
+        return available
+
+    cancellation_wins = await prepare("cancellation-wins")
+    cancelled = await store_harness.store.request_cancellation(
+        "cancellation-wins",
+        attempt_id="attempt",
+        expected_revision=cancellation_wins.revision,
+        reason=RuntimeTransferCancellationReason.CALLER,
+    )
+    assert cancelled is not None
+    assert (
+        await store_harness.store.commit_upload_response(
+            "cancellation-wins",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="cancellation-wins-claim",
+            expected_revision=cancelled.revision,
+            actual_size=1,
+            actual_sha256="a" * 64,
+        )
+        is None
+    )
+    assert cancelled.completed_object_cleanup_required is True
+
+    response_wins = await prepare("response-wins")
+    committed = await store_harness.store.commit_upload_response(
+        "response-wins",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="response-wins-claim",
+        expected_revision=response_wins.revision,
+        actual_size=1,
+        actual_sha256="a" * 64,
+    )
+    assert committed is not None
+    assert committed.upload_response_committed_at is not None
+    assert committed.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
+    assert committed.completed_object_cleanup_required is False
+    assert (
+        await store_harness.store.request_cancellation(
+            "response-wins",
+            attempt_id="attempt",
+            expected_revision=committed.revision,
+            reason=RuntimeTransferCancellationReason.DEADLINE,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_upload_response_commit_rejects_elapsed_deadline(
+    store_harness: _StoreHarness,
+) -> None:
+    """A completion that returns at the deadline cannot commit RPC success."""
+    admitted = await store_harness.store.admit(
+        replace(_admission(), transfer_id="deadline-wins"),
+        lease_id="deadline-wins-lease",
+    )
+    assert admitted is not None
+    ready = await store_harness.store.mark_ready(
+        "deadline-wins",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("deadline-wins-object", 1, "a" * 64),
+    )
+    assert ready is not None
+    stream = await _claim_stream(
+        store_harness.store,
+        "deadline-wins",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        claim_id="deadline-wins-claim",
+    )
+    assert stream is not None
+    responsibility = await store_harness.store.record_completed_object_cleanup(
+        "deadline-wins",
+        attempt_id="attempt",
+        expected_revision=stream.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        multipart_cleanup_required=False,
+        completed_object_cleanup_required=True,
+    )
+    assert responsibility is not None
+    verifying = await store_harness.store.begin_verification(
+        "deadline-wins",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="deadline-wins-claim",
+        expected_revision=responsibility.revision,
+    )
+    assert verifying is not None
+    available = await store_harness.store.publish_available(
+        "deadline-wins",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="deadline-wins-claim",
+        expected_revision=verifying.revision,
+        actual_size=1,
+        actual_sha256="a" * 64,
+    )
+    assert available is not None
+    store_harness.clock.now = available.admission.deadline_at
+
+    assert (
+        await store_harness.store.commit_upload_response(
+            "deadline-wins",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="deadline-wins-claim",
+            expected_revision=available.revision,
+            actual_size=1,
+            actual_sha256="a" * 64,
+        )
+        is None
+    )
+    current = await store_harness.store.get("deadline-wins")
+    assert current is not None
+    assert current.upload_response_committed_at is None
+    assert current.completed_object_cleanup_required is True
 
 
 @pytest.mark.asyncio
@@ -382,7 +687,12 @@ async def test_admission_lease_expiry_reclaims_capacity_and_fences_old_owner(
 
     store_harness.clock.now += store_harness.config.admission_lease
     replacement = await store_harness.store.admit(
-        replace(_admission(), transfer_id="replacement", expected_size=10),
+        replace(
+            _admission(),
+            transfer_id="replacement",
+            expected_size=10,
+            deadline_at=store_harness.clock.now + timedelta(minutes=5),
+        ),
         lease_id="replacement-lease",
     )
 
@@ -798,6 +1108,37 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
         actual_sha256="a" * 64,
     )
     assert available is not None
+    responsibility = await store_harness.store.record_completed_object_cleanup(
+        "upload",
+        attempt_id="attempt",
+        expected_revision=available.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        multipart_cleanup_required=False,
+        completed_object_cleanup_required=True,
+    )
+    assert responsibility is not None
+    committed_response = await store_harness.store.commit_upload_response(
+        "upload",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="upload-stream",
+        expected_revision=responsibility.revision,
+        actual_size=1,
+        actual_sha256="a" * 64,
+    )
+    assert committed_response is not None
+    confirmed = await store_harness.store.confirm_upload_result(
+        "upload",
+        attempt_id="attempt",
+        expected_revision=committed_response.revision,
+        actual_size=1,
+        actual_sha256="a" * 64,
+    )
+    assert confirmed is not None
+    assert confirmed.runner_result_confirmed_at is not None
+    available = confirmed
 
     claims = await asyncio.gather(
         *(
@@ -879,6 +1220,16 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
     retained = await store_harness.store.get("upload")
     assert retained is not None
     assert retained.phase is RuntimeTransferPhase.CONSUMED
+    terminal = await store_harness.store.settle(
+        "upload",
+        attempt_id="attempt",
+        expected_revision=retained.revision,
+        outcome=RuntimeTransferOutcome.SUCCEEDED,
+        failure=None,
+    )
+    assert terminal is not None
+    assert terminal.runner_result_confirmed_at is not None
+    assert terminal.terminal_outcome is RuntimeTransferOutcome.SUCCEEDED
 
 
 @pytest.mark.asyncio
@@ -935,6 +1286,10 @@ async def test_consumer_and_admission_expiry_reclaim_capacity_atomically(
     assert available is not None
 
     store_harness.clock.now += timedelta(minutes=4)
+    stale = await store_harness.store.list_stale_stream_claims(cursor=None, limit=2)
+    assert all(
+        record.admission.transfer_id != "simultaneous" for record in stale.records
+    )
     blocker = await store_harness.store.admit(
         replace(_admission(), transfer_id="blocker", expected_size=9),
         lease_id="blocker-lease",
@@ -950,7 +1305,11 @@ async def test_consumer_and_admission_expiry_reclaim_capacity_atomically(
 
     store_harness.clock.now += timedelta(minutes=1)
     replacement = await store_harness.store.admit(
-        replace(_admission(), transfer_id="after-reclaim"),
+        replace(
+            _admission(),
+            transfer_id="after-reclaim",
+            deadline_at=store_harness.clock.now + timedelta(minutes=5),
+        ),
         lease_id="replacement-lease",
     )
 
@@ -958,6 +1317,122 @@ async def test_consumer_and_admission_expiry_reclaim_capacity_atomically(
     reclaimed = await store_harness.store.get("simultaneous")
     assert reclaimed is not None
     assert reclaimed.phase is RuntimeTransferPhase.AVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_verified_object_requires_current_live_uncancelled_consumer_claim(
+    store_harness: _StoreHarness,
+) -> None:
+    """Verified handles are fenced by revision, cancellation, and consumer lease."""
+
+    async def prepare(transfer_id: str) -> RuntimeTransferRecord:
+        admitted = await store_harness.store.admit(
+            replace(_admission(), transfer_id=transfer_id),
+            lease_id=f"{transfer_id}-lease",
+        )
+        assert admitted is not None
+        ready = await store_harness.store.mark_ready(
+            transfer_id,
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            expected_revision=admitted.revision,
+            object=RuntimeTransferObject(
+                f"{transfer_id}-object",
+                1,
+                "a" * 64,
+            ),
+        )
+        assert ready is not None
+        streaming = await _claim_stream(
+            store_harness.store,
+            transfer_id,
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            expected_revision=ready.revision,
+            claim_id=f"{transfer_id}-stream",
+        )
+        assert streaming is not None
+        verifying = await store_harness.store.begin_verification(
+            transfer_id,
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=f"{transfer_id}-stream",
+            expected_revision=streaming.revision,
+        )
+        assert verifying is not None
+        available = await store_harness.store.publish_available(
+            transfer_id,
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=f"{transfer_id}-stream",
+            expected_revision=verifying.revision,
+            actual_size=1,
+            actual_sha256="a" * 64,
+        )
+        assert available is not None
+        consuming = await store_harness.store.claim_consumer(
+            transfer_id,
+            attempt_id="attempt",
+            expected_revision=available.revision,
+            claim_id=f"{transfer_id}-consumer",
+        )
+        assert consuming is not None
+        return consuming
+
+    consuming = await prepare("verified-live")
+    assert (
+        await store_harness.store.get_verified_object(
+            "verified-live",
+            attempt_id="attempt",
+            expected_revision=consuming.revision,
+            claim_id="verified-live-consumer",
+        )
+        == consuming
+    )
+    assert (
+        await store_harness.store.get_verified_object(
+            "verified-live",
+            attempt_id="attempt",
+            expected_revision=consuming.revision - 1,
+            claim_id="verified-live-consumer",
+        )
+        is None
+    )
+    cancelled = await store_harness.store.request_cancellation(
+        "verified-live",
+        attempt_id="attempt",
+        expected_revision=consuming.revision,
+        reason=RuntimeTransferCancellationReason.CALLER,
+    )
+    assert cancelled is not None
+    assert (
+        await store_harness.store.get_verified_object(
+            "verified-live",
+            attempt_id="attempt",
+            expected_revision=cancelled.revision,
+            claim_id="verified-live-consumer",
+        )
+        is None
+    )
+
+    expiring = await prepare("verified-expiring")
+    store_harness.clock.now += timedelta(minutes=2)
+    assert (
+        await store_harness.store.get_verified_object(
+            "verified-expiring",
+            attempt_id="attempt",
+            expected_revision=expiring.revision,
+            claim_id="verified-expiring-consumer",
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -994,6 +1469,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
         "cancellation",
         attempt_id="attempt",
         expected_revision=stream.revision,
+        reason=RuntimeTransferCancellationReason.CALLER,
     )
     assert cancelled is not None
     assert (
@@ -1001,6 +1477,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
             "cancellation",
             attempt_id="attempt",
             expected_revision=stream.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
         )
         == cancelled
     )
@@ -1044,7 +1521,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
         attempt_id="attempt",
         expected_revision=cancelled.revision,
         outcome=RuntimeTransferOutcome.CANCELLED,
-        failure=None,
+        failure=RuntimeTransferFailure.CANCELLED,
     )
     assert terminal is not None
     assert (
@@ -1053,7 +1530,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
             attempt_id="attempt",
             expected_revision=cancelled.revision,
             outcome=RuntimeTransferOutcome.CANCELLED,
-            failure=None,
+            failure=RuntimeTransferFailure.CANCELLED,
         )
         == terminal
     )
@@ -1062,6 +1539,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
             "cancellation",
             attempt_id="attempt",
             expected_revision=stream.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
         )
         == terminal
     )
@@ -1074,6 +1552,110 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
             failure=None,
         )
         is None
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason", "outcome", "failure"),
+    [
+        (
+            RuntimeTransferCancellationReason.CALLER,
+            RuntimeTransferOutcome.CANCELLED,
+            RuntimeTransferFailure.CANCELLED,
+        ),
+        (
+            RuntimeTransferCancellationReason.SHUTDOWN,
+            RuntimeTransferOutcome.CANCELLED,
+            RuntimeTransferFailure.CANCELLED,
+        ),
+        (
+            RuntimeTransferCancellationReason.DEADLINE,
+            RuntimeTransferOutcome.EXPIRED,
+            RuntimeTransferFailure.EXPIRED,
+        ),
+        (
+            RuntimeTransferCancellationReason.SUPERSEDED,
+            RuntimeTransferOutcome.SUPERSEDED,
+            RuntimeTransferFailure.FENCED,
+        ),
+    ],
+)
+async def test_cancellation_reason_has_canonical_terminal_precedence(
+    store_harness: _StoreHarness,
+    reason: RuntimeTransferCancellationReason,
+    outcome: RuntimeTransferOutcome,
+    failure: RuntimeTransferFailure,
+) -> None:
+    """Late mismatched settlement cannot overwrite persisted cancellation authority."""
+    transfer_id = f"canonical-{reason.value}"
+    admitted = await store_harness.store.admit(
+        replace(_admission(), transfer_id=transfer_id),
+        lease_id=f"{transfer_id}-lease",
+    )
+    assert admitted is not None
+    cancelled = await store_harness.store.request_cancellation(
+        transfer_id,
+        attempt_id="attempt",
+        expected_revision=admitted.revision,
+        reason=reason,
+    )
+    assert cancelled is not None
+    assert (
+        await store_harness.store.settle(
+            transfer_id,
+            attempt_id="attempt",
+            expected_revision=cancelled.revision,
+            outcome=RuntimeTransferOutcome.FAILED,
+            failure=RuntimeTransferFailure.STREAM,
+        )
+        is None
+    )
+    terminal = await store_harness.store.settle(
+        transfer_id,
+        attempt_id="attempt",
+        expected_revision=cancelled.revision,
+        outcome=outcome,
+        failure=failure,
+    )
+    assert terminal is not None
+    assert terminal.terminal_outcome is outcome
+    assert terminal.failure is failure
+
+
+@pytest.mark.asyncio
+async def test_elapsed_deadline_has_atomic_terminal_precedence(
+    store_harness: _StoreHarness,
+) -> None:
+    """A late failure is atomically canonicalized to expiry at the deadline."""
+    admitted = await store_harness.store.admit(
+        replace(_admission(), transfer_id="deadline-terminal"),
+        lease_id="deadline-terminal-lease",
+    )
+    assert admitted is not None
+    store_harness.clock.now = admitted.admission.deadline_at
+
+    terminal = await store_harness.store.settle(
+        "deadline-terminal",
+        attempt_id="attempt",
+        expected_revision=admitted.revision,
+        outcome=RuntimeTransferOutcome.FAILED,
+        failure=RuntimeTransferFailure.STREAM,
+    )
+
+    assert terminal is not None
+    assert terminal.phase is RuntimeTransferPhase.TERMINAL
+    assert terminal.terminal_outcome is RuntimeTransferOutcome.EXPIRED
+    assert terminal.failure is RuntimeTransferFailure.EXPIRED
+    assert (
+        await store_harness.store.settle(
+            "deadline-terminal",
+            attempt_id="attempt",
+            expected_revision=admitted.revision,
+            outcome=RuntimeTransferOutcome.FAILED,
+            failure=RuntimeTransferFailure.STREAM,
+        )
+        == terminal
     )
 
 
@@ -1486,6 +2068,7 @@ async def test_terminal_metadata_expires_on_access(
             "terminal-expiry",
             attempt_id="attempt",
             expected_revision=terminal.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
         )
         is None
     )
@@ -1546,7 +2129,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
         attempt_id="attempt",
         expected_revision=pending_cleanup.revision,
         outcome=RuntimeTransferOutcome.FAILED,
-        failure=None,
+        failure=RuntimeTransferFailure.STREAM,
     )
     assert terminal is not None
     assert (
@@ -1555,7 +2138,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
             attempt_id="attempt",
             expected_revision=terminal.revision,
             outcome=RuntimeTransferOutcome.FAILED,
-            failure=None,
+            failure=RuntimeTransferFailure.STREAM,
         )
         == terminal
     )
@@ -1604,7 +2187,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
             attempt_id="attempt",
             expected_revision=old_cleanup.revision,
             outcome=RuntimeTransferOutcome.FAILED,
-            failure=None,
+            failure=RuntimeTransferFailure.STREAM,
         )
         == old_cleanup
     )

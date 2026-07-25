@@ -122,6 +122,11 @@ class CoordinatorExpectedManifest:
     size: int | None
     sha256: str | None
 
+    def __post_init__(self) -> None:
+        """Validate optional expected manifest values."""
+        _optional_size(self.size)
+        _optional_sha256(self.sha256)
+
 
 @dataclass(frozen=True)
 class CoordinatorObjectManifest:
@@ -130,12 +135,25 @@ class CoordinatorObjectManifest:
     size: int | None
     sha256: str
 
+    def __post_init__(self) -> None:
+        """Validate one complete verified manifest."""
+        if self.size is None:
+            raise ValueError("Object manifest size is required")
+        _optional_size(self.size)
+        _sha256(self.sha256)
+
 
 @dataclass(frozen=True)
 class CoordinatorOpaqueObjectHandle:
     """Opaque trusted-service object reference without storage authority."""
 
     value: str
+
+    def __post_init__(self) -> None:
+        """Validate one bounded opaque trusted handle."""
+        _bounded(self.value, "object_handle", 512)
+        if "://" in self.value:
+            raise ValueError("object_handle must not contain storage authority")
 
 
 @dataclass(frozen=True)
@@ -173,6 +191,23 @@ class CoordinatorAdmitTransferRequest:
     source_expires_at: datetime | None
     resource_class: str
 
+    def __post_init__(self) -> None:
+        """Validate complete bounded admission request metadata."""
+        _bounded(self.lease_id, "lease_id", 128)
+        _bounded(self.runtime_path, "runtime_path", 4096)
+        _bounded(self.resource_class, "resource_class", 64)
+        if self.overwrite is None:
+            raise ValueError("overwrite presence is required")
+        if self.expected_manifest.size is None:
+            raise ValueError("expected manifest size is required")
+        if self.product_maximum_size is None or self.provider_maximum_size is None:
+            raise ValueError("transfer maximum sizes are required")
+        _optional_size(self.product_maximum_size)
+        _optional_size(self.provider_maximum_size)
+        _aware(self.deadline_at, "deadline_at")
+        if self.source_expires_at is not None:
+            _aware(self.source_expires_at, "source_expires_at")
+
 
 @dataclass(frozen=True)
 class CoordinatorAdmitTransferResult:
@@ -191,6 +226,10 @@ class CoordinatorMarkTransferReadyRequest:
     object_handle: CoordinatorOpaqueObjectHandle
     object_manifest: CoordinatorObjectManifest
 
+    def __post_init__(self) -> None:
+        """Validate one ready transition revision."""
+        _positive(self.expected_revision, "expected_revision")
+
 
 @dataclass(frozen=True)
 class CoordinatorDispatchTransferRequest:
@@ -199,6 +238,11 @@ class CoordinatorDispatchTransferRequest:
     identity: CoordinatorTransferIdentity
     expected_revision: int
     dispatch_id: str
+
+    def __post_init__(self) -> None:
+        """Validate one stable dispatch transition."""
+        _positive(self.expected_revision, "expected_revision")
+        _bounded(self.dispatch_id, "dispatch_id", 128)
 
 
 @dataclass(frozen=True)
@@ -209,6 +253,10 @@ class CoordinatorCancelTransferRequest:
     expected_revision: int
     reason: CoordinatorCancellationReason
 
+    def __post_init__(self) -> None:
+        """Validate one cancellation transition revision."""
+        _positive(self.expected_revision, "expected_revision")
+
 
 @dataclass(frozen=True)
 class CoordinatorGetVerifiedObjectRequest:
@@ -217,6 +265,11 @@ class CoordinatorGetVerifiedObjectRequest:
     identity: CoordinatorTransferIdentity
     expected_revision: int
     consumer_claim_id: str
+
+    def __post_init__(self) -> None:
+        """Validate one verified-object claim lookup."""
+        _positive(self.expected_revision, "expected_revision")
+        _bounded(self.consumer_claim_id, "consumer_claim_id", 128)
 
 
 @dataclass(frozen=True)
@@ -236,6 +289,11 @@ class CoordinatorConsumerRequest:
     expected_revision: int
     consumer_claim_id: str
 
+    def __post_init__(self) -> None:
+        """Validate one bounded consumer transition."""
+        _positive(self.expected_revision, "expected_revision")
+        _bounded(self.consumer_claim_id, "consumer_claim_id", 128)
+
 
 @dataclass(frozen=True)
 class CoordinatorSettleTransferRequest:
@@ -246,6 +304,27 @@ class CoordinatorSettleTransferRequest:
     outcome: CoordinatorTransferOutcome
     failure: CoordinatorTransferFailure | None
 
+    def __post_init__(self) -> None:
+        """Validate one exact terminal outcome and failure pair."""
+        _positive(self.expected_revision, "expected_revision")
+        expected = {
+            CoordinatorTransferOutcome.SUCCEEDED: {None},
+            CoordinatorTransferOutcome.FAILED: {
+                CoordinatorTransferFailure.ADMISSION,
+                CoordinatorTransferFailure.FENCED,
+                CoordinatorTransferFailure.INTEGRITY,
+                CoordinatorTransferFailure.STREAM,
+                CoordinatorTransferFailure.CONSUMER,
+            },
+            CoordinatorTransferOutcome.CANCELLED: {
+                CoordinatorTransferFailure.CANCELLED
+            },
+            CoordinatorTransferOutcome.EXPIRED: {CoordinatorTransferFailure.EXPIRED},
+            CoordinatorTransferOutcome.SUPERSEDED: {CoordinatorTransferFailure.FENCED},
+        }[self.outcome]
+        if self.failure not in expected:
+            raise ValueError("Settlement outcome and failure do not match")
+
 
 @dataclass(frozen=True)
 class CoordinatorRecordCleanupRequest:
@@ -254,6 +333,10 @@ class CoordinatorRecordCleanupRequest:
     identity: CoordinatorTransferIdentity
     expected_revision: int
     cleanup_status: CoordinatorCleanupStatus
+
+    def __post_init__(self) -> None:
+        """Validate one cleanup transition revision."""
+        _positive(self.expected_revision, "expected_revision")
 
 
 @dataclass(frozen=True)
@@ -1011,6 +1094,42 @@ def _timestamp_message(value: datetime) -> timestamp_pb2.Timestamp:
 
 def _datetime_from_message(value: timestamp_pb2.Timestamp) -> datetime:
     return value.ToDatetime(tzinfo=UTC)
+
+
+def _bounded(value: str, name: str, maximum_bytes: int) -> None:
+    if not value:
+        raise ValueError(f"{name} must not be empty")
+    if len(value.encode("utf-8")) > maximum_bytes:
+        raise ValueError(f"{name} exceeds {maximum_bytes} UTF-8 bytes")
+
+
+def _positive(value: int, name: str) -> None:
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+
+
+def _optional_size(value: int | None) -> None:
+    if value is not None and value < 0:
+        raise ValueError("size must not be negative")
+
+
+def _sha256(value: str) -> None:
+    if (
+        len(value) != 64
+        or value.lower() != value
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError("SHA-256 must be lowercase hexadecimal")
+
+
+def _optional_sha256(value: str | None) -> None:
+    if value is not None:
+        _sha256(value)
+
+
+def _aware(value: datetime, name: str) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{name} must be timezone-aware")
 
 
 _DIRECTION_TO_PROTO = {

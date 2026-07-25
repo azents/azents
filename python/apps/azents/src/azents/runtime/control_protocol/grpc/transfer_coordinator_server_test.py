@@ -56,6 +56,7 @@ async def test_unauthenticated_dispatch_cannot_access_state_or_coordination() ->
     coordinator = RuntimeTransferCoordinator(
         state_store=state,
         coordination_store=coordination,
+        cleanup=None,
         clock=lambda: _NOW,
     )
     server, channel, stub, _supplier = await _server(coordinator)
@@ -95,6 +96,7 @@ async def test_authenticated_transitions_preserve_state_and_dispatch_metadata() 
     coordinator = RuntimeTransferCoordinator(
         state_store=state,
         coordination_store=coordination,
+        cleanup=None,
         clock=lambda: _NOW,
     )
     server, channel, stub, supplier = await _server(coordinator)

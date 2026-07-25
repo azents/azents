@@ -6,7 +6,7 @@ from azents.runtime.transfer.data import RuntimeTransferRecord
 
 
 class RuntimeTransferS3Cleanup:
-    """Abort stale multipart uploads from trusted transfer state only."""
+    """Clean stale multipart and completed-object work from trusted state."""
 
     def __init__(
         self,
@@ -25,23 +25,46 @@ class RuntimeTransferS3Cleanup:
         self._bucket = _required(bucket, "Runtime transfer bucket")
         self._object_prefix = _prefix(object_prefix)
 
-    async def abort(self, record: RuntimeTransferRecord) -> None:
-        """Abort one stale multipart upload identified by trusted state.
+    async def cleanup(self, record: RuntimeTransferRecord) -> None:
+        """Clean one exact stale upload artifact identified by trusted state.
 
-        :param record: exact stale stream record with opaque cleanup evidence
+        :param record: exact stale stream record with trusted cleanup evidence
         """
-        if record.object is None or record.multipart_cleanup_handle is None:
-            raise ValueError("Stale transfer multipart cleanup evidence is unavailable")
-        await self._object_store.abort_multipart_upload(
-            upload=S3MultipartUpload(
-                identity=runtime_transfer_object_identity(
-                    bucket=self._bucket,
-                    object_prefix=self._object_prefix,
-                    opaque_key=record.object.key,
-                ),
-                upload_id=record.multipart_cleanup_handle,
-            )
+        if record.object is None:
+            raise ValueError("Stale transfer object cleanup evidence is unavailable")
+        identity = runtime_transfer_object_identity(
+            bucket=self._bucket,
+            object_prefix=self._object_prefix,
+            opaque_key=record.object.key,
         )
+        error: BaseException | None = None
+        if record.multipart_cleanup_handle is not None:
+            try:
+                await self._object_store.abort_multipart_upload(
+                    upload=S3MultipartUpload(
+                        identity=identity,
+                        upload_id=record.multipart_cleanup_handle,
+                    )
+                )
+            except BaseException as exc:
+                error = exc
+        if record.completed_object_cleanup_required:
+            try:
+                await self._object_store.delete_verified_transfer_object(
+                    identity=identity,
+                    expected_size=record.object.size,
+                    expected_sha256=record.object.sha256,
+                )
+            except BaseException as exc:
+                if error is None:
+                    error = exc
+        if (
+            record.multipart_cleanup_handle is None
+            and not record.completed_object_cleanup_required
+        ):
+            raise ValueError("Stale transfer cleanup evidence is unavailable")
+        if error is not None:
+            raise error
 
 
 def runtime_transfer_object_identity(

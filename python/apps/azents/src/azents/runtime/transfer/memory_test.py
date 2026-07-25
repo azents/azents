@@ -8,8 +8,10 @@ import pytest
 
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCancellationReason,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
+    RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferRecord,
@@ -180,7 +182,7 @@ async def test_concurrent_budget_retry_expiry_and_pagination() -> None:
         attempt_id="a",
         expected_revision=current.revision,
         outcome=RuntimeTransferOutcome.FAILED,
-        failure=None,
+        failure=RuntimeTransferFailure.STREAM,
     )
     assert settled is not None
     retry = await store.admit(
@@ -445,12 +447,18 @@ async def test_upload_consumer_cancellation_terminal_and_historical_safety() -> 
         is None
     )
     cancelled = await store.request_cancellation(
-        "upload", attempt_id="a", expected_revision=reclaimed.revision
+        "upload",
+        attempt_id="a",
+        expected_revision=reclaimed.revision,
+        reason=RuntimeTransferCancellationReason.CALLER,
     )
     assert cancelled is not None
     assert (
         await store.request_cancellation(
-            "upload", attempt_id="a", expected_revision=cancelled.revision
+            "upload",
+            attempt_id="a",
+            expected_revision=cancelled.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
         )
         == cancelled
     )
@@ -469,7 +477,7 @@ async def test_upload_consumer_cancellation_terminal_and_historical_safety() -> 
         attempt_id="a",
         expected_revision=cancelled.revision,
         outcome=RuntimeTransferOutcome.CANCELLED,
-        failure=None,
+        failure=RuntimeTransferFailure.CANCELLED,
     )
     assert terminal is not None
     assert (

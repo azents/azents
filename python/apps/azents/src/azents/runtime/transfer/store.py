@@ -4,6 +4,7 @@ from typing import Protocol
 
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCancellationReason,
     RuntimeTransferCleanupStatus,
     RuntimeTransferFailure,
     RuntimeTransferObject,
@@ -134,7 +135,21 @@ class RuntimeTransferStateStore(Protocol):
     ) -> RuntimeTransferRecord | None: ...
 
     async def request_cancellation(
-        self, transfer_id: str, *, attempt_id: str, expected_revision: int
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        reason: RuntimeTransferCancellationReason,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def get_verified_object(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
     ) -> RuntimeTransferRecord | None: ...
 
     async def begin_verification(
@@ -158,6 +173,30 @@ class RuntimeTransferStateStore(Protocol):
         desired_generation: int,
         accepted_runner_generation: int,
         claim_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def commit_upload_response(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def confirm_upload_result(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
         expected_revision: int,
         actual_size: int,
         actual_sha256: str,
@@ -221,6 +260,17 @@ class RuntimeTransferStateStore(Protocol):
         attempt_id: str,
         expected_revision: int,
         status: RuntimeTransferCleanupStatus,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def record_completed_object_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        status: RuntimeTransferCleanupStatus,
+        multipart_cleanup_required: bool,
+        completed_object_cleanup_required: bool,
     ) -> RuntimeTransferRecord | None: ...
 
     async def release_admission(

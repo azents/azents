@@ -22,13 +22,18 @@ from azents.runtime.coordination.data import (
     RuntimeOperationTransferDirection,
 )
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
+from azents.runtime.transfer.coordinator import RuntimeTransferCoordinator
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferRecord,
+)
+from azents.runtime.transfer.data import (
+    RuntimeTransferFailure as StateTransferFailure,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.result_coordinator import (
@@ -39,10 +44,37 @@ _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _DIGEST = "a" * 64
 
 
+class _Clock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+class _Cleanup:
+    def __init__(self) -> None:
+        self.records: list[RuntimeTransferRecord] = []
+
+    async def cleanup(self, record: RuntimeTransferRecord) -> None:
+        self.records.append(record)
+
+
 @pytest.mark.asyncio
 async def test_download_success_marks_committed_settles_and_appends_final() -> None:
-    harness = await _harness(RuntimeTransferDirection.DOWNLOAD)
-    record = await harness.claim_stream()
+    cleanup = _Cleanup()
+    harness = await _harness(RuntimeTransferDirection.DOWNLOAD, cleanup=cleanup)
+    streaming = await harness.claim_stream()
+    record = await harness.state.begin_verification(
+        "transfer-1",
+        attempt_id="attempt-1",
+        runtime_id="runtime-1",
+        desired_generation=1,
+        accepted_runner_generation=1,
+        claim_id=streaming.stream_claim_id or "",
+        expected_revision=streaming.revision,
+    )
+    assert record is not None
 
     await harness.coordinator.handle(
         _result(
@@ -57,6 +89,9 @@ async def test_download_success_marks_committed_settles_and_appends_final() -> N
     settled = await harness.state.get("transfer-1")
     assert settled is not None
     assert settled.terminal_outcome is RuntimeTransferOutcome.SUCCEEDED
+    assert settled.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
+    assert len(cleanup.records) == 1
+    assert cleanup.records[0].completed_object_cleanup_required is True
     replies = await harness.control.read_replies(
         reply_stream_id="reply-1",
         after_cursor=None,
@@ -94,6 +129,27 @@ async def test_upload_success_requires_authoritative_available_manifest() -> Non
         actual_sha256=_DIGEST,
     )
     assert available is not None
+    responsibility = await harness.state.record_completed_object_cleanup(
+        "transfer-1",
+        attempt_id="attempt-1",
+        expected_revision=available.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        multipart_cleanup_required=False,
+        completed_object_cleanup_required=True,
+    )
+    assert responsibility is not None
+    committed_response = await harness.state.commit_upload_response(
+        "transfer-1",
+        attempt_id="attempt-1",
+        runtime_id="runtime-1",
+        desired_generation=1,
+        accepted_runner_generation=1,
+        claim_id=responsibility.stream_claim_id or "",
+        expected_revision=responsibility.revision,
+        actual_size=3,
+        actual_sha256=_DIGEST,
+    )
+    assert committed_response is not None
 
     await harness.coordinator.handle(
         _result(
@@ -112,7 +168,144 @@ async def test_upload_success_requires_authoritative_available_manifest() -> Non
         reply_stream_id="reply-1", after_cursor=None, limit=10
     )
     assert len(replies) == 1
+    assert replies[0].event.request_id == "request-1"
     assert replies[0].event.payload["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_upload_success_cannot_cross_cancel_requested_operation() -> None:
+    """A late Runner success cannot replace durable cancellation authority."""
+    harness = await _harness(RuntimeTransferDirection.UPLOAD)
+    available = await _publish_upload_available(harness)
+    await harness.coordination.update_operation_status(
+        "operation-1",
+        status=RuntimeOperationStatus.CANCEL_REQUESTED,
+        updated_at=_NOW,
+        final_event_cursor=None,
+    )
+
+    await harness.coordinator.handle(
+        _result(
+            direction=RunnerTransferDirection.UPLOAD,
+            outcome=RunnerTransferOutcome.SUCCEEDED,
+            committed=False,
+            failure=None,
+        ),
+        request_id="late-runner-success",
+    )
+
+    current = await harness.state.get("transfer-1")
+    assert current is not None
+    assert current == available
+    assert current.runner_result_confirmed_at is None
+    assert (
+        await harness.control.read_replies(
+            reply_stream_id="reply-1",
+            after_cursor=None,
+            limit=10,
+        )
+        == []
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("runner_failure", "expected_outcome", "expected_failure"),
+    [
+        (
+            RunnerTransferFailure.STREAM_FAILED,
+            RuntimeTransferOutcome.FAILED,
+            StateTransferFailure.STREAM,
+        ),
+        (
+            RunnerTransferFailure.DEADLINE_EXCEEDED,
+            RuntimeTransferOutcome.EXPIRED,
+            StateTransferFailure.EXPIRED,
+        ),
+    ],
+)
+async def test_upload_failure_preserves_completed_object_cleanup_and_reason(
+    runner_failure: RunnerTransferFailure,
+    expected_outcome: RuntimeTransferOutcome,
+    expected_failure: StateTransferFailure,
+) -> None:
+    """Completed upload failures retain exact delete retry and deadline evidence."""
+    harness = await _harness(RuntimeTransferDirection.UPLOAD)
+    await _publish_upload_available(harness, commit_response=False)
+
+    await harness.coordinator.handle(
+        _result(
+            direction=RunnerTransferDirection.UPLOAD,
+            outcome=RunnerTransferOutcome.FAILED,
+            committed=False,
+            failure=runner_failure,
+            size=None,
+            sha256=None,
+        ),
+        request_id=f"runner-failure:{runner_failure.value}",
+    )
+
+    current = await harness.state.get("transfer-1")
+    assert current is not None
+    assert current.terminal_outcome is expected_outcome
+    assert current.failure is expected_failure
+    assert current.completed_object_cleanup_required is True
+    assert current.multipart_cleanup_handle is None
+
+
+@pytest.mark.asyncio
+async def test_runner_failure_after_deadline_settles_expired() -> None:
+    """A late Runner stream failure cannot defeat effective deadline authority."""
+    clock = _Clock(_NOW)
+    harness = await _harness(RuntimeTransferDirection.UPLOAD, clock=clock)
+    await _publish_upload_available(harness, commit_response=False)
+    clock.now = _NOW + timedelta(minutes=5)
+
+    await harness.coordinator.handle(
+        _result(
+            direction=RunnerTransferDirection.UPLOAD,
+            outcome=RunnerTransferOutcome.FAILED,
+            committed=False,
+            failure=RunnerTransferFailure.STREAM_FAILED,
+            size=None,
+            sha256=None,
+        ),
+        request_id="late-runner-failure",
+    )
+
+    current = await harness.state.get("transfer-1")
+    assert current is not None
+    assert current.terminal_outcome is RuntimeTransferOutcome.EXPIRED
+    assert current.failure is StateTransferFailure.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_download_success_requires_authoritative_completion_barrier() -> None:
+    """Runner success cannot advance a download that Control still sees streaming."""
+    harness = await _harness(RuntimeTransferDirection.DOWNLOAD)
+    await harness.claim_stream()
+
+    await harness.coordinator.handle(
+        _result(
+            direction=RunnerTransferDirection.DOWNLOAD,
+            outcome=RunnerTransferOutcome.SUCCEEDED,
+            committed=True,
+            failure=None,
+        ),
+        request_id="runner-result-before-control-completion",
+    )
+
+    record = await harness.state.get("transfer-1")
+    assert record is not None
+    assert record.phase.value == "streaming"
+    assert (
+        await harness.control.read_replies(
+            reply_stream_id="reply-1",
+            after_cursor=None,
+            limit=10,
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio
@@ -287,8 +480,14 @@ class _Harness:
         return streaming
 
 
-async def _harness(direction: RuntimeTransferDirection) -> _Harness:
-    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+async def _harness(
+    direction: RuntimeTransferDirection,
+    *,
+    cleanup: _Cleanup | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> _Harness:
+    clock = clock or (lambda: _NOW)
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=clock)
     coordination = InMemoryRuntimeCoordinationStore()
     await coordination.register_connection(
         kind=RuntimeConnectionKind.RUNNER,
@@ -324,6 +523,12 @@ async def _harness(direction: RuntimeTransferDirection) -> _Harness:
     )
     await coordination.put_operation(operation, ttl_seconds=60)
     control = RuntimeControlProtocolService(coordination)
+    terminal_coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=coordination,
+        cleanup=cleanup,
+        clock=clock,
+    )
     return _Harness(
         state,
         coordination,
@@ -332,10 +537,65 @@ async def _harness(direction: RuntimeTransferDirection) -> _Harness:
             state_store=state,
             coordination_store=coordination,
             control_protocol=control,
-            clock=lambda: _NOW,
+            terminal_coordinator=terminal_coordinator,
+            clock=clock,
         ),
         direction,
     )
+
+
+async def _publish_upload_available(
+    harness: _Harness,
+    *,
+    commit_response: bool = True,
+) -> RuntimeTransferRecord:
+    streaming = await harness.claim_stream()
+    verifying = await harness.state.begin_verification(
+        "transfer-1",
+        attempt_id="attempt-1",
+        runtime_id="runtime-1",
+        desired_generation=1,
+        accepted_runner_generation=1,
+        claim_id=streaming.stream_claim_id or "",
+        expected_revision=streaming.revision,
+    )
+    assert verifying is not None
+    available = await harness.state.publish_available(
+        "transfer-1",
+        attempt_id="attempt-1",
+        runtime_id="runtime-1",
+        desired_generation=1,
+        accepted_runner_generation=1,
+        claim_id=verifying.stream_claim_id or "",
+        expected_revision=verifying.revision,
+        actual_size=3,
+        actual_sha256=_DIGEST,
+    )
+    assert available is not None
+    responsibility = await harness.state.record_completed_object_cleanup(
+        "transfer-1",
+        attempt_id="attempt-1",
+        expected_revision=available.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        multipart_cleanup_required=False,
+        completed_object_cleanup_required=True,
+    )
+    assert responsibility is not None
+    if not commit_response:
+        return responsibility
+    committed = await harness.state.commit_upload_response(
+        "transfer-1",
+        attempt_id="attempt-1",
+        runtime_id="runtime-1",
+        desired_generation=1,
+        accepted_runner_generation=1,
+        claim_id=responsibility.stream_claim_id or "",
+        expected_revision=responsibility.revision,
+        actual_size=3,
+        actual_sha256=_DIGEST,
+    )
+    assert committed is not None
+    return committed
 
 
 def _admission(direction: RuntimeTransferDirection) -> RuntimeTransferAdmission:

@@ -317,6 +317,20 @@ The store adds these dispatch operations:
 - `record_multipart_cleanup_handle(...)` requires the exact upload claim and records the
   bounded trusted cleanup handle before the first part upload. Completion or successful
   abort clears it.
+- `record_completed_object_cleanup(...)` records conditional completed-object deletion
+  responsibility before multipart completion or the zero-byte immutable write begins.
+  Multipart abort and completed-object deletion responsibility may coexist across an
+  ambiguous completion; exact conditional deletion protects a replacement object.
+- `commit_upload_response(...)` is the atomic upload-success barrier. It requires exact
+  attempt, Runtime, desired and accepted generation, stream claim, revision, authoritative
+  manifest, `AVAILABLE`, and retained completed-object responsibility. The same mutation
+  clears that responsibility, records cleanup complete, and commits the response. A
+  cancellation, deadline, or generation fence that wins first prevents success; once the
+  barrier commits, later cancellation cannot revoke the successful upload response.
+- terminal settlement atomically canonicalizes an already reached admission deadline or
+  logical expiry as `EXPIRED`/`EXPIRED` when no earlier persisted cancellation authority
+  exists. This closes the scheduler gap between observing a deadline and persisting its
+  cancellation reason, so a late data-RPC or Runner failure cannot win after expiry.
 - `list_stale_stream_claims(...)` returns a bounded page of expired stream-owner leases
   with their cleanup evidence.
 
@@ -361,7 +375,11 @@ settlement also wins before its final read. A crash before
 before append leaves a repairable outbox-ready record. A crash after append but before
 `ENQUEUED` may append the same logical intent again. Control and Runner deduplicate
 identical delivery by `dispatch_id`; they acknowledge duplicate stream entries without
-starting a second transfer task. A conflicting duplicate fails closed. Atomic
+starting a second transfer task. The Runner retains a bounded dispatch fingerprint
+tombstone for the connection lifetime after both accepted and rejected results, so a
+delayed identical entry remains an acknowledgement and a delayed conflict still fails
+closed. Tombstone capacity exhaustion closes the connection instead of forgetting an
+older identity. A conflicting duplicate fails closed. Atomic
 `claim_stream()` remains the final byte-path fence even if duplicate transport entries are
 observed.
 
@@ -527,13 +545,24 @@ The data RPC does not mark the Runtime destination committed. Phase 5 Runner loc
 - aggregates no more than one 5 MiB multipart part plus one 256 KiB input frame and allows one in-flight part;
 - records coalesced progress only;
 - validates Runner-declared completion size/hash against authoritative values and trusted expected manifest when present;
+- durably records conditional completed-object cleanup responsibility before multipart
+  completion or empty-object creation, retaining multipart and completed-object evidence
+  together until ambiguity is resolved;
 - completes and verifies the multipart object only after all checks succeed, then transitions through verification to available;
 - uses the verified zero-byte object path for an empty upload;
+- returns `SUCCEEDED` only after `commit_upload_response()` atomically proves current
+  uncancelled generation/claim authority and commits the response barrier;
 - aborts incomplete multipart work on protocol failure, integrity failure, cancellation, deadline, stale authority, disconnect, or unexpected error;
 - never exposes failed/rejected content as an available object and never retains it for diagnostics;
 - returns no object identity to Runner.
 
-Cancellation is caught separately from ordinary exceptions, aborts/cleans up bounded storage work, updates state and operation correlation, releases admission idempotently, and then preserves cancellation semantics.
+Cancellation is caught separately from ordinary exceptions, including when S3 cleanup
+itself fails. It aborts/cleans up bounded storage work, durably retains exact remaining
+artifact responsibility, updates state and operation correlation, releases admission
+idempotently, and preserves cancellation as the outward control flow. Persisted
+cancellation authority is canonical at every settlement path: `CALLER`/`SHUTDOWN` settle
+`CANCELLED`/`CANCELLED`, `DEADLINE` settles `EXPIRED`/`EXPIRED`, and `SUPERSEDED` settles
+`SUPERSEDED`/`FENCED`; a late Runner failure cannot overwrite that pair.
 
 ## Error and terminal mapping
 

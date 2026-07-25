@@ -8,15 +8,18 @@ import asyncio
 import hashlib
 import secrets
 from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, suppress
 from datetime import datetime
-from typing import Protocol
+from enum import StrEnum
+from typing import Any, Protocol
 
 import grpc
 from azcommon.infra.s3.service import (
     S3CompletedPart,
     S3MultipartUpload,
     S3ObjectIdentity,
+    S3TransferCancelled,
+    S3TransferCleanupRequired,
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
@@ -36,12 +39,15 @@ from azents.runtime.control_protocol.grpc.auth import (
 from azents.runtime.coordination.data import RuntimeConnectionKind
 from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.transfer.data import (
+    RuntimeTransferCancellationReason,
     RuntimeTransferCleanupStatus,
     RuntimeTransferDirection,
     RuntimeTransferDispatchStatus,
     RuntimeTransferFailure,
+    RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferRecord,
+    cancellation_settlement,
 )
 from azents.runtime.transfer.object_store import runtime_transfer_object_identity
 from azents.runtime.transfer.store import RuntimeTransferStateStore
@@ -49,6 +55,77 @@ from azents.runtime.transfer.store import RuntimeTransferStateStore
 _DEFAULT_MAX_CONCURRENT_DOWNLOADS = 4
 _DEFAULT_MAX_CONCURRENT_UPLOADS = 4
 _MAX_MULTIPART_PARTS = 10_000
+_PROGRESS_INTERVAL_SECONDS = 1
+_PROGRESS_MINIMUM_BYTES = 1024 * 1024
+
+
+class _TransferCancelled(RuntimeError):
+    """Raised when durable or transport cancellation stops one stream."""
+
+    def __init__(self, record: RuntimeTransferRecord) -> None:
+        super().__init__("Transfer cancellation requested")
+        self.record = record
+
+
+class _TransferExpired(RuntimeError):
+    """Raised when one transfer reaches its effective deadline."""
+
+    def __init__(self, record: RuntimeTransferRecord) -> None:
+        super().__init__("Transfer deadline expired")
+        self.record = record
+
+
+class _StreamTermination(StrEnum):
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+    FENCED = "fenced"
+
+
+class _StreamLeaseKeeper:
+    """Renew and independently fence one active stream owner."""
+
+    def __init__(
+        self,
+        *,
+        servicer: "RuntimeRunnerTransferGrpcServicer",
+        record: RuntimeTransferRecord,
+        credential: RuntimeRunnerCredential,
+        owner_task: asyncio.Task[Any],
+    ) -> None:
+        self.servicer = servicer
+        self.record = record
+        self.credential = credential
+        self.owner_task = owner_task
+        self.termination: _StreamTermination | None = None
+        self.task = asyncio.create_task(self._run())
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(STREAM_OWNER_RENEWAL_SECONDS)
+                try:
+                    current = await self.servicer.renew_stream_owner(
+                        self.record,
+                        self.credential,
+                    )
+                except _TransferCancelled:
+                    self.termination = _StreamTermination.CANCELLED
+                except _TransferExpired:
+                    self.termination = _StreamTermination.EXPIRED
+                except Exception:
+                    self.termination = _StreamTermination.FENCED
+                else:
+                    self.record = current
+                    continue
+                self.owner_task.cancel()
+                return
+        except asyncio.CancelledError:
+            raise
+
+    async def stop(self) -> None:
+        self.task.cancel()
+        with suppress(asyncio.CancelledError):
+            await self.task
 
 
 class RuntimeRunnerTransferObjectStore(Protocol):
@@ -116,6 +193,31 @@ class RuntimeRunnerTransferObjectStore(Protocol):
         """Create and verify one immutable empty transfer object."""
         ...
 
+    async def delete_verified_transfer_object(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> None:
+        """Delete one exact completed attempt object under trusted evidence."""
+        ...
+
+
+class RuntimeTransferTerminalSink(Protocol):
+    """Settle and correlate one Control-authoritative transfer terminal."""
+
+    async def settle_terminal(
+        self,
+        record: RuntimeTransferRecord,
+        *,
+        outcome: RuntimeTransferOutcome,
+        failure: RuntimeTransferFailure,
+        cleanup_completed: bool,
+    ) -> RuntimeTransferRecord | None:
+        """Settle one exact attempt and append its initiating operation final."""
+        ...
+
 
 class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
     """Authenticate and stream state-owned objects to one Runner."""
@@ -126,6 +228,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         state_store: RuntimeTransferStateStore,
         coordination_store: RuntimeCoordinationStore,
         object_store: RuntimeRunnerTransferObjectStore,
+        terminal_sink: RuntimeTransferTerminalSink,
         bucket: str,
         owner_replica_id: str,
         runner_authenticator: RuntimeRunnerCredentialAuthenticator,
@@ -141,6 +244,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         :param state_store: authoritative transfer state
         :param coordination_store: current Runner generation registry
         :param object_store: trusted object-store service
+        :param terminal_sink: authoritative terminal settlement and correlation
         :param bucket: trusted object bucket selected by Control
         :param object_prefix: internal transfer-object S3 key namespace
         :param owner_replica_id: Control replica owning stream claims
@@ -164,6 +268,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         self._state_store = state_store
         self._coordination_store = coordination_store
         self._object_store = object_store
+        self._terminal_sink = terminal_sink
         self._bucket = bucket
         self._object_prefix = object_prefix
         self._owner_replica_id = owner_replica_id
@@ -200,6 +305,8 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             raise AssertionError("unreachable")
         await self._downloads.acquire()
         claimed: RuntimeTransferRecord | None = None
+        latest: RuntimeTransferRecord | None = None
+        keeper: _StreamLeaseKeeper | None = None
         try:
             claimed = await self._state_store.claim_stream(
                 record.admission.transfer_id,
@@ -217,6 +324,8 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     "Transfer stream claim is unavailable",
                 )
                 raise AssertionError("unreachable")
+            latest = claimed
+            keeper = self._start_lease_keeper(claimed, credential)
             if claimed.object is None:
                 await self._fail(claimed)
                 await context.abort(
@@ -240,8 +349,6 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 raise AssertionError("unreachable")
             offset = 0
             digest = hashlib.sha256()
-            latest = claimed
-            renewed_at = self._now()
             async with self._object_store.iter_chunks(
                 identity,
                 maximum_chunk_size=self._maximum_chunk_bytes,
@@ -264,45 +371,12 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                             "Transfer object exceeds expected size",
                         )
                         raise AssertionError("unreachable")
-                    progressed = await self._state_store.record_progress(
-                        latest.admission.transfer_id,
-                        attempt_id=latest.admission.attempt_id,
-                        runtime_id=latest.admission.runtime_id,
-                        desired_generation=latest.admission.desired_generation,
-                        accepted_runner_generation=latest.accepted_runner_generation
-                        or 0,
-                        claim_id=latest.stream_claim_id or "",
-                        expected_revision=latest.revision,
-                        bytes_transferred=offset,
+                    latest = await self._record_progress(
+                        latest,
+                        offset,
+                        context,
+                        force=offset == latest.admission.expected_size,
                     )
-                    if progressed is None:
-                        await context.abort(
-                            grpc.StatusCode.FAILED_PRECONDITION,
-                            "Transfer stream is fenced",
-                        )
-                        raise AssertionError("unreachable")
-                    latest = progressed
-                    now = self._now()
-                    if (
-                        now - renewed_at
-                    ).total_seconds() >= STREAM_OWNER_RENEWAL_SECONDS:
-                        renewed = await self._state_store.renew_stream_lease(
-                            latest.admission.transfer_id,
-                            attempt_id=latest.admission.attempt_id,
-                            accepted_runner_generation=latest.accepted_runner_generation
-                            or 0,
-                            expected_revision=latest.revision,
-                            claim_id=latest.stream_claim_id or "",
-                            owner_replica_id=self._owner_replica_id,
-                        )
-                        if renewed is None:
-                            await context.abort(
-                                grpc.StatusCode.FAILED_PRECONDITION,
-                                "Transfer stream lease is fenced",
-                            )
-                            raise AssertionError("unreachable")
-                        latest = renewed
-                        renewed_at = now
                     yield pb.DownloadTransferFrame(
                         chunk=pb.TransferChunk(offset=offset - len(chunk), data=chunk)
                     )
@@ -315,16 +389,99 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     grpc.StatusCode.DATA_LOSS, "Transfer object manifest does not match"
                 )
                 raise AssertionError("unreachable")
+            await keeper.stop()
+            keeper = None
+            verifying = await self._state_store.begin_verification(
+                latest.admission.transfer_id,
+                attempt_id=latest.admission.attempt_id,
+                runtime_id=latest.admission.runtime_id,
+                desired_generation=latest.admission.desired_generation,
+                accepted_runner_generation=latest.accepted_runner_generation or 0,
+                claim_id=latest.stream_claim_id or "",
+                expected_revision=latest.revision,
+            )
+            if verifying is None:
+                await context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "Transfer completion is fenced",
+                )
+                raise AssertionError("unreachable")
+            latest = verifying
             yield pb.DownloadTransferFrame(
                 complete=pb.DownloadTransferComplete(
                     actual_size=offset, sha256=digest.hexdigest()
                 )
             )
+        except _TransferCancelled as exc:
+            await self._abort_for_cancellation(exc.record, context)
+            raise AssertionError("unreachable")
+        except _TransferExpired as exc:
+            await self._fail(
+                exc.record,
+                outcome=RuntimeTransferOutcome.EXPIRED,
+                failure=RuntimeTransferFailure.EXPIRED,
+            )
+            await context.abort(
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+                "Transfer deadline expired",
+            )
+            raise AssertionError("unreachable")
         except asyncio.CancelledError:
-            if claimed is not None:
-                await self._fail(claimed, cancelled=True)
+            if latest is not None:
+                current = await self._state_store.get(latest.admission.transfer_id)
+                latest = current or latest
+                if (
+                    keeper is not None
+                    and keeper.termination is _StreamTermination.EXPIRED
+                ):
+                    await self._fail(
+                        latest,
+                        outcome=RuntimeTransferOutcome.EXPIRED,
+                        failure=RuntimeTransferFailure.EXPIRED,
+                    )
+                    await context.abort(
+                        grpc.StatusCode.DEADLINE_EXCEEDED,
+                        "Transfer deadline expired",
+                    )
+                    raise AssertionError("unreachable")
+                if (
+                    keeper is not None
+                    and keeper.termination is _StreamTermination.FENCED
+                ):
+                    settled = await self._fail(latest)
+                    if (
+                        settled is not None
+                        and settled.terminal_outcome is RuntimeTransferOutcome.EXPIRED
+                    ):
+                        await context.abort(
+                            grpc.StatusCode.DEADLINE_EXCEEDED,
+                            "Transfer deadline expired",
+                        )
+                    await context.abort(
+                        grpc.StatusCode.FAILED_PRECONDITION,
+                        "Transfer stream is fenced",
+                    )
+                    raise AssertionError("unreachable")
+                await self._fail(latest, cancelled=True)
             raise
+        except Exception as exc:
+            if _is_abort_exception(exc):
+                raise
+            if latest is not None:
+                settled = await self._fail(latest)
+                if (
+                    settled is not None
+                    and settled.terminal_outcome is RuntimeTransferOutcome.EXPIRED
+                ):
+                    await context.abort(
+                        grpc.StatusCode.DEADLINE_EXCEEDED,
+                        "Transfer deadline expired",
+                    )
+            await context.abort(grpc.StatusCode.INTERNAL, "Transfer stream failed")
+            raise AssertionError("unreachable")
         finally:
+            if keeper is not None:
+                await keeper.stop()
             self._downloads.release()
 
     async def UploadTransfer(
@@ -367,6 +524,10 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         await self._uploads.acquire()
         latest: RuntimeTransferRecord | None = None
         upload: S3MultipartUpload | None = None
+        multipart_cleanup_required = False
+        completed_object_cleanup_required = False
+        identity: S3ObjectIdentity | None = None
+        keeper: _StreamLeaseKeeper | None = None
         try:
             latest = await self._state_store.claim_stream(
                 record.admission.transfer_id,
@@ -384,6 +545,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     "Transfer stream claim is unavailable",
                 )
                 raise AssertionError("unreachable")
+            keeper = self._start_lease_keeper(latest, credential)
             if latest.object is None:
                 await self._fail(latest)
                 await context.abort(
@@ -418,7 +580,6 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             digest = hashlib.sha256()
             parts: list[S3CompletedPart] = []
             buffer = bytearray()
-            renewed_at = self._now()
             saw_completion = False
             async for frame in request_iterator:
                 latest = await self._check_stream(latest, credential, context)
@@ -507,6 +668,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                             )
                             raise AssertionError("unreachable")
                         latest = pending
+                        multipart_cleanup_required = True
                     digest.update(data)
                     offset = next_offset
                     buffer.extend(data)
@@ -520,9 +682,11 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                             bytes(buffer[: self._multipart_part_bytes]),
                         )
                         del buffer[: self._multipart_part_bytes]
-                    latest = await self._record_progress(latest, offset, context)
-                    latest, renewed_at = await self._renew_if_due(
-                        latest, renewed_at, context
+                    latest = await self._record_progress(
+                        latest,
+                        offset,
+                        context,
+                        force=offset == transfer_object.size,
                     )
                     continue
                 if payload == "complete":
@@ -565,92 +729,166 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     "Upload transfer completion is required",
                 )
                 raise AssertionError("unreachable")
-            latest = await self._check_stream(latest, credential, context)
-            if transfer_object.size == 0:
-                await self._object_store.create_empty_immutable(
-                    destination=identity,
-                    transfer_metadata=metadata,
-                )
-            else:
-                if upload is None:
-                    await self._fail(latest)
-                    await context.abort(
-                        grpc.StatusCode.INTERNAL, "Upload transfer stream is invalid"
-                    )
-                    raise AssertionError("unreachable")
-                if buffer:
-                    latest = await self._upload_part(
-                        latest,
-                        credential,
-                        context,
-                        upload,
-                        parts,
-                        bytes(buffer),
-                    )
-                latest = await self._check_stream(latest, credential, context)
-                await self._object_store.complete_multipart_upload(
-                    upload=upload,
-                    completed_parts=tuple(parts),
-                    expected_size=offset,
-                    expected_sha256=digest.hexdigest(),
-                )
-            verifying = await self._state_store.begin_verification(
-                latest.admission.transfer_id,
-                attempt_id=latest.admission.attempt_id,
-                runtime_id=latest.admission.runtime_id,
-                desired_generation=latest.admission.desired_generation,
-                accepted_runner_generation=latest.accepted_runner_generation or 0,
-                claim_id=latest.stream_claim_id or "",
-                expected_revision=latest.revision,
-            )
-            if verifying is None:
-                await context.abort(
-                    grpc.StatusCode.FAILED_PRECONDITION,
-                    "Transfer stream is fenced",
-                )
-                raise AssertionError("unreachable")
-            available = await self._state_store.publish_available(
-                verifying.admission.transfer_id,
-                attempt_id=verifying.admission.attempt_id,
-                runtime_id=verifying.admission.runtime_id,
-                desired_generation=verifying.admission.desired_generation,
-                accepted_runner_generation=verifying.accepted_runner_generation or 0,
-                claim_id=verifying.stream_claim_id or "",
-                expected_revision=verifying.revision,
+            latest = await self._complete_and_commit_upload(
+                latest,
+                credential=credential,
+                context=context,
+                keeper=keeper,
+                transfer_object=transfer_object,
+                identity=identity,
+                metadata=metadata,
+                upload=upload,
+                parts=parts,
+                final_buffer=bytes(buffer),
                 actual_size=offset,
                 actual_sha256=digest.hexdigest(),
             )
-            if available is None:
-                await context.abort(
-                    grpc.StatusCode.FAILED_PRECONDITION,
-                    "Transfer availability is fenced",
-                )
-                raise AssertionError("unreachable")
-            if upload is not None:
-                await self._state_store.record_cleanup(
-                    available.admission.transfer_id,
-                    attempt_id=available.admission.attempt_id,
-                    expected_revision=available.revision,
-                    status=RuntimeTransferCleanupStatus.COMPLETE,
-                )
+            keeper = None
+            multipart_cleanup_required = False
+            completed_object_cleanup_required = False
             return pb.UploadTransferResult(
                 status=pb.UPLOAD_TRANSFER_STATUS_SUCCEEDED,
                 actual_size=offset,
                 sha256=digest.hexdigest(),
             )
-        except asyncio.CancelledError:
+        except _TransferCancelled as exc:
+            latest = exc.record
+            if identity is not None:
+                latest = await self._cleanup_upload(
+                    latest,
+                    upload=upload,
+                    multipart_cleanup_required=multipart_cleanup_required,
+                    completed_object_cleanup_required=(
+                        completed_object_cleanup_required
+                    ),
+                    identity=identity,
+                )
+            await self._abort_for_cancellation(latest, context)
+            raise AssertionError("unreachable")
+        except _TransferExpired as exc:
+            latest = exc.record
+            if identity is not None:
+                latest = await self._cleanup_upload(
+                    latest,
+                    upload=upload,
+                    multipart_cleanup_required=multipart_cleanup_required,
+                    completed_object_cleanup_required=(
+                        completed_object_cleanup_required
+                    ),
+                    identity=identity,
+                )
+            await self._fail(
+                latest,
+                outcome=RuntimeTransferOutcome.EXPIRED,
+                failure=RuntimeTransferFailure.EXPIRED,
+            )
+            await context.abort(
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+                "Transfer deadline expired",
+            )
+            raise AssertionError("unreachable")
+        except asyncio.CancelledError as exc:
+            if isinstance(exc, S3TransferCancelled):
+                multipart_cleanup_required = exc.multipart_cleanup_required
+                completed_object_cleanup_required = (
+                    exc.completed_object_cleanup_required
+                )
             if latest is not None:
-                if upload is not None:
-                    latest = await self._abort_upload(latest, upload)
+                current = await self._state_store.get(latest.admission.transfer_id)
+                latest = current or latest
+                if latest.upload_response_committed_at is not None:
+                    raise
+                if identity is not None:
+                    latest = await self._cleanup_upload(
+                        latest,
+                        upload=upload,
+                        multipart_cleanup_required=multipart_cleanup_required,
+                        completed_object_cleanup_required=(
+                            completed_object_cleanup_required
+                        ),
+                        identity=identity,
+                    )
+                if (
+                    keeper is not None
+                    and keeper.termination is _StreamTermination.EXPIRED
+                ):
+                    await self._fail(
+                        latest,
+                        outcome=RuntimeTransferOutcome.EXPIRED,
+                        failure=RuntimeTransferFailure.EXPIRED,
+                    )
+                    await context.abort(
+                        grpc.StatusCode.DEADLINE_EXCEEDED,
+                        "Transfer deadline expired",
+                    )
+                    raise AssertionError("unreachable")
+                if (
+                    keeper is not None
+                    and keeper.termination is _StreamTermination.FENCED
+                ):
+                    settled = await self._fail(latest)
+                    if (
+                        settled is not None
+                        and settled.terminal_outcome is RuntimeTransferOutcome.EXPIRED
+                    ):
+                        await context.abort(
+                            grpc.StatusCode.DEADLINE_EXCEEDED,
+                            "Transfer deadline expired",
+                        )
+                    await context.abort(
+                        grpc.StatusCode.FAILED_PRECONDITION,
+                        "Transfer stream is fenced",
+                    )
+                    raise AssertionError("unreachable")
                 await self._fail(latest, cancelled=True)
             raise
-        except Exception:
+        except Exception as exc:
+            if _is_abort_exception(exc):
+                if latest is not None and identity is not None:
+                    latest = await self._cleanup_upload(
+                        latest,
+                        upload=upload,
+                        multipart_cleanup_required=multipart_cleanup_required,
+                        completed_object_cleanup_required=(
+                            completed_object_cleanup_required
+                        ),
+                        identity=identity,
+                    )
+                    settled = await self._settle_lost_upload_authority(latest)
+                    if (
+                        settled is not None
+                        and settled.terminal_outcome is RuntimeTransferOutcome.EXPIRED
+                    ):
+                        await context.abort(
+                            grpc.StatusCode.DEADLINE_EXCEEDED,
+                            "Transfer deadline expired",
+                        )
+                raise
             if latest is not None:
-                if upload is not None:
-                    latest = await self._abort_upload(latest, upload)
-                await self._fail(latest)
-            raise
+                if identity is not None:
+                    latest = await self._cleanup_upload(
+                        latest,
+                        upload=upload,
+                        multipart_cleanup_required=multipart_cleanup_required,
+                        completed_object_cleanup_required=(
+                            completed_object_cleanup_required
+                        ),
+                        identity=identity,
+                    )
+                settled = await self._fail(latest)
+                if (
+                    settled is not None
+                    and settled.terminal_outcome is RuntimeTransferOutcome.EXPIRED
+                ):
+                    await context.abort(
+                        grpc.StatusCode.DEADLINE_EXCEEDED,
+                        "Transfer deadline expired",
+                    )
+            await context.abort(grpc.StatusCode.INTERNAL, "Transfer stream failed")
+            raise AssertionError("unreachable")
         finally:
+            if keeper is not None:
+                await keeper.stop()
             self._uploads.release()
 
     async def _authorize_download(
@@ -670,19 +908,36 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 grpc.StatusCode.FAILED_PRECONDITION, "Transfer identity is invalid"
             )
             raise AssertionError("unreachable")
-        if (
-            identity.runtime_id != credential.runtime_id
-            or identity.runner_generation != credential.desired_generation
-        ):
+        if identity.runtime_id != credential.runtime_id:
             await context.abort(
                 grpc.StatusCode.PERMISSION_DENIED, "Transfer identity is not authorized"
             )
             raise AssertionError("unreachable")
         record = await self._state_store.get(identity.transfer_id)
         if (
+            record is not None
+            and record.admission.attempt_id == identity.attempt_id
+            and record.admission.runtime_id == identity.runtime_id
+            and record.admission.desired_generation == credential.desired_generation
+            and record.admission.direction is RuntimeTransferDirection.DOWNLOAD
+            and record.accepted_runner_generation == identity.runner_generation
+            and _expired(record, self._now())
+        ):
+            await self._fail(
+                record,
+                outcome=RuntimeTransferOutcome.EXPIRED,
+                failure=RuntimeTransferFailure.EXPIRED,
+            )
+            await context.abort(
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+                "Transfer deadline expired",
+            )
+            raise AssertionError("unreachable")
+        if (
             record is None
             or record.admission.attempt_id != identity.attempt_id
             or record.admission.runtime_id != identity.runtime_id
+            or record.admission.desired_generation != credential.desired_generation
             or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
             or record.phase.value != "ready"
             or record.dispatch_status
@@ -720,19 +975,36 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 grpc.StatusCode.FAILED_PRECONDITION, "Transfer identity is invalid"
             )
             raise AssertionError("unreachable")
-        if (
-            identity.runtime_id != credential.runtime_id
-            or identity.runner_generation != credential.desired_generation
-        ):
+        if identity.runtime_id != credential.runtime_id:
             await context.abort(
                 grpc.StatusCode.PERMISSION_DENIED, "Transfer identity is not authorized"
             )
             raise AssertionError("unreachable")
         record = await self._state_store.get(identity.transfer_id)
         if (
+            record is not None
+            and record.admission.attempt_id == identity.attempt_id
+            and record.admission.runtime_id == identity.runtime_id
+            and record.admission.desired_generation == credential.desired_generation
+            and record.admission.direction is RuntimeTransferDirection.UPLOAD
+            and record.accepted_runner_generation == identity.runner_generation
+            and _expired(record, self._now())
+        ):
+            await self._fail(
+                record,
+                outcome=RuntimeTransferOutcome.EXPIRED,
+                failure=RuntimeTransferFailure.EXPIRED,
+            )
+            await context.abort(
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+                "Transfer deadline expired",
+            )
+            raise AssertionError("unreachable")
+        if (
             record is None
             or record.admission.attempt_id != identity.attempt_id
             or record.admission.runtime_id != identity.runtime_id
+            or record.admission.desired_generation != credential.desired_generation
             or record.admission.direction is not RuntimeTransferDirection.UPLOAD
             or record.phase.value not in {"ready", "streaming"}
             or record.dispatch_status
@@ -764,9 +1036,10 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         credential: RuntimeRunnerCredential,
         context: grpc.aio.ServicerContext[object, object],
     ) -> RuntimeTransferRecord:
-        if context.cancelled() or not await self._runner_authenticator.authorize_runner(
-            credential
-        ):
+        if context.cancelled():
+            current = await self._state_store.get(record.admission.transfer_id)
+            raise _TransferCancelled(current or record)
+        if not await self._runner_authenticator.authorize_runner(credential):
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED, "Runner transfer authorization expired"
             )
@@ -777,14 +1050,27 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             subject_id=record.admission.runtime_id,
         )
         if (
+            current is not None
+            and current.admission.attempt_id == record.admission.attempt_id
+            and current.cancellation_requested_at is not None
+        ):
+            if (
+                current.cancellation_reason
+                is RuntimeTransferCancellationReason.DEADLINE
+            ):
+                raise _TransferExpired(current)
+            raise _TransferCancelled(current)
+        if current is not None and _expired(current, self._now()):
+            raise _TransferExpired(current)
+        if (
             current is None
             or current.revision != record.revision
             or current.stream_claim_id != record.stream_claim_id
             or current.stream_owner_replica_id != self._owner_replica_id
-            or current.accepted_runner_generation != credential.desired_generation
+            or current.admission.desired_generation != credential.desired_generation
+            or current.accepted_runner_generation != record.accepted_runner_generation
             or connection is None
-            or connection.generation != credential.desired_generation
-            or _expired(current, self._now())
+            or connection.generation != current.accepted_runner_generation
         ):
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION, "Transfer stream is fenced"
@@ -797,7 +1083,23 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         record: RuntimeTransferRecord,
         offset: int,
         context: grpc.aio.ServicerContext[object, object],
+        *,
+        force: bool,
     ) -> RuntimeTransferRecord:
+        now = self._now()
+        progress = record.progress
+        byte_threshold = max(
+            _PROGRESS_MINIMUM_BYTES,
+            self._maximum_chunk_bytes * 4,
+        )
+        previous_bytes = 0 if progress is None else progress.bytes_transferred
+        previous_at = record.updated_at if progress is None else progress.observed_at
+        if (
+            not force
+            and offset - previous_bytes < byte_threshold
+            and (now - previous_at).total_seconds() < _PROGRESS_INTERVAL_SECONDS
+        ):
+            return record
         progressed = await self._state_store.record_progress(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
@@ -815,29 +1117,242 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             raise AssertionError("unreachable")
         return progressed
 
-    async def _renew_if_due(
+    def _start_lease_keeper(
         self,
         record: RuntimeTransferRecord,
-        renewed_at: datetime,
-        context: grpc.aio.ServicerContext[object, object],
-    ) -> tuple[RuntimeTransferRecord, datetime]:
-        now = self._now()
-        if (now - renewed_at).total_seconds() < STREAM_OWNER_RENEWAL_SECONDS:
-            return record, renewed_at
+        credential: RuntimeRunnerCredential,
+    ) -> _StreamLeaseKeeper:
+        owner_task = asyncio.current_task()
+        if owner_task is None:
+            raise RuntimeError("Runner transfer task is unavailable")
+        return _StreamLeaseKeeper(
+            servicer=self,
+            record=record,
+            credential=credential,
+            owner_task=owner_task,
+        )
+
+    async def renew_stream_owner(
+        self,
+        record: RuntimeTransferRecord,
+        credential: RuntimeRunnerCredential,
+    ) -> RuntimeTransferRecord:
+        if not await self._runner_authenticator.authorize_runner(credential):
+            raise RuntimeError("Runner transfer authorization expired")
+        current = await self._state_store.get(record.admission.transfer_id)
+        if (
+            current is not None
+            and current.admission.attempt_id == record.admission.attempt_id
+            and current.cancellation_requested_at is not None
+        ):
+            if (
+                current.cancellation_reason
+                is RuntimeTransferCancellationReason.DEADLINE
+            ):
+                raise _TransferExpired(current)
+            raise _TransferCancelled(current)
+        if current is not None and _expired(current, self._now()):
+            raise _TransferExpired(current)
+        connection = await self._coordination_store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id=record.admission.runtime_id,
+        )
+        if (
+            current is None
+            or current.phase.value != "streaming"
+            or current.stream_claim_id != record.stream_claim_id
+            or current.stream_owner_replica_id != self._owner_replica_id
+            or current.admission.desired_generation != credential.desired_generation
+            or current.accepted_runner_generation != record.accepted_runner_generation
+            or connection is None
+            or connection.generation != current.accepted_runner_generation
+        ):
+            raise RuntimeError("Transfer stream is fenced")
         renewed = await self._state_store.renew_stream_lease(
-            record.admission.transfer_id,
-            attempt_id=record.admission.attempt_id,
-            accepted_runner_generation=record.accepted_runner_generation or 0,
-            expected_revision=record.revision,
-            claim_id=record.stream_claim_id or "",
+            current.admission.transfer_id,
+            attempt_id=current.admission.attempt_id,
+            accepted_runner_generation=current.accepted_runner_generation or 0,
+            expected_revision=current.revision,
+            claim_id=current.stream_claim_id or "",
             owner_replica_id=self._owner_replica_id,
         )
         if renewed is None:
+            raise RuntimeError("Transfer stream lease is fenced")
+        return renewed
+
+    async def _complete_and_commit_upload(
+        self,
+        record: RuntimeTransferRecord,
+        *,
+        credential: RuntimeRunnerCredential,
+        context: grpc.aio.ServicerContext[object, object],
+        keeper: _StreamLeaseKeeper,
+        transfer_object: RuntimeTransferObject,
+        identity: S3ObjectIdentity,
+        metadata: S3TransferObjectMetadata,
+        upload: S3MultipartUpload | None,
+        parts: list[S3CompletedPart],
+        final_buffer: bytes,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord:
+        """Persist cleanup authority, complete S3, and commit upload success."""
+        latest = await self._check_stream(record, credential, context)
+        if transfer_object.size > 0:
+            if upload is None:
+                await self._fail(latest)
+                await context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    "Upload transfer stream is invalid",
+                )
+                raise AssertionError("unreachable")
+            if final_buffer:
+                latest = await self._upload_part(
+                    latest,
+                    credential,
+                    context,
+                    upload,
+                    parts,
+                    final_buffer,
+                )
+            latest = await self._check_stream(latest, credential, context)
+        responsibility = await self._state_store.record_completed_object_cleanup(
+            latest.admission.transfer_id,
+            attempt_id=latest.admission.attempt_id,
+            expected_revision=latest.revision,
+            status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+            multipart_cleanup_required=upload is not None,
+            completed_object_cleanup_required=True,
+        )
+        if responsibility is None:
+            current = await self._state_store.get(latest.admission.transfer_id)
+            cleaned = await self._cleanup_upload(
+                current or latest,
+                upload=upload,
+                multipart_cleanup_required=upload is not None,
+                completed_object_cleanup_required=False,
+                identity=identity,
+            )
+            await self._settle_lost_upload_authority(cleaned)
             await context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION, "Transfer stream lease is fenced"
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Transfer completion cleanup authority is fenced",
             )
             raise AssertionError("unreachable")
-        return renewed, now
+        latest = responsibility
+        try:
+            if transfer_object.size == 0:
+                await self._object_store.create_empty_immutable(
+                    destination=identity,
+                    transfer_metadata=metadata,
+                )
+            else:
+                assert upload is not None
+                await self._object_store.complete_multipart_upload(
+                    upload=upload,
+                    completed_parts=tuple(parts),
+                    expected_size=actual_size,
+                    expected_sha256=actual_sha256,
+                )
+        except (S3TransferCancelled, S3TransferCleanupRequired) as exc:
+            retained = await self._state_store.record_completed_object_cleanup(
+                latest.admission.transfer_id,
+                attempt_id=latest.admission.attempt_id,
+                expected_revision=latest.revision,
+                status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                multipart_cleanup_required=exc.multipart_cleanup_required,
+                completed_object_cleanup_required=(
+                    exc.completed_object_cleanup_required
+                ),
+            )
+            if retained is not None:
+                latest = retained
+            raise
+        if upload is not None:
+            completed_only = await self._state_store.record_completed_object_cleanup(
+                latest.admission.transfer_id,
+                attempt_id=latest.admission.attempt_id,
+                expected_revision=latest.revision,
+                status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                multipart_cleanup_required=False,
+                completed_object_cleanup_required=True,
+            )
+            if completed_only is None:
+                current = await self._state_store.get(latest.admission.transfer_id)
+                cleaned = await self._cleanup_upload(
+                    current or latest,
+                    upload=upload,
+                    multipart_cleanup_required=True,
+                    completed_object_cleanup_required=True,
+                    identity=identity,
+                )
+                await self._settle_lost_upload_authority(cleaned)
+                await context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "Transfer completion state is fenced",
+                )
+                raise AssertionError("unreachable")
+            latest = completed_only
+        await keeper.stop()
+        verifying = await self._state_store.begin_verification(
+            latest.admission.transfer_id,
+            attempt_id=latest.admission.attempt_id,
+            runtime_id=latest.admission.runtime_id,
+            desired_generation=latest.admission.desired_generation,
+            accepted_runner_generation=latest.accepted_runner_generation or 0,
+            claim_id=latest.stream_claim_id or "",
+            expected_revision=latest.revision,
+        )
+        if verifying is None:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Transfer stream is fenced",
+            )
+            raise AssertionError("unreachable")
+        available = await self._state_store.publish_available(
+            verifying.admission.transfer_id,
+            attempt_id=verifying.admission.attempt_id,
+            runtime_id=verifying.admission.runtime_id,
+            desired_generation=verifying.admission.desired_generation,
+            accepted_runner_generation=verifying.accepted_runner_generation or 0,
+            claim_id=verifying.stream_claim_id or "",
+            expected_revision=verifying.revision,
+            actual_size=actual_size,
+            actual_sha256=actual_sha256,
+        )
+        if available is None:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Transfer availability is fenced",
+            )
+            raise AssertionError("unreachable")
+        committed = await self._state_store.commit_upload_response(
+            available.admission.transfer_id,
+            attempt_id=available.admission.attempt_id,
+            runtime_id=available.admission.runtime_id,
+            desired_generation=available.admission.desired_generation,
+            accepted_runner_generation=available.accepted_runner_generation or 0,
+            claim_id=available.stream_claim_id or "",
+            expected_revision=available.revision,
+            actual_size=actual_size,
+            actual_sha256=actual_sha256,
+        )
+        if committed is not None:
+            return committed
+        current = await self._state_store.get(available.admission.transfer_id)
+        cleaned = await self._cleanup_upload(
+            current or available,
+            upload=upload,
+            multipart_cleanup_required=False,
+            completed_object_cleanup_required=True,
+            identity=identity,
+        )
+        await self._settle_lost_upload_authority(cleaned)
+        await context.abort(
+            grpc.StatusCode.FAILED_PRECONDITION,
+            "Transfer upload response lost authority",
+        )
+        raise AssertionError("unreachable")
 
     async def _upload_part(
         self,
@@ -890,32 +1405,157 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         )
         return updated or current
 
+    async def _cleanup_upload(
+        self,
+        record: RuntimeTransferRecord,
+        *,
+        upload: S3MultipartUpload | None,
+        multipart_cleanup_required: bool,
+        completed_object_cleanup_required: bool,
+        identity: S3ObjectIdentity,
+    ) -> RuntimeTransferRecord:
+        """Clean exact upload artifacts and retain only failed cleanup evidence."""
+        current = await self._state_store.get(record.admission.transfer_id)
+        if (
+            current is not None
+            and current.admission.attempt_id == record.admission.attempt_id
+        ):
+            if current.upload_response_committed_at is not None:
+                return current
+            record = current
+            multipart_cleanup_required = current.multipart_cleanup_handle is not None
+            completed_object_cleanup_required = (
+                current.completed_object_cleanup_required
+            )
+        multipart_remaining = multipart_cleanup_required
+        completed_remaining = completed_object_cleanup_required
+        if multipart_cleanup_required and upload is not None:
+            try:
+                await self._object_store.abort_multipart_upload(upload=upload)
+            except Exception:
+                pass
+            else:
+                multipart_remaining = False
+        if completed_object_cleanup_required:
+            try:
+                if record.object is None:
+                    raise ValueError("Completed object metadata is unavailable")
+                await self._object_store.delete_verified_transfer_object(
+                    identity=identity,
+                    expected_size=record.object.size,
+                    expected_sha256=record.object.sha256,
+                )
+            except Exception:
+                pass
+            else:
+                completed_remaining = False
+        current = await self._state_store.get(record.admission.transfer_id)
+        if (
+            current is None
+            or current.admission.attempt_id != record.admission.attempt_id
+        ):
+            return record
+        if not completed_object_cleanup_required:
+            if not multipart_cleanup_required:
+                return current
+            updated = await self._state_store.record_cleanup(
+                current.admission.transfer_id,
+                attempt_id=current.admission.attempt_id,
+                expected_revision=current.revision,
+                status=(
+                    RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+                    if multipart_remaining
+                    else RuntimeTransferCleanupStatus.COMPLETE
+                ),
+            )
+            return updated or current
+        updated = await self._state_store.record_completed_object_cleanup(
+            current.admission.transfer_id,
+            attempt_id=current.admission.attempt_id,
+            expected_revision=current.revision,
+            status=(
+                RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+                if multipart_remaining or completed_remaining
+                else RuntimeTransferCleanupStatus.COMPLETE
+            ),
+            multipart_cleanup_required=multipart_remaining,
+            completed_object_cleanup_required=completed_remaining,
+        )
+        return updated or current
+
     async def _fail(
         self,
         record: RuntimeTransferRecord,
         *,
         cancelled: bool = False,
+        outcome: RuntimeTransferOutcome | None = None,
         failure: RuntimeTransferFailure = RuntimeTransferFailure.STREAM,
-    ) -> None:
-        outcome = (
-            RuntimeTransferOutcome.CANCELLED
-            if cancelled
-            else RuntimeTransferOutcome.FAILED
-        )
-        failure = RuntimeTransferFailure.CANCELLED if cancelled else failure
-        settled = await self._state_store.settle(
-            record.admission.transfer_id,
-            attempt_id=record.admission.attempt_id,
-            expected_revision=record.revision,
+    ) -> RuntimeTransferRecord | None:
+        if outcome is None:
+            outcome = (
+                RuntimeTransferOutcome.CANCELLED
+                if cancelled
+                else RuntimeTransferOutcome.FAILED
+            )
+        if cancelled:
+            failure = RuntimeTransferFailure.CANCELLED
+        return await self._terminal_sink.settle_terminal(
+            record,
             outcome=outcome,
             failure=failure,
+            cleanup_completed=(
+                record.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
+                and record.multipart_cleanup_handle is None
+                and not record.completed_object_cleanup_required
+            ),
         )
-        if settled is not None:
-            await self._state_store.release_admission(
-                settled.admission.transfer_id,
-                attempt_id=settled.admission.attempt_id,
-                lease_id=settled.lease_id,
+
+    async def _abort_for_cancellation(
+        self,
+        record: RuntimeTransferRecord,
+        context: grpc.aio.ServicerContext[object, object],
+    ) -> None:
+        """Settle and expose one persisted cancellation with canonical semantics."""
+        reason = record.cancellation_reason or RuntimeTransferCancellationReason.CALLER
+        settlement = cancellation_settlement(reason)
+        await self._fail(
+            record,
+            outcome=settlement.outcome,
+            failure=settlement.failure or RuntimeTransferFailure.CANCELLED,
+        )
+        if reason is RuntimeTransferCancellationReason.DEADLINE:
+            await context.abort(
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+                "Transfer deadline expired",
             )
+        if reason is RuntimeTransferCancellationReason.SUPERSEDED:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "Transfer Runner generation was superseded",
+            )
+        await context.abort(grpc.StatusCode.CANCELLED, "Transfer was cancelled")
+
+    async def _settle_lost_upload_authority(
+        self,
+        record: RuntimeTransferRecord,
+    ) -> RuntimeTransferRecord | None:
+        """Settle the exact authority that defeated post-publish success."""
+        if record.phase.value == "terminal":
+            return record
+        if record.cancellation_reason is not None:
+            settlement = cancellation_settlement(record.cancellation_reason)
+            return await self._fail(
+                record,
+                outcome=settlement.outcome,
+                failure=settlement.failure or RuntimeTransferFailure.CANCELLED,
+            )
+        if _expired(record, self._now()):
+            return await self._fail(
+                record,
+                outcome=RuntimeTransferOutcome.EXPIRED,
+                failure=RuntimeTransferFailure.EXPIRED,
+            )
+        return await self._fail(record, failure=RuntimeTransferFailure.FENCED)
 
     def _now(self) -> datetime:
         now = self._clock()
@@ -938,6 +1578,7 @@ def add_runtime_runner_transfer_servicer(
     state_store: RuntimeTransferStateStore,
     coordination_store: RuntimeCoordinationStore,
     object_store: RuntimeRunnerTransferObjectStore,
+    terminal_sink: RuntimeTransferTerminalSink,
     bucket: str,
     owner_replica_id: str,
     runner_authenticator: RuntimeRunnerCredentialAuthenticator,
@@ -954,6 +1595,7 @@ def add_runtime_runner_transfer_servicer(
             state_store=state_store,
             coordination_store=coordination_store,
             object_store=object_store,
+            terminal_sink=terminal_sink,
             bucket=bucket,
             owner_replica_id=owner_replica_id,
             runner_authenticator=runner_authenticator,
@@ -978,6 +1620,13 @@ def _claim_id() -> str:
 
 def _multipart_part_count(size: int, multipart_part_bytes: int) -> int:
     return (size + multipart_part_bytes - 1) // multipart_part_bytes
+
+
+def _is_abort_exception(exc: Exception) -> bool:
+    """Return whether a gRPC context already selected an explicit status."""
+    if isinstance(exc, grpc.aio.AbortError):
+        return True
+    return isinstance(getattr(exc, "code", None), grpc.StatusCode)
 
 
 def _valid_identity(identity: pb.TransferIdentity) -> bool:

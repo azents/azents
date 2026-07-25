@@ -41,6 +41,10 @@ class _Coordinator:
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
 
+    async def repair_terminal_correlations(self, *, page_size: int) -> int:
+        self.calls.append(("terminals", page_size))
+        return 4
+
     async def repair_pending(self, *, page_size: int) -> int:
         self.calls.append(("pending", page_size))
         return 1
@@ -159,8 +163,9 @@ async def test_transfer_repair_one_shot_runs_bounded_categories() -> None:
         page_size=7,
     )
 
-    assert observed == 6
+    assert observed == 10
     assert coordinator.calls == [
+        ("terminals", 7),
         ("pending", 7),
         ("generations", 7),
         ("stale", 7),

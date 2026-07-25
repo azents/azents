@@ -1,6 +1,6 @@
 """Agent Runtime Runner Control gRPC server tests."""
 
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportPrivateUsage=false
 # protobuf generated modules expose dynamic message attributes.
 
 import asyncio
@@ -32,6 +32,8 @@ from azents.runtime.control_protocol.data import (
 )
 from azents.runtime.control_protocol.grpc.runner_server import (
     RuntimeRunnerControlGrpcServicer,
+    _runner_transfer_cancel,
+    _runner_transfer_intent,
 )
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
@@ -50,6 +52,7 @@ from azents.runtime.coordination.data import (
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
 )
+from azents.runtime.transfer.data import RuntimeTransferFailure
 from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
 
 
@@ -83,6 +86,9 @@ class RecordingTransferResultSink(RuntimeRunnerTransferResultSink):
     calls: list[tuple[RunnerTransferResult, str]] = dataclasses.field(
         default_factory=list
     )
+    failure_calls: list[
+        tuple[RuntimeOperationMetadata, str, str, RuntimeTransferFailure]
+    ] = dataclasses.field(default_factory=list)
 
     async def handle(
         self,
@@ -92,6 +98,50 @@ class RecordingTransferResultSink(RuntimeRunnerTransferResultSink):
     ) -> None:
         """Record one sink invocation."""
         self.calls.append((result, request_id))
+
+    async def handle_failure(
+        self,
+        operation: RuntimeOperationMetadata,
+        *,
+        request_id: str,
+        error_code: str,
+        failure: RuntimeTransferFailure,
+    ) -> None:
+        """Record one unusable-result settlement invocation."""
+        self.failure_calls.append((operation, request_id, error_code, failure))
+
+
+def test_transfer_cancel_envelope_maps_to_typed_runner_message() -> None:
+    """Bounded cancellation metadata maps without body or storage authority."""
+    cancellation = _runner_transfer_cancel(
+        RuntimeRequestEnvelope(
+            request_id="cancel-1",
+            runtime_id="runtime-1",
+            target=RuntimeCoordinationTarget.RUNNER,
+            generation=2,
+            operation_type="file.transfer.cancel.v1",
+            payload={
+                "transfer_id": "transfer-1",
+                "attempt_id": "attempt-1",
+                "runtime_id": "runtime-1",
+                "runner_generation": 2,
+                "operation_id": "operation-1",
+                "dispatch_id": "dispatch-1",
+                "reason": "caller",
+            },
+            reply_stream_id="reply-1",
+            deadline_at=datetime.now(UTC) + timedelta(minutes=1),
+            body_stream_id=None,
+        )
+    )
+
+    assert cancellation.identity.runner_generation == 2
+    assert cancellation.operation_id == "operation-1"
+    assert cancellation.dispatch_id == "dispatch-1"
+    assert (
+        cancellation.reason
+        == runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_CALLER
+    )
 
 
 @pytest.mark.asyncio
@@ -146,7 +196,7 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
         transfer_result_sink=sink,
     )
 
-    await servicer._append_transfer_result(  # pyright: ignore[reportPrivateUsage]  # Test the bounded bridge path directly.
+    await servicer._append_transfer_result(  # Test the bounded bridge path directly.
         _transfer_result_message(committed=True)
     )
 
@@ -160,18 +210,45 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
         == []
     )
 
-    await servicer._append_transfer_result(  # pyright: ignore[reportPrivateUsage]  # Test the bounded bridge path directly.
+    await servicer._append_transfer_result(  # Test the bounded bridge path directly.
         _transfer_result_message(committed=False)
     )
 
     assert len(sink.calls) == 1
-    replies = await control.read_replies(
-        reply_stream_id="reply-1",
-        after_cursor=None,
-        limit=10,
+    assert len(sink.failure_calls) == 1
+    operation, request_id, error_code, failure = sink.failure_calls[0]
+    assert operation.operation_id == "operation-1"
+    assert request_id == "result:False"
+    assert error_code == "RUNNER_TRANSFER_PROTOCOL_VIOLATION"
+    assert failure is RuntimeTransferFailure.FENCED
+
+
+@pytest.mark.asyncio
+async def test_transfer_result_rejects_unbounded_identity_before_store_lookup() -> None:
+    """Untrusted identifiers are bounded before they can construct Redis keys."""
+
+    class _NoLookupStore:
+        async def get_operation(self, operation_id: str) -> RuntimeOperationMetadata:
+            del operation_id
+            raise AssertionError("store lookup must not run")
+
+    sink = RecordingTransferResultSink()
+    servicer = RuntimeRunnerControlGrpcServicer(
+        control_protocol=object(),
+        coordination_store=_NoLookupStore(),
+        state_sink=FakeStateSink(),
+        owner_replica_id="control-a",
+        consumer_id="consumer-1",
+        runner_authenticator=FakeRunnerAuthenticator(),
+        transfer_result_sink=sink,
     )
-    assert len(replies) == 1
-    assert replies[0].event.payload["protocol_violation"] is True
+    message = _transfer_result_message(committed=True)
+    message.transfer_result.operation_id = "o" * 129
+
+    await servicer._append_transfer_result(message)
+
+    assert sink.calls == []
+    assert sink.failure_calls == []
 
 
 def _transfer_result_message(
@@ -286,6 +363,7 @@ class CountingRelayControlProtocol:
     def __init__(self, envelopes: list[RuntimeRequestEnvelope]) -> None:
         self.envelopes = envelopes
         self.claim_count = 0
+        self.acked: list[RuntimeRequestEnvelope] = []
 
     async def claim_next_runner_request(
         self,
@@ -302,6 +380,10 @@ class CountingRelayControlProtocol:
             await asyncio.sleep(3600)
             return None
         return self.envelopes.pop(0)
+
+    async def ack_claimed_request(self, envelope: RuntimeRequestEnvelope) -> None:
+        """Record an identical duplicate acknowledgement."""
+        self.acked.append(envelope)
 
 
 @pytest.mark.asyncio
@@ -727,13 +809,14 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
         consumer_id="runner-consumer-a",
         operation_block_ms=1,
         runner_authenticator=FakeRunnerAuthenticator(),
+        transfer_result_sink=RecordingTransferResultSink(),
     )
     outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage] = (
         asyncio.Queue(maxsize=1)
     )
 
     task = asyncio.create_task(
-        servicer._relay_runner_operations(  # pyright: ignore[reportPrivateUsage]  # Exercise relay backpressure directly.
+        servicer._relay_runner_operations(  # Exercise relay backpressure directly.
             outbound,
             authentication=RuntimeRunnerCredential(
                 credential_id="credential-1",
@@ -742,6 +825,7 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
             ),
             runtime_id="runtime-1",
             generation=1,
+            active_transfer_dispatches={},
         )
     )
     for _ in range(100):
@@ -769,16 +853,176 @@ async def test_runner_operation_relay_checks_authority_before_claim() -> None:
         consumer_id="runner-consumer-a",
         operation_block_ms=1,
         runner_authenticator=authenticator,
+        transfer_result_sink=RecordingTransferResultSink(),
     )
 
-    await servicer._relay_runner_operations(  # pyright: ignore[reportPrivateUsage]  # Verify auth precedes durable claim.
+    await servicer._relay_runner_operations(  # Verify auth precedes durable claim.
         asyncio.Queue(maxsize=1),
         authentication=authenticator.credential,
         runtime_id="runtime-1",
         generation=1,
+        active_transfer_dispatches={},
     )
 
     assert control.claim_count == 0
+
+
+@pytest.mark.asyncio
+async def test_runner_transfer_relay_deduplicates_only_identical_intent() -> None:
+    """Identical transport retries are acknowledged without a second task."""
+    envelope = _transfer_envelope()
+    intent = _runner_transfer_intent(envelope)
+    dispatch_key = ("transfer-1", "attempt-1", "dispatch-1", 1)
+    fingerprint = (
+        envelope.request_id,
+        envelope.operation_type,
+        envelope.reply_stream_id,
+        intent.SerializeToString(deterministic=True),
+    )
+    control = CountingRelayControlProtocol([envelope])
+    authenticator = FakeRunnerAuthenticator()
+    servicer = RuntimeRunnerControlGrpcServicer(
+        control_protocol=control,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        state_sink=FakeStateSink(),
+        owner_replica_id="control-a",
+        consumer_id="runner-consumer-a",
+        operation_block_ms=1,
+        runner_authenticator=authenticator,
+        transfer_result_sink=RecordingTransferResultSink(),
+    )
+    task = asyncio.create_task(
+        servicer._relay_runner_operations(
+            asyncio.Queue(maxsize=1),
+            authentication=authenticator.credential,
+            runtime_id="runtime-1",
+            generation=1,
+            active_transfer_dispatches={dispatch_key: fingerprint},
+        )
+    )
+    for _ in range(100):
+        if control.acked:
+            break
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert control.acked == [envelope]
+
+
+@pytest.mark.asyncio
+async def test_runner_transfer_relay_fails_closed_on_conflicting_duplicate() -> None:
+    """A reused dispatch identity with different correlation closes the relay."""
+    envelope = _transfer_envelope()
+    dispatch_key = ("transfer-1", "attempt-1", "dispatch-1", 1)
+    control = CountingRelayControlProtocol([envelope])
+    authenticator = FakeRunnerAuthenticator()
+    servicer = RuntimeRunnerControlGrpcServicer(
+        control_protocol=control,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        state_sink=FakeStateSink(),
+        owner_replica_id="control-a",
+        consumer_id="runner-consumer-a",
+        operation_block_ms=1,
+        runner_authenticator=authenticator,
+        transfer_result_sink=RecordingTransferResultSink(),
+    )
+
+    with pytest.raises(RuntimeError, match="Conflicting duplicate"):
+        await servicer._relay_runner_operations(
+            asyncio.Queue(maxsize=1),
+            authentication=authenticator.credential,
+            runtime_id="runtime-1",
+            generation=1,
+            active_transfer_dispatches={
+                dispatch_key: ("other-request", "file.transfer.v1", "reply-1", b"")
+            },
+        )
+
+    assert control.acked == []
+
+
+@pytest.mark.asyncio
+async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
+    """Rejected and accepted results retain dedup authority for delayed intents."""
+    store = InMemoryRuntimeCoordinationStore()
+    now = datetime.now(UTC)
+    await store.register_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="connection-1",
+        owner_replica_id="control-a",
+        connected_at=now,
+        heartbeat_at=now,
+        ttl_seconds=60,
+        metadata={},
+    )
+    await store.put_operation(
+        RuntimeOperationMetadata(
+            operation_id="operation-1",
+            runtime_id="runtime-1",
+            target=RuntimeCoordinationTarget.RUNNER,
+            generation=1,
+            operation_type="file.transfer.v1",
+            transfer_id="transfer-1",
+            transfer_attempt_id="attempt-1",
+            transfer_dispatch_id="dispatch-1",
+            transfer_direction=RuntimeOperationTransferDirection.DOWNLOAD,
+            request_stream_id="request-1",
+            reply_stream_id="reply-1",
+            status=RuntimeOperationStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+            deadline_at=now + timedelta(minutes=1),
+            body_stream_id=None,
+            last_heartbeat_at=None,
+            last_event_at=None,
+            cancel_requested_at=None,
+            final_event_cursor=None,
+        ),
+        ttl_seconds=60,
+    )
+    sink = RecordingTransferResultSink()
+    authenticator = FakeRunnerAuthenticator()
+    servicer = RuntimeRunnerControlGrpcServicer(
+        control_protocol=RuntimeControlProtocolService(store),
+        coordination_store=store,
+        state_sink=FakeStateSink(),
+        owner_replica_id="control-a",
+        consumer_id="runner-consumer-a",
+        operation_block_ms=1,
+        runner_authenticator=authenticator,
+        transfer_result_sink=sink,
+    )
+    envelope = _transfer_envelope()
+    intent = _runner_transfer_intent(envelope)
+    dispatch_key = ("transfer-1", "attempt-1", "dispatch-1", 1)
+    fingerprint = (
+        envelope.request_id,
+        envelope.operation_type,
+        envelope.reply_stream_id,
+        intent.SerializeToString(deterministic=True),
+    )
+    tombstones = {dispatch_key: fingerprint}
+    inbound = QueueIterator()
+    malformed = _transfer_result_message(committed=True)
+    malformed.transfer_result.operation_id = "o" * 129
+    await inbound.put(malformed)
+    await inbound.put(_transfer_result_message(committed=True))
+    await inbound.put(None)
+
+    await servicer._consume_runner_messages(
+        inbound,
+        asyncio.Queue(maxsize=1),
+        authentication=authenticator.credential,
+        runtime_id="runtime-1",
+        generation=1,
+        active_transfer_dispatches=tombstones,
+    )
+
+    assert tombstones == {dispatch_key: fingerprint}
+    assert len(sink.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -1533,6 +1777,7 @@ def _servicer(
         owner_replica_id="control-a",
         consumer_id="runner-consumer-a",
         runner_authenticator=runner_authenticator or FakeRunnerAuthenticator(),
+        transfer_result_sink=RecordingTransferResultSink(),
         operation_block_ms=1,
     )
 
@@ -1553,6 +1798,33 @@ def _register_message(
             auth_credential_id="credential-1",
             execution_policy=_execution_policy_evidence_message(),
         ),
+    )
+
+
+def _transfer_envelope() -> RuntimeRequestEnvelope:
+    return RuntimeRequestEnvelope(
+        request_id="transfer-request-1",
+        runtime_id="runtime-1",
+        target=RuntimeCoordinationTarget.RUNNER,
+        generation=1,
+        operation_type="file.transfer.v1",
+        payload={
+            "transfer_id": "transfer-1",
+            "attempt_id": "attempt-1",
+            "runtime_id": "runtime-1",
+            "desired_generation": 1,
+            "direction": "upload",
+            "operation_id": "operation-1",
+            "owner_session_id": "session-1",
+            "runtime_path": "/workspace/file",
+            "overwrite": False,
+            "expected_size": 3,
+            "expected_sha256": "a" * 64,
+            "dispatch_id": "dispatch-1",
+        },
+        reply_stream_id="reply-1",
+        deadline_at=_now() + timedelta(minutes=1),
+        body_stream_id=None,
     )
 
 

@@ -143,26 +143,68 @@ def test_transfer_cancel_maps_each_reason(
     assert cancel.reason is reason
 
 
-def test_transfer_result_maps_present_falsey_optional_fields() -> None:
-    """Preserve present optional result evidence before domain validation."""
-    result = runner_transfer_result_from_message(
-        runtime_runner_control_pb2.RunnerTransferResult(
-            identity=_identity_message(),
-            operation_id="operation-1",
-            dispatch_id="dispatch-1",
-            outcome=runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_FAILED,
-            actual_size=0,
-            sha256="",
-            destination_committed=False,
-            failure=runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_STREAM_FAILED,
-        ),
-        direction=RunnerTransferDirection.DOWNLOAD,
-    )
+def test_transfer_result_rejects_present_empty_sha256() -> None:
+    """Present SHA-256 evidence must contain one exact lowercase digest."""
+    with pytest.raises(ValueError, match="sha256"):
+        runner_transfer_result_from_message(
+            runtime_runner_control_pb2.RunnerTransferResult(
+                identity=_identity_message(),
+                operation_id="operation-1",
+                dispatch_id="dispatch-1",
+                outcome=runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_FAILED,
+                actual_size=0,
+                sha256="",
+                destination_committed=False,
+                failure=(
+                    runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_STREAM_FAILED
+                ),
+            ),
+            direction=RunnerTransferDirection.DOWNLOAD,
+        )
 
-    assert result.actual_size == 0
-    assert result.sha256 == ""
-    assert result.destination_committed is False
-    assert result.failure is RunnerTransferFailure.STREAM_FAILED
+
+@pytest.mark.parametrize(
+    ("identity", "operation_id", "dispatch_id"),
+    [
+        (
+            RunnerTransferIdentity("", "attempt-1", "runtime-1", 2),
+            "operation-1",
+            "dispatch-1",
+        ),
+        (
+            RunnerTransferIdentity("transfer-1", "attempt-1", "runtime-1", 0),
+            "operation-1",
+            "dispatch-1",
+        ),
+        (
+            RunnerTransferIdentity("transfer-1", "attempt-1", "runtime-1", 2),
+            "o" * 129,
+            "dispatch-1",
+        ),
+        (
+            RunnerTransferIdentity("transfer-1", "attempt-1", "runtime-1", 2),
+            "operation-1",
+            "d" * 129,
+        ),
+    ],
+)
+def test_result_rejects_unbounded_lookup_identity(
+    identity: RunnerTransferIdentity,
+    operation_id: str,
+    dispatch_id: str,
+) -> None:
+    with pytest.raises(ValueError):
+        RunnerTransferResult(
+            identity=identity,
+            operation_id=operation_id,
+            dispatch_id=dispatch_id,
+            direction=RunnerTransferDirection.UPLOAD,
+            outcome=RunnerTransferOutcome.FAILED,
+            actual_size=None,
+            sha256=None,
+            destination_committed=False,
+            failure=RunnerTransferFailure.STREAM_FAILED,
+        )
 
 
 @pytest.mark.parametrize(

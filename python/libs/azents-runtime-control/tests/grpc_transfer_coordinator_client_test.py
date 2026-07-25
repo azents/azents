@@ -329,19 +329,19 @@ def test_identity_mapper_preserves_nullable_presence_and_digest_is_deterministic
         session_id=None,
         agent_id=None,
     )
-    present_empty = dataclasses.replace(absent, session_id="")
+    present = dataclasses.replace(absent, session_id="session-1")
     absent_message = coordinator_identity_to_message(absent)
-    present_empty_message = coordinator_identity_to_message(present_empty)
+    present_message = coordinator_identity_to_message(present)
 
     assert not absent_message.HasField("session_id")
-    assert present_empty_message.HasField("session_id")
+    assert present_message.HasField("session_id")
     assert coordinator_identity_from_message(absent_message) == absent
-    assert coordinator_identity_from_message(present_empty_message) == present_empty
+    assert coordinator_identity_from_message(present_message) == present
     assert coordinator_request_sha256(absent_message) == coordinator_request_sha256(
         absent_message
     )
     assert coordinator_request_sha256(absent_message) != coordinator_request_sha256(
-        present_empty_message
+        present_message
     )
 
 
