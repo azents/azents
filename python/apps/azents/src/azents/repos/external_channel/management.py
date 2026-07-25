@@ -201,6 +201,7 @@ class ExternalChannelManagementRepository:
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
         await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)
 
     async def list_bindings(

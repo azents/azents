@@ -180,12 +180,6 @@ def test_external_channel_installed_schema_preserves_lifecycle_ownership(
                 "RESTRICT",
             ),
             (
-                "external_channel_agent_routes",
-                "agent_id",
-                "agents",
-                "RESTRICT",
-            ),
-            (
                 "external_channel_access_grants",
                 "agent_id",
                 "agents",
@@ -198,6 +192,12 @@ def test_external_channel_installed_schema_preserves_lifecycle_ownership(
                 "RESTRICT",
             ),
         }.issubset(restrictive_roots)
+        assert (
+            "external_channel_agent_routes",
+            "agent_id",
+            "agents",
+            "SET NULL",
+        ) in restrictive_roots
 
         batch_item_foreign_keys = inspector.get_foreign_keys(
             "external_channel_invocation_batch_items"

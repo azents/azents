@@ -1312,6 +1312,7 @@ class ExternalChannelRepository:
         if rdb.selected_route_id is None:
             rdb.selected_route_id = selected_route_id
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelConversationAdmission.model_validate(rdb)
 
     async def get_routable_route_by_binding_id(
@@ -2260,9 +2261,15 @@ class ExternalChannelRepository:
                     "for another Agent Session."
                 )
             return existing
-        return ExternalChannelBinding.model_validate(
-            await self._create(session, RDBExternalChannelBinding, create)
+        values = create.model_dump(
+            exclude={"truncated_message_count", "truncated_size"}
         )
+        rdb = RDBExternalChannelBinding(**values)
+        rdb.truncated_message_count = create.truncated_message_count
+        rdb.truncated_size = create.truncated_size
+        session.add(rdb)
+        await session.flush()
+        return ExternalChannelBinding.model_validate(rdb)
 
     async def _validate_binding_owners(
         self,

@@ -1,5 +1,6 @@
 """External Channel event processing domain tests."""
 
+import dataclasses
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -408,7 +409,7 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
         message: SlackNormalizedMessage,
         now: datetime.datetime,
     ) -> ExternalChannelPersistedRevision:
-        return await self._persist_normalized_message(
+        persisted = await self._persist_normalized_message(
             session,
             resource=resource,
             message=message,
@@ -417,6 +418,16 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             original_url=None,
             reference_mappings={},
         )
+        trim = await self._project_current_revision(
+            session,
+            route=route,
+            resource=resource,
+            message=persisted.message,
+            provider_position=message.provider_position,
+            now=now,
+            applied=persisted.applied,
+        )
+        return dataclasses.replace(persisted, trim=trim)
 
     async def release_pending_context_for_test(
         self,

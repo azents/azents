@@ -622,7 +622,12 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
         async with rdb_session.begin_nested():
             await repository.create_agent_route(
                 rdb_session,
-                create.model_copy(update={"agent_id": second_agent.id}),
+                create.model_copy(
+                    update={
+                        "agent_id": second_agent.id,
+                        "agent_id_snapshot": second_agent.id,
+                    }
+                ),
             )
     with pytest.raises(ValueError, match="App mode"):
         await repository.create_agent_route(
@@ -634,7 +639,12 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
     with pytest.raises(ValueError, match="Workspace"):
         await repository.create_agent_route(
             rdb_session,
-            create.model_copy(update={"agent_id": foreign_agent.id}),
+            create.model_copy(
+                update={
+                    "agent_id": foreign_agent.id,
+                    "agent_id_snapshot": foreign_agent.id,
+                }
+            ),
         )
     with pytest.raises(ValueError, match="dedicated mode"):
         await repository.create_agent_route(

@@ -72,7 +72,9 @@ from .repository import ExternalChannelRepository, validate_interaction_projecti
 
 def _at(minute: int) -> datetime.datetime:
     """Return stable timezone-aware timestamps."""
-    return datetime.datetime(2026, 7, 25, 0, minute, tzinfo=datetime.UTC)
+    return datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC) + datetime.timedelta(
+        minutes=minute
+    )
 
 
 async def _workspace(session: AsyncSession, handle: str) -> str:
@@ -307,6 +309,13 @@ async def _cleanup_committed_workspace(
         """
         DELETE FROM external_channel_connections
         WHERE workspace_id = :workspace_id
+        """,
+        """
+        DELETE FROM session_agents
+        WHERE agent_session_id IN (
+            SELECT id FROM agent_sessions
+            WHERE workspace_id = :workspace_id
+        )
         """,
         "DELETE FROM agent_sessions WHERE workspace_id = :workspace_id",
         "DELETE FROM agents WHERE workspace_id = :workspace_id",
@@ -1396,6 +1405,9 @@ async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
             mode=ExternalChannelAppMode.SINGLE,
         ),
     )
+    await rdb_session.execute(
+        sa.text("DROP INDEX uq_external_channel_agent_routes_single_connection")
+    )
     rdb_session.add(
         RDBExternalChannelAgentRoute(
             connection_id=corrupt_single.id,
@@ -1504,6 +1516,7 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
             resource_id=resource.id,
             source_message_id=message.id,
             selected_route_id=first_route.id,
+            status=ExternalChannelConversationAdmissionStatus.SELECTED,
         ),
     )
     principal = await repo.create_principal_idempotent(
