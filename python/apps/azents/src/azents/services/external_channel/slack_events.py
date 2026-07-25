@@ -67,12 +67,29 @@ class SlackEventExcluded(SlackEventNormalizationError):
 class SlackProviderError(RuntimeError):
     """Base class for controlled Slack Web API failures."""
 
+    def __init__(
+        self,
+        message: str = "Slack provider operation failed.",
+        *,
+        diagnostics: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.diagnostics = dict(diagnostics or {})
+
 
 class SlackProviderRateLimited(SlackProviderError):
     """Slack asked the inbound hydrator to retry after a bounded delay."""
 
-    def __init__(self, retry_after_seconds: int) -> None:
-        super().__init__("Slack thread hydration is rate limited.")
+    def __init__(
+        self,
+        retry_after_seconds: int,
+        *,
+        diagnostics: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(
+            "Slack thread hydration is rate limited.",
+            diagnostics=diagnostics,
+        )
         self.retry_after_seconds = max(1, retry_after_seconds)
 
 
@@ -83,8 +100,16 @@ class SlackProviderTemporaryError(SlackProviderError):
 class SlackProviderRequestRejected(SlackProviderTemporaryError):
     """Slack returned a confirmed provider-specific request rejection."""
 
-    def __init__(self, error_code: str) -> None:
-        super().__init__("Slack rejected the provider request.")
+    def __init__(
+        self,
+        error_code: str,
+        *,
+        diagnostics: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(
+            "Slack rejected the provider request.",
+            diagnostics=diagnostics,
+        )
         self.error_code = error_code
 
 
@@ -910,35 +935,40 @@ class SlackConversationClient:
                     },
                 )
             )
-        except SlackProviderPermissionDenied:
+        except SlackProviderPermissionDenied as error:
+            _log_slack_provider_failure(error, operation="file_reply")
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,
                 error_kind="missing_scope",
                 error_summary="Slack App permissions are incomplete.",
             )
-        except SlackProviderCredentialsInvalid:
+        except SlackProviderCredentialsInvalid as error:
+            _log_slack_provider_failure(error, operation="file_reply")
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,
                 error_kind="credentials_invalid",
                 error_summary="Slack rejected the configured credential.",
             )
-        except SlackProviderResourceUnavailable:
+        except SlackProviderResourceUnavailable as error:
+            _log_slack_provider_failure(error, operation="file_reply")
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,
                 error_kind="resource_unavailable",
                 error_summary="Slack cannot post to the linked conversation.",
             )
-        except SlackProviderFileNotFound:
+        except SlackProviderFileNotFound as error:
+            _log_slack_provider_failure(error, operation="file_reply")
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,
                 error_kind="provider_rejected",
                 error_summary="Slack no longer accepts one uploaded file.",
             )
-        except SlackProviderRateLimited:
+        except SlackProviderRateLimited as error:
+            _log_slack_provider_failure(error, operation="file_reply")
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,
@@ -946,13 +976,15 @@ class SlackConversationClient:
                 error_summary="Slack rate limited the file reply attempt.",
             )
         except SlackProviderRequestRejected as error:
+            _log_slack_provider_failure(error, operation="file_reply")
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,
                 error_kind="provider_rejected",
                 error_summary=f"Slack rejected the file reply ({error.error_code}).",
             )
-        except SlackProviderTemporaryError:
+        except SlackProviderTemporaryError as error:
+            _log_slack_provider_failure(error, operation="file_reply")
             return SlackControlMessageResult(
                 status="unknown",
                 provider_message_key=None,
@@ -1167,34 +1199,28 @@ class SlackConversationClient:
                     params=params,
                 )
         except httpx.RequestError as error:
-            logger.warning(
-                "Slack API request failed before a response was received",
-                exc_info=True,
-                extra={
+            raise SlackProviderTemporaryError(
+                "Slack request did not produce a response.",
+                diagnostics={
                     "slack_api_path": path,
                     "slack_api_method": method,
                 },
-            )
-            raise SlackProviderTemporaryError(
-                "Slack request did not produce a response."
             ) from error
         if response.status_code == 429:
-            logger.warning(
-                "Slack API rate limited a request",
-                extra=_slack_response_log_extra(response),
-            )
             retry_after = response.headers.get("Retry-After", "1")
             try:
                 retry_after_seconds = int(retry_after)
             except ValueError:
                 retry_after_seconds = 1
-            raise SlackProviderRateLimited(retry_after_seconds)
-        if response.status_code >= 500:
-            logger.warning(
-                "Slack API returned a server error",
-                extra=_slack_response_log_extra(response),
+            raise SlackProviderRateLimited(
+                retry_after_seconds,
+                diagnostics=_slack_response_diagnostics(response),
             )
-            raise SlackProviderTemporaryError("Slack is temporarily unavailable.")
+        if response.status_code >= 500:
+            raise SlackProviderTemporaryError(
+                "Slack is temporarily unavailable.",
+                diagnostics=_slack_response_diagnostics(response),
+            )
         return response
 
     @staticmethod
@@ -1202,28 +1228,24 @@ class SlackConversationClient:
         try:
             payload: object = response.json()
         except ValueError as error:
-            logger.error(
-                "Slack API returned a non-JSON response",
-                extra=_slack_response_log_extra(response),
-            )
             raise SlackProviderTemporaryError(
-                "Slack response body is not valid JSON."
+                "Slack response body is not valid JSON.",
+                diagnostics=_slack_response_diagnostics(response),
             ) from error
         if not isinstance(payload, dict):
-            logger.error(
-                "Slack API returned a malformed JSON response",
-                extra=_slack_response_log_extra(response),
+            raise SlackProviderTemporaryError(
+                "Slack response body is malformed.",
+                diagnostics=_slack_response_diagnostics(response),
             )
-            raise SlackProviderTemporaryError("Slack response body is malformed.")
         if response.status_code < 400 and payload.get("ok") is True:
             return payload
         error_code = payload.get("error")
-        logger.error(
-            "Slack API rejected a request",
-            extra=_slack_response_log_extra(response, payload),
-        )
+        diagnostics = _slack_response_diagnostics(response, payload)
         if error_code == "missing_scope":
-            raise SlackProviderPermissionDenied("Slack App permissions are incomplete.")
+            raise SlackProviderPermissionDenied(
+                "Slack App permissions are incomplete.",
+                diagnostics=diagnostics,
+            )
         if error_code in {
             "account_inactive",
             "invalid_auth",
@@ -1232,7 +1254,8 @@ class SlackConversationClient:
             "token_revoked",
         }:
             raise SlackProviderCredentialsInvalid(
-                "Slack rejected the configured credential."
+                "Slack rejected the configured credential.",
+                diagnostics=diagnostics,
             )
         if error_code in {
             "channel_not_found",
@@ -1241,15 +1264,18 @@ class SlackConversationClient:
             "thread_not_found",
         }:
             raise SlackProviderResourceUnavailable(
-                "Slack conversation is unavailable to the App."
+                "Slack conversation is unavailable to the App.",
+                diagnostics=diagnostics,
             )
         if error_code == "message_not_found":
             raise SlackProviderMessageNotFound(
-                "Slack no longer contains the requested message."
+                "Slack no longer contains the requested message.",
+                diagnostics=diagnostics,
             )
         if error_code in {"file_deleted", "file_not_found"}:
             raise SlackProviderFileNotFound(
-                "Slack no longer exposes the requested file."
+                "Slack no longer exposes the requested file.",
+                diagnostics=diagnostics,
             )
         normalized_error_code = (
             error_code
@@ -1257,14 +1283,32 @@ class SlackConversationClient:
             and re.fullmatch(r"[a-z0-9_]{1,80}", error_code)
             else "unknown_error"
         )
-        raise SlackProviderRequestRejected(normalized_error_code)
+        raise SlackProviderRequestRejected(
+            normalized_error_code,
+            diagnostics=diagnostics,
+        )
 
 
-def _slack_response_log_extra(
+def _log_slack_provider_failure(
+    error: SlackProviderError,
+    *,
+    operation: str,
+) -> None:
+    """Log one outbound Slack failure after it has reached its result boundary."""
+    logger.exception(
+        "Slack outbound operation failed",
+        extra={
+            "slack_operation": operation,
+            **error.diagnostics,
+        },
+    )
+
+
+def _slack_response_diagnostics(
     response: httpx.Response,
     payload: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Return safe Slack API diagnostics without logging user or credential data."""
+    """Return safe Slack API diagnostics without user or credential data."""
     request = _response_request(response)
     request_content_type = (
         request.headers.get("content-type") if request is not None else None

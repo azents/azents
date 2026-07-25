@@ -1464,9 +1464,10 @@ async def test_file_reply_completion_rejection_logs_safe_diagnostics(
     record = next(
         record
         for record in caplog.records
-        if record.message == "Slack API rejected a request"
+        if record.message == "Slack outbound operation failed"
     )
     record_extra = record.__dict__
+    assert record_extra["slack_operation"] == "file_reply"
     assert record_extra["slack_api_path"] == "/api/files.completeUploadExternal"
     assert record_extra["slack_api_method"] == "POST"
     assert record_extra["slack_http_status_code"] == 200
@@ -1484,6 +1485,7 @@ async def test_file_reply_completion_rejection_logs_safe_diagnostics(
     assert record_extra["slack_response_diagnostic_argument_names"] == [
         "initial_comment"
     ]
+    assert record.exc_info is not None
     assert "confidential outbound message" not in caplog.text
     assert "private file content" not in caplog.text
     assert "private-report.txt" not in caplog.text
