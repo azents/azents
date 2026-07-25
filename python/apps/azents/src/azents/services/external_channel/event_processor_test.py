@@ -1560,7 +1560,10 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
         ),
         session_lifecycle=cast(
             SessionLifecycleService,
-            MagicMock(send_session_wake_up=AsyncMock()),
+            MagicMock(
+                mark_session_running_for_input_wakeup=AsyncMock(),
+                send_session_wake_up=AsyncMock(),
+            ),
         ),
     )
     allowed = await access_service.allow(
