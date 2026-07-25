@@ -2007,7 +2007,11 @@ async def test_redis_stale_pagination_continues_after_dangling_members(
         transfer_ids_by_key: dict[str, str] = {}
         for transfer_id in ("dangling-a", "dangling-b", "dangling-c"):
             admitted = await store.admit(
-                replace(_admission(), transfer_id=transfer_id),
+                replace(
+                    _admission(),
+                    transfer_id=transfer_id,
+                    deadline_at=clock.now + timedelta(minutes=1),
+                ),
                 lease_id=f"{transfer_id}-lease",
             )
             assert admitted is not None
