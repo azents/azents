@@ -33,6 +33,13 @@ class ExternalChannelFileUnsupportedReason(enum.StrEnum):
     UNSUPPORTED_MODE = "unsupported_mode"
 
 
+class ExternalChannelOutboundFileSource(enum.StrEnum):
+    """Supported source kinds for one explicit outbound file."""
+
+    RUNTIME = "runtime"
+    EXCHANGE = "exchange"
+
+
 class ExternalChannelFileMetadata(BaseModel):
     """Bounded provider-neutral metadata persisted for one observed file."""
 
@@ -69,10 +76,13 @@ class ExternalChannelFileMetadata(BaseModel):
 
 
 class ExternalChannelOutboundFileManifest(BaseModel):
-    """Bounded Runtime source metadata persisted for one outbound file."""
+    """Bounded source metadata persisted for one outbound file."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    source: ExternalChannelOutboundFileSource = (
+        ExternalChannelOutboundFileSource.RUNTIME
+    )
     path: str = Field(min_length=1, max_length=4_096)
     filename: str = Field(
         min_length=1,
@@ -83,6 +93,18 @@ class ExternalChannelOutboundFileManifest(BaseModel):
         max_length=MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
     )
     expected_size: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_source_path(self) -> "ExternalChannelOutboundFileManifest":
+        """Keep persisted source kind and source reference consistent."""
+        if self.source is ExternalChannelOutboundFileSource.RUNTIME:
+            if not self.path.startswith("/"):
+                raise ValueError("Outbound Runtime file path must be absolute.")
+        elif not self.path.startswith("exchange://") or self.path == "exchange://":
+            raise ValueError(
+                "Outbound Exchange file source must be an exchange:// URI."
+            )
+        return self
 
 
 @dataclass(frozen=True)

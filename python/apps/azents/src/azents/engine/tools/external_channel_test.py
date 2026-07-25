@@ -248,6 +248,7 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
     ]
     assert service.calls[0]["client_tool_call_id"] == "call-42"
     assert service.calls[0]["run_id"] == "run-current"
+    assert service.calls[0]["authority"] is None
 
 
 @pytest.mark.asyncio
@@ -327,6 +328,7 @@ async def test_channel_action_preflights_files_with_current_runtime_storage() ->
             "binding_id": "binding-1",
             "paths": ["/workspace/agent/report.csv"],
             "file_storage": file_storage,
+            "authority": None,
         }
     ]
     manifests = cast(
@@ -335,6 +337,7 @@ async def test_channel_action_preflights_files_with_current_runtime_storage() ->
     )
     assert manifests[0].path == "/workspace/agent/report.csv"
     assert service.calls[0]["file_storage"] is file_storage
+    assert service.calls[0]["authority"] is None
 
 
 @pytest.mark.asyncio
@@ -471,6 +474,7 @@ async def test_prompt_compaction_and_idle_include_every_active_binding() -> None
     prompt = await toolkit.get_dynamic_prompt(_turn_context())
     assert "ordinary assistant output is not sent" in prompt.lower()
     assert "metadata-only until `download_external_file`" in prompt
+    assert "`exchange://` URIs" in prompt
     assert "`binding-1`" in prompt
     assert "`binding-2`" in prompt
     assert prompt == render_channel_work_prompt(service.snapshots)

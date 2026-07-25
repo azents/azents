@@ -59,6 +59,7 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 EXTERNAL_CHANNEL_TOOLKIT_SLUG = "external_channel"
 _COMPACTION_HEADING = "## Channel Work Snapshot"
@@ -112,6 +113,10 @@ class FinishChannelActionInput(BaseModel):
         default=None,
         min_length=1,
         max_length=MAX_EXTERNAL_CHANNEL_FILES,
+        description=(
+            "One or more absolute Runtime file paths or authorized exchange:// file "
+            "URIs. Relative paths and artifact:// or azents:// URIs are unsupported."
+        ),
     )
 
 
@@ -146,6 +151,10 @@ class ContinueChannelActionInput(BaseModel):
         default=None,
         min_length=1,
         max_length=MAX_EXTERNAL_CHANNEL_FILES,
+        description=(
+            "One or more absolute Runtime file paths or authorized exchange:// file "
+            "URIs. Relative paths and artifact:// or azents:// URIs are unsupported."
+        ),
     )
 
     @model_validator(mode="after")
@@ -245,6 +254,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         self.session_id = session_id
         self.run_id = run_id
         self.runtime_context_store: RuntimeInstructionContextStore | None = None
+        self.resource_authority: SessionResourceAuthority | None = None
 
     def set_runtime_context_store(
         self,
@@ -256,6 +266,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Expose Channel Action only while an active binding exists."""
         self.run_id = context.run_id
+        self.resource_authority = context.resource_authority
         enabled = await self.service.has_active_binding(
             session_id=self.session_id,
             agent_id=self.agent_id,
@@ -399,6 +410,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         binding_id=value.binding,
                         paths=value.files,
                         file_storage=runtime_context.file_storage,
+                        authority=self.resource_authority,
                     )
                 result = await self.service.execute(
                     session_id=self.session_id,
@@ -420,6 +432,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         if runtime_context is None
                         else runtime_context.file_storage
                     ),
+                    authority=self.resource_authority,
                 )
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None
@@ -520,6 +533,9 @@ def render_channel_work_prompt(works: list[ChannelWorkSnapshot]) -> str:
         "publishes to an external provider. Ordinary assistant output is not sent. "
         "External file entries are metadata-only until `download_external_file` "
         "materializes one selected locator into an absolute Runtime path. "
+        "`channel_action.files` accepts absolute Runtime paths and authorized "
+        "`exchange://` URIs; it does not accept relative paths, `artifact://`, or "
+        "`azents://` URIs. "
         "Use the binding handles below, keep Channel Work separate from the Session "
         "Todo, and finish or continue each binding explicitly. When declaring or "
         "changing work, write a concise concrete in-progress title in the "

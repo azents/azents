@@ -884,8 +884,11 @@ class SlackConversationClient:
                     "POST",
                     "/files.completeUploadExternal",
                     bot_token=bot_token,
-                    json_body={
-                        "files": uploaded_files,
+                    form_data={
+                        "files": json.dumps(
+                            uploaded_files,
+                            separators=(",", ":"),
+                        ),
                         "channel_id": channel_id,
                         "thread_ts": thread_ts,
                         "initial_comment": markdown_text,
@@ -1118,15 +1121,36 @@ class SlackConversationClient:
         bot_token: str,
         params: dict[str, str | int] | None = None,
         json_body: dict[str, object] | None = None,
+        form_data: dict[str, str] | None = None,
     ) -> httpx.Response:
-        try:
-            response = await self.http_client.request(
-                method,
-                f"{slack_api_base_url()}{path}",
-                headers={"Authorization": f"Bearer {bot_token}"},
-                params=params,
-                json=json_body,
+        if json_body is not None and form_data is not None:
+            raise ValueError(
+                "Slack request cannot contain JSON and form bodies together."
             )
+        try:
+            if json_body is not None:
+                response = await self.http_client.request(
+                    method,
+                    f"{slack_api_base_url()}{path}",
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                    params=params,
+                    json=json_body,
+                )
+            elif form_data is not None:
+                response = await self.http_client.request(
+                    method,
+                    f"{slack_api_base_url()}{path}",
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                    params=params,
+                    data=form_data,
+                )
+            else:
+                response = await self.http_client.request(
+                    method,
+                    f"{slack_api_base_url()}{path}",
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                    params=params,
+                )
         except httpx.RequestError as error:
             raise SlackProviderTemporaryError(
                 "Slack request did not produce a response."

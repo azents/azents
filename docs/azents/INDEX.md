@@ -38,10 +38,10 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-24 | 6 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-23 | 11 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-25 | 12 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 9 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-24 | 8 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-24 | 29 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-25 | 30 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
@@ -333,6 +333,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Agent Conversation Requirements](requirements/slack-260721-external-channel-conversation.md) | slack-260721 | 2026-07-21 | - |
 | [Slack Connection Setup and Management Requirements](requirements/slack-260722-connection-management.md) | slack-260722 | 2026-07-22 | - |
 | [Readable Slack Channel Messages Requirements](requirements/slack-260723-readable-channel-messages.md) | slack-260723 | 2026-07-23 | 2026-07-23 |
+| [External Channel Exchange File Publication Requirements](requirements/slack-260725-outbound-exchange-files.md) | slack-260725 | 2026-07-25 | 2026-07-25 |
 | [Slack Channel Control Feedback Requirements](requirements/slackops-260723-channel-control-feedback.md) | slackops-260723 | 2026-07-23 | 2026-07-23 |
 | [Stage 4 (browser/web QA) Historical Requirements Reconstruction](requirements/stage4-260410-stage4-web.md) | stage4-260410 | 2026-04-10 | 2026-04-10 |
 | [Use Standard Responses for ChatGPT OAuth Historical Requirements Reconstruction](requirements/standard-260716-standard-responses-for-chatgpt-oauth.md) | standard-260716 | 2026-07-16 | - |
@@ -663,6 +664,7 @@ Design documents are accumulated records and are not listed individually in this
 - [External Channel Agent Conversation](adr/slack-260721-external-channel-conversation.md)
 - [Slack Connection Setup and Management](adr/slack-260722-connection-management.md)
 - [Readable Slack Channel Messages](adr/slack-260723-readable-channel-messages.md)
+- [External Channel Exchange File Publication](adr/slack-260725-outbound-exchange-files.md)
 - [Slack Channel Control Feedback](adr/slackops-260723-channel-control-feedback.md)
 - [Stage 4 (browser/web QA) Historical Decision Reconstruction](adr/stage4-260410-stage4-web.md)
 - [Use Standard Responses for ChatGPT OAuth](adr/standard-260716-standard-responses-for-chatgpt-oauth.md)

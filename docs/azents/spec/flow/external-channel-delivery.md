@@ -17,14 +17,16 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
+  - python/apps/azents/src/azents/services/exchange_file/**
+  - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
   - python/apps/azents/src/azents/repos/external_channel/management_data.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-23
-spec_version: 11
+last_verified_at: 2026-07-25
+spec_version: 12
 ---
 
 # External Channel Delivery and Channel Work
@@ -39,9 +41,11 @@ A tool call must identify a binding owned by the current Agent and Session. The 
   provider-neutral work title, and replace the ordered Channel Work task list.
 - `finish`: send one required final reply and finish Channel Work.
 
-Either mode may attach up to 20 absolute Runtime paths to its conversational reply.
-File-bearing calls always require non-empty text and do not introduce a separate upload
-action. Text-only calls retain the existing behavior.
+Either mode may attach up to 20 absolute Runtime paths or authorized `exchange://`
+file-location URIs to its conversational reply. Relative paths, `artifact://`,
+`azents://`, and other URI schemes are rejected. File-bearing calls always require
+non-empty text and do not introduce a separate upload action. Text-only calls retain the
+existing behavior.
 
 Task updates require a concise current-work title in the same call. Guidance tells
 the Agent to use the participant's language, concrete progressive wording, and an
@@ -71,21 +75,26 @@ Provider mutations are never automatically retried. Stale `attempting` recovery 
 
 ## File-bearing Reply Delivery
 
-Before the action transaction commits, the service resolves each absolute Runtime path,
-requires a readable regular file with a positive size, derives a bounded filename and
-media type, and enforces the effective outbound per-file and aggregate byte limits. Any
-missing, unreadable, unsupported, oversized, or recovered-without-source file fails before
-provider mutation. The committed action and existing `REPLY` delivery store only ordered
-manifests containing path, filename, media type, and expected size.
+Before the action transaction commits, the service resolves each source and enforces the
+effective outbound per-file and aggregate byte limits. Runtime sources must be readable
+regular files with a positive size. Exchange sources must resolve under the current
+canonical `SessionResourceAuthority`; their metadata and returned byte length must agree.
+Any missing, unauthorized, expired, unreadable, unsupported, oversized, or
+recovered-without-source file fails before provider mutation. The committed action and
+existing `REPLY` delivery store only ordered manifests containing source kind, source
+reference, filename, media type, and expected size.
 
 After commit, Slack delivery processes files sequentially:
 
 1. acquire one `files.getUploadURLExternal` target for each manifest;
-2. read the Runtime source in ordered 1 MiB chunks without whole-file `get()`;
+2. read the Runtime source in ordered 1 MiB chunks without whole-file `get()`, or
+   re-resolve and verify an Exchange source under the same execution authority before
+   yielding bounded chunks;
 3. require the streamed byte count to match the preflight size exactly;
 4. upload directly to the provider target; and
-5. after every stream succeeds, call `files.completeUploadExternal` exactly once with
-   ordered file IDs, the conversational text, channel, and root thread.
+5. after every stream succeeds, call `files.completeUploadExternal` exactly once as form
+   data with ordered file IDs serialized in `files`, the conversational text, channel,
+   and root thread.
 
 A failed acquisition or stream prevents completion. Confirmed provider rejection,
 missing scope, rate limit, or unavailable Runtime source is `failed`. Upload or
@@ -180,6 +189,9 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-25** (spec_version 12) — Added authority-resolved `exchange://` outbound
+  sources, explicit source-kind manifests, post-commit Exchange revalidation, supported
+  source guidance, and form-encoded Slack external-upload completion.
 - **2026-07-23** (spec_version 11) — Added file-bearing `channel_action` replies,
   pre-commit Runtime manifests and limits, sequential 1 MiB streaming, one ordered Slack
   completion, and one-attempt failure/ambiguity outcomes.

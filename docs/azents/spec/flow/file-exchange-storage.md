@@ -50,8 +50,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-24
-spec_version: 29
+last_verified_at: 2026-07-25
+spec_version: 30
 ---
 
 # File Exchange Storage
@@ -123,10 +123,14 @@ byte limits, and writes one bounded payload to the authorized Runtime destinatio
 `FileStorage.put`. The Tool result retains only Runtime path, filename, media type, and
 actual size.
 
-A file-bearing `channel_action` selects absolute Runtime paths, stats all sources before
-commit, stores only bounded manifests, and streams each source through
-`FileStorage.iter_chunks` directly to Slack in 1 MiB chunks. The flow does not stage bytes
-in object storage or convert them into user attachments or model rich input.
+A file-bearing `channel_action` accepts absolute Runtime paths and `exchange://` URIs.
+Runtime paths are statted before commit and stream through bounded Runtime range reads.
+An Exchange URI resolves only under the current canonical `SessionResourceAuthority`,
+first at preflight and again immediately before provider upload; both the stored metadata
+and returned byte length must match the committed bounded manifest. Relative paths,
+`artifact://`, and `azents://` are not outbound source forms. The flow does not create
+new staging bytes in object storage or convert source content into user attachments or
+model rich input.
 
 ### Agent/tool output artifact
 
@@ -229,6 +233,9 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ## Changelog
 
+- **2026-07-25** — v30. Added authority-resolved Exchange files as an explicit outbound
+  External Channel source while retaining Runtime paths and rejecting Artifact, managed
+  VFS, and relative sources.
 - **2026-07-24** — v29. Separated requester-authorized public file access from
   Session/Run-authorized internal resource operations; added typed Exchange provenance and exact or
   explicitly unresolved ModelFile Run lineage.

@@ -16,12 +16,23 @@ from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
     ExternalChannelFileLocator,
     ExternalChannelOutboundFileManifest,
+    ExternalChannelOutboundFileSource,
 )
 from azents.core.external_channel_file_system_setting import ExternalChannelFilesConfig
 from azents.core.system_setting import SystemSettingSection
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.services.exchange_file import (
+    ExchangeFileDownload,
+    ExchangeFileService,
+    FileAccessDenied,
+    FileExpired,
+    FileNotFound,
+    FileUnavailable,
+    SessionNotFound,
+    exchange_object_key_from_uri,
+)
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
@@ -39,6 +50,7 @@ from azents.services.external_channel.slack_events import (
 )
 from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_storage import guess_media_type
 from azents.services.system_setting.service import SystemSettingsService
 
@@ -92,6 +104,10 @@ class ExternalChannelFileTransferService:
     slack_client: Annotated[
         SlackConversationClient,
         Depends(get_slack_file_client),
+    ]
+    exchange_file_service: Annotated[
+        ExchangeFileService,
+        Depends(ExchangeFileService),
     ]
     system_settings: Annotated[
         SystemSettingsService,
@@ -284,6 +300,7 @@ class ExternalChannelFileTransferService:
         binding_id: str,
         paths: Sequence[str],
         file_storage: FileStorage,
+        authority: SessionResourceAuthority | None = None,
     ) -> tuple[ExternalChannelOutboundFileManifest, ...]:
         """Validate one file-bearing reply before its durable action commit."""
         if not paths or len(paths) > MAX_EXTERNAL_CHANNEL_FILES:
@@ -314,39 +331,66 @@ class ExternalChannelFileTransferService:
         manifests: list[ExternalChannelOutboundFileManifest] = []
         total_size = 0
         for path in paths:
-            if not PurePosixPath(path).is_absolute():
-                raise ExternalChannelFileTransferError(
-                    "Every outbound Runtime file path must be absolute."
+            if path.startswith("exchange://"):
+                if exchange_object_key_from_uri(path) is None:
+                    raise ExternalChannelFileTransferError(
+                        "Outbound Exchange file URI is invalid."
+                    )
+                if authority is None:
+                    raise ExternalChannelFileTransferError(
+                        "Exchange file publication requires execution authority."
+                    )
+                exchange = await _resolve_outbound_exchange_file(
+                    exchange_file_service=self.exchange_file_service,
+                    uri=path,
+                    authority=authority,
                 )
-            metadata = await self._stat_outbound(
-                file_storage,
-                path=path,
-                agent_id=agent_id,
-            )
-            if metadata.get("is_file") is not True:
-                raise ExternalChannelFileTransferError(
-                    f"Outbound Runtime path is not a regular file: {path}."
+                size = exchange.file.size_bytes
+                filename = exchange.file.filename
+                media_type = exchange.file.media_type
+                source = ExternalChannelOutboundFileSource.EXCHANGE
+            else:
+                if "://" in path or not PurePosixPath(path).is_absolute():
+                    raise ExternalChannelFileTransferError(
+                        "Every outbound Runtime file path must be absolute; Exchange "
+                        "sources must use an exchange:// URI."
+                    )
+                metadata = await self._stat_outbound(
+                    file_storage,
+                    path=path,
+                    agent_id=agent_id,
                 )
-            size = metadata.get("size")
+                if metadata.get("is_file") is not True:
+                    raise ExternalChannelFileTransferError(
+                        f"Outbound Runtime path is not a regular file: {path}."
+                    )
+                size = metadata.get("size")
+                if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+                    raise ExternalChannelFileTransferError(
+                        f"Outbound Runtime file has an invalid size: {path}."
+                    )
+                filename = PurePosixPath(path).name
+                media_type = guess_media_type(filename)
+                source = ExternalChannelOutboundFileSource.RUNTIME
             if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
                 raise ExternalChannelFileTransferError(
-                    f"Outbound Runtime file has an invalid size: {path}."
+                    f"Outbound file has an invalid size: {path}."
                 )
             if size > resolved.config.outbound_max_file_bytes:
                 raise ExternalChannelFileTransferError(
-                    "Outbound Runtime file exceeds the configured per-file limit."
+                    "Outbound file exceeds the configured per-file limit."
                 )
             total_size += size
             if total_size > resolved.config.outbound_max_action_bytes:
                 raise ExternalChannelFileTransferError(
-                    "Outbound Runtime files exceed the configured action limit."
+                    "Outbound files exceed the configured action limit."
                 )
-            filename = PurePosixPath(path).name
             manifests.append(
                 ExternalChannelOutboundFileManifest(
+                    source=source,
                     path=path,
                     filename=filename,
-                    media_type=guess_media_type(filename),
+                    media_type=media_type,
                     expected_size=size,
                 )
             )
@@ -508,3 +552,65 @@ async def _read_outbound_range(
         raise ExternalChannelFileTransferError(
             "Failed to read the outbound Runtime file."
         ) from None
+
+
+async def iter_external_channel_exchange_file_chunks(
+    *,
+    exchange_file_service: ExchangeFileService,
+    manifest: ExternalChannelOutboundFileManifest,
+    authority: SessionResourceAuthority,
+) -> AsyncIterator[bytes]:
+    """Resolve and yield one authorized Exchange source in bounded chunks."""
+    if manifest.source is not ExternalChannelOutboundFileSource.EXCHANGE:
+        raise ExternalChannelFileTransferError(
+            "Outbound manifest does not describe an Exchange file."
+        )
+    resolved = await _resolve_outbound_exchange_file(
+        exchange_file_service=exchange_file_service,
+        uri=manifest.path,
+        authority=authority,
+    )
+    if (
+        resolved.file.filename != manifest.filename
+        or resolved.file.media_type != manifest.media_type
+        or resolved.file.size_bytes != manifest.expected_size
+        or len(resolved.body) != manifest.expected_size
+    ):
+        raise ExternalChannelFileTransferError(
+            "Exchange file changed after outbound preflight."
+        )
+    for offset in range(
+        0, len(resolved.body), EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES
+    ):
+        yield resolved.body[offset : offset + EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES]
+
+
+async def _resolve_outbound_exchange_file(
+    *,
+    exchange_file_service: ExchangeFileService,
+    uri: str,
+    authority: SessionResourceAuthority,
+) -> ExchangeFileDownload:
+    """Resolve one Exchange source with the current canonical authority."""
+    result = await exchange_file_service.resolve_for_authority(
+        uri=uri,
+        authority=authority,
+    )
+    if result.failure:
+        match result.error:
+            case SessionNotFound() | FileNotFound():
+                message = "Outbound Exchange file was not found."
+            case FileAccessDenied():
+                message = "Outbound Exchange file access is denied."
+            case FileExpired():
+                message = "Outbound Exchange file is no longer available."
+            case FileUnavailable():
+                message = "Outbound Exchange file content is unavailable."
+            case _:
+                assert_never(result.error)
+        raise ExternalChannelFileTransferError(message)
+    if len(result.value.body) != result.value.file.size_bytes:
+        raise ExternalChannelFileTransferError(
+            "Outbound Exchange file size does not match its metadata."
+        )
+    return result.value

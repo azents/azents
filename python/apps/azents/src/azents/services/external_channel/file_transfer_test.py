@@ -1,19 +1,28 @@
 """Explicit External Channel inbound file-transfer tests."""
 
+import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ExternalChannelProvider
+from azents.core.enums import (
+    ExchangeFileOrigin,
+    ExchangeFileProvenanceKind,
+    ExchangeFileStatus,
+    ExternalChannelProvider,
+)
 from azents.core.external_channel_file import (
     EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
     ExternalChannelFileLocator,
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
     ExternalChannelOutboundFileManifest,
+    ExternalChannelOutboundFileSource,
 )
 from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesConfig,
@@ -22,8 +31,14 @@ from azents.core.external_channel_file_system_setting import (
 from azents.core.system_setting import ResolvedSystemSetting, SystemSettingSection
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.rdb.session import SessionManager
+from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import ExternalChannelFileAccessTarget
+from azents.services.exchange_file import (
+    ExchangeFileDownload,
+    ExchangeFileService,
+    FileAccessDenied,
+)
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.file_transfer import (
@@ -41,7 +56,10 @@ from azents.services.external_channel.slack_events import (
     SlackProviderTemporaryError,
 )
 from azents.services.file_storage import FileStorage, RangedFileStorage
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.system_setting.service import SystemSettingsService
+
+_NOW = datetime.datetime.now(datetime.UTC)
 
 
 class _Repository:
@@ -285,6 +303,7 @@ def _service(
     repository: _Repository,
     slack_client: _SlackClient,
     settings: _SystemSettings | None = None,
+    exchange_file_service: AsyncMock | None = None,
 ) -> ExternalChannelFileTransferService:
     return ExternalChannelFileTransferService(
         session_manager=cast(SessionManager[AsyncSession], _session_manager),
@@ -294,6 +313,10 @@ def _service(
             _CredentialsCodec(),
         ),
         slack_client=cast(SlackConversationClient, slack_client),
+        exchange_file_service=cast(
+            ExchangeFileService,
+            exchange_file_service or AsyncMock(),
+        ),
         system_settings=cast(
             SystemSettingsService,
             settings or _SystemSettings(),
@@ -307,6 +330,54 @@ def _locator(provider_file_id: str = "F123") -> str:
         binding_id="binding-1",
         provider_file_id=provider_file_id,
     ).encode()
+
+
+def _authority() -> SessionResourceAuthority:
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="root-session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
+    )
+
+
+def _exchange_file() -> ExchangeFile:
+    return ExchangeFile(
+        id="a" * 32,
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        origin_type=ExchangeFileOrigin.ARTIFACT,
+        status=ExchangeFileStatus.AVAILABLE,
+        object_key="exchange/workspace-1/files/a/original",
+        filename="generated.png",
+        media_type="image/png",
+        size_bytes=7,
+        sha256="0" * 64,
+        provenance_kind=ExchangeFileProvenanceKind.TOOL,
+        source_user_id=None,
+        source_agent_id="agent-1",
+        source_run_id="run-1",
+        source_tool_name="image_generation",
+        source_provider=None,
+        source_exchange_file_id=None,
+        retention_root_session_id="root-session-1",
+        retention_bound_at=_NOW,
+        preview_thumbnail_file_id=None,
+        preview_thumbnail_uri=None,
+        preview_title="generated.png",
+        preview_summary=None,
+        preview_thumbnail_media_type=None,
+        preview_thumbnail_width=None,
+        preview_thumbnail_height=None,
+        preview_generated_at=None,
+        expires_at=_NOW + datetime.timedelta(days=7),
+        expired_at=None,
+        blob_deleted_at=None,
+        created_at=_NOW,
+    )
 
 
 @pytest.mark.asyncio
@@ -648,12 +719,14 @@ async def test_outbound_preflight_builds_only_bounded_runtime_manifests() -> Non
 
     assert [item.model_dump(mode="json") for item in manifests] == [
         {
+            "source": "runtime",
             "path": "/workspace/agent/report.csv",
             "filename": "report.csv",
             "media_type": "text/csv",
             "expected_size": 6,
         },
         {
+            "source": "runtime",
             "path": "/workspace/agent/chart.png",
             "filename": "chart.png",
             "media_type": "image/png",
@@ -665,6 +738,87 @@ async def test_outbound_preflight_builds_only_bounded_runtime_manifests() -> Non
         ("/workspace/agent/chart.png", "agent-1"),
     ]
     assert storage.read_calls == []
+
+
+@pytest.mark.asyncio
+async def test_outbound_preflight_supports_authorized_exchange_file() -> None:
+    """Exchange publication shares file limits without staging Runtime bytes."""
+    exchange_file = _exchange_file()
+    exchange_file_service = AsyncMock()
+    exchange_file_service.resolve_for_authority.return_value = Success(
+        ExchangeFileDownload(file=exchange_file, body=b"pngdata")
+    )
+    storage = _OutboundStorage({})
+    service = _service(
+        repository=_Repository(_target(capabilities=_capabilities(upload_files=True))),
+        slack_client=_SlackClient(),
+        settings=_SystemSettings(
+            outbound_file_limit=10,
+            outbound_action_limit=10,
+        ),
+        exchange_file_service=exchange_file_service,
+    )
+
+    manifests = await service.prepare_outbound(
+        session_id="session-1",
+        agent_id="agent-1",
+        binding_id="binding-1",
+        paths=[exchange_file.uri],
+        file_storage=cast(FileStorage, storage),
+        authority=_authority(),
+    )
+
+    assert manifests == (
+        ExternalChannelOutboundFileManifest(
+            source=ExternalChannelOutboundFileSource.EXCHANGE,
+            path=exchange_file.uri,
+            filename="generated.png",
+            media_type="image/png",
+            expected_size=7,
+        ),
+    )
+    exchange_file_service.resolve_for_authority.assert_awaited_once_with(
+        uri=exchange_file.uri,
+        authority=_authority(),
+    )
+    assert storage.stat_calls == []
+    assert storage.read_calls == []
+
+
+@pytest.mark.asyncio
+async def test_outbound_preflight_rejects_unavailable_exchange_and_other_uris() -> None:
+    """Only current-authority Exchange sources cross the outbound URI boundary."""
+    exchange_file_service = AsyncMock()
+    exchange_file_service.resolve_for_authority.return_value = Failure(
+        FileAccessDenied()
+    )
+    service = _service(
+        repository=_Repository(_target(capabilities=_capabilities(upload_files=True))),
+        slack_client=_SlackClient(),
+        exchange_file_service=exchange_file_service,
+    )
+    storage = _OutboundStorage({})
+
+    with pytest.raises(ExternalChannelFileTransferError, match="access is denied"):
+        await service.prepare_outbound(
+            session_id="session-1",
+            agent_id="agent-1",
+            binding_id="binding-1",
+            paths=["exchange://exchange/workspace-1/files/missing/original"],
+            file_storage=cast(FileStorage, storage),
+            authority=_authority(),
+        )
+    with pytest.raises(ExternalChannelFileTransferError, match="must be absolute"):
+        await service.prepare_outbound(
+            session_id="session-1",
+            agent_id="agent-1",
+            binding_id="binding-1",
+            paths=["artifact://artifacts/workspace-1/file-1"],
+            file_storage=cast(FileStorage, storage),
+            authority=_authority(),
+        )
+
+    assert exchange_file_service.resolve_for_authority.await_count == 1
 
 
 @pytest.mark.asyncio
