@@ -457,7 +457,7 @@ def test_external_channel_app_mode_installed_schema_contract(
         ] == ("id", "app_mode")
         assert route_unique_constraints[
             "uq_external_channel_agent_routes_connection_agent"
-        ] == ("connection_id", "agent_id")
+        ] == ("connection_id", "agent_id_snapshot")
         assert route_unique_constraints[
             "uq_external_channel_agent_routes_connection_id_id"
         ] == ("connection_id", "id")

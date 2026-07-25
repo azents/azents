@@ -212,6 +212,7 @@ class TestExternalChannelRepository:
             reason="app_uninstalled",
             now=_at(4),
             required_socket_lease_owner=None,
+            defer_provider_state_purge=False,
         )
         released = await repo.get_connection_configuration(
             rdb_session,
@@ -223,7 +224,7 @@ class TestExternalChannelRepository:
             _connection_create(second_workspace_id),
         )
 
-        assert terminated is True
+        assert terminated == ()
         assert released is not None
         assert released.status is ExternalChannelConnectionStatus.DISCONNECTED
         assert released.encrypted_credentials is None
@@ -231,6 +232,54 @@ class TestExternalChannelRepository:
         assert second.workspace_id == second_workspace_id
         assert second.provider_app_id == "app-1"
         assert second.provider_tenant_id == "tenant-1"
+
+    async def test_provider_state_purge_can_follow_cleanup_target_capture(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Uninstall keeps credentials only until cleanup targets are captured."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "external-channel-deferred-provider-purge",
+        )
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id),
+        )
+
+        terminated = await repo.terminate_connection_for_provider_event(
+            rdb_session,
+            connection_id=connection.id,
+            status=ExternalChannelConnectionStatus.DISCONNECTED,
+            reason="app_uninstalled",
+            now=_at(4),
+            required_socket_lease_owner=None,
+            defer_provider_state_purge=True,
+        )
+        retained = await repo.get_connection_configuration(
+            rdb_session,
+            connection_id=connection.id,
+        )
+
+        assert terminated == ()
+        assert retained is not None
+        assert retained.status is ExternalChannelConnectionStatus.DISCONNECTED
+        assert retained.encrypted_credentials is not None
+        assert retained.provider_tenant_id == "tenant-1"
+
+        assert await repo.purge_disconnected_connection_provider_state(
+            rdb_session,
+            connection_id=connection.id,
+        )
+        purged = await repo.get_connection_configuration(
+            rdb_session,
+            connection_id=connection.id,
+        )
+
+        assert purged is not None
+        assert purged.encrypted_credentials is None
+        assert purged.provider_tenant_id is None
 
     async def test_connection_health_update_returns_refreshed_projection(
         self,
@@ -556,6 +605,7 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
     create = ExternalChannelAgentRouteCreate(
         connection_id=connection.id,
         agent_id=agent.id,
+        agent_id_snapshot=agent.id,
         route_mode=ExternalChannelRouteMode.DEDICATED,
         connection_app_mode=ExternalChannelAppMode.SINGLE,
         catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
@@ -564,6 +614,7 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
     )
     route = await repository.create_agent_route(rdb_session, create)
     assert route.agent_id == agent.id
+    assert route.agent_id_snapshot == agent.id
     with pytest.raises(
         IntegrityError,
         match="uq_external_channel_agent_routes_single_connection",

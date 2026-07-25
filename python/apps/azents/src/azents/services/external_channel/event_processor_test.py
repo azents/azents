@@ -21,7 +21,10 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
+    ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationAdmissionOrigin,
+    ExternalChannelConversationAdmissionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -51,6 +54,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessRequest,
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
+    RDBExternalChannelConversationAdmission,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelEvent,
     RDBExternalChannelInvocationBatch,
@@ -76,13 +80,16 @@ from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
     ExternalChannelBinding,
     ExternalChannelBindingCreate,
+    ExternalChannelChannelDefaultCreate,
     ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
+    ExternalChannelConversationAdmissionCreate,
     ExternalChannelDeliveryAttempt,
     ExternalChannelEvent,
     ExternalChannelEventCreate,
     ExternalChannelMessage,
     ExternalChannelMessageCreate,
+    ExternalChannelPendingContextTrim,
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
@@ -99,6 +106,9 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_channel.access import (
     ExternalChannelAccessDecisionError,
     ExternalChannelAccessService,
+)
+from azents.services.external_channel.channel_action import (
+    ExternalChannelActionService,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
@@ -238,6 +248,7 @@ async def _setup_route(
         ExternalChannelAgentRouteCreate(
             connection_id=connection.id,
             agent_id=agent.id,
+            agent_id_snapshot=agent.id,
             route_mode=ExternalChannelRouteMode.DEDICATED,
             connection_app_mode=ExternalChannelAppMode.SINGLE,
             catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
@@ -247,6 +258,118 @@ async def _setup_route(
     )
     await session.commit()
     return connection.id, route.id, agent.id, repository
+
+
+async def _setup_multi_routes(
+    session: AsyncSession,
+) -> tuple[
+    str,
+    tuple[ExternalChannelAgentRoute, ExternalChannelAgentRoute],
+    tuple[str, str],
+    ExternalChannelRepository,
+]:
+    """Create one internal two-route Multi App fixture."""
+    workspace_result = await WorkspaceRepository().create(
+        session,
+        WorkspaceCreate(
+            name="External Channel Multi processor test",
+            handle="external-channel-multi-processor-test",
+        ),
+    )
+    assert isinstance(workspace_result, Success)
+    workspace_id = await WorkspaceRepository().resolve_id(
+        session,
+        "external-channel-multi-processor-test",
+    )
+    assert workspace_id is not None
+    integration = RDBLLMProviderIntegration(
+        workspace_id=workspace_id,
+        provider=LLMProvider.ANTHROPIC,
+        name="external-channel-multi-processor-integration",
+        encrypted_credentials="encrypted-test-value",
+        config=None,
+    )
+    session.add(integration)
+    await session.flush()
+    selection = make_test_model_selection_dict(
+        integration_id=integration.id,
+        provider=LLMProvider.ANTHROPIC,
+        model_identifier="external-channel-multi-processor-model",
+    )
+    agents = (
+        RDBAgent(
+            workspace_id=workspace_id,
+            name="External Channel Multi Agent One",
+            model_selection=selection,
+            lightweight_model_selection=selection,
+        ),
+        RDBAgent(
+            workspace_id=workspace_id,
+            name="External Channel Multi Agent Two",
+            model_selection=selection,
+            lightweight_model_selection=selection,
+        ),
+    )
+    session.add_all(agents)
+    await session.flush()
+    session.add_all(
+        RDBAgentAutomaticProjectSetting(agent_id=agent.id) for agent in agents
+    )
+    await session.flush()
+    repository = ExternalChannelRepository()
+    connection = await repository.create_connection(
+        session,
+        ExternalChannelConnectionCreate(
+            workspace_id=workspace_id,
+            provider=ExternalChannelProvider.SLACK,
+            transport=ExternalChannelTransport.HTTP,
+            app_mode=ExternalChannelAppMode.MULTI,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+            provider_app_id="A-multi",
+            provider_tenant_id="T1",
+            provider_bot_user_id="B1",
+            http_callback_selector_hash="processor-multi-selector",
+            encrypted_credentials="ciphertext",
+            capabilities=None,
+            provider_config=None,
+            last_verified_at=_at(0),
+            last_health_at=_at(0),
+            disconnected_at=None,
+            socket_lease_owner=None,
+            socket_lease_until=None,
+            socket_heartbeat_at=None,
+            socket_gap_detected_at=None,
+            socket_gap_reason=None,
+        ),
+    )
+    routes = tuple(
+        [
+            await repository.create_agent_route(
+                session,
+                ExternalChannelAgentRouteCreate(
+                    connection_id=connection.id,
+                    agent_id=agent.id,
+                    agent_id_snapshot=agent.id,
+                    route_mode=ExternalChannelRouteMode.DEDICATED,
+                    connection_app_mode=ExternalChannelAppMode.MULTI,
+                    catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
+                    catalog_removed_at=None,
+                    catalog_removed_by_user_id=None,
+                ),
+            )
+            for agent in agents
+        ]
+    )
+    await session.commit()
+    return (
+        connection.id,
+        cast(
+            tuple[ExternalChannelAgentRoute, ExternalChannelAgentRoute],
+            routes,
+        ),
+        (agents[0].id, agents[1].id),
+        repository,
+    )
 
 
 class _TestEventProcessorService(ExternalChannelEventProcessorService):
@@ -287,7 +410,6 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
     ) -> ExternalChannelPersistedRevision:
         return await self._persist_normalized_message(
             session,
-            route=route,
             resource=resource,
             message=message,
             source_event_id=None,
@@ -318,6 +440,27 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             agent_id=agent_id,
         )
 
+    async def project_current_revision_for_test(
+        self,
+        session: AsyncSession,
+        *,
+        route: ExternalChannelAgentRoute,
+        resource: ExternalChannelResource,
+        message: ExternalChannelMessage,
+        provider_position: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelPendingContextTrim:
+        """Expose route projection for provider-age retention regression coverage."""
+        return await self._project_current_revision(
+            session,
+            route=route,
+            resource=resource,
+            message=message,
+            provider_position=provider_position,
+            now=now,
+            applied=True,
+        )
+
     async def attempt_control_delivery_for_test(
         self,
         *,
@@ -339,6 +482,7 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
         route: ExternalChannelAgentRoute,
         resource: ExternalChannelResource,
         trigger_message: ExternalChannelMessage,
+        expected_admission_id: str | None = None,
     ) -> ExternalChannelBinding:
         """Expose the already-granted initial binding transaction helper."""
         return await self._create_granted_initial_binding(
@@ -346,6 +490,7 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             route=route,
             resource=resource,
             trigger_message=trigger_message,
+            expected_admission_id=expected_admission_id,
         )
 
 
@@ -466,6 +611,10 @@ def _service(
         session_manager=session_manager,
         repository=repository,
         work_repository=ExternalChannelWorkRepository(),
+        action_service=cast(
+            ExternalChannelActionService,
+            MagicMock(spec=ExternalChannelActionService),
+        ),
         credentials_codec=cast(
             ExternalChannelCredentialsCodec,
             MagicMock(spec=ExternalChannelCredentialsCodec),
@@ -493,6 +642,42 @@ def _service(
         ),
         session_lifecycle=cast(SessionLifecycleService, session_lifecycle),
     )
+
+
+async def test_pending_context_retention_uses_provider_message_time() -> None:
+    """Hydration cannot grant old provider messages a new retention window."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    repository.create_pending_context_idempotent = AsyncMock()
+    repository.trim_pending_context = AsyncMock(
+        return_value=ExternalChannelPendingContextTrim(
+            deleted_message_count=0,
+            deleted_size=0,
+            retained_message_count=1,
+            retained_size=7,
+        )
+    )
+    service = _service(
+        cast(SessionManager[AsyncSession], MagicMock()),
+        cast(ExternalChannelRepository, repository),
+    )
+    provider_created_at = _at(1)
+    now = _at(10)
+
+    await service.project_current_revision_for_test(
+        cast(AsyncSession, MagicMock()),
+        route=ExternalChannelAgentRoute.model_construct(id="route-1"),
+        resource=ExternalChannelResource.model_construct(id="resource-1"),
+        message=ExternalChannelMessage.model_construct(
+            current_revision_id="revision-1",
+            pending_size=7,
+            provider_created_at=provider_created_at,
+        ),
+        provider_position="0001",
+        now=now,
+    )
+
+    create = repository.create_pending_context_idempotent.await_args.args[1]
+    assert create.expires_at == provider_created_at + datetime.timedelta(days=7)
 
 
 async def _prepare_allow_request(
@@ -530,6 +715,20 @@ async def _prepare_allow_request(
             decision_summary=None,
             expires_at=_at(10),
             decided_at=None,
+        ),
+    )
+    await repository.create_conversation_admission_idempotent(
+        session,
+        ExternalChannelConversationAdmissionCreate(
+            connection_id=connection_id,
+            resource_id=resource.id,
+            source_message_id=message.id,
+            initiating_principal_id=message.principal_id,
+            origin=ExternalChannelConversationAdmissionOrigin.SINGLE_ROUTE,
+            status=ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+            selected_route_id=route_id,
+            interaction_id=None,
+            expires_at=_at(10),
         ),
     )
     approver = await UserRepository().create(
@@ -1089,6 +1288,69 @@ async def test_allow_reuses_existing_binding_without_root_service(
     root_service.create_root_session.assert_not_awaited()
 
 
+async def test_allow_transitions_matching_admission_to_bound(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Allow binds its selected awaiting-access admission in the same commit."""
+    async with rdb_session_manager() as session:
+        (
+            _,
+            route_id,
+            _,
+            repository,
+            request_id,
+            approver_id,
+        ) = await _prepare_allow_request(session)
+
+    allowed = await _access_service(
+        rdb_session_manager,
+        repository,
+    ).allow(
+        access_request_id=request_id,
+        scope=ExternalChannelAccessGrantScope.SESSION,
+        decided_by_user_id=approver_id,
+        decision_summary="Approve selected admission.",
+        now=_at(2),
+    )
+
+    async with rdb_session_manager() as session:
+        admission = await session.scalar(
+            sa.select(RDBExternalChannelConversationAdmission).where(
+                RDBExternalChannelConversationAdmission.source_message_id
+                == allowed.request.source_message_id
+            )
+        )
+
+    assert admission is not None
+    assert admission.status is ExternalChannelConversationAdmissionStatus.BOUND
+    assert admission.selected_route_id == route_id
+
+
+def test_route_resolution_log_contains_only_safe_categorical_fields() -> None:
+    """Routing observability never serializes provider content or credentials."""
+    with patch("azents.services.external_channel.event_processor.logger.info") as info:
+        ExternalChannelEventProcessorService.log_route_resolution(
+            connection_id="connection-1",
+            resource_id="resource-1",
+            app_mode=ExternalChannelAppMode.MULTI,
+            source="channel_default",
+            route_id="route-1",
+            reason="selection_required",
+        )
+
+    info.assert_called_once_with(
+        "External Channel route resolution",
+        extra={
+            "external_channel_connection_id": "connection-1",
+            "external_channel_resource_id": "resource-1",
+            "external_channel_route_id": "route-1",
+            "external_channel_app_mode": "multi",
+            "route_resolution_source": "channel_default",
+            "route_resolution_reason": "selection_required",
+        },
+    )
+
+
 async def test_allow_rolls_back_session_projects_and_external_channel_writes(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -1519,6 +1781,207 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
     assert retained_source_message is not None
 
 
+async def test_multi_without_default_persists_selection_required_source_only(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A route-neutral Multi mention creates no Agent-specific execution state."""
+    async with rdb_session_manager() as session:
+        connection_id, routes, agent_ids, repository = await _setup_multi_routes(
+            session
+        )
+        admitted = await repository.admit_event(
+            session,
+            ExternalChannelEventCreate(
+                connection_id=connection_id,
+                provider_event_id="Ev-multi-selection",
+                transport_envelope_id="Ev-multi-selection",
+                event_type="app_mention",
+                provider_app_id="A-multi",
+                provider_tenant_id="T1",
+                provider_enterprise_id=None,
+                resource_correlation_key="C1:1784678500.000100",
+                eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+                envelope={"event": {"type": "app_mention"}},
+                status=ExternalChannelEventStatus.ACCEPTED,
+                provider_occurred_at=_at(1),
+                received_at=_at(1),
+            ),
+        )
+        configuration = await repository.get_connection_configuration(
+            session,
+            connection_id=connection_id,
+        )
+        await session.commit()
+    assert configuration is not None
+    normalized = normalize_slack_event(
+        event_type="app_mention",
+        tenant_id="T1",
+        envelope={
+            "event": {
+                "type": "app_mention",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U-multi",
+                "ts": "1784678500.000100",
+                "text": "<@B1> choose an Agent",
+            }
+        },
+    )
+    assert isinstance(normalized, SlackNormalizedMessage)
+
+    result = await _service(
+        rdb_session_manager,
+        repository,
+    ).persist_message_event_for_test(
+        event=admitted.event,
+        configuration=configuration,
+        message=normalized,
+        original_url=None,
+    )
+
+    async with rdb_session_manager() as session:
+        admissions = list(
+            await session.scalars(sa.select(RDBExternalChannelConversationAdmission))
+        )
+        pending = list(
+            await session.scalars(sa.select(RDBExternalChannelPendingContext))
+        )
+        requests = list(
+            await session.scalars(sa.select(RDBExternalChannelAccessRequest))
+        )
+        bindings = list(await session.scalars(sa.select(RDBExternalChannelBinding)))
+        sessions = list(
+            await session.scalars(
+                sa.select(RDBAgentSession).where(
+                    RDBAgentSession.agent_id.in_(agent_ids)
+                )
+            )
+        )
+        batches = list(
+            await session.scalars(sa.select(RDBExternalChannelInvocationBatch))
+        )
+        source = await repository.get_message(
+            session,
+            message_id=admissions[0].source_message_id,
+        )
+
+    assert len(admissions) == 1
+    assert admissions[0].status is (
+        ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
+    )
+    assert admissions[0].origin is (
+        ExternalChannelConversationAdmissionOrigin.MENTION_SELECTOR
+    )
+    assert admissions[0].selected_route_id is None
+    assert source is not None
+    assert pending == []
+    assert requests == []
+    assert bindings == []
+    assert sessions == []
+    assert batches == []
+    assert result.control_delivery_attempt_id is None
+    assert result.activity_delivery_attempt_id is None
+    assert result.wake_up is None
+    assert {route.id for route in routes}.isdisjoint(
+        admission.selected_route_id for admission in admissions
+    )
+
+
+async def test_multi_channel_default_projects_only_selected_route(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A Multi channel default selects exactly its configured route."""
+    async with rdb_session_manager() as session:
+        connection_id, routes, _, repository = await _setup_multi_routes(session)
+        configured_by = await UserRepository().create(
+            session,
+            UserCreate(email="multi-default-configurer@example.com"),
+        )
+        await repository.create_channel_default(
+            session,
+            ExternalChannelChannelDefaultCreate(
+                connection_id=connection_id,
+                provider_channel_id="C1",
+                route_id=routes[1].id,
+                status=ExternalChannelChannelDefaultStatus.ACTIVE,
+                configured_by_user_id=configured_by.id,
+                invalidated_at=None,
+                invalidation_reason=None,
+            ),
+        )
+        admitted = await repository.admit_event(
+            session,
+            ExternalChannelEventCreate(
+                connection_id=connection_id,
+                provider_event_id="Ev-multi-default",
+                transport_envelope_id="Ev-multi-default",
+                event_type="app_mention",
+                provider_app_id="A-multi",
+                provider_tenant_id="T1",
+                provider_enterprise_id=None,
+                resource_correlation_key="C1:1784678600.000100",
+                eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+                envelope={"event": {"type": "app_mention"}},
+                status=ExternalChannelEventStatus.ACCEPTED,
+                provider_occurred_at=_at(1),
+                received_at=_at(1),
+            ),
+        )
+        configuration = await repository.get_connection_configuration(
+            session,
+            connection_id=connection_id,
+        )
+        await session.commit()
+    assert configuration is not None
+    normalized = normalize_slack_event(
+        event_type="app_mention",
+        tenant_id="T1",
+        envelope={
+            "event": {
+                "type": "app_mention",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U-multi-default",
+                "ts": "1784678600.000100",
+                "text": "<@B1> use the configured Agent",
+            }
+        },
+    )
+    assert isinstance(normalized, SlackNormalizedMessage)
+
+    await _service(
+        rdb_session_manager,
+        repository,
+    ).persist_message_event_for_test(
+        event=admitted.event,
+        configuration=configuration,
+        message=normalized,
+        original_url=None,
+    )
+
+    async with rdb_session_manager() as session:
+        admission = await session.scalar(
+            sa.select(RDBExternalChannelConversationAdmission)
+        )
+        pending = list(
+            await session.scalars(sa.select(RDBExternalChannelPendingContext))
+        )
+        requests = list(
+            await session.scalars(sa.select(RDBExternalChannelAccessRequest))
+        )
+
+    assert admission is not None
+    assert admission.status is (
+        ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS
+    )
+    assert admission.origin is (
+        ExternalChannelConversationAdmissionOrigin.CHANNEL_DEFAULT
+    )
+    assert admission.selected_route_id == routes[1].id
+    assert [item.route_id for item in pending] == [routes[1].id]
+    assert [request.route_id for request in requests] == [routes[1].id]
+
+
 async def test_initial_binding_release_creates_one_session_link_and_tracker(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -1605,6 +2068,8 @@ async def test_initial_binding_release_creates_one_session_link_and_tracker(
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
+            expected_admission_id=None,
+            expected_access_request_id=None,
         )
         released = await service.release_pending_context_for_test(
             session,
@@ -1679,8 +2144,8 @@ async def test_initial_binding_release_creates_one_session_link_and_tracker(
         }
     ]
     assert repeated is not None
-    assert repeated.session_link_delivery_attempt_id is None
-    assert repeated.activity_delivery_attempt_id is None
+    assert repeated.session_link_delivery_attempt_id == session_link.id
+    assert repeated.activity_delivery_attempt_id == activity.id
 
 
 async def test_pending_context_is_trimmed_by_count_and_size(
@@ -1841,7 +2306,7 @@ async def test_routable_route_requires_active_agent_lifecycle(
 ) -> None:
     """Only the routed Agent lifecycle controls new execution eligibility."""
     async with rdb_session_manager() as session:
-        connection_id, route_id, agent_id, repository = await _setup_route(session)
+        _, route_id, agent_id, repository = await _setup_route(session)
         route = await repository.get_agent_route(session, route_id=route_id)
         agent = await session.get(RDBAgent, agent_id)
         assert route is not None
@@ -1851,9 +2316,9 @@ async def test_routable_route_requires_active_agent_lifecycle(
 
     async with rdb_session_manager() as session:
         route = await repository.get_agent_route(session, route_id=route_id)
-        routable = await repository.get_routable_route_by_connection_id(
+        routable = await repository.get_routable_route_by_id(
             session,
-            connection_id=connection_id,
+            route_id=route_id,
         )
 
     assert route is not None
@@ -1865,7 +2330,7 @@ async def test_routable_route_rejects_disconnecting_connection(
 ) -> None:
     """A disconnecting connection cannot admit new routing work."""
     async with rdb_session_manager() as session:
-        connection_id, _, _, repository = await _setup_route(session)
+        connection_id, route_id, _, repository = await _setup_route(session)
         connection = await session.scalar(
             sa.select(RDBExternalChannelConnection)
             .where(RDBExternalChannelConnection.id == connection_id)
@@ -1876,9 +2341,9 @@ async def test_routable_route_rejects_disconnecting_connection(
         await session.commit()
 
     async with rdb_session_manager() as session:
-        routable = await repository.get_routable_route_by_connection_id(
+        routable = await repository.get_routable_route_by_id(
             session,
-            connection_id=connection_id,
+            route_id=route_id,
         )
 
     assert routable is None
@@ -2138,10 +2603,10 @@ async def test_provider_failure_does_not_revive_disconnected_connection(
     assert connection.status is ExternalChannelConnectionStatus.DISCONNECTED
 
 
-async def test_app_uninstall_preserves_agent_route(
+async def test_app_uninstall_preserves_detached_agent_route(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Slack App uninstall clears provider state without removing Agent routing."""
+    """Slack App uninstall clears provider state and retains route provenance."""
     async with rdb_session_manager() as session:
         connection_id, route_id, _, repository = await _setup_route(session)
         changed = await repository.terminate_connection_for_provider_event(
@@ -2151,6 +2616,7 @@ async def test_app_uninstall_preserves_agent_route(
             reason="app_uninstalled",
             now=_at(2),
             required_socket_lease_owner=None,
+            defer_provider_state_purge=False,
         )
         await session.commit()
 
@@ -2161,7 +2627,10 @@ async def test_app_uninstall_preserves_agent_route(
         )
         route = await repository.get_agent_route(session, route_id=route_id)
 
-    assert changed is True
+    assert changed == ()
     assert connection is not None
     assert connection.status is ExternalChannelConnectionStatus.DISCONNECTED
     assert route is not None
+    assert route.agent_id is None
+    assert route.agent_id_snapshot
+    assert route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED

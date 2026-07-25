@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
+    ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
@@ -104,6 +105,43 @@ async def test_repeated_disconnect_reterminalizes_connection() -> None:
     session.flush.assert_awaited_once()
 
 
+async def test_disconnect_retry_recovers_pending_progress_cleanup_ids() -> None:
+    """A crash retry can prepare cleanup created by the prior transaction."""
+    connection = SimpleNamespace(
+        status=ExternalChannelConnectionStatus.DISCONNECTING,
+    )
+    route = SimpleNamespace(id="route-1")
+    resource = SimpleNamespace(id="resource-1")
+    binding = SimpleNamespace(
+        id="binding-1",
+        resource_id=resource.id,
+        status=ExternalChannelBindingStatus.DISCONNECTED,
+    )
+    resource_rows = Mock()
+    resource_rows.all.return_value = [resource]
+    binding_rows = Mock()
+    binding_rows.all.return_value = [binding]
+    session = AsyncMock(spec=AsyncSession)
+    session.scalars.side_effect = [
+        resource_rows,
+        binding_rows,
+        ("cleanup-1",),
+    ]
+    repository = ExternalChannelManagementRepository()
+    repository.get_connection = AsyncMock(return_value=(connection, route))
+
+    cleanup_ids = await repository.begin_connection_disconnect(
+        session,
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        connection_id="connection-1",
+        now=datetime.datetime.now(datetime.UTC),
+    )
+
+    assert cleanup_ids == ("cleanup-1",)
+    session.flush.assert_awaited_once()
+
+
 async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> None:
     """Provider cleanup retains its target while terminal state commits first."""
     events: list[str] = []
@@ -131,6 +169,13 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
 
     repository.begin_connection_disconnect.side_effect = begin_disconnect
     repository.complete_connection_disconnect.side_effect = complete_disconnect
+    lifecycle_repository = AsyncMock()
+
+    async def disconnect_single(*args: object, **kwargs: object) -> object:
+        events.append("lifecycle")
+        return object()
+
+    lifecycle_repository.disconnect_single_connection.side_effect = disconnect_single
 
     action_service = AsyncMock()
     prepared_target = object()
@@ -157,6 +202,7 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
         session_manager=session_manager,
         repository=repository,
         domain_repository=AsyncMock(),
+        lifecycle_repository=lifecycle_repository,
         agent_repository=agent_repository,
         agent_admin_repository=agent_admin_repository,
         workspace_user_repository=AsyncMock(),
@@ -177,6 +223,7 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
         "begin",
         "commit",
         "prepare",
+        "lifecycle",
         "complete",
         "commit",
         "delivery",

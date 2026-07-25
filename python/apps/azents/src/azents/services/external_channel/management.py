@@ -22,6 +22,9 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.external_channel.data import ExternalChannelAgentRouteCreate
+from azents.repos.external_channel.lifecycle import (
+    ExternalChannelLifecycleRepository,
+)
 from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
 )
@@ -99,6 +102,10 @@ class ExternalChannelManagementService:
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
     ]
+    lifecycle_repository: Annotated[
+        ExternalChannelLifecycleRepository,
+        Depends(ExternalChannelLifecycleRepository),
+    ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_admin_repository: Annotated[
         AgentAdminRepository,
@@ -169,6 +176,7 @@ class ExternalChannelManagementService:
                 ExternalChannelAgentRouteCreate(
                     connection_id=setup.connection.id,
                     agent_id=agent_id,
+                    agent_id_snapshot=agent_id,
                     route_mode=ExternalChannelRouteMode.DEDICATED,
                     connection_app_mode=ExternalChannelAppMode.SINGLE,
                     catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
@@ -285,6 +293,14 @@ class ExternalChannelManagementService:
             if target is not None:
                 cleanup_targets.append(target)
         async with self.session_manager() as session:
+            disconnected = await self.lifecycle_repository.disconnect_single_connection(
+                session,
+                connection_id=connection_id,
+                now=datetime.datetime.now(datetime.UTC),
+                reason="manager_disconnected",
+            )
+            if disconnected is None:
+                raise ExternalChannelManagementNotFound(connection_id)
             connection = await self.repository.complete_connection_disconnect(
                 session,
                 workspace_id=workspace_id,

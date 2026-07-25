@@ -16,6 +16,7 @@ from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentSessionKind,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
@@ -23,6 +24,7 @@ from azents.core.enums import (
     ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationAdmissionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -41,6 +43,7 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
@@ -518,7 +521,8 @@ class ExternalChannelRepository:
         reason: str,
         now: datetime.datetime,
         required_socket_lease_owner: str | None,
-    ) -> bool:
+        defer_provider_state_purge: bool,
+    ) -> tuple[str, ...] | None:
         """Fence provider resources after an explicit App uninstall."""
         if status is not ExternalChannelConnectionStatus.DISCONNECTED:
             raise ValueError("Provider termination requires disconnection.")
@@ -541,59 +545,170 @@ class ExternalChannelRepository:
             )
         connection = await session.scalar(statement.with_for_update())
         if connection is None:
-            return False
-        route_ids = sa.select(RDBExternalChannelAgentRoute.id).where(
-            RDBExternalChannelAgentRoute.connection_id == connection_id
+            return None
+        routes = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelAgentRoute)
+                    .where(RDBExternalChannelAgentRoute.connection_id == connection_id)
+                    .order_by(RDBExternalChannelAgentRoute.id)
+                    .with_for_update()
+                )
+            ).all()
         )
-        binding_ids = sa.select(RDBExternalChannelBinding.id).where(
-            RDBExternalChannelBinding.route_id.in_(route_ids)
+        route_ids = [route.id for route in routes]
+        resources = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelResource)
+                    .where(RDBExternalChannelResource.connection_id == connection_id)
+                    .order_by(RDBExternalChannelResource.id)
+                    .with_for_update()
+                )
+            ).all()
         )
-        await session.execute(
-            sa.update(RDBExternalChannelWork)
-            .where(
-                RDBExternalChannelWork.binding_id.in_(binding_ids),
-                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
-            )
-            .values(
-                status=ExternalChannelWorkStatus.FINISHED,
-                finished_at=now,
-            )
+        bindings = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelBinding)
+                    .where(RDBExternalChannelBinding.route_id.in_(route_ids))
+                    .order_by(
+                        RDBExternalChannelBinding.resource_id,
+                        RDBExternalChannelBinding.id,
+                    )
+                    .with_for_update()
+                )
+            ).all()
         )
-        await session.execute(
-            sa.update(RDBExternalChannelBinding)
-            .where(
-                RDBExternalChannelBinding.route_id.in_(route_ids),
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
-            )
-            .values(
-                status=ExternalChannelBindingStatus.DISCONNECTED,
-                disconnected_at=now,
-                disconnect_reason=reason,
-            )
+        admissions = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelConversationAdmission)
+                    .where(
+                        RDBExternalChannelConversationAdmission.connection_id
+                        == connection_id,
+                        RDBExternalChannelConversationAdmission.status.in_(
+                            (
+                                ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+                                ExternalChannelConversationAdmissionStatus.SELECTED,
+                                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                            )
+                        ),
+                    )
+                    .order_by(RDBExternalChannelConversationAdmission.id)
+                    .with_for_update()
+                )
+            ).all()
         )
+        access_requests = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelAccessRequest)
+                    .where(
+                        RDBExternalChannelAccessRequest.route_id.in_(route_ids),
+                        RDBExternalChannelAccessRequest.status
+                        == ExternalChannelAccessRequestStatus.PENDING,
+                    )
+                    .order_by(RDBExternalChannelAccessRequest.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        binding_ids = [binding.id for binding in bindings]
+        works = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelWork)
+                    .where(
+                        RDBExternalChannelWork.binding_id.in_(binding_ids),
+                        RDBExternalChannelWork.status
+                        == ExternalChannelWorkStatus.ACTIVE,
+                    )
+                    .order_by(RDBExternalChannelWork.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        resource_labels = {resource.id: resource.labels for resource in resources}
+        binding_resource_ids = {binding.id: binding.resource_id for binding in bindings}
+        progress_delete_intent_ids: list[str] = []
+        for work in works:
+            if work.progress_provider_message_key is None:
+                continue
+            result = await session.execute(
+                pg_insert(RDBExternalChannelDeliveryAttempt)
+                .values(
+                    id=uuid7().hex,
+                    origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                    origin_id=work.binding_id,
+                    channel_action_id=None,
+                    binding_id=work.binding_id,
+                    operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                    request_payload=_progress_delete_payload(
+                        resource_labels.get(binding_resource_ids[work.binding_id]),
+                        work.progress_provider_message_key,
+                    ),
+                    status=ExternalChannelDeliveryStatus.PENDING,
+                    provider_message_key=work.progress_provider_message_key,
+                    error_kind=None,
+                    error_summary=None,
+                    attempted_at=None,
+                    completed_at=None,
+                )
+                .on_conflict_do_nothing()
+                .returning(RDBExternalChannelDeliveryAttempt.id)
+            )
+            created_id = result.scalar_one_or_none()
+            if created_id is not None:
+                progress_delete_intent_ids.append(created_id)
+        for work in works:
+            work.status = ExternalChannelWorkStatus.FINISHED
+            work.finished_at = now
+            work.state_revision += 1
+            work.desired_progress_payload = None
+            work.desired_progress_revision += 1
+        for binding in bindings:
+            if binding.status is ExternalChannelBindingStatus.ACTIVE:
+                binding.status = ExternalChannelBindingStatus.DISCONNECTED
+                binding.disconnected_at = now
+                binding.disconnect_reason = reason
         await session.execute(
             sa.delete(RDBExternalChannelPendingContext).where(
                 RDBExternalChannelPendingContext.route_id.in_(route_ids)
             )
         )
         await session.execute(
-            sa.update(RDBExternalChannelResource)
+            sa.update(RDBExternalChannelChannelDefault)
             .where(
-                RDBExternalChannelResource.connection_id == connection_id,
-                RDBExternalChannelResource.status
-                == ExternalChannelResourceStatus.ACTIVE,
+                RDBExternalChannelChannelDefault.connection_id == connection_id,
+                RDBExternalChannelChannelDefault.status
+                == ExternalChannelChannelDefaultStatus.ACTIVE,
             )
             .values(
-                status=ExternalChannelResourceStatus.UNAVAILABLE,
-                unavailable_at=now,
+                status=ExternalChannelChannelDefaultStatus.INVALIDATED,
+                invalidated_at=now,
+                invalidation_reason=reason,
             )
         )
+        for admission in admissions:
+            admission.status = ExternalChannelConversationAdmissionStatus.EXPIRED
+        for request in access_requests:
+            request.status = ExternalChannelAccessRequestStatus.EXPIRED
+            request.decision_summary = (
+                "The External Channel connection was disconnected."
+            )
+            request.decided_at = now
+        for resource in resources:
+            if resource.status is ExternalChannelResourceStatus.ACTIVE:
+                resource.status = ExternalChannelResourceStatus.UNAVAILABLE
+                resource.unavailable_at = now
+        for route in routes:
+            if route.catalog_status is not ExternalChannelRouteCatalogStatus.REMOVED:
+                route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
+                route.catalog_removed_at = now
+                route.catalog_removed_by_user_id = None
+            route.agent_id = None
         connection.status = status
-        if status is ExternalChannelConnectionStatus.DISCONNECTED:
-            connection.encrypted_credentials = None
-            connection.provider_tenant_id = None
-            connection.provider_bot_user_id = None
-            connection.capabilities = None
         connection.disconnected_at = now
         connection.socket_lease_owner = None
         connection.socket_lease_until = None
@@ -605,8 +720,42 @@ class ExternalChannelRepository:
             connection.socket_heartbeat_at = None
             connection.socket_gap_detected_at = None
             connection.socket_gap_reason = None
+        if not defer_provider_state_purge:
+            self._purge_connection_provider_state(connection)
+        await session.flush()
+        return tuple(progress_delete_intent_ids)
+
+    async def purge_disconnected_connection_provider_state(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> bool:
+        """Clear provider secrets after cleanup targets have been captured."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.status
+                == ExternalChannelConnectionStatus.DISCONNECTED,
+            )
+            .with_for_update()
+        )
+        if connection is None:
+            return False
+        self._purge_connection_provider_state(connection)
         await session.flush()
         return True
+
+    @staticmethod
+    def _purge_connection_provider_state(
+        connection: RDBExternalChannelConnection,
+    ) -> None:
+        """Remove provider identity and credentials from one terminal connection."""
+        connection.encrypted_credentials = None
+        connection.provider_tenant_id = None
+        connection.provider_bot_user_id = None
+        connection.capabilities = None
 
     async def mark_connection_reconnect_required(
         self,
@@ -680,6 +829,10 @@ class ExternalChannelRepository:
             raise ValueError("New External Channel routes must use dedicated mode.")
         if create.catalog_status is not ExternalChannelRouteCatalogStatus.AVAILABLE:
             raise ValueError("New External Channel routes must be catalog-available.")
+        if create.agent_id_snapshot != create.agent_id:
+            raise ValueError(
+                "New External Channel route Agent snapshot must match its Agent."
+            )
         if (
             create.catalog_removed_at is not None
             or create.catalog_removed_by_user_id is not None
@@ -687,10 +840,16 @@ class ExternalChannelRepository:
             raise ValueError(
                 "New External Channel routes cannot include catalog-removal metadata."
             )
-        agent = await session.get(RDBAgent, create.agent_id)
-        if agent is None or agent.workspace_id != connection.workspace_id:
+        agent = await session.scalar(
+            sa.select(RDBAgent).where(RDBAgent.id == create.agent_id).with_for_update()
+        )
+        if (
+            agent is None
+            or agent.workspace_id != connection.workspace_id
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+        ):
             raise ValueError(
-                "External Channel route Agent must belong to connection Workspace."
+                "External Channel route Agent must be active in connection Workspace."
             )
         return ExternalChannelAgentRoute.model_validate(
             await self._create(session, RDBExternalChannelAgentRoute, create)
@@ -907,7 +1066,18 @@ class ExternalChannelRepository:
             raise ValueError(
                 "External Channel default connection or route does not exist."
             )
-        agent = await session.get(RDBAgent, route.agent_id)
+        agent = (
+            None
+            if route.agent_id is None
+            else await session.scalar(
+                sa.select(RDBAgent)
+                .where(
+                    RDBAgent.id == route.agent_id,
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                )
+                .with_for_update()
+            )
+        )
         if (
             connection.app_mode is not ExternalChannelAppMode.MULTI
             or route.connection_id != connection.id
@@ -915,25 +1085,33 @@ class ExternalChannelRepository:
             or route.catalog_status is not ExternalChannelRouteCatalogStatus.AVAILABLE
             or agent is None
             or agent.workspace_id != connection.workspace_id
-            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
         ):
             raise ValueError("External Channel default route is not eligible.")
         return ExternalChannelChannelDefault.model_validate(
             await self._create(session, RDBExternalChannelChannelDefault, create)
         )
 
-    async def get_routable_route_by_connection_id(
+    async def lock_connection_for_routing(
         self,
         session: AsyncSession,
         *,
         connection_id: str,
-    ) -> ExternalChannelAgentRoute | None:
-        """Lock and fetch a routable route for one connection."""
-        return await self._get_routable_route(
-            session,
-            connection_id=connection_id,
-            route_id=None,
+    ) -> ExternalChannelConnection | None:
+        """Lock one execution-eligible connection before route resolution."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+            )
+            .with_for_update()
         )
+        return self._as(ExternalChannelConnection, rdb)
 
     async def get_routable_route_by_id(
         self,
@@ -944,9 +1122,197 @@ class ExternalChannelRepository:
         """Lock and fetch one route if its connection admits new execution."""
         return await self._get_routable_route(
             session,
-            connection_id=None,
             route_id=route_id,
         )
+
+    async def lock_routable_single_route(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> ExternalChannelAgentRoute | None:
+        """Lock the sole eligible Single App route without candidate ordering."""
+        route_ids = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelAgentRoute.id)
+                .where(
+                    RDBExternalChannelAgentRoute.connection_id == connection_id,
+                )
+                .with_for_update(of=RDBExternalChannelAgentRoute)
+            )
+        )
+        if len(route_ids) != 1:
+            return None
+        return await self._get_routable_route(
+            session,
+            route_id=route_ids[0],
+        )
+
+    async def lock_routable_channel_default(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        provider_channel_id: str,
+    ) -> ExternalChannelAgentRoute | None:
+        """Lock the exact eligible Multi App channel default, if any."""
+        rows = list(
+            await session.scalars(
+                self._routable_route_statement()
+                .join(
+                    RDBExternalChannelChannelDefault,
+                    sa.and_(
+                        RDBExternalChannelChannelDefault.connection_id
+                        == RDBExternalChannelAgentRoute.connection_id,
+                        RDBExternalChannelChannelDefault.route_id
+                        == RDBExternalChannelAgentRoute.id,
+                    ),
+                )
+                .where(
+                    RDBExternalChannelConnection.id == connection_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelAgentRoute.connection_app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelChannelDefault.provider_channel_id
+                    == provider_channel_id,
+                    RDBExternalChannelChannelDefault.status
+                    == ExternalChannelChannelDefaultStatus.ACTIVE,
+                )
+                .with_for_update(of=RDBExternalChannelAgentRoute)
+            )
+        )
+        if len(rows) != 1:
+            return None
+        route = rows[0]
+        if not await self._lock_active_route_agent(session, route=route):
+            return None
+        return ExternalChannelAgentRoute.model_validate(route)
+
+    async def lock_open_conversation_admission(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+    ) -> ExternalChannelConversationAdmission | None:
+        """Lock the one open routing admission for a resource."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConversationAdmission)
+            .where(
+                RDBExternalChannelConversationAdmission.resource_id == resource_id,
+                RDBExternalChannelConversationAdmission.status.in_(
+                    (
+                        ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+                        ExternalChannelConversationAdmissionStatus.SELECTED,
+                        ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+        return self._as(ExternalChannelConversationAdmission, rdb)
+
+    async def get_open_conversation_admission(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+    ) -> ExternalChannelConversationAdmission | None:
+        """Fetch the open admission snapshot before canonical lock acquisition."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConversationAdmission).where(
+                RDBExternalChannelConversationAdmission.resource_id == resource_id,
+                RDBExternalChannelConversationAdmission.status.in_(
+                    (
+                        ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+                        ExternalChannelConversationAdmissionStatus.SELECTED,
+                        ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                    )
+                ),
+            )
+        )
+        return self._as(ExternalChannelConversationAdmission, rdb)
+
+    async def transition_conversation_admission(
+        self,
+        session: AsyncSession,
+        *,
+        admission_id: str,
+        status: ExternalChannelConversationAdmissionStatus,
+        selected_route_id: str | None,
+    ) -> ExternalChannelConversationAdmission | None:
+        """Apply a routing transition without replacing a recorded route."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConversationAdmission)
+            .where(RDBExternalChannelConversationAdmission.id == admission_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        allowed_transitions = {
+            ExternalChannelConversationAdmissionStatus.PENDING_SELECTION: {
+                ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+                ExternalChannelConversationAdmissionStatus.SELECTED,
+                ExternalChannelConversationAdmissionStatus.EXPIRED,
+                ExternalChannelConversationAdmissionStatus.REJECTED,
+            },
+            ExternalChannelConversationAdmissionStatus.SELECTED: {
+                ExternalChannelConversationAdmissionStatus.SELECTED,
+                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                ExternalChannelConversationAdmissionStatus.BOUND,
+                ExternalChannelConversationAdmissionStatus.EXPIRED,
+                ExternalChannelConversationAdmissionStatus.REJECTED,
+            },
+            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS: {
+                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                ExternalChannelConversationAdmissionStatus.BOUND,
+                ExternalChannelConversationAdmissionStatus.EXPIRED,
+                ExternalChannelConversationAdmissionStatus.REJECTED,
+            },
+            ExternalChannelConversationAdmissionStatus.BOUND: {
+                ExternalChannelConversationAdmissionStatus.BOUND,
+            },
+            ExternalChannelConversationAdmissionStatus.EXPIRED: {
+                ExternalChannelConversationAdmissionStatus.EXPIRED,
+            },
+            ExternalChannelConversationAdmissionStatus.REJECTED: {
+                ExternalChannelConversationAdmissionStatus.REJECTED,
+            },
+        }
+        if status not in allowed_transitions[rdb.status]:
+            raise ValueError(
+                "External Channel conversation admission transition is invalid."
+            )
+        if (
+            rdb.selected_route_id is not None
+            and selected_route_id is not None
+            and rdb.selected_route_id != selected_route_id
+        ):
+            raise ValueError(
+                "External Channel conversation admission route is immutable."
+            )
+        if (
+            status is ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
+            and selected_route_id is not None
+        ):
+            raise ValueError(
+                "Pending-selection External Channel admissions cannot select a route."
+            )
+        if (
+            status
+            in (
+                ExternalChannelConversationAdmissionStatus.SELECTED,
+                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                ExternalChannelConversationAdmissionStatus.BOUND,
+            )
+            and (selected_route_id or rdb.selected_route_id) is None
+        ):
+            raise ValueError("Selected External Channel admissions require a route.")
+        rdb.status = status
+        if rdb.selected_route_id is None:
+            rdb.selected_route_id = selected_route_id
+        await session.flush()
+        return ExternalChannelConversationAdmission.model_validate(rdb)
 
     async def get_routable_route_by_binding_id(
         self,
@@ -957,7 +1323,6 @@ class ExternalChannelRepository:
         """Lock and fetch the route owning one routable binding."""
         return await self._get_routable_route(
             session,
-            connection_id=None,
             route_id=None,
             binding_id=binding_id,
         )
@@ -966,54 +1331,78 @@ class ExternalChannelRepository:
         self,
         session: AsyncSession,
         *,
-        connection_id: str | None,
         route_id: str | None,
         binding_id: str | None = None,
     ) -> ExternalChannelAgentRoute | None:
-        """Serialize routable selection with connection state transitions."""
-        predicates = [
-            RDBExternalChannelConnection.status.in_(
-                (
-                    ExternalChannelConnectionStatus.ACTIVE,
-                    ExternalChannelConnectionStatus.DEGRADED,
-                )
-            ),
-            RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
-        ]
-        if connection_id is not None:
-            predicates.append(
-                RDBExternalChannelAgentRoute.connection_id == connection_id
-            )
+        """Lock one stable route with all execution ownership boundaries."""
+        predicates: list[sa.ColumnElement[bool]] = []
         if route_id is not None:
             predicates.append(RDBExternalChannelAgentRoute.id == route_id)
-        statement = (
+        if binding_id is not None:
+            statement = self._routable_route_statement().join(
+                RDBExternalChannelBinding,
+                RDBExternalChannelBinding.route_id == RDBExternalChannelAgentRoute.id,
+            )
+            predicates.append(RDBExternalChannelBinding.id == binding_id)
+        else:
+            statement = self._routable_route_statement()
+        rdb = await session.scalar(
+            statement.where(*predicates).with_for_update(
+                of=RDBExternalChannelAgentRoute
+            )
+        )
+        if rdb is not None and not await self._lock_active_route_agent(
+            session,
+            route=rdb,
+        ):
+            return None
+        return self._as(ExternalChannelAgentRoute, rdb)
+
+    @staticmethod
+    async def _lock_active_route_agent(
+        session: AsyncSession,
+        *,
+        route: RDBExternalChannelAgentRoute,
+    ) -> bool:
+        """Serialize route selection with Agent lifecycle fencing."""
+        if route.agent_id is None:
+            return False
+        agent = await session.scalar(
+            sa.select(RDBAgent)
+            .where(
+                RDBAgent.id == route.agent_id,
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        return agent is not None
+
+    @staticmethod
+    def _routable_route_statement() -> sa.Select[tuple[RDBExternalChannelAgentRoute]]:
+        """Build common route eligibility predicates without candidate ordering."""
+        return (
             sa.select(RDBExternalChannelAgentRoute)
             .join(
                 RDBExternalChannelConnection,
                 RDBExternalChannelConnection.id
                 == RDBExternalChannelAgentRoute.connection_id,
             )
-            .join(
-                RDBAgent,
-                RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+            .join(RDBAgent, RDBAgent.id == RDBExternalChannelAgentRoute.agent_id)
+            .where(
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == RDBExternalChannelConnection.app_mode,
+                RDBExternalChannelAgentRoute.catalog_status
+                == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                RDBAgent.workspace_id == RDBExternalChannelConnection.workspace_id,
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
             )
         )
-        if binding_id is not None:
-            statement = statement.join(
-                RDBExternalChannelBinding,
-                RDBExternalChannelBinding.route_id == RDBExternalChannelAgentRoute.id,
-            )
-            predicates.append(RDBExternalChannelBinding.id == binding_id)
-        rdb = await session.scalar(
-            statement.where(*predicates)
-            .order_by(
-                RDBExternalChannelAgentRoute.updated_at.desc(),
-                RDBExternalChannelAgentRoute.id.desc(),
-            )
-            .limit(1)
-            .with_for_update(of=RDBExternalChannelConnection)
-        )
-        return self._as(ExternalChannelAgentRoute, rdb)
 
     async def get_agent_route(
         self,
@@ -1838,51 +2227,134 @@ class ExternalChannelRepository:
         self,
         session: AsyncSession,
         create: ExternalChannelBindingCreate,
+        *,
+        expected_admission_id: str | None,
+        expected_access_request_id: str | None,
     ) -> ExternalChannelBinding:
         """Create or return the active binding for one resource and route."""
-        rdb = await self._insert_or_lookup(
+        resource = await self.lock_resource(
             session,
-            RDBExternalChannelBinding,
-            create,
-            lambda: session.scalar(
-                sa.select(RDBExternalChannelBinding).where(
-                    RDBExternalChannelBinding.resource_id == create.resource_id,
-                    RDBExternalChannelBinding.status
-                    == ExternalChannelBindingStatus.ACTIVE,
-                )
-            ),
+            resource_id=create.resource_id,
         )
-        return ExternalChannelBinding.model_validate(rdb)
+        if resource is None:
+            raise ValueError("External Channel binding resource does not exist.")
+        existing = await self.lock_active_binding_by_resource(
+            session,
+            resource_id=create.resource_id,
+        )
+        await self._validate_binding_owners(
+            session,
+            create,
+            expected_admission_id=expected_admission_id,
+            expected_access_request_id=expected_access_request_id,
+        )
+        if existing is not None:
+            if existing.route_id != create.route_id:
+                raise ValueError(
+                    "External Channel resource already has an active binding "
+                    "for another route."
+                )
+            if existing.agent_session_id != create.agent_session_id:
+                raise ValueError(
+                    "External Channel resource already has an active binding "
+                    "for another Agent Session."
+                )
+            return existing
+        return ExternalChannelBinding.model_validate(
+            await self._create(session, RDBExternalChannelBinding, create)
+        )
 
-    async def get_active_binding_by_route_resource(
+    async def _validate_binding_owners(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelBindingCreate,
+        *,
+        expected_admission_id: str | None,
+        expected_access_request_id: str | None,
+    ) -> None:
+        """Validate owners and the durable admission/request authority."""
+        resource = await session.get(RDBExternalChannelResource, create.resource_id)
+        route = await session.get(RDBExternalChannelAgentRoute, create.route_id)
+        agent_session = await session.get(RDBAgentSession, create.agent_session_id)
+        if resource is None or route is None or agent_session is None:
+            raise ValueError("External Channel binding owner does not exist.")
+        connection = await session.get(
+            RDBExternalChannelConnection, route.connection_id
+        )
+        agent = await session.get(RDBAgent, route.agent_id)
+        if (
+            connection is None
+            or resource.connection_id != connection.id
+            or route.connection_app_mode is not connection.app_mode
+            or route.catalog_status is not ExternalChannelRouteCatalogStatus.AVAILABLE
+            or agent is None
+            or agent.workspace_id != connection.workspace_id
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or agent_session.workspace_id != agent.workspace_id
+            or agent_session.agent_id != agent.id
+            or agent_session.session_kind is not AgentSessionKind.ROOT
+        ):
+            raise ValueError("External Channel binding owners are incompatible.")
+        if expected_admission_id is not None:
+            admission = await session.scalar(
+                sa.select(RDBExternalChannelConversationAdmission)
+                .where(
+                    RDBExternalChannelConversationAdmission.id == expected_admission_id
+                )
+                .with_for_update()
+            )
+            if (
+                admission is None
+                or admission.resource_id != resource.id
+                or admission.selected_route_id != route.id
+                or admission.status
+                not in (
+                    ExternalChannelConversationAdmissionStatus.SELECTED,
+                    ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                )
+            ):
+                raise ValueError("External Channel binding admission is incompatible.")
+        if expected_access_request_id is not None:
+            request = await session.scalar(
+                sa.select(RDBExternalChannelAccessRequest)
+                .where(RDBExternalChannelAccessRequest.id == expected_access_request_id)
+                .with_for_update()
+            )
+            if (
+                request is None
+                or request.resource_id != resource.id
+                or request.route_id != route.id
+                or request.status is not ExternalChannelAccessRequestStatus.PENDING
+            ):
+                raise ValueError(
+                    "External Channel binding access request is incompatible."
+                )
+
+    async def get_active_binding_by_resource(
         self,
         session: AsyncSession,
         *,
-        route_id: str,
         resource_id: str,
     ) -> ExternalChannelBinding | None:
-        """Fetch the active binding for one route and external resource."""
+        """Fetch the one active binding allowed for an external resource."""
         rdb = await session.scalar(
             sa.select(RDBExternalChannelBinding).where(
-                RDBExternalChannelBinding.route_id == route_id,
                 RDBExternalChannelBinding.resource_id == resource_id,
                 RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
             )
         )
         return self._as(ExternalChannelBinding, rdb)
 
-    async def lock_active_binding_by_route_resource(
+    async def lock_active_binding_by_resource(
         self,
         session: AsyncSession,
         *,
-        route_id: str,
         resource_id: str,
     ) -> ExternalChannelBinding | None:
-        """Lock the active binding before pending-context mutations."""
+        """Lock the one active binding after its resource lock."""
         rdb = await session.scalar(
             sa.select(RDBExternalChannelBinding)
             .where(
-                RDBExternalChannelBinding.route_id == route_id,
                 RDBExternalChannelBinding.resource_id == resource_id,
                 RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
             )
@@ -1923,6 +2395,18 @@ class ExternalChannelRepository:
         )
         return self._as(ExternalChannelBinding, rdb)
 
+    async def get_binding(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+    ) -> ExternalChannelBinding | None:
+        """Fetch one binding snapshot before canonical lock acquisition."""
+        return self._as(
+            ExternalChannelBinding,
+            await session.get(RDBExternalChannelBinding, binding_id),
+        )
+
     async def mark_binding_activated(
         self,
         session: AsyncSession,
@@ -1942,6 +2426,13 @@ class ExternalChannelRepository:
         )
         if rdb is None:
             return None
+        if rdb.activation_status is ExternalChannelBindingActivationStatus.ACTIVE:
+            return ExternalChannelBinding.model_validate(rdb)
+        if (
+            rdb.activation_status
+            is not ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+        ):
+            return None
         rdb.activation_status = ExternalChannelBindingActivationStatus.ACTIVE
         rdb.activated_at = now
         rdb.projected_through_position = projected_through_position
@@ -1950,6 +2441,58 @@ class ExternalChannelRepository:
         await session.flush()
         await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelBinding.model_validate(rdb)
+
+    async def get_pending_initial_delivery_attempt_ids(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+    ) -> tuple[str | None, str | None]:
+        """Recover pending initial provider intents while activation is waiting."""
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelDeliveryAttempt.id,
+                    RDBExternalChannelDeliveryAttempt.origin_id,
+                    RDBExternalChannelDeliveryAttempt.operation,
+                )
+                .where(
+                    RDBExternalChannelDeliveryAttempt.binding_id == binding_id,
+                    RDBExternalChannelDeliveryAttempt.origin_type
+                    == ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                    RDBExternalChannelDeliveryAttempt.operation.in_(
+                        (
+                            ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                            ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                        )
+                    ),
+                    RDBExternalChannelDeliveryAttempt.status
+                    == ExternalChannelDeliveryStatus.PENDING,
+                )
+                .order_by(
+                    RDBExternalChannelDeliveryAttempt.created_at,
+                    RDBExternalChannelDeliveryAttempt.id,
+                )
+            )
+        ).all()
+        session_link_id = next(
+            (
+                attempt_id
+                for attempt_id, origin_id, operation in rows
+                if operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                and origin_id == binding_id
+            ),
+            None,
+        )
+        activity_id = next(
+            (
+                attempt_id
+                for attempt_id, _, operation in rows
+                if operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+            ),
+            None,
+        )
+        return session_link_id, activity_id
 
     async def advance_binding_projection(
         self,
@@ -2936,6 +3479,23 @@ def _validate_interaction_identifier(
         raise ValueError(
             f"External Channel interaction {field_name} must be an opaque identifier."
         )
+
+
+def _progress_delete_payload(
+    labels: dict[str, Any] | None,
+    provider_message_key: str,
+) -> dict[str, object]:
+    """Build one complete provider target for a progress deletion."""
+    labels = labels or {}
+    channel_id = labels.get("channel_id")
+    thread_ts = labels.get("thread_ts")
+    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        raise ValueError("External Channel resource has no provider target.")
+    return {
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "provider_message_key": provider_message_key,
+    }
 
 
 def _validate_interaction_projection_value(value: object, *, depth: int) -> None:

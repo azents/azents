@@ -220,6 +220,7 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
         binding_id="binding-1",
         status=ExternalChannelWorkStatus.ACTIVE,
         finished_at=None,
+        state_revision=7,
         desired_progress_payload={"status": "working"},
         desired_progress_revision=3,
         progress_provider_message_key="progress-message-1",
@@ -236,6 +237,7 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     progress_insert = session.execute_statements[0].compile().params
     assert progress_insert is not None
     assert "external_channel_works.status =" in work_select
+    assert active_work.state_revision == 8
     assert active_work.desired_progress_payload is None
     assert active_work.desired_progress_revision == 4
     assert progress_insert["id"]

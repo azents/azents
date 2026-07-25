@@ -97,6 +97,15 @@ class SessionLifecycleService:
             lambda db: self.agent_session_repository.mark_running(db, session_id)
         )
 
+    async def mark_session_running_for_input_wakeup(self, session_id: str) -> None:
+        """Apply the durable input wake transition outside producer locks."""
+        await self.run_short_db(
+            lambda db: self.agent_session_repository.mark_running_for_input_wakeup(
+                db,
+                session_id,
+            )
+        )
+
     async def mark_session_idle(
         self,
         session_id: str,
