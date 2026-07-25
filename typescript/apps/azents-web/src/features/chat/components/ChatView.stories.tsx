@@ -240,6 +240,7 @@ const baseArgs = {
   },
   isResponsePending: false,
   isWritePending: false,
+  lastEventReceivedAt: null,
   liveRun: null,
   onSendInput: sendMessage,
   onDeletePendingInputBuffer: noop,

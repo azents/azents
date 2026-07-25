@@ -366,6 +366,8 @@ interface ChatViewProps {
   sessionId?: string | null;
   isResponsePending: boolean;
   isWritePending: boolean;
+  /** browser timestamp for the most recently received chat event */
+  lastEventReceivedAt: string | null;
   /** current live run snapshot with retry recovery state */
   liveRun: ChatLiveRunState | null;
   /** latest context-window usage snapshot */
@@ -448,6 +450,7 @@ export function ChatView({
   sessionId = null,
   isResponsePending,
   isWritePending,
+  lastEventReceivedAt,
   liveRun,
   tokenUsage = null,
   onComposerInferenceProfileChange,
@@ -1551,7 +1554,7 @@ export function ChatView({
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   isResponsePending && (
                     <AgentRunIndicator
-                      modelCallStartedAt={liveRun?.modelCallStartedAt ?? null}
+                      lastEventReceivedAt={lastEventReceivedAt}
                     />
                   )}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&

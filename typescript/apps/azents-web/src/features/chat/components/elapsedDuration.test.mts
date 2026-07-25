@@ -7,27 +7,43 @@ import {
   visibleElapsedDurationSeconds,
 } from "./elapsedDuration.ts";
 
-const STARTED_AT = "2026-07-14T00:00:00.000Z";
-const STARTED_AT_MS = Date.parse(STARTED_AT);
+const LAST_EVENT_RECEIVED_AT = "2026-07-14T00:00:00.000Z";
+const LAST_EVENT_RECEIVED_AT_MS = Date.parse(LAST_EVENT_RECEIVED_AT);
 
-void test("elapsed duration stays hidden before its visibility threshold", () => {
+void test("event silence duration stays hidden before its visibility threshold", () => {
   assert.equal(
-    visibleElapsedDurationSeconds(STARTED_AT, STARTED_AT_MS + 9_999, 10),
+    visibleElapsedDurationSeconds(
+      LAST_EVENT_RECEIVED_AT,
+      LAST_EVENT_RECEIVED_AT_MS + 9_999,
+      10,
+    ),
     null,
   );
   assert.equal(
-    visibleElapsedDurationSeconds(STARTED_AT, STARTED_AT_MS + 29_999, 30),
+    visibleElapsedDurationSeconds(
+      LAST_EVENT_RECEIVED_AT,
+      LAST_EVENT_RECEIVED_AT_MS + 29_999,
+      30,
+    ),
     null,
   );
 });
 
-void test("elapsed duration becomes visible at its threshold and increments", () => {
+void test("event silence duration becomes visible at its threshold and increments", () => {
   assert.equal(
-    visibleElapsedDurationSeconds(STARTED_AT, STARTED_AT_MS + 10_000, 10),
+    visibleElapsedDurationSeconds(
+      LAST_EVENT_RECEIVED_AT,
+      LAST_EVENT_RECEIVED_AT_MS + 10_000,
+      10,
+    ),
     10,
   );
   assert.equal(
-    visibleElapsedDurationSeconds(STARTED_AT, STARTED_AT_MS + 31_000, 30),
+    visibleElapsedDurationSeconds(
+      LAST_EVENT_RECEIVED_AT,
+      LAST_EVENT_RECEIVED_AT_MS + 31_000,
+      30,
+    ),
     31,
   );
 });
@@ -42,7 +58,7 @@ void test("elapsed duration timer cleanup clears the scheduled interval", () => 
   let scheduledDelay: number | null = null;
   let clearedTimerId: number | null = null;
   const cleanup = startElapsedDurationTimer(
-    STARTED_AT,
+    LAST_EVENT_RECEIVED_AT,
     () => {},
     (_callback, delay) => {
       scheduledDelay = delay;
