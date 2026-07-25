@@ -1,11 +1,15 @@
 """Backend-neutral Runtime transfer state-store contract harness."""
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+from typing import Protocol, cast
+from uuid import uuid4
 
 import pytest
 
+from azents.core.redis import create_redis_client
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCleanupStatus,
@@ -16,6 +20,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
+from azents.runtime.transfer.redis import RedisRuntimeTransferStateStore
 from azents.runtime.transfer.store import RuntimeTransferStateStore
 
 
@@ -34,6 +39,20 @@ class _Clock:
         return self.now
 
 
+class _RedisNamespaceCleaner(Protocol):
+    """Redis namespace commands used only by the test fixture."""
+
+    async def scan(
+        self,
+        *,
+        cursor: int,
+        match: str,
+        count: int,
+    ) -> tuple[int, list[bytes]]: ...
+
+    async def delete(self, *keys: bytes) -> int: ...
+
+
 @dataclass(frozen=True)
 class _StoreHarness:
     """Backend-neutral store and deterministic time dependencies."""
@@ -43,9 +62,11 @@ class _StoreHarness:
     config: RuntimeTransferConfig
 
 
-@pytest.fixture
-def store_harness() -> _StoreHarness:
-    """Create the current memory-backed contract harness."""
+@pytest.fixture(params=("memory", "redis"), ids=("memory", "redis"))
+async def store_harness(
+    request: pytest.FixtureRequest,
+) -> AsyncIterator[_StoreHarness]:
+    """Create one memory or real-Redis contract harness."""
     clock = _Clock(datetime(2026, 7, 25, tzinfo=timezone.utc))
     config = RuntimeTransferConfig(
         per_runtime_attempts=2,
@@ -57,11 +78,49 @@ def store_harness() -> _StoreHarness:
         terminal_ttl=timedelta(minutes=5),
         list_page_size=2,
     )
-    store: RuntimeTransferStateStore = InMemoryRuntimeTransferStateStore(
+    if request.param == "memory":
+        store: RuntimeTransferStateStore = InMemoryRuntimeTransferStateStore(
+            config=config,
+            clock=clock,
+        )
+        yield _StoreHarness(store=store, clock=clock, config=config)
+        return
+
+    redis_url = request.getfixturevalue("redis_url")
+    client = create_redis_client(redis_url)
+    namespace = f"azents:runtime:transfer:test:{uuid4().hex}"
+    store = RedisRuntimeTransferStateStore(
+        redis=client,
         config=config,
         clock=clock,
+        namespace=namespace,
     )
-    return _StoreHarness(store=store, clock=clock, config=config)
+    try:
+        yield _StoreHarness(store=store, clock=clock, config=config)
+    finally:
+        await _delete_transfer_namespace(
+            cast(_RedisNamespaceCleaner, client),
+            namespace,
+        )
+        await client.aclose()
+
+
+async def _delete_transfer_namespace(
+    client: _RedisNamespaceCleaner,
+    namespace: str,
+) -> None:
+    """Iteratively delete one test-only transfer namespace without ``KEYS``."""
+    cursor = 0
+    while True:
+        cursor, keys = await client.scan(
+            cursor=cursor,
+            match=f"{namespace}:*",
+            count=100,
+        )
+        if keys:
+            await client.delete(*keys)
+        if cursor == 0:
+            return
 
 
 def _admission() -> RuntimeTransferAdmission:

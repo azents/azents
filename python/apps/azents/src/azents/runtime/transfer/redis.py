@@ -1,30 +1,113 @@
-"""Private Redis key and record serialization helpers for Runtime transfers.
+"""Redis-backed metadata-only Runtime transfer state."""
 
-This module intentionally contains no Redis client, commands, scripts, or store
-implementation. Future adapters may use these bounded helpers without exposing
-Redis concerns through the transfer domain or its public store protocol.
-"""
-
+import asyncio
 import base64
+import dataclasses
 import json
+import secrets
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from typing import AsyncContextManager, Protocol, cast
+
+from redis.asyncio import Redis
+from redis.exceptions import WatchError
 
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCleanupStatus,
+    RuntimeTransferConfig,
     RuntimeTransferDirection,
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
+    RuntimeTransferPage,
     RuntimeTransferPhase,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
+    logical_expiry,
+    validate_admission_time,
 )
+from azents.runtime.transfer.policy import phase_transition_allowed
 
 _DEFAULT_NAMESPACE = "azents:runtime:transfer"
 _RECORD_SCHEMA_VERSION = 1
 _MAX_SERIALIZED_RECORD_BYTES = 16 * 1024
+_LOCK_TTL_MILLISECONDS = 5_000
+_LOCK_ACQUIRE_TIMEOUT_SECONDS = 5.0
+_LOCK_RETRY_SECONDS = 0.01
+_RELEASE_LOCK_SCRIPT = """
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0
+"""
+
+
+class _RedisTransferPipeline(Protocol):
+    """Redis pipeline methods used by the transfer adapter."""
+
+    async def __aenter__(self) -> "_RedisTransferPipeline": ...
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc_value: object,
+        traceback: object,
+    ) -> bool | None: ...
+
+    async def watch(self, *keys: str) -> object: ...
+
+    async def get(self, name: str) -> object: ...
+
+    def multi(self) -> None: ...
+
+    def set(self, name: str, value: str | bytes) -> object: ...
+
+    def delete(self, *names: str) -> object: ...
+
+    def zadd(self, name: str, mapping: dict[str, float]) -> object: ...
+
+    def zrem(self, name: str, *values: str) -> object: ...
+
+    async def execute(self) -> object: ...
+
+
+class _RedisTransferClient(Protocol):
+    """Redis commands used by the transfer adapter."""
+
+    async def set(
+        self,
+        name: str,
+        value: str | bytes,
+        *,
+        nx: bool,
+        px: int,
+    ) -> bool | None: ...
+
+    async def get(self, name: str) -> object: ...
+
+    async def mget(self, keys: list[str]) -> list[object]: ...
+
+    async def zrange(self, name: str, start: int, end: int) -> list[object]: ...
+
+    async def zrangebyscore(
+        self,
+        name: str,
+        minimum: str,
+        maximum: float,
+        *,
+        start: int,
+        num: int,
+    ) -> list[object]: ...
+
+    async def eval(self, script: str, numkeys: int, *keys_and_args: str) -> object: ...
+
+    def pipeline(
+        self, *, transaction: bool
+    ) -> AsyncContextManager[_RedisTransferPipeline]: ...
+
 
 _ENVELOPE_FIELDS = frozenset({"version", "record", "private"})
 _PRIVATE_FIELDS = frozenset({"admission_released"})
@@ -79,7 +162,7 @@ _PROGRESS_FIELDS = frozenset({"bytes_transferred", "observed_at"})
 
 
 @dataclass(frozen=True)
-class _RedisTransferKeys:  # pyright: ignore[reportUnusedClass]  # Tested private seam.
+class _RedisTransferKeys:
     """Deterministic Redis key names under one transfer-only namespace."""
 
     namespace: str = _DEFAULT_NAMESPACE
@@ -148,6 +231,14 @@ class _RedisTransferKeys:  # pyright: ignore[reportUnusedClass]  # Tested privat
         """Return the consumer-lease expiry index key."""
         return f"{self.namespace}:index:consumer-lease"
 
+    def active_index(self) -> str:
+        """Return the bounded active-attempt index key."""
+        return f"{self.namespace}:index:active"
+
+    def mutation_lock(self) -> str:
+        """Return the namespace-wide mutation lock key."""
+        return f"{self.namespace}:lock:mutation"
+
 
 @dataclass(frozen=True)
 class _RedisTransferRecordEnvelope:
@@ -165,7 +256,7 @@ def _key_component(value: str) -> str:
     return encoded.rstrip("=")
 
 
-def _encode_record_envelope(  # pyright: ignore[reportUnusedFunction]  # Tested private seam.
+def _encode_record_envelope(
     envelope: _RedisTransferRecordEnvelope,
 ) -> bytes:
     """Encode one bounded record envelope as deterministic JSON bytes."""
@@ -186,7 +277,7 @@ def _encode_record_envelope(  # pyright: ignore[reportUnusedFunction]  # Tested 
     return encoded
 
 
-def _decode_record_envelope(  # pyright: ignore[reportUnusedFunction]  # Tested private seam.
+def _decode_record_envelope(
     payload: bytes,
 ) -> _RedisTransferRecordEnvelope:
     """Decode one bounded, schema-validated record envelope."""
@@ -495,3 +586,1178 @@ def _require_bool(value: object, name: str) -> bool:
     if type(value) is not bool:
         raise ValueError(f"{name} must be a boolean")
     return value
+
+
+class RedisRuntimeTransferStateStore:
+    """Redis implementation of metadata-only Runtime transfer state.
+
+    A token-owned namespace lock serializes bounded state changes across processes.
+    Each write is committed through ``WATCH``/``MULTI``/``EXEC`` against that lock,
+    so ownership expiry aborts rather than allowing an unfenced mutation.
+    """
+
+    def __init__(
+        self,
+        *,
+        redis: Redis,
+        config: RuntimeTransferConfig,
+        clock: Callable[[], datetime],
+        namespace: str = _DEFAULT_NAMESPACE,
+    ) -> None:
+        """Initialize transfer state dependencies."""
+        self.redis = cast(_RedisTransferClient, redis)
+        self.config = config
+        self.clock = clock
+        self.keys = _RedisTransferKeys(namespace)
+
+    async def admit(
+        self, admission: RuntimeTransferAdmission, *, lease_id: str
+    ) -> RuntimeTransferRecord | None:
+        """Atomically admit one new transfer attempt."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            record_key = self.keys.record(admission.transfer_id, admission.attempt_id)
+            existing = await self._load_entry(entries, record_key, now)
+            if existing is not None:
+                await self._commit(token, entries)
+                return existing.record
+            try:
+                validate_admission_time(admission, now)
+            except ValueError:
+                await self._commit(token, entries)
+                return None
+            current = await self._load_current_entry(
+                entries,
+                admission.transfer_id,
+                now,
+            )
+            if (
+                current is not None
+                and current[1].record.phase is not RuntimeTransferPhase.TERMINAL
+            ):
+                await self._commit(token, entries)
+                return None
+            if admission.expected_size > min(
+                admission.product_maximum_size,
+                admission.provider_maximum_size,
+            ) or not self._has_capacity(entries, admission):
+                await self._commit(token, entries)
+                return None
+            record = RuntimeTransferRecord(
+                admission=admission,
+                phase=RuntimeTransferPhase.PREPARING,
+                revision=1,
+                lease_id=lease_id,
+                lease_expires_at=now + self.config.admission_lease,
+                created_at=now,
+                updated_at=now,
+                logical_expires_at=logical_expiry(now, admission.source_expires_at),
+                accepted_runner_generation=None,
+                object=None,
+                actual_size=None,
+                actual_sha256=None,
+                stream_claim_id=None,
+                progress=None,
+                cancellation_requested_at=None,
+                consumer_claim_id=None,
+                consumer_lease_expires_at=None,
+                consumer_acknowledged_at=None,
+                terminal_outcome=None,
+                terminal_expires_at=None,
+                cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
+                failure=None,
+            )
+            entries[record_key] = _RedisTransferRecordEnvelope(
+                record=record,
+                admission_released=False,
+            )
+            await self._commit(
+                token,
+                entries,
+                pointer_sets={self.keys.current(admission.transfer_id): record_key},
+            )
+            return record
+
+    async def get(self, transfer_id: str) -> RuntimeTransferRecord | None:
+        """Return the current attempt while reclaiming due bounded state."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            current = await self._load_current_entry(entries, transfer_id, now)
+            await self._commit(token, entries)
+            return None if current is None else current[1].record
+
+    async def mark_ready(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        object: RuntimeTransferObject,
+    ) -> RuntimeTransferRecord | None:
+        """Move a PREPARING attempt to READY under runtime fencing."""
+        return await self._move(
+            transfer_id,
+            attempt_id=attempt_id,
+            expected_revision=expected_revision,
+            current=RuntimeTransferPhase.PREPARING,
+            target=RuntimeTransferPhase.READY,
+            runtime_id=runtime_id,
+            desired_generation=desired_generation,
+            object=object,
+            claim_id=None,
+            accepted_runner_generation=None,
+        )
+
+    async def claim_stream(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Claim a READY attempt for one Runner stream."""
+        return await self._move(
+            transfer_id,
+            attempt_id=attempt_id,
+            expected_revision=expected_revision,
+            current=RuntimeTransferPhase.READY,
+            target=RuntimeTransferPhase.STREAMING,
+            runtime_id=runtime_id,
+            desired_generation=desired_generation,
+            object=None,
+            claim_id=claim_id,
+            accepted_runner_generation=accepted_runner_generation,
+        )
+
+    async def record_progress(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        bytes_transferred: int,
+    ) -> RuntimeTransferRecord | None:
+        """Store the latest monotonic stream progress."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+            ) or (
+                envelope is not None
+                and (
+                    bytes_transferred > envelope.record.admission.expected_size
+                    or (
+                        envelope.record.progress is not None
+                        and bytes_transferred
+                        < envelope.record.progress.bytes_transferred
+                    )
+                )
+            ):
+                await self._commit(token, entries)
+                return None
+            assert key is not None and envelope is not None
+            record = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                progress=RuntimeTransferProgress(bytes_transferred, now),
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries)
+            return record
+
+    async def request_cancellation(
+        self, transfer_id: str, *, attempt_id: str, expected_revision: int
+    ) -> RuntimeTransferRecord | None:
+        """Record idempotent cancellation evidence for one exact attempt."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if envelope is None or envelope.record.revision != expected_revision:
+                await self._commit(token, entries)
+                return None
+            if (
+                envelope.record.phase is RuntimeTransferPhase.TERMINAL
+                or envelope.record.cancellation_requested_at is not None
+            ):
+                await self._commit(token, entries)
+                return envelope.record
+            assert key is not None
+            record = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                cancellation_requested_at=now,
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries)
+            return record
+
+    async def begin_verification(
+        self, transfer_id: str, *, attempt_id: str, expected_revision: int
+    ) -> RuntimeTransferRecord | None:
+        """Move a STREAMING attempt to VERIFYING."""
+        return await self._move(
+            transfer_id,
+            attempt_id=attempt_id,
+            expected_revision=expected_revision,
+            current=RuntimeTransferPhase.STREAMING,
+            target=RuntimeTransferPhase.VERIFYING,
+            runtime_id=None,
+            desired_generation=None,
+            object=None,
+            claim_id=None,
+            accepted_runner_generation=None,
+        )
+
+    async def publish_available(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Complete upload verification as AVAILABLE."""
+        return await self._complete_phase(
+            transfer_id,
+            attempt_id=attempt_id,
+            expected_revision=expected_revision,
+            target=RuntimeTransferPhase.AVAILABLE,
+            actual_size=actual_size,
+            actual_sha256=actual_sha256,
+        )
+
+    async def mark_committed(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Complete download verification as COMMITTED."""
+        return await self._complete_phase(
+            transfer_id,
+            attempt_id=attempt_id,
+            expected_revision=expected_revision,
+            target=RuntimeTransferPhase.COMMITTED,
+            actual_size=actual_size,
+            actual_sha256=actual_sha256,
+        )
+
+    async def claim_consumer(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Claim one AVAILABLE upload for a consumer."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.AVAILABLE,
+                now,
+            ) or (
+                envelope is not None and envelope.record.consumer_claim_id is not None
+            ):
+                await self._commit(token, entries)
+                return None
+            assert key is not None and envelope is not None
+            record = dataclasses.replace(
+                envelope.record,
+                phase=RuntimeTransferPhase.CONSUMING,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                consumer_claim_id=claim_id,
+                consumer_lease_expires_at=now + self.config.consumer_lease,
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries)
+            return record
+
+    async def acknowledge_consumer(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Acknowledge one correctly claimed consumer transfer."""
+        return await self._resolve_consumer(
+            transfer_id,
+            attempt_id=attempt_id,
+            expected_revision=expected_revision,
+            claim_id=claim_id,
+            target=RuntimeTransferPhase.CONSUMED,
+            acknowledged=True,
+        )
+
+    async def abandon_consumer(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Return one correctly claimed consumer transfer to AVAILABLE."""
+        return await self._resolve_consumer(
+            transfer_id,
+            attempt_id=attempt_id,
+            expected_revision=expected_revision,
+            claim_id=claim_id,
+            target=RuntimeTransferPhase.AVAILABLE,
+            acknowledged=False,
+        )
+
+    async def settle(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        outcome: RuntimeTransferOutcome,
+        failure: RuntimeTransferFailure | None,
+    ) -> RuntimeTransferRecord | None:
+        """Settle one exact attempt without touching a newer current attempt."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if envelope is None or envelope.record.revision != expected_revision:
+                await self._commit(token, entries)
+                return None
+            record = envelope.record
+            if record.phase is RuntimeTransferPhase.TERMINAL:
+                await self._commit(token, entries)
+                return (
+                    record
+                    if record.terminal_outcome is outcome and record.failure is failure
+                    else None
+                )
+            if (
+                record.cancellation_requested_at is not None
+                and outcome is RuntimeTransferOutcome.SUCCEEDED
+            ):
+                await self._commit(token, entries)
+                return None
+            assert key is not None
+            settled = dataclasses.replace(
+                record,
+                phase=RuntimeTransferPhase.TERMINAL,
+                revision=record.revision + 1,
+                updated_at=now,
+                terminal_outcome=outcome,
+                failure=failure,
+                terminal_expires_at=now + self.config.terminal_ttl,
+            )
+            entries[key] = dataclasses.replace(envelope, record=settled)
+            await self._commit(token, entries)
+            return settled
+
+    async def record_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        status: RuntimeTransferCleanupStatus,
+    ) -> RuntimeTransferRecord | None:
+        """Record cleanup evidence independently from transfer terminal state."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if envelope is None or envelope.record.revision != expected_revision:
+                await self._commit(token, entries)
+                return None
+            if envelope.record.cleanup_status is status:
+                await self._commit(token, entries)
+                return envelope.record
+            assert key is not None
+            record = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                cleanup_status=status,
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries)
+            return record
+
+    async def release_admission(
+        self, transfer_id: str, *, attempt_id: str, lease_id: str
+    ) -> RuntimeTransferRecord | None:
+        """Release one exact admission lease idempotently."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if envelope is None or envelope.record.lease_id != lease_id:
+                await self._commit(token, entries)
+                return None
+            if envelope.admission_released:
+                await self._commit(token, entries)
+                return envelope.record
+            assert key is not None
+            entries[key] = dataclasses.replace(envelope, admission_released=True)
+            await self._commit(token, entries)
+            return envelope.record
+
+    async def list_stale(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage:
+        """List one bounded stale-record page using its sorted-set index."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            await self._commit(token, entries)
+            if limit <= 0 or limit > self.config.list_page_size:
+                raise ValueError("invalid page limit")
+            start = _cursor_offset(cursor)
+            members = _decode_redis_texts(
+                await self.redis.zrange(
+                    self.keys.stale_index(),
+                    start,
+                    start + limit,
+                )
+            )
+            page_members = members[:limit]
+            records: list[RuntimeTransferRecord] = []
+            for member in page_members:
+                envelope = await self._load_record(member)
+                if envelope is None:
+                    raise RuntimeError(
+                        "stale transfer index references a missing record"
+                    )
+                records.append(envelope.record)
+            return RuntimeTransferPage(
+                records=tuple(records),
+                cursor=str(start + limit) if len(members) > limit else None,
+            )
+
+    async def purge_terminal(self, *, limit: int) -> int:
+        """Purge at most ``limit`` terminal records whose retention has elapsed."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            if limit <= 0:
+                await self._commit(token, entries)
+                raise ValueError("limit must be positive")
+            members = _decode_redis_texts(
+                await self.redis.zrangebyscore(
+                    self.keys.terminal_index(),
+                    "-inf",
+                    now.timestamp(),
+                    start=0,
+                    num=limit,
+                )
+            )
+            deleted: set[str] = set()
+            pointer_deletes: set[str] = set()
+            for member in members:
+                envelope = await self._load_record(member)
+                if (
+                    envelope is None
+                    or envelope.record.terminal_expires_at is None
+                    or envelope.record.terminal_expires_at > now
+                ):
+                    continue
+                current_key = await self._current_key(
+                    envelope.record.admission.transfer_id
+                )
+                if current_key == member:
+                    pointer_deletes.add(
+                        self.keys.current(envelope.record.admission.transfer_id)
+                    )
+                entries.pop(member, None)
+                deleted.add(member)
+            await self._commit(
+                token,
+                entries,
+                pointer_deletes=pointer_deletes,
+                record_deletes=deleted,
+            )
+            return len(deleted)
+
+    async def _move(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        current: RuntimeTransferPhase,
+        target: RuntimeTransferPhase,
+        runtime_id: str | None,
+        desired_generation: int | None,
+        object: RuntimeTransferObject | None,
+        claim_id: str | None,
+        accepted_runner_generation: int | None,
+    ) -> RuntimeTransferRecord | None:
+        """Apply one runtime-fenced phase transition."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if (
+                not await self._active_matches(
+                    transfer_id,
+                    key,
+                    envelope,
+                    expected_revision,
+                    current,
+                    now,
+                )
+                or (
+                    envelope is not None
+                    and (
+                        runtime_id is not None
+                        and envelope.record.admission.runtime_id != runtime_id
+                    )
+                )
+                or (
+                    envelope is not None
+                    and (
+                        desired_generation is not None
+                        and envelope.record.admission.desired_generation
+                        != desired_generation
+                    )
+                )
+                or (
+                    envelope is not None
+                    and not phase_transition_allowed(
+                        envelope.record.admission.direction,
+                        current,
+                        target,
+                    )
+                )
+            ):
+                await self._commit(token, entries)
+                return None
+            assert key is not None and envelope is not None
+            record = dataclasses.replace(
+                envelope.record,
+                phase=target,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                object=object if object is not None else envelope.record.object,
+                stream_claim_id=claim_id
+                if claim_id is not None
+                else envelope.record.stream_claim_id,
+                accepted_runner_generation=accepted_runner_generation
+                if accepted_runner_generation is not None
+                else envelope.record.accepted_runner_generation,
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries)
+            return record
+
+    async def _complete_phase(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        target: RuntimeTransferPhase,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Complete one VERIFYING attempt on its direction-valid path."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.VERIFYING,
+                now,
+            ) or (
+                envelope is not None
+                and (
+                    envelope.record.cancellation_requested_at is not None
+                    or not phase_transition_allowed(
+                        envelope.record.admission.direction,
+                        envelope.record.phase,
+                        target,
+                    )
+                )
+            ):
+                await self._commit(token, entries)
+                return None
+            assert key is not None and envelope is not None
+            record = dataclasses.replace(
+                envelope.record,
+                phase=target,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                actual_size=actual_size,
+                actual_sha256=actual_sha256,
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries)
+            return record
+
+    async def _resolve_consumer(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+        target: RuntimeTransferPhase,
+        acknowledged: bool,
+    ) -> RuntimeTransferRecord | None:
+        """Resolve one CONSUMING attempt as consumed or available."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.CONSUMING,
+                now,
+            ) or (
+                envelope is not None and envelope.record.consumer_claim_id != claim_id
+            ):
+                await self._commit(token, entries)
+                return None
+            assert key is not None and envelope is not None
+            record = dataclasses.replace(
+                envelope.record,
+                phase=target,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                consumer_claim_id=(
+                    envelope.record.consumer_claim_id if acknowledged else None
+                ),
+                consumer_lease_expires_at=(
+                    envelope.record.consumer_lease_expires_at if acknowledged else None
+                ),
+                consumer_acknowledged_at=now if acknowledged else None,
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries)
+            return record
+
+    def _now(self) -> datetime:
+        """Capture one authoritative timezone-aware time value."""
+        now = self.clock()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("clock must return timezone-aware datetime")
+        return now
+
+    @asynccontextmanager
+    async def _locked(self) -> AsyncIterator[str]:
+        """Acquire one bounded token-owned cross-process mutation lock."""
+        token = secrets.token_urlsafe(32)
+        deadline = asyncio.get_running_loop().time() + _LOCK_ACQUIRE_TIMEOUT_SECONDS
+        while True:
+            acquired = await self.redis.set(
+                self.keys.mutation_lock(),
+                token,
+                nx=True,
+                px=_LOCK_TTL_MILLISECONDS,
+            )
+            if acquired:
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError("timed out acquiring Runtime transfer mutation lock")
+            await asyncio.sleep(_LOCK_RETRY_SECONDS)
+        operation_failed = False
+        try:
+            yield token
+        except BaseException:
+            operation_failed = True
+            raise
+        finally:
+            released = await self.redis.eval(
+                _RELEASE_LOCK_SCRIPT,
+                1,
+                self.keys.mutation_lock(),
+                token,
+            )
+            if (
+                _redis_integer(released, "mutation lock release") != 1
+                and not operation_failed
+            ):
+                raise RuntimeError("Runtime transfer mutation lock ownership was lost")
+
+    async def _load_reclaimed_entries(
+        self,
+        now: datetime,
+    ) -> dict[str, _RedisTransferRecordEnvelope]:
+        """Load the bounded active set and apply due lease reclamation."""
+        members = _decode_redis_texts(
+            await self.redis.zrange(
+                self.keys.active_index(),
+                0,
+                self.config.deployment_attempts,
+            )
+        )
+        if len(members) > self.config.deployment_attempts:
+            raise RuntimeError("Runtime transfer active index exceeds configured bound")
+        if not members:
+            return {}
+        raw_records = await self.redis.mget(members)
+        if len(raw_records) != len(members):
+            raise RuntimeError(
+                "Redis returned an incomplete Runtime transfer active set"
+            )
+        entries: dict[str, _RedisTransferRecordEnvelope] = {}
+        for member, raw in zip(members, raw_records, strict=True):
+            if raw is None:
+                raise RuntimeError(
+                    "Runtime transfer active index references a missing record"
+                )
+            entries[member] = _decode_record_envelope(_redis_bytes(raw))
+        for key, envelope in tuple(entries.items()):
+            entries[key] = self._reclaim(envelope, now)
+        return entries
+
+    async def _load_exact_entry(
+        self,
+        entries: dict[str, _RedisTransferRecordEnvelope],
+        transfer_id: str,
+        attempt_id: str,
+        now: datetime,
+    ) -> tuple[str | None, _RedisTransferRecordEnvelope | None]:
+        """Load one exact attempt and add it to the mutation state."""
+        key = self.keys.record(transfer_id, attempt_id)
+        return key, await self._load_entry(entries, key, now)
+
+    async def _load_current_entry(
+        self,
+        entries: dict[str, _RedisTransferRecordEnvelope],
+        transfer_id: str,
+        now: datetime,
+    ) -> tuple[str, _RedisTransferRecordEnvelope] | None:
+        """Load one current pointer target and add it to mutation state."""
+        key = await self._current_key(transfer_id)
+        if key is None:
+            return None
+        envelope = await self._load_entry(entries, key, now)
+        if envelope is None:
+            raise RuntimeError(
+                "Runtime transfer current pointer references a missing record"
+            )
+        return key, envelope
+
+    async def _current_key(self, transfer_id: str) -> str | None:
+        """Return one validated current record key."""
+        value = await self.redis.get(self.keys.current(transfer_id))
+        if value is None:
+            return None
+        key = _decode_redis_text(value)
+        if not key.startswith(f"{self.keys.namespace}:record:"):
+            raise RuntimeError(
+                "Runtime transfer current pointer is outside its namespace"
+            )
+        return key
+
+    async def _load_entry(
+        self,
+        entries: dict[str, _RedisTransferRecordEnvelope],
+        key: str,
+        now: datetime,
+    ) -> _RedisTransferRecordEnvelope | None:
+        """Load one record at most once and apply due direct expiry."""
+        existing = entries.get(key)
+        if existing is not None:
+            return existing
+        envelope = await self._load_record(key)
+        if envelope is None:
+            return None
+        reclaimed = self._reclaim(envelope, now)
+        entries[key] = reclaimed
+        return reclaimed
+
+    async def _load_record(self, key: str) -> _RedisTransferRecordEnvelope | None:
+        """Load one exact bounded record envelope."""
+        value = await self.redis.get(key)
+        return None if value is None else _decode_record_envelope(_redis_bytes(value))
+
+    def _reclaim(
+        self,
+        envelope: _RedisTransferRecordEnvelope,
+        now: datetime,
+    ) -> _RedisTransferRecordEnvelope:
+        """Apply logical, consumer, then admission-lease expiry in memory."""
+        record = envelope.record
+        if (
+            record.phase is not RuntimeTransferPhase.TERMINAL
+            and record.logical_expires_at <= now
+        ):
+            return dataclasses.replace(
+                envelope,
+                record=dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.TERMINAL,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    terminal_outcome=RuntimeTransferOutcome.EXPIRED,
+                    failure=RuntimeTransferFailure.EXPIRED,
+                    terminal_expires_at=now + self.config.terminal_ttl,
+                ),
+                admission_released=True,
+            )
+        if (
+            record.consumer_lease_expires_at is not None
+            and record.consumer_lease_expires_at <= now
+        ):
+            return dataclasses.replace(
+                envelope,
+                record=dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.AVAILABLE,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    consumer_claim_id=None,
+                    consumer_lease_expires_at=None,
+                ),
+            )
+        if record.lease_expires_at <= now:
+            return dataclasses.replace(envelope, admission_released=True)
+        return envelope
+
+    async def _active_matches(
+        self,
+        transfer_id: str,
+        key: str | None,
+        envelope: _RedisTransferRecordEnvelope | None,
+        expected_revision: int,
+        phase: RuntimeTransferPhase,
+        now: datetime,
+    ) -> bool:
+        """Return whether one exact current attempt remains active and fenced."""
+        if key is None or envelope is None:
+            return False
+        if await self._current_key(transfer_id) != key:
+            return False
+        return (
+            key == self.keys.record(transfer_id, envelope.record.admission.attempt_id)
+            and not envelope.admission_released
+            and envelope.record.revision == expected_revision
+            and envelope.record.phase is phase
+            and envelope.record.lease_expires_at > now
+            and envelope.record.logical_expires_at > now
+        )
+
+    def _has_capacity(
+        self,
+        entries: dict[str, _RedisTransferRecordEnvelope],
+        admission: RuntimeTransferAdmission,
+    ) -> bool:
+        """Return whether one admission fits bounded active counters."""
+        active = [
+            envelope.record
+            for envelope in entries.values()
+            if _capacity_active(envelope)
+        ]
+        runtime = [
+            record
+            for record in active
+            if record.admission.runtime_id == admission.runtime_id
+        ]
+        return (
+            len(active) < self.config.deployment_attempts
+            and len(runtime) < self.config.per_runtime_attempts
+            and sum(record.admission.expected_size for record in active)
+            + admission.expected_size
+            <= self.config.deployment_bytes
+            and sum(record.admission.expected_size for record in runtime)
+            + admission.expected_size
+            <= self.config.per_runtime_bytes
+        )
+
+    async def _commit(
+        self,
+        token: str,
+        entries: dict[str, _RedisTransferRecordEnvelope],
+        *,
+        pointer_sets: dict[str, str] | None = None,
+        pointer_deletes: set[str] | None = None,
+        record_deletes: set[str] | None = None,
+    ) -> None:
+        """Persist bounded records, indexes, and counters under lock ownership."""
+        active = {
+            key: envelope
+            for key, envelope in entries.items()
+            if _capacity_active(envelope)
+        }
+        if len(active) > self.config.deployment_attempts:
+            raise RuntimeError("Runtime transfer active state exceeds configured bound")
+        runtime_ids = {
+            envelope.record.admission.runtime_id for envelope in entries.values()
+        }
+        runtime_records: dict[str, list[RuntimeTransferRecord]] = {}
+        for envelope in active.values():
+            runtime_records.setdefault(
+                envelope.record.admission.runtime_id,
+                [],
+            ).append(envelope.record)
+        await self._owned_transaction(
+            token,
+            lambda pipeline: self._queue_commit(
+                pipeline,
+                entries,
+                active,
+                runtime_ids,
+                runtime_records,
+                pointer_sets or {},
+                pointer_deletes or set(),
+                record_deletes or set(),
+            ),
+        )
+
+    async def _owned_transaction(
+        self,
+        token: str,
+        queue: Callable[[_RedisTransferPipeline], None],
+    ) -> None:
+        """Execute queued writes only while the mutation lock token is owned."""
+        async with self.redis.pipeline(transaction=True) as pipeline:
+            await pipeline.watch(self.keys.mutation_lock())
+            owner = await pipeline.get(self.keys.mutation_lock())
+            if owner is None or _decode_redis_text(owner) != token:
+                raise RuntimeError("Runtime transfer mutation lock ownership was lost")
+            pipeline.multi()
+            queue(pipeline)
+            try:
+                await pipeline.execute()
+            except WatchError as exc:
+                raise RuntimeError(
+                    "Runtime transfer mutation lock changed before commit"
+                ) from exc
+
+    def _queue_commit(
+        self,
+        pipeline: _RedisTransferPipeline,
+        entries: dict[str, _RedisTransferRecordEnvelope],
+        active: dict[str, _RedisTransferRecordEnvelope],
+        runtime_ids: set[str],
+        runtime_records: dict[str, list[RuntimeTransferRecord]],
+        pointer_sets: dict[str, str],
+        pointer_deletes: set[str],
+        record_deletes: set[str],
+    ) -> None:
+        """Queue one owner-fenced bounded state rewrite."""
+        for key, envelope in entries.items():
+            pipeline.set(key, _encode_record_envelope(envelope))
+            self._queue_indexes(pipeline, key, envelope, key in active)
+        for key in record_deletes:
+            pipeline.delete(key)
+            pipeline.zrem(self.keys.active_index(), key)
+            pipeline.zrem(self.keys.stale_index(), key)
+            pipeline.zrem(self.keys.terminal_index(), key)
+            pipeline.zrem(self.keys.admission_lease_index(), key)
+            pipeline.zrem(self.keys.consumer_lease_index(), key)
+        pipeline.delete(
+            self.keys.deployment_attempts_counter(),
+            self.keys.deployment_bytes_counter(),
+        )
+        if active:
+            records = [envelope.record for envelope in active.values()]
+            pipeline.set(self.keys.deployment_attempts_counter(), str(len(records)))
+            pipeline.set(
+                self.keys.deployment_bytes_counter(),
+                str(sum(record.admission.expected_size for record in records)),
+            )
+        for runtime_id in runtime_ids:
+            pipeline.delete(
+                self.keys.runtime_attempts_counter(runtime_id),
+                self.keys.runtime_bytes_counter(runtime_id),
+            )
+        for runtime_id, records in runtime_records.items():
+            pipeline.set(
+                self.keys.runtime_attempts_counter(runtime_id), str(len(records))
+            )
+            pipeline.set(
+                self.keys.runtime_bytes_counter(runtime_id),
+                str(sum(record.admission.expected_size for record in records)),
+            )
+        for pointer, record_key in pointer_sets.items():
+            pipeline.set(pointer, record_key)
+        for pointer in pointer_deletes:
+            pipeline.delete(pointer)
+
+    def _queue_indexes(
+        self,
+        pipeline: _RedisTransferPipeline,
+        key: str,
+        envelope: _RedisTransferRecordEnvelope,
+        active: bool,
+    ) -> None:
+        """Queue all exact index membership for one record envelope."""
+        record = envelope.record
+        if active:
+            pipeline.zadd(
+                self.keys.active_index(), {key: record.created_at.timestamp()}
+            )
+            pipeline.zadd(
+                self.keys.admission_lease_index(),
+                {key: record.lease_expires_at.timestamp()},
+            )
+        else:
+            pipeline.zrem(self.keys.active_index(), key)
+            pipeline.zrem(self.keys.admission_lease_index(), key)
+        if (
+            record.phase is RuntimeTransferPhase.TERMINAL
+            or envelope.admission_released
+            or record.cleanup_status is not RuntimeTransferCleanupStatus.NOT_REQUIRED
+        ):
+            pipeline.zadd(self.keys.stale_index(), {key: record.updated_at.timestamp()})
+        else:
+            pipeline.zrem(self.keys.stale_index(), key)
+        if (
+            record.phase is RuntimeTransferPhase.TERMINAL
+            and record.terminal_expires_at is not None
+        ):
+            pipeline.zadd(
+                self.keys.terminal_index(),
+                {key: record.terminal_expires_at.timestamp()},
+            )
+        else:
+            pipeline.zrem(self.keys.terminal_index(), key)
+        if (
+            active
+            and record.consumer_lease_expires_at is not None
+            and record.phase is RuntimeTransferPhase.CONSUMING
+        ):
+            pipeline.zadd(
+                self.keys.consumer_lease_index(),
+                {key: record.consumer_lease_expires_at.timestamp()},
+            )
+        else:
+            pipeline.zrem(self.keys.consumer_lease_index(), key)
+
+
+def _capacity_active(envelope: _RedisTransferRecordEnvelope) -> bool:
+    """Return whether one envelope reserves capacity and belongs in active state."""
+    return (
+        not envelope.admission_released
+        and envelope.record.phase is not RuntimeTransferPhase.TERMINAL
+    )
+
+
+def _decode_redis_text(value: object) -> str:
+    """Decode one Redis binary or decoded text response."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    raise RuntimeError("Redis returned an unexpected text response type")
+
+
+def _decode_redis_texts(values: object) -> list[str]:
+    """Decode one bounded Redis response sequence."""
+    if not isinstance(values, list):
+        raise RuntimeError("Redis returned an unexpected sequence response type")
+    return [_decode_redis_text(value) for value in values]
+
+
+def _redis_bytes(value: object) -> bytes:
+    """Normalize one Redis record payload to bytes for the bounded codec."""
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    raise RuntimeError("Redis returned an unexpected record response type")
+
+
+def _redis_integer(value: object, name: str) -> int:
+    """Require one Redis integer response."""
+    if type(value) is not int:
+        raise RuntimeError(f"Redis returned an unexpected {name} response")
+    return value
+
+
+def _cursor_offset(cursor: str | None) -> int:
+    """Decode one non-negative stale-page offset."""
+    if cursor is None:
+        return 0
+    try:
+        offset = int(cursor)
+    except ValueError as exc:
+        raise ValueError("invalid stale page cursor") from exc
+    if offset < 0:
+        raise ValueError("invalid stale page cursor")
+    return offset
