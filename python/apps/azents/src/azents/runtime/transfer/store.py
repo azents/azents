@@ -15,7 +15,12 @@ from azents.runtime.transfer.data import (
 
 
 class RuntimeTransferStateStore(Protocol):
-    """Atomic metadata-only transfer state owned by Runtime Control."""
+    """Atomic metadata-only transfer state owned by Runtime Control.
+
+    ``record_progress`` stores only the latest coalesced monotonic observation.
+    ``request_cancellation`` is idempotent and makes later successful settlement
+    invalid once accepted. An already-terminal attempt remains unchanged.
+    """
 
     async def admit(
         self, admission: RuntimeTransferAdmission, *, lease_id: str, now: datetime

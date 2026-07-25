@@ -10,6 +10,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferConfig,
     RuntimeTransferDirection,
     RuntimeTransferPhase,
+    RuntimeTransferProgress,
     RuntimeTransferRecord,
     logical_expiry,
     validate_admission_time,
@@ -95,6 +96,42 @@ def test_record_enforces_authoritative_expiry_and_terminal_ceiling() -> None:
             actual_size=None,
             actual_sha256=None,
             stream_claim_id=None,
+            progress=None,
+            cancellation_requested_at=None,
+            consumer_claim_id=None,
+            consumer_lease_expires_at=None,
+            consumer_acknowledged_at=None,
+            terminal_outcome=None,
+            terminal_expires_at=None,
+            cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
+            failure=None,
+        )
+
+
+def test_progress_is_timezone_aware_and_bounded_by_expected_size() -> None:
+    """Latest progress evidence remains bounded metadata."""
+    progress = RuntimeTransferProgress(bytes_transferred=1, observed_at=_NOW)
+    assert progress.bytes_transferred == 1
+    with pytest.raises(ValueError, match="negative"):
+        RuntimeTransferProgress(bytes_transferred=-1, observed_at=_NOW)
+
+    admission = _admission()
+    with pytest.raises(ValueError, match="expected_size"):
+        RuntimeTransferRecord(
+            admission=admission,
+            phase=RuntimeTransferPhase.STREAMING,
+            revision=1,
+            lease_id="lease",
+            lease_expires_at=_NOW + timedelta(minutes=1),
+            created_at=_NOW,
+            updated_at=_NOW,
+            logical_expires_at=_NOW + timedelta(hours=1),
+            accepted_runner_generation=1,
+            object=None,
+            actual_size=None,
+            actual_sha256=None,
+            stream_claim_id="stream",
+            progress=RuntimeTransferProgress(bytes_transferred=2, observed_at=_NOW),
             cancellation_requested_at=None,
             consumer_claim_id=None,
             consumer_lease_expires_at=None,

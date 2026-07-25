@@ -153,6 +153,19 @@ class RuntimeTransferObject:
 
 
 @dataclass(frozen=True)
+class RuntimeTransferProgress:
+    """Latest coalesced progress and heartbeat evidence."""
+
+    bytes_transferred: int
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        if self.bytes_transferred < 0:
+            raise ValueError("bytes_transferred must not be negative")
+        _aware(self.observed_at, "observed_at")
+
+
+@dataclass(frozen=True)
 class RuntimeTransferRecord:
     """Complete metadata-only attempt state."""
 
@@ -169,6 +182,7 @@ class RuntimeTransferRecord:
     actual_size: int | None
     actual_sha256: str | None
     stream_claim_id: str | None
+    progress: RuntimeTransferProgress | None
     cancellation_requested_at: datetime | None
     consumer_claim_id: str | None
     consumer_lease_expires_at: datetime | None
@@ -198,6 +212,11 @@ class RuntimeTransferRecord:
         if self.actual_size is not None and self.actual_size < 0:
             raise ValueError("actual_size must not be negative")
         _sha(self.actual_sha256)
+        if (
+            self.progress is not None
+            and self.progress.bytes_transferred > self.admission.expected_size
+        ):
+            raise ValueError("progress must not exceed expected_size")
         if self.terminal_expires_at is not None:
             _aware(self.terminal_expires_at, "terminal_expires_at")
             if self.terminal_expires_at > self.updated_at + timedelta(hours=1):

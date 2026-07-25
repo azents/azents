@@ -55,7 +55,7 @@ The transfer record includes at least:
 - expected size and optional trusted expected SHA-256;
 - actual size and authoritative SHA-256 when verified;
 - phase, terminal outcome, cleanup status, and bounded error classification;
-- revision and one-stream claim evidence;
+- revision, one-stream claim evidence, and the latest bounded coalesced progress/heartbeat observation containing only bytes transferred and observation time;
 - admission lease identity and expiry;
 - object handle owned by the transfer layer;
 - consumer claim and acknowledgement evidence;
@@ -76,7 +76,7 @@ The Protocol exposes domain operations equivalent to:
 - get a current non-expired attempt;
 - transition preparation to `ready` with verified object metadata;
 - claim exactly one data stream for the expected attempt, direction, generation, phase, and revision;
-- coalesce bounded progress/heartbeat evidence;
+- record the latest bounded coalesced progress/heartbeat evidence so adapters expose monotonic bytes and observation time without persisting one mutation per body chunk;
 - request cancellation;
 - enter verification and publish verified `available` state;
 - record Runtime destination `committed` state;
@@ -94,11 +94,13 @@ Required atomic/fencing semantics:
 - rejection creates neither lease nor attempt metadata and invokes no downstream preparation callback;
 - every mutation compares the expected attempt ID, phase, revision, Runtime identity, and applicable generation;
 - exactly one stream claim and exactly one active consumer claim can succeed;
+- a cancellation request is a persistent authority marker: duplicate requests are idempotent, an already-terminal record remains unchanged, and success settlement cannot win after cancellation was accepted;
 - terminal settlement is idempotent and cannot be replaced by a late success, cleanup, or older attempt;
 - old-attempt cleanup cannot delete or settle a newer attempt;
 - ready/streaming/consumer transitions require a live admission lease and unexpired logical content;
 - expired admission and consumer leases are reclaimed atomically, release their corresponding capacity or claim, and cannot authorize a stale owner mutation;
 - heartbeats, progress, retries, and consumer activity never extend absolute content expiry;
+- progress bytes are monotonic, cannot exceed the admitted expected size, and update only the latest coalesced observation rather than an event history;
 - physical object existence never reconstructs or revives missing/expired state;
 - progress persistence is coalesced and never written once per body chunk; and
 - no method accepts or returns file-body chunks.
@@ -187,11 +189,11 @@ Run each applicable case against memory and Redis:
 - absent or later source expiry uses exactly the one-hour absolute content cap;
 - an already-expired source is rejected before admission state is created;
 - active-attempt expiry releases admission capacity while retaining bounded terminal and cleanup evidence;
-- heartbeat/progress/consumer activity does not extend absolute expiry;
+- progress/heartbeat evidence is observable, monotonic, bounded by expected size, and does not extend absolute expiry;
 - ready cannot succeed without a live lease, correct attempt, phase, and revision;
 - exactly one stream claim succeeds under concurrency;
 - stale desired generation, accepted Runner generation, attempt, phase, or revision cannot mutate current state;
-- cancellation races with claim/verification/settlement and preserves one terminal authority;
+- cancellation races with claim/verification/settlement and preserves one terminal authority; once cancellation is accepted, a later success settlement is rejected while duplicate cancellation is idempotent;
 - duplicate terminal settlement and admission release are idempotent;
 - late success cannot replace failed/cancelled/expired/superseded outcome;
 - available consumer claim is exclusive, lease-backed, and fenced;
