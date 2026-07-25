@@ -4,6 +4,7 @@ import asyncio
 import base64
 import dataclasses
 import json
+import math
 import secrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -848,13 +849,20 @@ class RedisRuntimeTransferStateStore:
                 attempt_id,
                 now,
             )
-            if envelope is None or envelope.record.revision != expected_revision:
+            if envelope is None:
                 await self._commit(token, entries, now)
                 return None
-            if (
-                envelope.record.phase is RuntimeTransferPhase.TERMINAL
-                or envelope.record.cancellation_requested_at is not None
-            ):
+            if envelope.record.cancellation_requested_at is not None:
+                await self._commit(token, entries, now)
+                return (
+                    envelope.record
+                    if expected_revision <= envelope.record.revision
+                    else None
+                )
+            if envelope.record.revision != expected_revision:
+                await self._commit(token, entries, now)
+                return None
+            if envelope.record.phase is RuntimeTransferPhase.TERMINAL:
                 await self._commit(token, entries, now)
                 return envelope.record
             assert key is not None
@@ -1049,7 +1057,7 @@ class RedisRuntimeTransferStateStore:
                 attempt_id,
                 now,
             )
-            if envelope is None or envelope.record.revision != expected_revision:
+            if envelope is None:
                 await self._commit(token, entries, now)
                 return None
             record = envelope.record
@@ -1057,9 +1065,14 @@ class RedisRuntimeTransferStateStore:
                 await self._commit(token, entries, now)
                 return (
                     record
-                    if record.terminal_outcome is outcome and record.failure is failure
+                    if expected_revision <= record.revision
+                    and record.terminal_outcome is outcome
+                    and record.failure is failure
                     else None
                 )
+            if record.revision != expected_revision:
+                await self._commit(token, entries, now)
+                return None
             if (
                 record.cancellation_requested_at is not None
                 and outcome is RuntimeTransferOutcome.SUCCEEDED
@@ -1115,12 +1128,19 @@ class RedisRuntimeTransferStateStore:
                 attempt_id,
                 now,
             )
-            if envelope is None or envelope.record.revision != expected_revision:
+            if envelope is None:
                 await self._commit(token, entries, now)
                 return None
             if envelope.record.cleanup_status is status:
                 await self._commit(token, entries, now)
-                return envelope.record
+                return (
+                    envelope.record
+                    if expected_revision <= envelope.record.revision
+                    else None
+                )
+            if envelope.record.revision != expected_revision:
+                await self._commit(token, entries, now)
+                return None
             assert key is not None
             record = dataclasses.replace(
                 envelope.record,
@@ -1167,6 +1187,7 @@ class RedisRuntimeTransferStateStore:
                 await self._commit(token, entries, now)
                 raise ValueError("invalid page limit")
             state = None if cursor is None else _decode_stale_cursor(cursor)
+            await self._commit(token, entries, now)
             records: list[RuntimeTransferRecord] = []
             deleted: set[str] = set()
             pointer_deletes: set[str] = set()
@@ -2098,7 +2119,7 @@ def _terminal_bucket_epochs(
     """Return bounded terminal bucket epochs around the authoritative time."""
     quantum = max(1, int(terminal_ttl.total_seconds()) // 60)
     now_epoch = int(now.timestamp())
-    ttl_seconds = int(terminal_ttl.total_seconds())
+    ttl_seconds = math.ceil(terminal_ttl.total_seconds())
     if expired:
         start = (now_epoch - ttl_seconds) // quantum * quantum
         end = now_epoch // quantum * quantum

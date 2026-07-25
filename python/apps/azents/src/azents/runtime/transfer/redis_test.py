@@ -16,6 +16,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPhase,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
+    terminal_expiry,
 )
 from azents.runtime.transfer.redis import (
     _MAX_SERIALIZED_RECORD_BYTES,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
@@ -23,6 +24,7 @@ from azents.runtime.transfer.redis import (
     _encode_record_envelope,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
     _RedisTransferKeys,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
     _RedisTransferRecordEnvelope,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
+    _terminal_bucket_epochs,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
 )
 
 _NOW = datetime(2026, 7, 25, 12, tzinfo=timezone(timedelta(hours=9)))
@@ -159,6 +161,24 @@ def test_record_envelope_round_trips_all_public_and_private_evidence() -> None:
     assert _decode_record_envelope(encoded) == _RedisTransferRecordEnvelope(
         record=record,
         admission_released=True,
+    )
+
+
+def test_fractional_terminal_ttl_bucket_range_includes_aligned_expiry() -> None:
+    """Fractional TTLs cannot place live terminal state outside scanned buckets."""
+    now = datetime.fromtimestamp(100.9, tz=timezone.utc)
+    terminal_ttl = timedelta(seconds=1.5)
+    expiry = terminal_expiry(now, terminal_ttl)
+
+    assert int(expiry.timestamp()) in _terminal_bucket_epochs(
+        now,
+        terminal_ttl,
+        expired=False,
+    )
+    assert int(expiry.timestamp()) in _terminal_bucket_epochs(
+        expiry,
+        terminal_ttl,
+        expired=True,
     )
 
 

@@ -821,7 +821,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
         await store_harness.store.request_cancellation(
             "cancellation",
             attempt_id="attempt",
-            expected_revision=cancelled.revision,
+            expected_revision=stream.revision,
         )
         == cancelled
     )
@@ -872,9 +872,17 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
         await store_harness.store.settle(
             "cancellation",
             attempt_id="attempt",
-            expected_revision=terminal.revision,
+            expected_revision=cancelled.revision,
             outcome=RuntimeTransferOutcome.CANCELLED,
             failure=None,
+        )
+        == terminal
+    )
+    assert (
+        await store_harness.store.request_cancellation(
+            "cancellation",
+            attempt_id="attempt",
+            expected_revision=stream.revision,
         )
         == terminal
     )
@@ -882,7 +890,7 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
         await store_harness.store.settle(
             "cancellation",
             attempt_id="attempt",
-            expected_revision=terminal.revision,
+            expected_revision=cancelled.revision,
             outcome=RuntimeTransferOutcome.FAILED,
             failure=None,
         )
@@ -1327,6 +1335,15 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
         status=RuntimeTransferCleanupStatus.PENDING,
     )
     assert pending_cleanup is not None
+    assert (
+        await store_harness.store.record_cleanup(
+            "historical",
+            attempt_id="attempt",
+            expected_revision=admitted.revision,
+            status=RuntimeTransferCleanupStatus.PENDING,
+        )
+        == pending_cleanup
+    )
     released = await store_harness.store.release_admission(
         "historical",
         attempt_id="attempt",
@@ -1370,7 +1387,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
         await store_harness.store.record_cleanup(
             "historical",
             attempt_id="attempt",
-            expected_revision=complete_cleanup.revision,
+            expected_revision=terminal.revision,
             status=RuntimeTransferCleanupStatus.COMPLETE,
         )
         == complete_cleanup

@@ -197,12 +197,13 @@ class InMemoryRuntimeTransferStateStore:
         async with self.lock:
             self._expire(now)
             record = self._exact(transfer_id, attempt_id)
-            if record is None or record.revision != expected_revision:
+            if record is None:
                 return None
-            if (
-                record.phase is RuntimeTransferPhase.TERMINAL
-                or record.cancellation_requested_at is not None
-            ):
+            if record.cancellation_requested_at is not None:
+                return record if expected_revision <= record.revision else None
+            if record.revision != expected_revision:
+                return None
+            if record.phase is RuntimeTransferPhase.TERMINAL:
                 return record
             return self._put(
                 dataclasses.replace(
@@ -390,14 +391,18 @@ class InMemoryRuntimeTransferStateStore:
         async with self.lock:
             self._expire(now)
             record = self._exact(transfer_id, attempt_id)
-            if record is None or record.revision != expected_revision:
+            if record is None:
                 return None
             if record.phase is RuntimeTransferPhase.TERMINAL:
                 return (
                     record
-                    if record.terminal_outcome is outcome and record.failure is failure
+                    if expected_revision <= record.revision
+                    and record.terminal_outcome is outcome
+                    and record.failure is failure
                     else None
                 )
+            if record.revision != expected_revision:
+                return None
             if (
                 record.cancellation_requested_at is not None
                 and outcome is RuntimeTransferOutcome.SUCCEEDED
@@ -442,10 +447,12 @@ class InMemoryRuntimeTransferStateStore:
         async with self.lock:
             self._expire(now)
             record = self._exact(transfer_id, attempt_id)
-            if record is None or record.revision != expected_revision:
+            if record is None:
                 return None
             if record.cleanup_status is status:
-                return record
+                return record if expected_revision <= record.revision else None
+            if record.revision != expected_revision:
+                return None
             return self._put(
                 dataclasses.replace(
                     record,
