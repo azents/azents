@@ -11,9 +11,13 @@ from typing import NoReturn
 
 import grpc
 import pytest
-from azents_runtime_control.proto import runtime_runner_control_pb2
+from azents_runtime_control.proto import (
+    runtime_runner_control_pb2,
+    runtime_runner_transfer_pb2,
+)
 from azents_runtime_control.runner import RunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
+from azents_runtime_control.runner_transfer import RunnerTransferResult
 from google.protobuf import timestamp_pb2
 
 from azents.core.runtime_runner_credential import (
@@ -36,7 +40,9 @@ from azents.runtime.coordination.data import (
     RuntimeBodyChunk,
     RuntimeConnectionKind,
     RuntimeCoordinationTarget,
+    RuntimeOperationMetadata,
     RuntimeOperationStatus,
+    RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
@@ -44,6 +50,7 @@ from azents.runtime.coordination.data import (
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
 )
+from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
 
 
 @dataclasses.dataclass
@@ -67,6 +74,130 @@ class FakeStateSink:
         """Record and validate Runner execution-policy evidence."""
         self.registrations.append(registration)
         return self.registration_valid
+
+
+@dataclasses.dataclass
+class RecordingTransferResultSink(RuntimeRunnerTransferResultSink):
+    """Record structurally valid transfer results delegated by the bridge."""
+
+    calls: list[tuple[RunnerTransferResult, str]] = dataclasses.field(
+        default_factory=list
+    )
+
+    async def handle(
+        self,
+        result: RunnerTransferResult,
+        *,
+        request_id: str,
+    ) -> None:
+        """Record one sink invocation."""
+        self.calls.append((result, request_id))
+
+
+@pytest.mark.asyncio
+async def test_transfer_result_delegates_only_valid_structural_result() -> None:
+    """Valid results use the sink; malformed results become protocol final errors."""
+    store = InMemoryRuntimeCoordinationStore()
+    now = datetime.now(UTC)
+    await store.register_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="connection-1",
+        owner_replica_id="control-a",
+        connected_at=now,
+        heartbeat_at=now,
+        ttl_seconds=60,
+        metadata={},
+    )
+    await store.put_operation(
+        RuntimeOperationMetadata(
+            operation_id="operation-1",
+            runtime_id="runtime-1",
+            target=RuntimeCoordinationTarget.RUNNER,
+            generation=1,
+            operation_type="file.transfer.v1",
+            transfer_id="transfer-1",
+            transfer_attempt_id="attempt-1",
+            transfer_dispatch_id="dispatch-1",
+            transfer_direction=RuntimeOperationTransferDirection.DOWNLOAD,
+            request_stream_id="request-1",
+            reply_stream_id="reply-1",
+            status=RuntimeOperationStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+            deadline_at=now + timedelta(minutes=1),
+            body_stream_id=None,
+            last_heartbeat_at=None,
+            last_event_at=None,
+            cancel_requested_at=None,
+            final_event_cursor=None,
+        ),
+        ttl_seconds=60,
+    )
+    control = RuntimeControlProtocolService(store)
+    sink = RecordingTransferResultSink()
+    servicer = RuntimeRunnerControlGrpcServicer(
+        control_protocol=control,
+        coordination_store=store,
+        state_sink=FakeStateSink(),
+        owner_replica_id="control-a",
+        consumer_id="consumer-1",
+        runner_authenticator=FakeRunnerAuthenticator(),
+        transfer_result_sink=sink,
+    )
+
+    await servicer._append_transfer_result(  # pyright: ignore[reportPrivateUsage]  # Test the bounded bridge path directly.
+        _transfer_result_message(committed=True)
+    )
+
+    assert len(sink.calls) == 1
+    assert (
+        await control.read_replies(
+            reply_stream_id="reply-1",
+            after_cursor=None,
+            limit=10,
+        )
+        == []
+    )
+
+    await servicer._append_transfer_result(  # pyright: ignore[reportPrivateUsage]  # Test the bounded bridge path directly.
+        _transfer_result_message(committed=False)
+    )
+
+    assert len(sink.calls) == 1
+    replies = await control.read_replies(
+        reply_stream_id="reply-1",
+        after_cursor=None,
+        limit=10,
+    )
+    assert len(replies) == 1
+    assert replies[0].event.payload["protocol_violation"] is True
+
+
+def _transfer_result_message(
+    *,
+    committed: bool,
+) -> runtime_runner_control_pb2.RunnerMessage:
+    """Build one bounded Runner transfer result message."""
+    result = runtime_runner_control_pb2.RunnerTransferResult(
+        identity=runtime_runner_transfer_pb2.TransferIdentity(
+            transfer_id="transfer-1",
+            attempt_id="attempt-1",
+            runtime_id="runtime-1",
+            runner_generation=1,
+        ),
+        operation_id="operation-1",
+        dispatch_id="dispatch-1",
+        outcome=runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_SUCCEEDED,
+        actual_size=3,
+        sha256="a" * 64,
+        destination_committed=committed,
+    )
+    return runtime_runner_control_pb2.RunnerMessage(
+        request_id=f"result:{committed}",
+        generation=1,
+        transfer_result=result,
+    )
 
 
 class QueueIterator:

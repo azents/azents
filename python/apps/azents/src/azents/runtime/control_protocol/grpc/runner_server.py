@@ -45,13 +45,14 @@ from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeBodyChunkRecord,
     RuntimeCoordinationTarget,
+    RuntimeOperationMetadata,
     RuntimeOperationStatus,
-    RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
+from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
 
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
@@ -103,6 +104,7 @@ class RuntimeRunnerControlGrpcServicer(
         owner_replica_id: str,
         consumer_id: str,
         runner_authenticator: RuntimeRunnerCredentialAuthenticator,
+        transfer_result_sink: RuntimeRunnerTransferResultSink | None = None,
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
         """Initialize the Runner Control gRPC servicer."""
@@ -113,6 +115,7 @@ class RuntimeRunnerControlGrpcServicer(
         self._consumer_id = consumer_id
         self._runner_authenticator = runner_authenticator
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
+        self._transfer_result_sink = transfer_result_sink
         self._operation_block_ms = operation_block_ms
         self._transfer_dispatch_request_ids: dict[str, str] = {}
 
@@ -646,12 +649,56 @@ class RuntimeRunnerControlGrpcServicer(
             or operation.generation != result.identity.runner_generation
         ):
             return
-        valid = _valid_transfer_result(
-            result,
-            direction=operation.transfer_direction,
-        )
-        if valid:
+        try:
+            mapped = runner_transfer_result_from_message(
+                result,
+                direction=RunnerTransferDirection(operation.transfer_direction.value),
+            )
+        except KeyError, ValueError:
+            await self._append_transfer_result_error(
+                operation,
+                message,
+                error_code="RUNNER_TRANSFER_PROTOCOL_VIOLATION",
+            )
             return
+        if self._transfer_result_sink is None:
+            await self._append_transfer_result_error(
+                operation,
+                message,
+                error_code="RUNNER_TRANSFER_RESULT_SINK_UNAVAILABLE",
+            )
+            return
+        try:
+            await self._transfer_result_sink.handle(
+                mapped,
+                request_id=message.request_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _LOGGER.exception(
+                "Runner transfer result sink failed",
+                extra={
+                    "runtime_id": result.identity.runtime_id,
+                    "runner_generation": result.identity.runner_generation,
+                    "transfer_id": result.identity.transfer_id,
+                },
+            )
+            await self._append_transfer_result_error(
+                operation,
+                message,
+                error_code="RUNNER_TRANSFER_RESULT_SINK_FAILED",
+            )
+
+    async def _append_transfer_result_error(
+        self,
+        operation: RuntimeOperationMetadata,
+        message: runtime_runner_control_pb2.RunnerMessage,
+        *,
+        error_code: str,
+    ) -> None:
+        """Append one bounded final error for an unusable transfer result."""
+        result = message.transfer_result
         await self._control_protocol.append_reply_event(
             RuntimeReplyEvent(
                 request_id=message.request_id,
@@ -663,7 +710,9 @@ class RuntimeRunnerControlGrpcServicer(
                     "attempt_id": result.identity.attempt_id,
                     "dispatch_id": result.dispatch_id,
                     "outcome": result.outcome,
-                    "protocol_violation": True,
+                    "protocol_violation": error_code
+                    == "RUNNER_TRANSFER_PROTOCOL_VIOLATION",
+                    "error_code": error_code,
                 },
                 created_at=datetime.now(UTC),
                 final=True,
@@ -712,6 +761,7 @@ def add_runtime_runner_control_servicer(
     owner_replica_id: str,
     consumer_id: str,
     runner_authenticator: RuntimeRunnerCredentialAuthenticator,
+    transfer_result_sink: RuntimeRunnerTransferResultSink | None = None,
     operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Runner Control servicer to a gRPC server."""
@@ -723,6 +773,7 @@ def add_runtime_runner_control_servicer(
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
             runner_authenticator=runner_authenticator,
+            transfer_result_sink=transfer_result_sink,
             operation_block_ms=operation_block_ms,
         ),
         server,
@@ -873,22 +924,6 @@ def _runner_transfer_intent(
     if isinstance(expected_sha256, str):
         message.expected_sha256 = expected_sha256
     return message
-
-
-def _valid_transfer_result(
-    result: runtime_runner_control_pb2.RunnerTransferResult,
-    *,
-    direction: RuntimeOperationTransferDirection,
-) -> bool:
-    """Validate untrusted result structure against persisted transfer direction."""
-    try:
-        runner_transfer_result_from_message(
-            result,
-            direction=RunnerTransferDirection(direction.value),
-        )
-    except KeyError, ValueError:
-        return False
-    return True
 
 
 def _copy_operation_payload(
