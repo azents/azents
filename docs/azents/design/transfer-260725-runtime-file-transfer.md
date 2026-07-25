@@ -18,9 +18,13 @@ The design does not redefine user-visible attachment selection, External Channel
 
 ## Design Summary
 
-Runtime file transfer uses three distinct planes:
+Runtime file transfer uses four distinct planes:
 
 - **Control plane:** existing Runner Control carries authenticated transfer intent, Runtime path, authorization correlation, cancellation, progress, and terminal operation status. It carries no file bytes.
+- **Trusted coordination plane:** Server and Worker feature services call an internal
+  authenticated Runtime Transfer Coordinator RPC for admission, state transitions,
+  verified-object handoff, and consumer acknowledgement. It carries bounded metadata and
+  opaque trusted-service handles, not file bodies.
 - **Runtime data plane:** a separate `RuntimeRunnerTransfer` gRPC service carries bounded raw byte chunks between Runtime Control and Runner over a dedicated Runner channel.
 - **Internal object plane:** the existing S3-compatible workspace bucket stores one immutable attempt object. Existing S3 sources enter that namespace through object-store-native copy. Verified Runtime uploads leave it through object-store-native copy or a bounded provider stream.
 
@@ -29,6 +33,7 @@ Runtime Control remains the trusted Runtime boundary. Runner knows a transfer ID
 ```mermaid
 flowchart LR
     Feature[Feature Service]
+    Coordinator[Internal Transfer Coordinator]
     Control[Runner Control Service]
     Transfer[Runner Transfer Service]
     State[RuntimeTransferStateStore]
@@ -37,9 +42,10 @@ flowchart LR
     FS[(Runtime Filesystem)]
     Provider[External Provider]
 
-    Feature -->|authorize and prepare| State
+    Feature -->|authenticated metadata commands| Coordinator
+    Coordinator -->|atomic state transitions| State
     Feature -->|S3 copy or bounded source stream| S3
-    Feature -->|small transfer intent| Control
+    Coordinator -->|small transfer intent| Control
     Control -->|intent and lifecycle| Runner
 
     Runner -->|dedicated transfer channel| Transfer
@@ -48,7 +54,7 @@ flowchart LR
     Runner <-->|bounded raw bytes| Transfer
     Runner <-->|temporary file and atomic commit| FS
 
-    S3 -->|verified internal handle| Feature
+    Coordinator -->|verified internal handle| Feature
     Feature -->|S3 copy or bounded upload| Provider
 ```
 
@@ -72,6 +78,7 @@ The current gRPC server and client use default message limits. This design inten
 | --- | --- | --- |
 | Feature service | Source and destination authorization, product identity, product metadata, final publication, provider delivery | Runner streaming protocol or transfer object cleanup implementation |
 | Runtime transfer coordinator | Attempt creation, admission, state transitions, object lease, cancellation, consumer handoff | Exchange, Artifact, ModelFile, FilePart, or provider product semantics |
+| Internal coordinator RPC | Trusted feature-service authentication, bounded command routing, opaque handle issuance, and single-owner state access | File-body relay, Runner authentication, or public file identity |
 | Runtime Control transfer service | Runner authentication, transfer authorization, object streaming, actual byte count and SHA-256 | Public file identity, user-visible URI, or Runner filesystem policy outside the admitted intent |
 | Runtime Runner | Authorized Runtime source read, destination temporary file, independent checksum, atomic local commit | S3 authority, transfer selection, source product authorization, or terminal server result authority |
 | Transfer state store | Bounded manifests, attempt fencing, admission lease, phase, outcome, cleanup state | File-body chunks or product file metadata |
@@ -186,7 +193,21 @@ The in-memory backend is supported only when one Runtime Control process owns al
 
 ### Runtime Control composition
 
-Runtime Control selects `memory` or `redis` through configuration. Business services receive only the Protocol. The existing hard-coded `RedisRuntimeCoordinationStore` construction is replaced by configured composition where standalone operation is supported. Existing coordination and transfer stores may share one Redis client lifecycle, but they keep separate domain interfaces and key namespaces.
+Runtime Control alone constructs `RuntimeTransferStateStore` and selects its `memory` or
+`redis` implementation through transfer-specific configuration. Feature services receive
+an internal `RuntimeFileTransferService` client for the authenticated coordinator RPC;
+they never instantiate the store.
+
+The existing `RuntimeCoordinationStore` remains Redis-backed because API/Worker and
+Runtime Control are separate processes that share Runner connections, request/reply
+streams, operation metadata, and cancellation through that store. Transfer-state memory
+mode does not change this existing coordination dependency. When Redis transfer state is
+selected, both stores may share one Redis client lifecycle while retaining separate
+domain interfaces and key namespaces.
+
+Memory transfer state is valid only when one Runtime Control process owns every internal
+coordinator and Runner transfer RPC. Multi-replica Runtime Control requires Redis transfer
+state.
 
 ## Internal Object Storage
 
@@ -351,6 +372,7 @@ Runner-provided size and SHA-256 remain validation inputs. Runtime Control indep
 ```mermaid
 sequenceDiagram
     participant Feature as Import/Feature Service
+    participant Coordinator as Transfer Coordinator
     participant State as Transfer State Store
     participant S3 as S3-compatible Storage
     participant Control as Runner Control
@@ -358,10 +380,13 @@ sequenceDiagram
     participant Runner as Runtime Runner
 
     Feature->>Feature: authorize source and destination
-    Feature->>State: admit and create preparing attempt
+    Feature->>Coordinator: admit and create preparing attempt
+    Coordinator->>State: atomic admission and metadata
+    Coordinator-->>Feature: opaque admitted object handle
     Feature->>S3: copy source to immutable transfer key
-    Feature->>State: mark ready with size and SHA-256
-    Feature->>Control: dispatch download intent
+    Feature->>Coordinator: mark ready with size and SHA-256
+    Coordinator->>State: verify transition to ready
+    Coordinator->>Control: dispatch download intent
     Control->>Runner: transfer ID, path, manifest, deadline
     Runner->>Transfer: DownloadTransfer(identity)
     Transfer->>State: authenticate and claim stream
@@ -389,6 +414,7 @@ preparation before Runner receives an intent.
 ```mermaid
 sequenceDiagram
     participant Tool as present_file
+    participant Coordinator as Transfer Coordinator
     participant State as Transfer State Store
     participant Control as Runner Control
     participant Transfer as Transfer Service
@@ -398,21 +424,25 @@ sequenceDiagram
     participant DB as PostgreSQL
 
     Tool->>Runner: bounded stat intent
-    Tool->>State: admit and create preparing upload attempt
-    Control->>Runner: upload intent with source path
+    Tool->>Coordinator: admit and create preparing upload attempt
+    Coordinator->>State: atomic admission and metadata
+    Coordinator->>Control: upload intent with source path
     Runner->>Runner: create bounded local snapshot
     Runner->>Transfer: UploadTransfer(open and chunks)
     Transfer->>State: authenticate and claim stream
     Transfer->>S3: bounded multipart upload
     Transfer->>State: mark available with actual size and SHA-256
     Transfer-->>Runner: verified result
-    Tool->>State: claim trusted consumer
+    Tool->>Coordinator: claim trusted consumer
+    Coordinator->>State: claim consumer lease
     Exchange->>Exchange: authorize and preallocate file identity
     Exchange->>S3: copy transfer object to final Exchange key
     Exchange->>Exchange: bounded preview or transformation
     Exchange->>DB: commit Exchange metadata
-    Exchange->>State: acknowledge consumed
-    State->>S3: best-effort delete transfer object
+    Exchange->>Coordinator: acknowledge consumed
+    Coordinator->>State: settle consumer acknowledgement
+    Coordinator->>S3: best-effort delete transfer object
+    Coordinator->>State: record cleanup outcome
 ```
 
 `present_file` reports success only after Exchange metadata commits. A completed Runtime upload followed by Exchange failure is a failed `present_file` operation, even though the transfer object may remain consumable until its one-hour lease expires.
@@ -448,6 +478,12 @@ async def upload_from_runtime(
 ```
 
 `VerifiedTransferObject` is an internal opaque handle. Only trusted server services can consume it. The Runner, model, public API, and event transcript never receive it.
+
+`RuntimeFileTransferService` is a client proxy to the internal Runtime Transfer
+Coordinator hosted by Runtime Control. Its RPCs carry bounded metadata, operation
+correlation, and opaque handles only. The coordinator authenticates the trusted Server or
+Worker caller, owns every transfer-state transition, and returns no Runner credential or
+public storage authority.
 
 ### Authorized object sources
 
@@ -530,6 +566,7 @@ The design adds configuration equivalent to:
 
 - transfer endpoint, defaulting to the Runner Control endpoint;
 - transfer state backend: `memory` or `redis`;
+- internal transfer-coordinator endpoint and trusted service authentication;
 - transfer TTL, validated as positive and at most 3,600 seconds;
 - terminal metadata TTL, at most 3,600 seconds;
 - chunk, multipart, stream, per-Runtime, per-replica, and deployment budgets;
@@ -543,6 +580,10 @@ The existing workspace S3 bucket, endpoint, credentials, TLS, Runner credential 
 Runtime Control and Runner receive a separately configurable transfer endpoint. The default points to the current Runtime Control Service and port. Runner still creates a distinct transfer channel and connection.
 
 When the selected state backend is memory, Helm requires one Runtime Control replica and disables autoscaling above one replica. Redis-backed state permits the existing multi-replica and HPA configuration.
+
+API Server and Worker receive the internal coordinator endpoint and trusted service
+authentication. They continue to use Redis-backed Runtime Coordination. Transfer-state
+memory mode never gives them an in-process state store.
 
 The chart adds no Runner S3 credentials, presigned URL, bucket, or object key. Runtime Runner NetworkPolicy needs only the transfer endpoint it already reaches through Runtime Control.
 
@@ -565,6 +606,8 @@ Rollback is also coordinated across Control, Runner, and consumers. Any attempt 
 ## Security
 
 - Runner is authenticated on every data RPC with the existing Runtime-bound signed credential.
+- Server and Worker are authenticated on every internal coordinator RPC with a
+  short-lived trusted-service credential distinct from Runner credentials.
 - Durable desired generation, accepted Runner generation, attempt identity, direction, phase, deadline, and admission are revalidated before bytes move.
 - Runner cannot select an object, provider, user, Session, Agent, or transfer by supplying a path or storage identity.
 - Runtime Control has only internal object-store access; Runner has none.
@@ -622,6 +665,9 @@ A transfer-specific terminal failure is appended promptly to the initiating oper
 ### Test layers
 
 - **State-store contract tests:** run the same transition, admission, cancellation, expiry, consumer, cleanup, and fencing suite against memory and Redis.
+- **Internal coordinator tests:** prove trusted feature callers reach the sole Runtime
+  Control state owner, memory mode works across the process boundary, unauthorized
+  callers fail before state access, and no coordinator message carries file bytes.
 - **S3 integration tests:** use RustFS for bounded reads, immutable copy, multipart upload, abort, checksum metadata, object verification, and cleanup.
 - **gRPC integration tests:** use the generated service and real default message limits. Assert no individual message is proportional to the complete file.
 - **Runner filesystem tests:** verify same-directory temporary files, fsync, atomic replacement, overwrite races, local source snapshot, source-change detection, cancellation, and cleanup.
@@ -647,16 +693,16 @@ Evidence includes operation result, transfer phase and terminal classification, 
 | --- | --- | --- | --- |
 | `transfer-260725/REQ-1` | D1, D2, D6, D7, D8, D9 | Immutable staging, download RPC, atomic Runtime commit | Slack and object import E2E |
 | `transfer-260725/REQ-2` | D1, D2, D3, D6, D7, D8, D9 | Upload RPC, verified object, feature-owned publication | `present_file` and outbound E2E |
-| `transfer-260725/REQ-3` | D1, D6, D8, D9 | Separate service, channel, messages, semaphores | Concurrent Control/data integration test |
-| `transfer-260725/REQ-4` | D2, D4, D5, D7, D8 | Bounded chunks, multipart parts, admission, no Redis bytes | Memory-bound and overload tests |
+| `transfer-260725/REQ-3` | D1, D6, D8, D9, D10 | Separate services, channels, messages, semaphores | Concurrent Control/data integration test |
+| `transfer-260725/REQ-4` | D2, D4, D5, D7, D8, D10 | Bounded chunks, multipart parts, admission, no Redis bytes | Memory-bound and overload tests |
 | `transfer-260725/REQ-5` | D2, D3, D4, D7 | SHA-256, exact size, temp file, atomic replace, object complete | Corruption and destination-race tests |
-| `transfer-260725/REQ-6` | D1, D3, D4, D5, D6, D7, D8 | Cancellation propagation, fail-closed state, explicit errors | Cancellation, timeout, reconnect tests |
-| `transfer-260725/REQ-7` | D2, D3, D6, D9 | Common transfer service and opaque verified object | All feature flow tests |
-| `transfer-260725/REQ-8` | D1, D3, D4, D5, D6, D7, D8, D9 | Structured phases, error taxonomy, metrics | Log and metric assertions |
-| `transfer-260725/REQ-9` | D1 through D9 | Per-RPC auth, scoped attempt, no Runner storage access | Adversarial protocol tests |
+| `transfer-260725/REQ-6` | D1, D3, D4, D5, D6, D7, D8, D10 | Cancellation propagation, fail-closed state, explicit errors | Cancellation, timeout, reconnect tests |
+| `transfer-260725/REQ-7` | D2, D3, D6, D9, D10 | Common transfer service and opaque verified object | All feature flow tests |
+| `transfer-260725/REQ-8` | D1, D3, D4, D5, D6, D7, D8, D9, D10 | Structured phases, error taxonomy, metrics | Log and metric assertions |
+| `transfer-260725/REQ-9` | D1 through D10 | Per-RPC auth, scoped attempt, no Runner storage access | Adversarial protocol tests |
 | `transfer-260725/REQ-10` | D2, D3, D5, D7 | S3 copy staging and final publication | Spy/integration assertion of no eager download |
-| `transfer-260725/REQ-11` | D4, D5, D8 | Store Protocol, memory and Redis implementations, replica validation | Shared contract suite and config tests |
-| `transfer-260725/REQ-12` | D2, D3, D4, D5, D7, D8 | One-hour authorization TTL, best-effort delete, cleanup reconciler | Injected-clock expiry and orphan tests |
+| `transfer-260725/REQ-11` | D4, D5, D8, D10 | Single-owner coordinator, Store Protocol, memory and Redis implementations, replica validation | Shared contract suite, coordinator integration, and config tests |
+| `transfer-260725/REQ-12` | D2, D3, D4, D5, D7, D8, D10 | One-hour authorization TTL, best-effort delete, cleanup reconciler | Injected-clock expiry and orphan tests |
 
 ## Feasibility Validation
 
@@ -672,7 +718,7 @@ Evidence includes operation result, transfer phase and terminal classification, 
 | REQ-8 | Feasible | Structured logging and correlated operation IDs already exist; add transfer phases, metrics, and direct error mapping. |
 | REQ-9 | Feasible | Runner bearer authentication is Runtime and desired-generation bound; add transfer and attempt authorization to each RPC. |
 | REQ-10 | Feasible | `S3Service.copy()` already exists. Exchange and Artifact need object-source creation APIs and bounded inspection paths. |
-| REQ-11 | Feasible | Runtime coordination already has a Protocol, Redis and in-memory implementations, and shared contract tests. Runtime Control composition currently hard-codes Redis and must become configurable. |
+| REQ-11 | Feasible | Runtime Control can solely own memory transfer state behind an internal authenticated coordinator RPC. Existing cross-process Runtime Coordination remains Redis-backed. |
 | REQ-12 | Feasible | State-store TTL, injected clocks, explicit cleanup, and S3 lifecycle defenses provide the required logical and physical split. |
 
 No requirement or accepted ADR decision is blocked. Conditional items are implementation work, not unresolved architecture choices.
@@ -681,7 +727,7 @@ No requirement or accepted ADR decision is blocked. Conditional items are implem
 
 Expected primary code areas:
 
-- `proto/azents/runtime_control/v1/` for the new transfer service;
+- `proto/azents/runtime_control/v1/` for the new Runner transfer and internal coordinator services;
 - `python/libs/azents-runtime-control/` for generated modules and transfer client contracts;
 - `python/apps/azents/src/azents/runtime/` for state, store adapters, coordinator, gRPC service, S3 lifespan, reconciliation, and control correlation;
 - `python/apps/azents-runtime-runner/` for the transfer client, local snapshot, temporary destination, checksum, and atomic commit;

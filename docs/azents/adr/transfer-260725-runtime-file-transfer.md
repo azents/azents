@@ -669,3 +669,67 @@ implementing the RPC contract is rejected as a protocol violation.
   transfer.
 - Future compatibility requirements must be introduced by a new Requirements snapshot
   rather than retrofitted into this accepted cutover.
+
+### transfer-260725/ADR-D10: Keep transfer-state authority inside Runtime Control and expose an authenticated internal coordinator contract
+
+**Affected requirements:** `transfer-260725/REQ-3`, `REQ-4`, `REQ-6`, `REQ-7`,
+`REQ-8`, `REQ-9`, `REQ-11`, `REQ-12`
+
+Runtime Control is the sole process owner of `RuntimeTransferStateStore`. Trusted Server
+and Worker feature services do not instantiate or access that store directly. They call a
+versioned internal transfer-coordinator RPC terminated by Runtime Control for admission,
+attempt preparation, ready/dispatch, cancellation, verified-object handoff, consumer
+claim and acknowledgement, terminal settlement, and bounded cleanup status.
+
+The internal coordinator contract carries bounded metadata and opaque trusted-service
+handles only. It carries no complete file body and is separate from the external
+Runner-facing transfer service. Trusted feature services may use an admitted opaque
+object handle with their existing internal S3 authority to perform bounded provider
+streaming or object-store-native copy, but the handle never crosses to Runner, model,
+public API, or user-visible events.
+
+Every coordinator RPC authenticates a trusted Azents service caller through the existing
+Runtime Control TLS boundary and a short-lived service credential rooted in the existing
+trusted credential authority. It authorizes the caller's operation, Runtime, Session,
+Agent, direction, attempt, and allowed transition before accessing transfer state. A
+Runner credential cannot call this service, and a trusted-service credential cannot call
+the Runner data RPC as a Runner.
+
+The existing `RuntimeCoordinationStore` remains Redis-backed in the current architecture.
+API/Worker and Runtime Control are separate processes and use it for the current Runner
+connection registry, request/reply streams, operation metadata, and cancellation. A
+process-local Coordination Store would split those authorities and break ordinary Runner
+communication.
+
+The transfer-state backend is selected independently:
+
+- `memory` keeps all transfer records inside one Runtime Control process and is valid
+  only when every coordinator and Runner transfer RPC reaches that one owner; and
+- `redis` shares transfer state across multiple Runtime Control replicas.
+
+When Redis transfer state is selected, it may share a Redis client lifecycle with Runtime
+Coordination while retaining a separate interface and key namespace. Selecting memory
+for transfer state does not change Runtime Coordination's existing Redis requirement.
+
+**Rejected alternatives**
+
+- Letting Server or Worker processes instantiate the in-memory transfer store creates
+  separate state authorities and makes Runtime Control unable to validate or settle the
+  same attempt.
+- Applying one `memory|redis` selector to both Coordination and Transfer State breaks the
+  existing cross-process Runner operation path even with one Runtime Control replica.
+- Requiring Redis commands or streams for every transfer-state operation would make the
+  transfer capability's standalone state implementation nominal rather than real.
+- Adding a relational transfer entity retains short-lived transport state as durable
+  product data and reintroduces the authority and lifecycle problems rejected by D4.
+
+**Consequences**
+
+- The memory transfer backend is feasible in the existing multi-process application
+  because one Runtime Control process remains the only state owner.
+- Phase implementation must add an internal coordinator protobuf/service/client and
+  trusted service authentication in addition to the external Runner transfer service.
+- Feature services retain authorization and object/provider work, while Runtime Control
+  serializes every transfer-state transition.
+- Existing Runtime Coordination composition and Redis-backed cross-process behavior stay
+  unchanged.
