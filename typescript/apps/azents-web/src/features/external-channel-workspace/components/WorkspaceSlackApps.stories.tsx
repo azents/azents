@@ -33,6 +33,8 @@ const connection: ManagedMultiConnection = {
   socket_gap_reason: null,
   disconnected_at: null,
   generation: "generation_01",
+  active_agent_count: 1,
+  configured_default_count: 1,
 };
 
 const availableRoute: ManagedMultiRoute = {
@@ -117,6 +119,10 @@ const args: WorkspaceSlackAppsContainerOutput = {
   handoffState: { handoff: null, message: null },
   busy: false,
   actionError: null,
+  detailError: null,
+  connectionLoading: false,
+  routesLoading: false,
+  defaultsLoading: false,
   canManage: true,
   onSelectConnection: noop,
   onSetupDraftChange: noop,
@@ -170,6 +176,35 @@ export const Empty = {
     selectedConnection: null,
     routeItems: [],
     defaultItems: [],
+  },
+} satisfies Story;
+
+export const EmptyCatalog = {
+  args: {
+    state: {
+      type: "LOADED",
+      connections: [
+        {
+          ...connection,
+          active_agent_count: 0,
+          configured_default_count: 0,
+        },
+      ],
+    },
+    selectedConnection: {
+      ...connection,
+      active_agent_count: 0,
+      configured_default_count: 0,
+    },
+    routeItems: [],
+    defaultItems: [],
+  },
+} satisfies Story;
+
+export const DetailError = {
+  args: {
+    selectedConnection: null,
+    detailError: "Unable to load the selected Slack App.",
   },
 } satisfies Story;
 

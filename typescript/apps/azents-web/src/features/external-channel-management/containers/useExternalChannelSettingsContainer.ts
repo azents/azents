@@ -34,6 +34,7 @@ export interface ExternalChannelSettingsContainerOutput {
   actionError: string | null;
   actionTarget: string | null;
   actionsBusy: boolean;
+  canManageWorkspaceMultiApps: boolean;
   onOpenSetup: () => void;
   onOpenEdit: (connection: ManagedConnection) => void;
   onCloseDialog: () => void;
@@ -71,6 +72,7 @@ export function useExternalChannelSettingsContainer({
   const connectionsQuery =
     trpc.externalChannel.listConnections.useQuery(queryInput);
   const accessQuery = trpc.externalChannel.listAgentAccess.useQuery(queryInput);
+  const workspaceMemberQuery = trpc.workspaceMember.me.useQuery({ handle });
   const manifestQuery = trpc.externalChannel.getManifestGuidance.useQuery(
     {
       ...queryInput,
@@ -196,6 +198,7 @@ export function useExternalChannelSettingsContainer({
           : {
               type: "LOADED",
               connections: connectionsQuery.data.items,
+              associatedMultiApps: connectionsQuery.data.associated_multi_apps,
               grants: accessQuery.data.grants,
               blocks: accessQuery.data.blocks,
             };
@@ -217,6 +220,9 @@ export function useExternalChannelSettingsContainer({
     actionError,
     actionTarget,
     actionsBusy: actionTarget !== null,
+    canManageWorkspaceMultiApps:
+      workspaceMemberQuery.data?.role === "owner" ||
+      workspaceMemberQuery.data?.role === "manager",
     onOpenSetup: () => {
       if (actionLock.current) {
         return;

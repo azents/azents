@@ -3,6 +3,7 @@ import type {
   ManagedBlock,
   ManagedConnection,
   ManagedGrant,
+  ManagedMultiConnection,
   SlackManifestGuidance,
 } from "@azents/public-client";
 
@@ -34,6 +35,7 @@ export type ExternalChannelManagementState =
   | {
       type: "LOADED";
       connections: ManagedConnection[];
+      associatedMultiApps: ManagedMultiConnection[];
       grants: ManagedGrant[];
       blocks: ManagedBlock[];
     };

@@ -7,6 +7,7 @@ import type {
   ManagedBlock,
   ManagedConnection,
   ManagedGrant,
+  ManagedMultiConnection,
   SlackManifestGuidance,
 } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -85,6 +86,31 @@ const block: ManagedBlock = {
   removed_at: null,
 };
 
+const associatedMultiApp: ManagedMultiConnection = {
+  id: "multi_connection_01",
+  provider: "slack",
+  transport: "socket",
+  app_mode: "multi",
+  status: "active",
+  provider_app_id: "A0987654321",
+  provider_tenant_id: "Engineering Workspace",
+  provider_bot_user_id: "U0987654321",
+  credentials_configured: true,
+  capabilities: {
+    inbound_events: true,
+    thread_history: true,
+    post_messages: true,
+  },
+  last_verified_at: "2026-07-25T04:30:00Z",
+  last_health_at: "2026-07-25T05:00:00Z",
+  socket_gap_detected_at: null,
+  socket_gap_reason: null,
+  disconnected_at: null,
+  generation: "generation_01",
+  active_agent_count: 3,
+  configured_default_count: 2,
+};
+
 const manifest: SlackManifestGuidance = {
   provider: "slack",
   transport: "socket",
@@ -124,6 +150,7 @@ const meta = {
     state: {
       type: "LOADED",
       connections: [connection],
+      associatedMultiApps: [associatedMultiApp],
       grants: [grant],
       blocks: [block],
     },
@@ -132,6 +159,7 @@ const meta = {
     actionError: null,
     actionTarget: null,
     actionsBusy: false,
+    canManageWorkspaceMultiApps: true,
     onOpenSetup: noop,
     onOpenEdit: noop,
     onCloseDialog: noop,
@@ -155,6 +183,7 @@ export const Empty = {
     state: {
       type: "LOADED",
       connections: [],
+      associatedMultiApps: [],
       grants: [],
       blocks: [],
     },
@@ -218,6 +247,7 @@ export const Degraded = {
             "Socket reconnect exceeded the observation window.",
         },
       ],
+      associatedMultiApps: [associatedMultiApp],
       grants: [grant],
       blocks: [],
     },

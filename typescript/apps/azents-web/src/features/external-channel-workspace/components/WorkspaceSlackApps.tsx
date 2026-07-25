@@ -174,7 +174,9 @@ function Pagination({
         {t("previous")}
       </Button>
       <Text size="xs" c="dimmed">
-        {t("pageRange", { start: offset + 1, end: offset + count })}
+        {count === 0
+          ? t("emptyPage")
+          : t("pageRange", { start: offset + 1, end: offset + count })}
       </Text>
       <Button
         variant="subtle"
@@ -197,17 +199,15 @@ function FocusedHandoff({
   const t = useTranslations("workspace.slackApps");
   const handoff = props.handoffState.handoff;
 
-  if (props.handoffState.message) {
+  if (props.state.type === "LOADING") {
     return (
-      <Stack gap="lg" p={{ base: "md", sm: "xl" }} maw={rem(820)} mx="auto">
-        <Alert color="red" title={t("handoffUnavailableTitle")}>
-          {props.handoffState.message}
-        </Alert>
-      </Stack>
+      <Center py="xl">
+        <Loader />
+      </Center>
     );
   }
 
-  if (props.state.type === "FORBIDDEN" || !props.canManage) {
+  if (props.state.type === "FORBIDDEN") {
     return (
       <Stack gap="lg" p={{ base: "md", sm: "xl" }} maw={rem(820)} mx="auto">
         <Alert color="yellow" title={t("handoffPermissionTitle")}>
@@ -227,10 +227,42 @@ function FocusedHandoff({
     );
   }
 
+  if (!props.canManage) {
+    return (
+      <Stack gap="lg" p={{ base: "md", sm: "xl" }} maw={rem(820)} mx="auto">
+        <Alert color="yellow" title={t("handoffPermissionTitle")}>
+          {t("handoffPermissionDescription")}
+        </Alert>
+      </Stack>
+    );
+  }
+
+  if (props.handoffState.message) {
+    return (
+      <Stack gap="lg" p={{ base: "md", sm: "xl" }} maw={rem(820)} mx="auto">
+        <Alert color="red" title={t("handoffUnavailableTitle")}>
+          {props.handoffState.message}
+        </Alert>
+      </Stack>
+    );
+  }
+
+  if (props.detailError) {
+    return (
+      <Stack gap="lg" p={{ base: "md", sm: "xl" }} maw={rem(820)} mx="auto">
+        <Alert color="red" title={t("detailErrorTitle")}>
+          {props.detailError}
+        </Alert>
+      </Stack>
+    );
+  }
+
   if (
-    props.state.type === "LOADING" ||
     handoff === null ||
-    props.selectedConnection === null
+    props.selectedConnection === null ||
+    props.connectionLoading ||
+    props.routesLoading ||
+    props.defaultsLoading
   ) {
     return (
       <Center py="xl">
@@ -387,6 +419,11 @@ export function WorkspaceSlackApps(
           {props.actionError}
         </Alert>
       )}
+      {props.detailError && (
+        <Alert color="red" title={t("detailErrorTitle")}>
+          {props.detailError}
+        </Alert>
+      )}
       {props.handoffState.message && (
         <Alert color="red">{props.handoffState.message}</Alert>
       )}
@@ -428,13 +465,15 @@ export function WorkspaceSlackApps(
               <Table
                 striped
                 highlightOnHover
-                miw={rem(720)}
+                miw={rem(980)}
                 verticalSpacing="sm"
               >
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>{t("app")}</Table.Th>
                     <Table.Th>{t("status")}</Table.Th>
+                    <Table.Th>{t("agents")}</Table.Th>
+                    <Table.Th>{t("defaults")}</Table.Th>
                     <Table.Th>{t("transportLabel")}</Table.Th>
                     <Table.Th>{t("lastHealth")}</Table.Th>
                   </Table.Tr>
@@ -447,7 +486,17 @@ export function WorkspaceSlackApps(
                       {...(props.selectedConnectionId === connection.id
                         ? { bg: "var(--mantine-color-blue-light)" }
                         : {})}
+                      tabIndex={0}
+                      aria-selected={
+                        props.selectedConnectionId === connection.id
+                      }
                       onClick={() => props.onSelectConnection(connection.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          props.onSelectConnection(connection.id);
+                        }
+                      }}
                     >
                       <Table.Td>
                         <Text fw={600}>
@@ -467,6 +516,27 @@ export function WorkspaceSlackApps(
                         </Badge>
                       </Table.Td>
                       <Table.Td>
+                        <Badge
+                          color={
+                            connection.active_agent_count === 0
+                              ? "yellow"
+                              : "blue"
+                          }
+                          variant="light"
+                        >
+                          {t("agentCount", {
+                            count: connection.active_agent_count,
+                          })}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge color="gray" variant="light">
+                          {t("defaultCount", {
+                            count: connection.configured_default_count,
+                          })}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
                         {t(`transport.${connection.transport}`)}
                       </Table.Td>
                       <Table.Td>
@@ -481,7 +551,17 @@ export function WorkspaceSlackApps(
         </Stack>
       </Paper>
 
-      {props.selectedConnection && (
+      {props.selectedConnectionId &&
+        props.selectedConnection === null &&
+        props.connectionLoading && (
+          <Paper withBorder radius="md" p="xl">
+            <Center>
+              <Loader size="sm" />
+            </Center>
+          </Paper>
+        )}
+
+      {props.selectedConnection?.id === props.selectedConnectionId && (
         <Paper withBorder radius="md" p="md">
           <Stack gap="lg">
             <Group justify="space-between" align="flex-start">
@@ -495,9 +575,21 @@ export function WorkspaceSlackApps(
                     t("identityUnavailable")}
                 </Text>
               </Box>
-              <Badge color={statusColor(props.selectedConnection.status)}>
-                {t(`statusValue.${props.selectedConnection.status}`)}
-              </Badge>
+              <Group gap="xs" justify="flex-end">
+                <Badge variant="light">
+                  {t("agentCount", {
+                    count: props.selectedConnection.active_agent_count,
+                  })}
+                </Badge>
+                <Badge color="gray" variant="light">
+                  {t("defaultCount", {
+                    count: props.selectedConnection.configured_default_count,
+                  })}
+                </Badge>
+                <Badge color={statusColor(props.selectedConnection.status)}>
+                  {t(`statusValue.${props.selectedConnection.status}`)}
+                </Badge>
+              </Group>
             </Group>
             {!props.selectedConnection.credentials_configured && (
               <Alert color="yellow" title={t("credentialsMissingTitle")}>
@@ -514,6 +606,12 @@ export function WorkspaceSlackApps(
                 {t("disconnectedDescription")}
               </Alert>
             )}
+            {props.selectedConnection.active_agent_count === 0 &&
+              props.selectedConnection.status !== "disconnected" && (
+                <Alert color="blue" title={t("noAgentsTitle")}>
+                  {t("noAgentsDescription")}
+                </Alert>
+              )}
             {props.canManage &&
               props.selectedConnection.status !== "disconnected" && (
                 <>
@@ -566,72 +664,86 @@ export function WorkspaceSlackApps(
                   </Button>
                 </Group>
               )}
-              <ScrollArea type="auto">
-                <Table miw={rem(680)}>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>{t("agent")}</Table.Th>
-                      <Table.Th>{t("routeStatus")}</Table.Th>
-                      <Table.Th>{t("actions")}</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {props.routeItems.map((route) => (
-                      <Table.Tr key={route.id}>
-                        <Table.Td>
-                          <Text fw={600}>
-                            {route.agent_name ?? route.agent_id_snapshot}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {route.id}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Badge
-                            color={
-                              route.catalog_status === "available"
-                                ? "green"
-                                : "gray"
-                            }
-                          >
-                            {t(`routeStatusValue.${route.catalog_status}`)}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td>
-                          {props.canManage &&
-                            (route.catalog_status === "removed" ? (
-                              <Button
-                                size="xs"
-                                variant="subtle"
-                                loading={props.busy}
-                                onClick={() => props.onReenableRoute(route.id)}
-                              >
-                                {t("reenable")}
-                              </Button>
-                            ) : (
-                              <Button
-                                size="xs"
-                                color="red"
-                                variant="subtle"
-                                loading={props.busy}
-                                onClick={() =>
-                                  props.onPreviewRouteRemoval(route.id)
+              {props.routesLoading ? (
+                <Center py="md">
+                  <Loader size="sm" />
+                </Center>
+              ) : props.routeItems.length === 0 && props.routeOffset === 0 ? (
+                <Text size="sm" c="dimmed">
+                  {t("emptyCatalog")}
+                </Text>
+              ) : (
+                <>
+                  <ScrollArea type="auto">
+                    <Table miw={rem(680)}>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>{t("agent")}</Table.Th>
+                          <Table.Th>{t("routeStatus")}</Table.Th>
+                          <Table.Th>{t("actions")}</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {props.routeItems.map((route) => (
+                          <Table.Tr key={route.id}>
+                            <Table.Td>
+                              <Text fw={600}>
+                                {route.agent_name ?? route.agent_id_snapshot}
+                              </Text>
+                              <Text size="xs" c="dimmed">
+                                {route.id}
+                              </Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Badge
+                                color={
+                                  route.catalog_status === "available"
+                                    ? "green"
+                                    : "gray"
                                 }
                               >
-                                {t("remove")}
-                              </Button>
-                            ))}
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea>
-              <Pagination
-                offset={props.routeOffset}
-                count={props.routeItems.length}
-                onChange={props.onRoutePage}
-              />
+                                {t(`routeStatusValue.${route.catalog_status}`)}
+                              </Badge>
+                            </Table.Td>
+                            <Table.Td>
+                              {props.canManage &&
+                                (route.catalog_status === "removed" ? (
+                                  <Button
+                                    size="xs"
+                                    variant="subtle"
+                                    loading={props.busy}
+                                    onClick={() =>
+                                      props.onReenableRoute(route.id)
+                                    }
+                                  >
+                                    {t("reenable")}
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="xs"
+                                    color="red"
+                                    variant="subtle"
+                                    loading={props.busy}
+                                    onClick={() =>
+                                      props.onPreviewRouteRemoval(route.id)
+                                    }
+                                  >
+                                    {t("remove")}
+                                  </Button>
+                                ))}
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
+                  </ScrollArea>
+                  <Pagination
+                    offset={props.routeOffset}
+                    count={props.routeItems.length}
+                    onChange={props.onRoutePage}
+                  />
+                </>
+              )}
               {props.previewRouteId && (
                 <Alert
                   color="orange"
@@ -699,53 +811,72 @@ export function WorkspaceSlackApps(
                   </Button>
                 </Group>
               )}
-              <ScrollArea type="auto">
-                <Table miw={rem(680)}>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>{t("channel")}</Table.Th>
-                      <Table.Th>{t("defaultAgent")}</Table.Th>
-                      <Table.Th>{t("defaultStatus")}</Table.Th>
-                      <Table.Th>{t("actions")}</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {props.defaultItems.map((item) => (
-                      <Table.Tr key={item.id}>
-                        <Table.Td>{item.provider_channel_id}</Table.Td>
-                        <Table.Td>{item.agent_name ?? item.route_id}</Table.Td>
-                        <Table.Td>
-                          <Badge
-                            color={item.status === "active" ? "green" : "gray"}
-                          >
-                            {t(`defaultStatusValue.${item.status}`)}
-                          </Badge>
-                        </Table.Td>
-                        <Table.Td>
-                          {props.canManage && item.status === "active" && (
-                            <Button
-                              size="xs"
-                              color="red"
-                              variant="subtle"
-                              loading={props.busy}
-                              onClick={() =>
-                                props.onClearDefault(item.provider_channel_id)
-                              }
-                            >
-                              {t("clear")}
-                            </Button>
-                          )}
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea>
-              <Pagination
-                offset={props.defaultOffset}
-                count={props.defaultItems.length}
-                onChange={props.onDefaultPage}
-              />
+              {props.defaultsLoading ? (
+                <Center py="md">
+                  <Loader size="sm" />
+                </Center>
+              ) : props.defaultItems.length === 0 &&
+                props.defaultOffset === 0 ? (
+                <Text size="sm" c="dimmed">
+                  {t("emptyDefaults")}
+                </Text>
+              ) : (
+                <>
+                  <ScrollArea type="auto">
+                    <Table miw={rem(680)}>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>{t("channel")}</Table.Th>
+                          <Table.Th>{t("defaultAgent")}</Table.Th>
+                          <Table.Th>{t("defaultStatus")}</Table.Th>
+                          <Table.Th>{t("actions")}</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {props.defaultItems.map((item) => (
+                          <Table.Tr key={item.id}>
+                            <Table.Td>{item.provider_channel_id}</Table.Td>
+                            <Table.Td>
+                              {item.agent_name ?? item.route_id}
+                            </Table.Td>
+                            <Table.Td>
+                              <Badge
+                                color={
+                                  item.status === "active" ? "green" : "gray"
+                                }
+                              >
+                                {t(`defaultStatusValue.${item.status}`)}
+                              </Badge>
+                            </Table.Td>
+                            <Table.Td>
+                              {props.canManage && item.status === "active" && (
+                                <Button
+                                  size="xs"
+                                  color="red"
+                                  variant="subtle"
+                                  loading={props.busy}
+                                  onClick={() =>
+                                    props.onClearDefault(
+                                      item.provider_channel_id,
+                                    )
+                                  }
+                                >
+                                  {t("clear")}
+                                </Button>
+                              )}
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
+                  </ScrollArea>
+                  <Pagination
+                    offset={props.defaultOffset}
+                    count={props.defaultItems.length}
+                    onChange={props.onDefaultPage}
+                  />
+                </>
+              )}
             </Stack>
 
             {props.canManage &&
