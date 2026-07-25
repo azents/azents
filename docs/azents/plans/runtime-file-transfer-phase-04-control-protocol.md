@@ -287,7 +287,7 @@ dispatch metadata:
 - `accepted_runner_generation`, which becomes dispatch-bound authority rather than a
   value first selected by `claim_stream()`.
 
-The store adds two revision-fenced operations:
+The store adds these dispatch operations:
 
 - `bind_dispatch(...)` requires a live `READY` attempt, current Runtime/desired
   generation, no cancellation, the caller's stable `dispatch_id`, the current accepted
@@ -299,14 +299,21 @@ The store adds two revision-fenced operations:
   before it succeeds.
 - `mark_dispatch_enqueued(...)` requires the bound dispatch identity and original
   operation identity and moves `DELIVERABLE` to `ENQUEUED`. Identical replay is
-  idempotent.
+  idempotent. If the same dispatch was concurrently promoted by `claim_stream()`, it
+  returns the current record as idempotently enqueued even when phase and revision have
+  advanced through streaming, verification, availability, commit, or terminal
+  settlement. It never accepts a different dispatch identity.
 - `list_pending_dispatches(...)` returns a bounded page of live `BOUND` or `DELIVERABLE`
   records for Runtime Control repair and never returns terminal or expired attempts.
 
 `claim_stream()` changes to require `DELIVERABLE` or `ENQUEUED` and an exact match with
 the already bound accepted Runner generation. It no longer chooses or first persists that
-generation. `BOUND` is not claimable. Memory and Redis implementations must pass the same
-updated contract suite.
+generation. When claiming from `DELIVERABLE`, the same atomic mutation also sets dispatch
+status to `ENQUEUED`, removes the pending-dispatch index entry, records the claim, advances
+the transfer phase, and increments the record revision. Claim from an already `ENQUEUED`
+attempt records only the one stream claim and phase transition. `BOUND` is not claimable.
+Dispatch status remains `ENQUEUED` through every later phase and terminal state. Memory
+and Redis implementations must pass the same updated contract suite.
 
 Transfer State and Runtime Coordination remain separate authorities, so dispatch uses an
 explicit recoverable at-least-once saga rather than claiming cross-store exactly-once
@@ -325,7 +332,11 @@ delivery:
 8. return success only from `ENQUEUED`.
 
 Because `DELIVERABLE` is persisted before append, an immediately delivered intent can
-open its data RPC without racing a later authorization transition. A crash before
+open its data RPC without racing a later authorization transition. If that claim wins
+before direct dispatch calls `mark_dispatch_enqueued()`, the claim itself performs the
+promotion and the later mark observes idempotent success from the advanced record. The
+Dispatch RPC therefore returns success for the same dispatch even if progress or terminal
+settlement also wins before its final read. A crash before
 `DELIVERABLE` leaves `BOUND`; retry resumes at step 4. A crash after `DELIVERABLE` but
 before append leaves a repairable outbox-ready record. A crash after append but before
 `ENQUEUED` may append the same logical intent again. Control and Runner deduplicate
@@ -343,6 +354,22 @@ the old attempt as superseded instead of delivering it. The repair loop marks
 `ENQUEUED` after append and uses bounded backoff; it neither scans arbitrary operations
 nor creates an unbounded queue. This is protocol delivery repair, not the Phase 9 object
 cleanup reconciler.
+
+The state store also maintains a bounded Runtime/generation dispatch index and exposes
+`list_generation_dispatches(runtime_id, cursor, limit)`. It returns every nonterminal
+bound dispatch, including `BOUND`, `DELIVERABLE`, `ENQUEUED`, and actively streaming
+records, with its accepted Runner generation. Pending and generation indexes are removed
+on terminal settlement or expiry.
+
+Runner Control invokes a transfer-generation fence hook after accepting a replacement
+Runner generation and after successfully revoking a closing generation. The hook pages
+the generation index, and for every attempt bound to the replaced/closed generation it
+requests active cancellation, settles `SUPERSEDED` with `FENCED`, releases admission, and
+correlates the initiating operation promptly. A stale close fences only its exact old
+generation and cannot affect attempts already bound to a newer connection. Thus an
+unclaimed `ENQUEUED` intent left in an old generation-specific Runtime Coordination stream
+does not wait for the generic operation deadline. Active transfer RPCs independently
+observe state/current-generation loss and terminate.
 
 Cancellation and terminal correlation use the same stable operation, request, and dispatch
 identities. Operation metadata creation, local terminal append, and final folding are
@@ -558,10 +585,14 @@ Integration order:
   through idempotent retry;
 - the normal interleaving persists `DELIVERABLE` before append, so immediate Runner
   delivery can claim safely;
+- claim racing the direct `mark_dispatch_enqueued()` atomically promotes the dispatch and
+  makes the later mark idempotently successful after arbitrary phase/revision advancement;
 - crash while `BOUND`, after `DELIVERABLE` but before append, and after append before
   `ENQUEUED` recover through caller retry and the bounded repair loop without changing
   generation or operation identity; repeated transport entries are acknowledged and
   deduplicated by dispatch ID without starting another transfer task;
+- replacement or closure after `ENQUEUED` but before claim fences the old generation,
+  settles the attempt promptly, and cannot mutate a newer-generation attempt;
 - cancellation is persistent/idempotent, orders one bounded cancel message, and promptly correlates terminal operation state;
 - verified-object handoff requires upload available state, live expiry, correct consumer scope, and an exclusive claim;
 - consumer acknowledge/abandon, settlement, cleanup status, and status reads preserve existing Phase 3 fencing/idempotency;
@@ -573,6 +604,9 @@ Integration order:
 - concurrent duplicate claims allow exactly one stream;
 - `claim_stream()` rejects `NOT_BOUND`/`BOUND`, accepts only
   `DELIVERABLE`/`ENQUEUED`, and cannot first select the accepted Runner generation;
+- a claim between append and direct enqueue-mark, progress before enqueue-mark, and
+  terminal settlement before enqueue-mark all leave Dispatch success idempotently
+  observable for the same dispatch;
 - a same-desired-generation reconnect cannot reopen an already claimed attempt;
 - download object missing/metadata mismatch/read failure/midstream cancellation/deadline produces no completion frame;
 - download chunks use exact offsets, remain at or below 256 KiB, hash correctly, close S3 body on every exit, and never call `download_bytes()`;
@@ -592,6 +626,10 @@ Integration order:
 - heartbeat and one bounded ordinary operation complete while a transfer stream is flow-controlled;
 - Runtime Control lifespan creates exactly one Transfer State owner and one process-lifetime S3 client, and closes both correctly;
 - memory Transfer State still coexists with Redis Runtime Coordination; selecting memory never creates state in API/Worker code.
+- pending-dispatch and generation indexes remove claimed/terminal/expired records,
+  paginate deterministically, and remain correct under concurrent repair and settlement;
+- Runner replacement after `ENQUEUED` but before stream claim promptly settles the old
+  attempt as superseded instead of waiting for the generic operation timeout.
 
 ### Real default-limit gRPC integration
 
@@ -659,6 +697,9 @@ Run pre-commit on every changed file before commit. Docker-backed Redis/RustFS c
 - dispatch generation binding and the cross-store at-least-once saga are revision-fenced,
   stable-ID based, authorization-barrier ordered, repairable after each partial-failure
   boundary, and duplicate-safe;
+- enqueue marking is race-safe with claim/progress/terminal advancement, and Runner
+  generation replacement promptly fences both unclaimed and active old-generation
+  attempts;
 - coordinator credentials are short-lived, audience/service/operation/scope bound, and non-interchangeable with Runner credentials;
 - coordinator calls fail before state access when unauthorized and never carry bodies;
 - upload/download memory and message bounds are calculable and independent from complete file size;
