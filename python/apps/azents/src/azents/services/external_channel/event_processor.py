@@ -397,15 +397,7 @@ class ExternalChannelEventProcessorService:
                     bot_token=credentials.bot_token,
                 )
             await self.session_lifecycle.send_session_wake_up(
-                SessionWakeUp(
-                    agent_id=route.agent_id,
-                    session_id=binding.agent_session_id,
-                    user_id=None,
-                    additional_system_prompt=None,
-                    interface=None,
-                    workspace_id=None,
-                    workspace_handle=None,
-                )
+                SessionWakeUp(session_id=binding.agent_session_id)
             )
             return True
 
@@ -969,15 +961,7 @@ class ExternalChannelEventProcessorService:
                 control_delivery_attempt_id=control_delivery_attempt_id,
                 activity_delivery_attempt_id=activity_delivery_attempt_id,
                 wake_up=(
-                    SessionWakeUp(
-                        agent_id=route.agent_id,
-                        session_id=wake_session_id,
-                        user_id=None,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=None,
-                        workspace_handle=None,
-                    )
+                    SessionWakeUp(session_id=wake_session_id)
                     if wake_session_id is not None
                     else None
                 ),

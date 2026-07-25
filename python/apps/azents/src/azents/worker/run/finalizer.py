@@ -25,6 +25,7 @@ class FailedRunFinalizationInput:
     """Input for terminal failed-run finalization."""
 
     session_id: str
+    owner_generation: int
     run_id: str
     user_message: str
     retry_state: FailedRunRetryState
@@ -60,6 +61,11 @@ class FailedRunErrorFinalizer:
     ) -> FailedRunFinalizationResult:
         """Append terminal failed-run output and close the run as failed."""
         async with self.session_manager() as session:
+            await self.session_lifecycle.assert_owner_generation(
+                session,
+                session_id=input.session_id,
+                owner_generation=input.owner_generation,
+            )
             finalized = await self.event_store.append_terminal_failed_run(
                 session,
                 session_id=input.session_id,
@@ -74,7 +80,6 @@ class FailedRunErrorFinalizer:
         await dispatch_event(input.session_id, error_event)
         await dispatch_event(input.session_id, run_marker)
         await dispatch_event(input.session_id, RunComplete(run_id=input.run_id))
-        await self.session_lifecycle.clear_session_activity(input.session_id)
         return FailedRunFinalizationResult(
             error_event=error_event,
             run_marker=run_marker,

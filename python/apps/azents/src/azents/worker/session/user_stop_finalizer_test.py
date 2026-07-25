@@ -23,6 +23,9 @@ from azents.engine.events.types import (
 from azents.engine.run.emit import PublishedEvent
 from azents.repos.agent_execution.data import EventCreate
 from azents.worker.events.publisher import WorkerEventPublisher
+from azents.worker.session.execution_snapshot import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 
@@ -209,6 +212,48 @@ class _AgentSessionRepository:
         return object()
 
 
+class _SessionLifecycle:
+    """SessionLifecycleService test double."""
+
+    def __init__(
+        self,
+        run_repository: _AgentRunRepository,
+        *,
+        owner_generation: int = 1,
+    ) -> None:
+        self.run_repository = run_repository
+        self.owner_generation = owner_generation
+
+    def _assert_owner_generation(self, owner_generation: int) -> None:
+        """Reject a stale Worker generation."""
+        if owner_generation != self.owner_generation:
+            raise CanonicalExecutionOwnerGenerationStaleError(
+                "Session owner generation is stale"
+            )
+
+    async def get_running_agent_run(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> AgentRunState | None:
+        """Return the configured running Run under the owner fence."""
+        del session_id
+        self._assert_owner_generation(owner_generation)
+        return self.run_repository.running_run
+
+    async def assert_owner_generation(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        owner_generation: int,
+    ) -> None:
+        """Validate the owner generation for a mutation transaction."""
+        del session, session_id
+        self._assert_owner_generation(owner_generation)
+
+
 class _LiveEventStore:
     """RedisLiveEventStore test double."""
 
@@ -367,7 +412,7 @@ def _finalizer(
         live_event_store=cast(Any, _LiveEventStore(live_events)),
         live_event_projector=cast(Any, projector),
         event_publisher=cast(WorkerEventPublisher, event_publisher),
-        broker=cast(Any, broker),
+        session_lifecycle=cast(Any, _SessionLifecycle(run_repository)),
     )
     return (
         finalizer,
@@ -399,6 +444,7 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
 
     await finalizer.finalize(
         session_id,
+        owner_generation=1,
         run_id=None,
         active_tool_calls=[],
     )
@@ -432,7 +478,7 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     assert run_repository.running_run is not None
     assert run_repository.running_run.active_tool_calls == []
     assert session_repository.cleared_stop_request_session_ids == [session_id]
-    assert broker.cleared_session_ids == [session_id]
+    assert broker.cleared_session_ids == []
     published_durable_events = [
         event for _, event in event_publisher.dispatched[:2] if isinstance(event, Event)
     ]
@@ -471,6 +517,7 @@ async def test_finalize_preserves_retry_state_when_terminal_persistence_fails() 
     with pytest.raises(RuntimeError, match="terminal persistence unavailable"):
         await finalizer.finalize(
             session_id,
+            owner_generation=1,
             run_id=None,
             active_tool_calls=[],
         )
@@ -496,6 +543,7 @@ async def test_record_interrupted_run_publishes_durable_history_before_stop() ->
 
     await finalizer.record_interrupted_run(
         session_id,
+        owner_generation=1,
         run_id="22222222222222222222222222222222",
     )
 
@@ -540,6 +588,7 @@ async def test_finalize_ignores_redis_tool_call_without_durable_ownership() -> N
 
     await finalizer.finalize(
         session_id,
+        owner_generation=1,
         run_id=None,
         active_tool_calls=[stale_call],
     )
@@ -551,3 +600,36 @@ async def test_finalize_ignores_redis_tool_call_without_durable_ownership() -> N
     assert projector.removed_events == [
         (session_id, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     ]
+
+
+@pytest.mark.asyncio
+async def test_finalize_rejects_stale_owner_before_live_or_durable_mutation() -> None:
+    """A stale Worker cannot finalize or clear another owner's stop state."""
+    session_id = "session-001"
+    (
+        finalizer,
+        run_repository,
+        session_repository,
+        transcripts,
+        projector,
+        broker,
+        event_publisher,
+    ) = _finalizer(
+        running_run=_running_run(session_id),
+        live_events=[_assistant_event(session_id)],
+    )
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await finalizer.finalize(
+            session_id,
+            owner_generation=2,
+            run_id=None,
+            active_tool_calls=[],
+        )
+
+    assert run_repository.terminal_runs == []
+    assert session_repository.cleared_stop_request_session_ids == []
+    assert transcripts.appended == []
+    assert projector.flushed_session_ids == []
+    assert broker.cleared_session_ids == []
+    assert event_publisher.dispatched == []

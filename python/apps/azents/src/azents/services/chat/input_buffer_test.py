@@ -528,6 +528,7 @@ class TestChatSessionInputBuffer:
         )
         promoted = await input_buffer_service.flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="test-model",
             required_inference_profile=None,
             expected_buffer_id=buffer_id,

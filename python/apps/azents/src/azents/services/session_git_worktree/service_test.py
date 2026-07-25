@@ -651,6 +651,7 @@ async def _execute_first_setup_action(
         external_channel_repository=ExternalChannelRepository(),
     ).flush_session_input_buffers(
         session_id=session_id,
+        owner_generation=0,
         model=None,
         required_inference_profile=None,
         expected_buffer_id=expected_buffer_id,

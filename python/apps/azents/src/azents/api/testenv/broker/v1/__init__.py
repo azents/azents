@@ -9,7 +9,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from azents.broker.deps import get_broker
 from azents.broker.types import SessionBroker, SessionWakeUp
@@ -23,8 +23,9 @@ router = APIRouter()
 class InjectResumeRequest(BaseModel):
     """RESUME message injection request."""
 
+    model_config = ConfigDict(extra="forbid")
+
     session_id: str
-    agent_id: str
 
 
 class InjectResumeResponse(BaseModel):
@@ -45,17 +46,9 @@ async def inject_resume(
     """
     logger.info(
         "Testenv: injecting session wake-up",
-        extra={"session_id": body.session_id, "agent_id": body.agent_id},
+        extra={"session_id": body.session_id},
     )
-    message = SessionWakeUp(
-        agent_id=body.agent_id,
-        session_id=body.session_id,
-        user_id=None,
-        additional_system_prompt=None,
-        interface=None,
-        workspace_id=None,
-        workspace_handle=None,
-    )
+    message = SessionWakeUp(session_id=body.session_id)
     await broker.send_message(message)
     return InjectResumeResponse(ok=True)
 

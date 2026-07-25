@@ -1,14 +1,19 @@
 """RedisBroker integration tests."""
 
-import dataclasses
 from collections.abc import AsyncGenerator
 from typing import cast
 from unittest.mock import AsyncMock, call
 
+import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
-from .redis import RedisBroker, decode_session_wake_up, encode_session_wake_up
+from .redis import (
+    RedisBroker,
+    decode_broker_message,
+    decode_session_wake_up,
+    encode_session_wake_up,
+)
 from .types import SessionStopSignal, SessionWakeUp
 
 
@@ -28,19 +33,36 @@ class TestSessionWakeUpEncoding:
 
     def test_roundtrip(self) -> None:
         """Verify serialization/deserialization roundtrip."""
-        message = SessionWakeUp(
-            agent_id="agent-1",
-            session_id="session-1",
-            user_id="user-1",
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id="workspace-1",
-            workspace_handle=None,
-        )
+        message = SessionWakeUp(session_id="session-1")
 
         decoded = decode_session_wake_up(encode_session_wake_up(message))
 
         assert decoded == message
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            b'{"session_id":"session-1","type":"session_wake_up","agent_id":"agent-1"}',
+            b'{"session_id":"session-1","type":"session_wake_up","user_id":"user-1"}',
+        ],
+    )
+    def test_rejects_rich_legacy_payload(self, raw: bytes) -> None:
+        """Legacy wake-up fields cannot bypass the routing-only contract."""
+        with pytest.raises(ValueError, match="only session_id and type"):
+            decode_session_wake_up(raw)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"session_id":"session-1","type":"session_wake_up","workspace_id":"workspace-1"}',
+        b'{"session_id":"session-1","type":"session_stop_signal","user_id":"user-1"}',
+    ],
+)
+def test_decode_broker_message_rejects_rich_legacy_payload(raw: bytes) -> None:
+    """Wake-up and stop signals reject deprecated execution identity fields."""
+    with pytest.raises(ValueError, match="only session_id and type"):
+        decode_broker_message(raw)
 
 
 class TestRedisBrokerSetup:
@@ -91,15 +113,7 @@ class TestRedisBrokerMessages:
         sender = RedisBroker(redis)
         worker = RedisBroker(redis, worker_id="worker-1")
         await worker.setup()
-        message = SessionWakeUp(
-            agent_id="agent-1",
-            session_id="session-1",
-            user_id="user-1",
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id="workspace-1",
-            workspace_handle=None,
-        )
+        message = SessionWakeUp(session_id="session-1")
 
         await sender.send_message(message)
         received = await worker.receive_messages()
@@ -111,7 +125,7 @@ class TestRedisBrokerMessages:
         sender = RedisBroker(redis)
         worker = RedisBroker(redis, worker_id="worker-1")
         await worker.setup()
-        message = SessionStopSignal(session_id="session-1", user_id="user-1")
+        message = SessionStopSignal(session_id="session-1")
 
         await sender.send_message(message)
         received = await worker.receive_messages()
@@ -123,16 +137,8 @@ class TestRedisBrokerMessages:
         sender = RedisBroker(redis)
         worker = RedisBroker(redis, worker_id="worker-1")
         await worker.setup()
-        first = SessionWakeUp(
-            agent_id="agent-1",
-            session_id="session-1",
-            user_id="user-1",
-            additional_system_prompt=None,
-            interface=None,
-            workspace_id="workspace-1",
-            workspace_handle=None,
-        )
-        second = dataclasses.replace(first, user_id="user-2")
+        first = SessionWakeUp(session_id="session-1")
+        second = SessionWakeUp(session_id=first.session_id)
 
         await sender.send_message(first)
         assert await worker.receive_messages() == [first]

@@ -19,6 +19,7 @@ from azents.services.model_file import (
     ModelFileNotFound,
     ModelFileResolveError,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 _NOW = datetime.datetime.now(datetime.UTC)
 
@@ -31,17 +32,16 @@ class _Downloader:
         result: Result[ModelFileDownload, ModelFileResolveError],
     ) -> None:
         self.result = result
-        self.calls: list[tuple[str, str, str]] = []
+        self.calls: list[tuple[str, SessionResourceAuthority]] = []
 
-    async def download_for_agent(
+    async def download_for_authority(
         self,
         *,
         model_file_id: str,
-        agent_id: str,
-        user_id: str,
+        authority: SessionResourceAuthority,
     ) -> Result[ModelFileDownload, ModelFileResolveError]:
-        """Record agent-scoped download call."""
-        self.calls.append((model_file_id, agent_id, user_id))
+        """Record Session/Run-authorized download call."""
+        self.calls.append((model_file_id, authority))
         return self.result
 
 
@@ -60,8 +60,7 @@ async def test_materializer_downloads_by_model_file_id_without_uri() -> None:
     materializer = ModelFileMaterializer(
         model_file_service=downloader,
         resolver=resolver,
-        user_id="user-1",
-        agent_id="agent-1",
+        authority=_authority(),
     )
     part = FileOutputPart(
         model_file_id="m" * 32,
@@ -73,7 +72,7 @@ async def test_materializer_downloads_by_model_file_id_without_uri() -> None:
 
     await materializer.materialize(transcript=[_tool_result_event(part)])
 
-    assert downloader.calls == [("m" * 32, "agent-1", "user-1")]
+    assert downloader.calls == [("m" * 32, _authority())]
     content = resolver.resolve(part)
     assert content is not None
     assert content.data_url == "data:image/jpeg;base64,aW1hZ2UtYnl0ZXM="
@@ -87,8 +86,7 @@ async def test_materializer_leaves_resolver_empty_when_download_fails() -> None:
     materializer = ModelFileMaterializer(
         model_file_service=downloader,
         resolver=resolver,
-        user_id="user-1",
-        agent_id="agent-1",
+        authority=_authority(),
     )
     part = FileOutputPart(
         model_file_id="m" * 32,
@@ -100,7 +98,33 @@ async def test_materializer_leaves_resolver_empty_when_download_fails() -> None:
 
     await materializer.materialize(transcript=[_tool_result_event(part)])
 
-    assert downloader.calls == [("m" * 32, "agent-1", "user-1")]
+    assert downloader.calls == [("m" * 32, _authority())]
+    assert resolver.resolve(part) is None
+
+
+@pytest.mark.asyncio
+async def test_materializer_skips_download_without_resource_authority() -> None:
+    """Do not materialize transcript FileParts without canonical authority."""
+    resolver = RequestLocalModelFileResolver()
+    downloader = _Downloader(
+        Success(ModelFileDownload(model_file=_model_file(), body=b"x"))
+    )
+    materializer = ModelFileMaterializer(
+        model_file_service=downloader,
+        resolver=resolver,
+        authority=None,
+    )
+    part = FileOutputPart(
+        model_file_id="m" * 32,
+        media_type="image/jpeg",
+        name="image.jpg",
+        size=1,
+        kind="image",
+    )
+
+    await materializer.materialize(transcript=[_tool_result_event(part)])
+
+    assert downloader.calls == []
     assert resolver.resolve(part) is None
 
 
@@ -132,6 +156,7 @@ def _model_file() -> ModelFile:
         media_type="image/jpeg",
         kind="image",
         size_bytes=11,
+        created_run_id="run-1",
         created_run_index=1,
         storage_key="model-files/workspace-1/session-1/m",
         status=ModelFileStatus.AVAILABLE,
@@ -140,4 +165,17 @@ def _model_file() -> ModelFile:
         metadata={},
         created_at=_NOW,
         deleted_at=None,
+    )
+
+
+def _authority() -> SessionResourceAuthority:
+    """Create canonical Session/Run authority for tests."""
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-2",
+        run_index=2,
+        owner_generation=1,
     )

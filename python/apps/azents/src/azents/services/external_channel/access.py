@@ -460,15 +460,7 @@ class ExternalChannelAccessService:
     ) -> None:
         """Send an idempotent post-commit wake for one released invocation."""
         await self.session_lifecycle.send_session_wake_up(
-            SessionWakeUp(
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=None,
-                additional_system_prompt=None,
-                interface=None,
-                workspace_id=None,
-                workspace_handle=None,
-            )
+            SessionWakeUp(session_id=session_id)
         )
 
     async def deny(

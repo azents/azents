@@ -102,12 +102,4 @@ class StuckSessionRecovery:
 
 def _build_resume_message(rec: AgentSession) -> SessionWakeUp:
     """Create SessionWakeUp for stuck recovery / shutdown recovery."""
-    return SessionWakeUp(
-        agent_id=rec.agent_id,
-        session_id=rec.id,
-        user_id=None,
-        additional_system_prompt=None,
-        interface=None,
-        workspace_id=rec.workspace_id,
-        workspace_handle=None,
-    )
+    return SessionWakeUp(session_id=rec.id)

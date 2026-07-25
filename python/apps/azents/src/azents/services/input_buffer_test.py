@@ -100,6 +100,7 @@ from .input_buffer import (
     EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY,
     ExternalChannelInvocationInputBufferProcessor,
     InputBufferEnqueue,
+    InputBufferOwnerGenerationStaleError,
     InputBufferPreparationContext,
     InputBufferPreparationStaleError,
     InputBufferService,
@@ -1313,6 +1314,7 @@ class TestInputBufferService:
 
         result = await service.flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=buffer_id,
@@ -1394,9 +1396,46 @@ class TestInputBufferService:
         with pytest.raises(InputBufferPreparationStaleError):
             await service.flush_session_input_buffers(
                 session_id=session_id,
+                owner_generation=0,
                 model="gpt-5.4",
                 required_inference_profile=None,
                 expected_buffer_id="another-buffer",
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+        assert remaining is not None
+
+    async def test_flush_rejects_superseded_owner_generation(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A stale Worker cannot promote the current owner's FIFO head."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-stale-owner",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="keep pending",
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
+
+        with pytest.raises(InputBufferOwnerGenerationStaleError):
+            await _input_buffer_service(
+                rdb_session_manager
+            ).flush_session_input_buffers(
+                session_id=session_id,
+                owner_generation=1,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
                 prepared_inference_state=None,
                 profile_resolution_failure=None,
                 active_run_id=None,
@@ -1468,6 +1507,7 @@ class TestInputBufferService:
             async with asyncio.timeout(2):
                 await service.flush_session_input_buffers(
                     session_id=session_id,
+                    owner_generation=0,
                     model="gpt-5.4",
                     required_inference_profile=None,
                     expected_buffer_id=buffer_id,
@@ -1524,6 +1564,7 @@ class TestInputBufferService:
         with pytest.raises(RuntimeError, match="event append failed"):
             await service.flush_session_input_buffers(
                 session_id=session_id,
+                owner_generation=0,
                 model="prepared-model",
                 required_inference_profile=RequestedInferenceProfile(
                     model_target_label="Fast",
@@ -1580,6 +1621,7 @@ class TestInputBufferService:
             rdb_session_manager
         ).flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Quality",
@@ -1638,6 +1680,7 @@ class TestInputBufferService:
             rdb_session_manager
         ).flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=first_id,
@@ -1686,6 +1729,7 @@ class TestInputBufferService:
             rdb_session_manager
         ).flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
@@ -1726,6 +1770,7 @@ class TestInputBufferService:
 
         result = await service.flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
@@ -1786,6 +1831,7 @@ class TestInputBufferService:
             rdb_session_manager
         ).flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=buffer_id,
@@ -1852,6 +1898,7 @@ class TestInputBufferService:
             )
             result = await service.flush_session_input_buffers(
                 session_id=session_id,
+                owner_generation=0,
                 model="gpt-5.4",
                 required_inference_profile=None,
                 expected_buffer_id=buffer_id,
@@ -1907,6 +1954,7 @@ class TestInputBufferService:
             rdb_session_manager
         ).flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=buffer_id,
@@ -1959,6 +2007,7 @@ class TestInputBufferService:
             rdb_session_manager
         ).flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=buffer_id,
@@ -2017,6 +2066,7 @@ class TestInputBufferService:
         with pytest.raises(RuntimeError, match="delete failed"):
             await service.flush_session_input_buffers(
                 session_id=session_id,
+                owner_generation=0,
                 model="gpt-5.4",
                 required_inference_profile=None,
                 expected_buffer_id=buffer_id,
@@ -2065,6 +2115,7 @@ class TestInputBufferService:
 
         result = await service.flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
@@ -2126,6 +2177,7 @@ class TestInputBufferService:
 
         result = await service.flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=RequestedInferenceProfile(
                 model_target_label="Fast",
@@ -2210,6 +2262,7 @@ class TestInputBufferService:
 
         result = await service.flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=attachment_buffer_id,
@@ -2306,6 +2359,7 @@ class TestInputBufferService:
         with pytest.raises(RuntimeError, match="temporary object storage outage"):
             await service.flush_session_input_buffers(
                 session_id=session_id,
+                owner_generation=0,
                 model="gpt-5.4",
                 required_inference_profile=None,
                 expected_buffer_id=buffer_id,
@@ -2320,6 +2374,7 @@ class TestInputBufferService:
         exchange_file_service.admitted_download_exception = None
         promoted = await service.flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=buffer_id,
@@ -2378,6 +2433,7 @@ class TestInputBufferService:
 
         result = await service.flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=image_buffer_id,
@@ -2420,6 +2476,7 @@ class TestInputBufferService:
 
         result = await service.flush_session_input_buffers(
             session_id=session_id,
+            owner_generation=0,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=None,
