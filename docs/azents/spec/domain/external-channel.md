@@ -17,6 +17,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/external_channel.py
   - python/apps/azents/src/azents/repos/external_channel/**
   - python/apps/azents/src/azents/services/external_channel/**
+  - python/apps/azents/src/azents/broker/types.py
+  - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/api/public/external_channel/**
@@ -41,7 +43,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-24
-spec_version: 14
+spec_version: 15
 ---
 
 # External Channel
@@ -59,6 +61,13 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 - Bindings, invocation batches, Channel Work, channel actions, and delivery attempts are Session lifecycle resources.
 - Credentials are encrypted at rest and decrypted only inside provider adapters. Public APIs, generated clients, prompts, events, logs, UI state, and test evidence expose only redacted credential status.
 - Provider message content remains external input even after approval. It retains provider, resource, sender, author type, authorization, message identity, and revision attribution.
+- An ExternalChannelPrincipal is provider provenance and admission authority only. It is never an
+  Azents execution User. After a binding releases durable work, the linked Team Session executes
+  through canonical Session/Run authority without inferring a User from the principal, approver,
+  route owner, Agent creator, Workspace owner, or broker signal.
+- External Channel wake-ups are routing-only `SessionWakeUp(session_id)` notifications. The batch,
+  binding, provider principal, and source content are loaded from durable records after the Worker
+  claims owner generation; they are not carried by the broker.
 - Foreign keys are restrictive across lifecycle roots. AgentSession deletion cannot cascade away provider or audit roots before lifecycle cleanup and verification complete.
 
 ## Core Records
@@ -164,6 +173,8 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-24** (spec_version 15) — Defined provider-principal provenance as distinct from
+  Userless Team Session execution and made External Channel wake-ups routing-only.
 - **2026-07-24** (spec_version 14) — Added automatic Project policy snapshotting for
   new External Channel binding Sessions and immutable snapshot reuse for existing
   bindings.

@@ -15,6 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/management.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/broker/types.py
+  - python/apps/azents/src/azents/worker/session/execution_snapshot.py
   - typescript/apps/azents-web/src/app/(app)/external-channel/access/**
   - typescript/apps/azents-web/src/features/external-channel-approval/**
 api_routes:
@@ -22,7 +24,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-07-24
-spec_version: 5
+spec_version: 6
 ---
 
 # External Channel Authorization
@@ -30,6 +32,13 @@ spec_version: 5
 ## Principal Boundary
 
 A Slack participant is an `ExternalChannelPrincipal`, not an Azents User or WorkspaceUser. Provider identity is scoped by provider tenant and user ID. Human, bot, app, and system authors are retained separately; only eligible human invocation messages enter the access decision flow.
+
+The authenticated Azents administrator who grants or revokes access is a requester for that public
+management operation only. Neither the administrator nor the ExternalChannelPrincipal becomes an
+execution User. Once authorized work is durable, the linked Team Session is executed by the canonical
+Session/Agent/Workspace/root-tree/Run snapshot after owner-generation claim. A broker wake contains
+only `session_id`; it cannot carry or override provider, principal, requester, Agent, Workspace,
+prompt, or resource authority.
 
 ## Unknown Participant Flow
 
@@ -84,6 +93,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-24** (spec_version 6) — Kept External Channel principal and administrator identity
+  outside Team Session execution, which now derives only from canonical durable work after a
+  routing-only wake.
 - **2026-07-24** (spec_version 5) — Added atomic Agent automatic Project policy
   snapshotting for Allow-created binding Sessions and existing-binding snapshot
   reuse.

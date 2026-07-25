@@ -23,6 +23,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/client_tool_compatibility.py
   - python/apps/azents/src/azents/engine/run/types.py
+  - python/apps/azents/src/azents/engine/run/contracts.py
+  - python/apps/azents/src/azents/engine/run/input.py
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
@@ -36,6 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/worker/deps.py
+  - python/apps/azents/src/azents/worker/session/toolkit_scope.py
   - python/apps/azents/src/azents/repos/mcp_oauth_connection/**
   - python/apps/azents/src/azents/rdb/models/toolkit_state.py
   - python/apps/azents/src/azents/runtime/**
@@ -50,7 +53,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-24
-spec_version: 73
+spec_version: 74
 ---
 
 # Toolkit
@@ -67,6 +70,21 @@ This domain covers four feature groups.
 4. **Managed Skill VFS** — immutable run-scoped `azents://` resources for release-bundled global and Toolkit Provider Skills. Managed files remain outside the Runtime filesystem until `import_file` materializes one selected entry.
 
 All credentials are stored in DB with Fernet (`AZ_CREDENTIAL_ENCRYPTION_KEY`) symmetric encryption and are never exposed in agent prompt. (`CredentialCipher`, [`python/apps/azents/src/azents/core/crypto.py`](../../../../python/apps/azents/src/azents/core/crypto.py))
+
+### Team Session execution boundary
+
+All currently implemented AgentSessions execute as Team Sessions. Generic Toolkit, resolve, run, and
+turn contexts contain canonical Workspace, Agent, Session, Run, and resource authority, but no User
+identity. The runtime never infers a User from a message sender, public requester, broker wake-up,
+Agent creator, Workspace owner, viewer, approver, uploader, or fallback.
+
+Session-managed Toolkit instances are keyed by stable source identity and revision, not a Human
+identity. Therefore a different authorized requester, External Channel invocation, recovery,
+continuation, or subagent delivery reconciles the same Team-scoped Toolkit lifecycle. Workspace
+Toolkit configuration, Agent attachments, toolkit-level OAuth, Workspace LLM integrations, Runtime
+tools, and Session/Run capabilities remain available without a User. Authenticated management and
+OAuth setup remain requester-authorized operations and do not leak their requester into runtime
+contexts. User-brought credentials are not a Team capability.
 
 ## Domain Model
 
@@ -528,7 +546,10 @@ Toolkit resolution receives an execution mode. Root sessions use root mode. Chil
 - `[agents-md-project-boundary]` Project-scoped `AGENTS.md` auto-load works only inside registered Project. Agent Workspace root instruction is separate root scope, and Agent Workspace root itself is not treated as Project.
 - `[toolkit-hook-effects]` Toolkit tool-call hook may perform `on_before_tool_call` deny and `on_after_tool_call` text output replacement within [hook-260518/ADR](../../adr/hook-260518-hook.md) scope. Arbitrary input mutation, retry/continuation wrapper, credential trace storage are not allowed.
 - `[toolkit-session-lifecycle]` Executable Toolkit instance is managed by session-scoped lifecycle registry tied to `_SessionRunner` active lifetime. Each actionable wake-up resolves a fresh desired toolkit snapshot. A binding with the same stable identity and source revision retains its entered instance; a changed revision enters a replacement before the previous instance is closed. New or replacement toolkit `__aenter__()` must complete before engine `update_context()` call. Removed and replaced toolkits are `__aexit__()` only after successful reconciliation.
-- `[toolkit-turn-context]` run/turn-scoped values such as `run_id`, current actor `user_id`, `publish_event`, `check_stop` must not remain stale in long-lived toolkit instance. If tool handler needs these values, create handler with current turn values from `update_context(TurnContext)`.
+- `[toolkit-turn-context]` run/turn-scoped values such as `run_id`, canonical Session/Run resource
+  authority, `publish_event`, and `check_stop` must not remain stale in a long-lived Toolkit
+  instance. Generic turn context has no User field. If a handler needs current values, create it
+  from `update_context(TurnContext)` rather than retaining an earlier turn's values.
 
 ## State Transitions
 
@@ -689,6 +710,9 @@ and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-07-24** (spec_version 74) — Made Team Session Toolkit execution Userless, stabilized
+  Session-managed Toolkit identity across senders and recovery, and retained requester identity only
+  at management boundaries.
 - **2026-07-23** (spec_version 73) — Added Agent-authored progressive Channel Work titles and provider-neutral rich task metadata with failed state to `channel_action`.
 - **2026-07-23** (spec_version 72) — Rendered Channel Work tasks inside one Slack plan with an explicit status on every Todo card.
 - **2026-07-23** (spec_version 71) — Limited Channel Work to 49 tasks and changed delivered `finish` actions from retained completion updates to Activity Tracker deletion.

@@ -18,14 +18,17 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_run/**
   - python/apps/azents/src/azents/repos/agent_execution/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
+  - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/worker/run/**
-last_verified_at: 2026-07-21
-spec_version: 24
+  - python/apps/azents/src/azents/services/team_session_cutover_replay.py
+  - python/apps/azents/src/cli/team_session_cutover.py
+last_verified_at: 2026-07-24
+spec_version: 25
 ---
 
 # Run Resume
@@ -44,6 +47,23 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Active event run | pending/running `agent_runs`, resolved inference provenance, phase, active tools, retry state, and nullable VFS projection | Runtime preserves the run/input boundary, ensures or reuses the immutable managed-file snapshot, resumes from an activated snapshot, and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime appends one deterministic cancelled result without executing the handler |
 | Leftover operation action | Session has an active buffer-keyed action execution at a new processing boundary | Worker records one cancelled durable snapshot and deletes the live execution before admitting new work; it never invokes the stale handler. |
+
+## Canonical Recovery And Cutover Replay
+
+`SessionWakeUp(session_id)` is only a routing signal. On every ordinary recovery, the Worker claims
+the Session owner generation before loading one immutable PostgreSQL canonical snapshot of the active
+Session, Agent, Workspace, root tree/context, and exact pending work. The snapshot has no User
+identity: a requester, Human sender, provider principal, Agent creator, Workspace owner, viewer,
+approver, uploader, or fallback cannot supply execution authority. Any stale generation, inactive or
+cross-lineage Session, or drift between expected and locked durable work fails closed.
+
+The coordinated Team Session cutover uses a separate bounded preflight/replay command. Candidate
+selection is PostgreSQL-only and considers pending InputBuffers, pending commands, recoverable Runs,
+idle continuations, and durable stop requests. Preflight validates each candidate against the same
+canonical snapshot without Redis I/O or message/file/credential content. Replay fail-closes the batch
+when a selected candidate is invalid; otherwise it fences the owner generation, purges Redis routing
+state, and emits only `SessionWakeUp(session_id)`. Redis is notification/ownership state, never
+replay truth. Old or rich broker payloads are rejected rather than decoded through compatibility.
 
 ## Ownership Lease
 
@@ -267,10 +287,14 @@ run to observe `check_stop()` as true.
 - User stop intent is consumed by stop finalization and must not interrupt the next wake-up.
 - A leftover nonterminal operation is cancelled into one durable snapshot before new work; operation handlers are never resumed or replayed after ownership loss.
 - SDK `RunState` compatibility is not preserved.
+- Recovery and replay never reconstruct an execution User. Canonical durable Session/work state is
+  the only execution authority after a routing signal.
 
 
 ## Changelog
 
+- **2026-07-24** (spec_version 25) — Added Userless canonical recovery and bounded
+  PostgreSQL-derived cutover preflight/replay with pure broker notifications.
 - **2026-07-21** (spec_version 24) — Preserved completed-run idle continuation across Worker shutdown through a durable Session pointer and conditional recovery outcome.
 - **2026-07-21** (spec_version 23) — Made recovery and synthetic client-tool terminal settlement explicitly dialect-preserving.
 - **2026-07-18** (spec_version 21) — Preserved bounded provider failure state and complete retry budgets across handover while giving terminal User Stop precedence over retry finalization.

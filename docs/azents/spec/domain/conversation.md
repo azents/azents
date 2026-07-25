@@ -19,6 +19,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/scheduler.py
   - python/apps/azents/src/azents/worker/live/**
+  - python/apps/azents/src/azents/broker/types.py
+  - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_session_unread_run.py
   - python/apps/azents/src/azents/rdb/models/session_agent.py
@@ -37,6 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/agent_run/**
   - python/apps/azents/src/azents/repos/agent_execution/**
+  - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/repos/input_buffer/**
   - python/apps/azents/src/azents/repos/session_git_worktree/**
@@ -51,6 +54,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/chat_write.py
   - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
@@ -73,10 +77,11 @@ code_paths:
   - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/worker/deps.py
+  - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/repos/toolkit_state/**
 api_routes:
   - /chat/v1
-  - /chat/v1/sessions/{session_id}/messages
+  - /chat/v1/sessions/{session_id}/inputs
   - /chat/v1/sessions/{session_id}/edit-message
   - /chat/v1/sessions/{session_id}/commands
   - /chat/v1/agents/{agent_id}/team-primary-session
@@ -98,13 +103,12 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
-  - /chat/v1/sessions/{session_id}/exchange-files
   - /chat/v1/sessions/{session_id}/input-buffers/{buffer_id}
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-24
-spec_version: 131
+spec_version: 132
 ---
 
 # Conversation & Events
@@ -114,6 +118,14 @@ The `conversation` domain owns `AgentSession`, event transcript events, durable
 
 Production agent execution now uses the event runtime. OpenAI Agents SDK `RunState` and legacy
 raw `runtime/llm.py` are not production conversation state.
+
+Every currently implemented `AgentSession` has Team Session execution semantics. A current
+authenticated requester is authorized only at public admission, control, read, subscription, and
+download boundaries. A Human `sender_user_id` is immutable provenance for one admitted input; it is
+not an execution identity. The Session, Agent, Workspace, root tree, Run, owner generation, and
+durable work selection are the only authority for internal execution. No execution layer infers a
+User from a sender, requester, broker signal, Agent creator, Workspace owner, viewer, approver,
+uploader, or fallback.
 
 ## 1. Domain Model
 
@@ -861,7 +873,7 @@ primary session and returns its `session_id`.
 to the path agent and is visible to the requester; session missing, agent/session mismatch, and access
 denied all return 404. Child subagent sessions are directly readable through this route and through
 history/live routes, but they are read-only for human chat writes.
-`POST /chat/v1/sessions/{session_id}/messages` appends a user message input to an existing root
+`POST /chat/v1/sessions/{session_id}/inputs` appends a user message input to an existing root
 session and rejects `session_kind = subagent` before creating a chat write request, input buffer, live
 projection, or broker wake-up.
 `POST /chat/v1/sessions/{session_id}/edit-message`,
@@ -872,11 +884,16 @@ effects; new subagent instructions must enter through parent-agent collaboration
 `agent_message` input. All REST write
 requests require `client_request_id`; accepted writes are recorded in `chat_write_requests` so
 retries with the same key return the same accepted target instead of creating duplicate side effects.
-REST write idempotency is scoped to `(session_id, user_id, client_request_id)`. The same
+REST write idempotency is scoped to `(session_id, requester_user_id, client_request_id)`. The same
 `client_request_id` may be reused independently for different explicit session routes because the URL
 session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` input buffer
-to the explicit path session before returning success, mark the same session running in the producer
-transaction, then send a worker wake-up signal for that session. The message path must not
+to the explicit path session only after the admission transaction locks and reauthorizes the current
+requester against the active Session, Agent, Workspace, root lineage, idempotency record, and any
+claimed ExchangeFiles. The new Human buffer records the authenticated `sender_user_id`; command and
+stop rows retain requester audit separately and do not become a sender or execution identity. The
+transaction marks the same session running before commit. After commit, the producer may send only
+`SessionWakeUp(session_id)`; a notification failure delays delivery but does not revoke, delete, or
+recreate accepted work. The message path must not
 resolve runtime current/active session state to replace the requested `session_id`. Edit writes
 rewrite durable history state, clear pending input buffers, commit a
 `user_message` input buffer, mark the session running in the producer transaction, and send a
@@ -904,7 +921,7 @@ target-scoped and does not automatically stop descendants.
 `/chat/v1/sessions/new` is not a WebSocket write or subscription route. Web clients first resolve
 the team primary session through `GET /chat/v1/agents/{agent_id}/team-primary-session`, navigate to
 `/w/{handle}/agents/{agent_id}/sessions/{session_id}`, and then write through
-`POST /chat/v1/sessions/{session_id}/messages`. Legacy message/edit/command/stop
+`POST /chat/v1/sessions/{session_id}/inputs`. Legacy message/edit/command/stop
 WebSocket compatibility paths are not part of the public contract and must not create input buffers,
 edits, commands, stop requests, or compatibility error responses.
 
@@ -968,6 +985,15 @@ remain as an unbounded raw tail or storage JSON dump.
 - Terminal child results enter the direct parent's mailbox exactly once through durable Run-level delivery markers and queue-only `agent_result` buffers.
 - A child result becomes observed only when its validated `agent_result` is promoted into the direct parent's durable transcript; cursor advancement is monotonic and transactional with promotion.
 - Every InputBuffer producer records explicit scheduling intent. Only `wake_session` input marks or wakes an idle session; `queue_only` input preserves FIFO delivery without blocking idle.
+- A broker wake-up and stop signal are routing-only `session_id` notifications. They do not carry or
+  override requester, sender, User, Agent, Workspace, prompt, interface, capability, or resource
+  authority.
+- A canonical Postgres snapshot is loaded only after the Session owner-generation claim. It validates
+  the active Session, Agent, Workspace, current/root `SessionAgent` tree and context, exact owner
+  generation, and expected FIFO buffer, pending command, recoverable Run, or idle continuation.
+  Mutable promotion and control paths re-lock their exact durable rows before commit.
+- `sender_user_id` and requester audit fields are provenance/audit only. They never authorize model,
+  Toolkit, credential, resource, Run, recovery, continuation, or subagent execution.
 
 ## 10. Verification
 
@@ -1010,6 +1036,8 @@ participant.
 
 ## 12. Changelog
 
+- **2026-07-24** — v132. Promoted Team Session requester/sender separation, post-commit
+  routing-only wakes, canonical Postgres execution authority, and Userless execution invariants.
 - **2026-07-24** — v131. Added explicit versus Agent-default root workspace intent,
   winner-only team-primary policy snapshotting, Runtime-free root initialization,
   and shared `SessionAgentContext` Project ownership/subagent inheritance.
