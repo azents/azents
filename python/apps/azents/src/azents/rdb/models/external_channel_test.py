@@ -86,6 +86,24 @@ def test_current_revision_foreign_key_is_deferred_no_action() -> None:
     assert foreign_key.initially == "DEFERRED"
 
 
+def test_external_channel_explicit_identifiers_fit_postgresql_limit() -> None:
+    """Keep explicit schema identifiers within PostgreSQL's 63-byte limit."""
+    identifiers: list[str] = []
+    for table in RDBModel.metadata.tables.values():
+        if not table.name.startswith("external_channel_"):
+            continue
+        identifiers.append(table.name)
+        for constraint in table.constraints:
+            if constraint.name is not None:
+                identifiers.append(str(constraint.name))
+        for index in table.indexes:
+            if index.name is not None:
+                identifiers.append(str(index.name))
+
+    assert identifiers
+    assert all(len(identifier.encode()) <= 63 for identifier in identifiers)
+
+
 def test_external_channel_installed_schema_preserves_lifecycle_ownership(
     latest_db_schema: None,
     postgres_container: PostgresContainer,
@@ -486,19 +504,19 @@ def test_external_channel_app_mode_installed_schema_contract(
             "external_channel_conversation_admissions"
         )
         expected_admission_foreign_keys = {
-            "fk_external_channel_conversation_admissions_connection_resource": (
+            "fk_external_channel_conv_admissions_connection_resource": (
                 ["connection_id", "resource_id"],
                 ["connection_id", "id"],
             ),
-            "fk_external_channel_conversation_admissions_resource_source_message": (
+            "fk_external_channel_conv_admissions_resource_source_message": (
                 ["resource_id", "source_message_id"],
                 ["resource_id", "id"],
             ),
-            "fk_external_channel_conversation_admissions_connection_selected_route": (
+            "fk_external_channel_conv_admissions_connection_selected_route": (
                 ["connection_id", "selected_route_id"],
                 ["connection_id", "id"],
             ),
-            "fk_external_channel_conversation_admissions_connection_interaction": (
+            "fk_external_channel_conv_admissions_connection_interaction": (
                 ["connection_id", "interaction_id"],
                 ["connection_id", "id"],
             ),

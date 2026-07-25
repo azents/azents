@@ -366,7 +366,7 @@ def upgrade() -> None:
                 "external_channel_resources.connection_id",
                 "external_channel_resources.id",
             ],
-            name="fk_external_channel_conversation_admissions_connection_resource",
+            name="fk_external_channel_conv_admissions_connection_resource",
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -375,7 +375,7 @@ def upgrade() -> None:
                 "external_channel_messages.resource_id",
                 "external_channel_messages.id",
             ],
-            name="fk_external_channel_conversation_admissions_resource_source_message",
+            name="fk_external_channel_conv_admissions_resource_source_message",
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -389,7 +389,7 @@ def upgrade() -> None:
                 "external_channel_agent_routes.connection_id",
                 "external_channel_agent_routes.id",
             ],
-            name="fk_external_channel_conversation_admissions_connection_selected_route",
+            name="fk_external_channel_conv_admissions_connection_selected_route",
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -398,7 +398,7 @@ def upgrade() -> None:
                 "external_channel_interactions.connection_id",
                 "external_channel_interactions.id",
             ],
-            name="fk_external_channel_conversation_admissions_connection_interaction",
+            name="fk_external_channel_conv_admissions_connection_interaction",
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id"),

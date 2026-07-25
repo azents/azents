@@ -245,10 +245,10 @@ The PostgreSQL integration test and ORM metadata test must verify names and exac
 - `uq_external_channel_interactions_connection_provider_key`;
 - `uq_external_channel_interactions_connection_id_id`;
 - `uq_external_channel_conversation_admissions_open_resource` and its exact open-status predicate;
-- `fk_external_channel_conversation_admissions_connection_resource`;
-- `fk_external_channel_conversation_admissions_resource_source_message`;
-- `fk_external_channel_conversation_admissions_connection_selected_route`;
-- `fk_external_channel_conversation_admissions_connection_interaction`;
+- `fk_external_channel_conv_admissions_connection_resource`;
+- `fk_external_channel_conv_admissions_resource_source_message`;
+- `fk_external_channel_conv_admissions_connection_selected_route`;
+- `fk_external_channel_conv_admissions_connection_interaction`;
 - `fk_external_channel_channel_defaults_connection_route`;
 - `uq_external_channel_channel_defaults_active_connection_channel` and its `active` predicate;
 - `uq_external_channel_bindings_active_resource` and its `active` predicate; and
