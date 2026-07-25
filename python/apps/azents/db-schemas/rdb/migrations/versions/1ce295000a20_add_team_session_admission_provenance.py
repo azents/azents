@@ -37,6 +37,14 @@ def upgrade() -> None:
         "ALTER TYPE chat_write_request_type ADD VALUE IF NOT EXISTS 'turn_action'"
     )
 
+    op.execute(
+        """
+        UPDATE input_buffers
+        SET actor_user_id = NULL
+        WHERE actor_user_id IS NOT NULL
+          AND kind NOT IN ('user_message', 'action_message')
+        """
+    )
     _drop_fk_by_column("input_buffers", "actor_user_id")
     op.alter_column(
         "input_buffers",
