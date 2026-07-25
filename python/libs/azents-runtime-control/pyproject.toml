@@ -51,6 +51,10 @@ exclude = [
     "src/azents_runtime_control/proto/runtime_provider_control_pb2_grpc.py",
     "src/azents_runtime_control/proto/runtime_runner_control_pb2.py",
     "src/azents_runtime_control/proto/runtime_runner_control_pb2_grpc.py",
+    "src/azents_runtime_control/proto/runtime_runner_transfer_pb2.py",
+    "src/azents_runtime_control/proto/runtime_runner_transfer_pb2_grpc.py",
+    "src/azents_runtime_control/proto/runtime_transfer_coordinator_pb2.py",
+    "src/azents_runtime_control/proto/runtime_transfer_coordinator_pb2_grpc.py",
 ]
 
 [tool.pytest.ini_options]

@@ -1,0 +1,221 @@
+syntax = "proto3";
+
+package azents.runtime_control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service RuntimeTransferCoordinator {
+  rpc AdmitTransfer(AdmitTransferRequest) returns (AdmitTransferResponse);
+  rpc MarkTransferReady(MarkTransferReadyRequest)
+      returns (TransferStatusResponse);
+  rpc DispatchTransfer(DispatchTransferRequest)
+      returns (TransferStatusResponse);
+  rpc CancelTransfer(CancelTransferRequest) returns (TransferStatusResponse);
+  rpc GetVerifiedObject(GetVerifiedObjectRequest)
+      returns (GetVerifiedObjectResponse);
+  rpc ClaimConsumer(ClaimConsumerRequest) returns (TransferStatusResponse);
+  rpc AcknowledgeConsumer(AcknowledgeConsumerRequest)
+      returns (TransferStatusResponse);
+  rpc AbandonConsumer(AbandonConsumerRequest)
+      returns (TransferStatusResponse);
+  rpc SettleTransfer(SettleTransferRequest) returns (TransferStatusResponse);
+  rpc RecordCleanup(RecordCleanupRequest) returns (TransferStatusResponse);
+  rpc GetTransferStatus(GetTransferStatusRequest)
+      returns (TransferStatusResponse);
+}
+
+enum CoordinatorTransferDirection {
+  COORDINATOR_TRANSFER_DIRECTION_UNSPECIFIED = 0;
+  COORDINATOR_TRANSFER_DIRECTION_DOWNLOAD = 1;
+  COORDINATOR_TRANSFER_DIRECTION_UPLOAD = 2;
+}
+
+enum CoordinatorTransferPhase {
+  COORDINATOR_TRANSFER_PHASE_UNSPECIFIED = 0;
+  COORDINATOR_TRANSFER_PHASE_PREPARING = 1;
+  COORDINATOR_TRANSFER_PHASE_READY = 2;
+  COORDINATOR_TRANSFER_PHASE_STREAMING = 3;
+  COORDINATOR_TRANSFER_PHASE_VERIFYING = 4;
+  COORDINATOR_TRANSFER_PHASE_AVAILABLE = 5;
+  COORDINATOR_TRANSFER_PHASE_CONSUMING = 6;
+  COORDINATOR_TRANSFER_PHASE_CONSUMED = 7;
+  COORDINATOR_TRANSFER_PHASE_COMMITTED = 8;
+  COORDINATOR_TRANSFER_PHASE_TERMINAL = 9;
+}
+
+enum CoordinatorTransferOutcome {
+  COORDINATOR_TRANSFER_OUTCOME_UNSPECIFIED = 0;
+  COORDINATOR_TRANSFER_OUTCOME_SUCCEEDED = 1;
+  COORDINATOR_TRANSFER_OUTCOME_FAILED = 2;
+  COORDINATOR_TRANSFER_OUTCOME_CANCELLED = 3;
+  COORDINATOR_TRANSFER_OUTCOME_EXPIRED = 4;
+  COORDINATOR_TRANSFER_OUTCOME_SUPERSEDED = 5;
+}
+
+enum CoordinatorTransferFailure {
+  COORDINATOR_TRANSFER_FAILURE_UNSPECIFIED = 0;
+  COORDINATOR_TRANSFER_FAILURE_ADMISSION = 1;
+  COORDINATOR_TRANSFER_FAILURE_CANCELLED = 2;
+  COORDINATOR_TRANSFER_FAILURE_EXPIRED = 3;
+  COORDINATOR_TRANSFER_FAILURE_FENCED = 4;
+  COORDINATOR_TRANSFER_FAILURE_INTEGRITY = 5;
+  COORDINATOR_TRANSFER_FAILURE_STREAM = 6;
+  COORDINATOR_TRANSFER_FAILURE_CONSUMER = 7;
+}
+
+enum CoordinatorCleanupStatus {
+  COORDINATOR_CLEANUP_STATUS_UNSPECIFIED = 0;
+  COORDINATOR_CLEANUP_STATUS_NOT_REQUIRED = 1;
+  COORDINATOR_CLEANUP_STATUS_PENDING = 2;
+  COORDINATOR_CLEANUP_STATUS_COMPLETE = 3;
+  COORDINATOR_CLEANUP_STATUS_RETRYABLE_FAILURE = 4;
+}
+
+enum CoordinatorCancellationReason {
+  COORDINATOR_CANCELLATION_REASON_UNSPECIFIED = 0;
+  COORDINATOR_CANCELLATION_REASON_CALLER = 1;
+  COORDINATOR_CANCELLATION_REASON_DEADLINE = 2;
+  COORDINATOR_CANCELLATION_REASON_SUPERSEDED = 3;
+  COORDINATOR_CANCELLATION_REASON_SHUTDOWN = 4;
+}
+
+enum CoordinatorDispatchStatus {
+  COORDINATOR_DISPATCH_STATUS_UNSPECIFIED = 0;
+  COORDINATOR_DISPATCH_STATUS_NOT_BOUND = 1;
+  COORDINATOR_DISPATCH_STATUS_BOUND = 2;
+  COORDINATOR_DISPATCH_STATUS_DELIVERABLE = 3;
+  COORDINATOR_DISPATCH_STATUS_ENQUEUED = 4;
+}
+
+message CoordinatorTransferIdentity {
+  string transfer_id = 1;
+  string attempt_id = 2;
+  string runtime_id = 3;
+  uint64 desired_generation = 4;
+  CoordinatorTransferDirection direction = 5;
+  string operation_id = 6;
+  optional string session_id = 7;
+  optional string agent_id = 8;
+}
+
+message ExpectedManifest {
+  optional uint64 size = 1;
+  optional string sha256 = 2;
+}
+
+message ObjectManifest {
+  optional uint64 size = 1;
+  string sha256 = 2;
+}
+
+message OpaqueObjectHandle {
+  string value = 1;
+}
+
+message CoordinatorTransferStatus {
+  CoordinatorTransferIdentity identity = 1;
+  CoordinatorTransferPhase phase = 2;
+  uint64 revision = 3;
+  optional uint64 accepted_runner_generation = 4;
+  optional string dispatch_id = 5;
+  CoordinatorDispatchStatus dispatch_status = 6;
+  ExpectedManifest expected_manifest = 7;
+  ObjectManifest actual_manifest = 8;
+  google.protobuf.Timestamp deadline_at = 9;
+  google.protobuf.Timestamp logical_expires_at = 10;
+  CoordinatorTransferOutcome outcome = 11;
+  CoordinatorTransferFailure failure = 12;
+  CoordinatorCleanupStatus cleanup_status = 13;
+  bool cancellation_requested = 14;
+}
+
+message AdmitTransferRequest {
+  CoordinatorTransferIdentity identity = 1;
+  string lease_id = 2;
+  string runtime_path = 3;
+  optional bool overwrite = 4;
+  ExpectedManifest expected_manifest = 5;
+  optional uint64 product_maximum_size = 6;
+  optional uint64 provider_maximum_size = 7;
+  google.protobuf.Timestamp deadline_at = 8;
+  google.protobuf.Timestamp source_expires_at = 9;
+  string resource_class = 10;
+}
+
+message AdmitTransferResponse {
+  CoordinatorTransferStatus status = 1;
+  OpaqueObjectHandle admitted_object_handle = 2;
+}
+
+message MarkTransferReadyRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  OpaqueObjectHandle object_handle = 3;
+  ObjectManifest object_manifest = 4;
+}
+
+message DispatchTransferRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  string dispatch_id = 3;
+}
+
+message CancelTransferRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  CoordinatorCancellationReason reason = 3;
+}
+
+message GetVerifiedObjectRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  string consumer_claim_id = 3;
+}
+
+message GetVerifiedObjectResponse {
+  CoordinatorTransferStatus status = 1;
+  OpaqueObjectHandle verified_object_handle = 2;
+  ObjectManifest actual_manifest = 3;
+}
+
+message ClaimConsumerRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  string consumer_claim_id = 3;
+}
+
+message AcknowledgeConsumerRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  string consumer_claim_id = 3;
+}
+
+message AbandonConsumerRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  string consumer_claim_id = 3;
+}
+
+message SettleTransferRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  CoordinatorTransferOutcome outcome = 3;
+  oneof failure_choice {
+    CoordinatorTransferFailure failure = 4;
+    bool no_failure = 5;
+  }
+}
+
+message RecordCleanupRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  CoordinatorCleanupStatus cleanup_status = 3;
+}
+
+message GetTransferStatusRequest {
+  CoordinatorTransferIdentity identity = 1;
+}
+
+message TransferStatusResponse {
+  CoordinatorTransferStatus status = 1;
+}

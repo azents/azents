@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package azents.runtime_control.v1;
+
+service RuntimeRunnerTransfer {
+  rpc DownloadTransfer(DownloadTransferRequest)
+      returns (stream DownloadTransferFrame);
+  rpc UploadTransfer(stream UploadTransferFrame)
+      returns (UploadTransferResult);
+}
+
+enum TransferDirection {
+  TRANSFER_DIRECTION_UNSPECIFIED = 0;
+  TRANSFER_DIRECTION_DOWNLOAD = 1;
+  TRANSFER_DIRECTION_UPLOAD = 2;
+}
+
+enum UploadTransferStatus {
+  UPLOAD_TRANSFER_STATUS_UNSPECIFIED = 0;
+  UPLOAD_TRANSFER_STATUS_SUCCEEDED = 1;
+}
+
+message TransferIdentity {
+  string transfer_id = 1;
+  string attempt_id = 2;
+  string runtime_id = 3;
+  uint64 runner_generation = 4;
+}
+
+message TransferChunk {
+  uint64 offset = 1;
+  bytes data = 2;
+}
+
+message DownloadTransferRequest {
+  TransferIdentity identity = 1;
+}
+
+message DownloadTransferComplete {
+  optional uint64 actual_size = 1;
+  string sha256 = 2;
+}
+
+message DownloadTransferFrame {
+  oneof payload {
+    TransferChunk chunk = 1;
+    DownloadTransferComplete complete = 2;
+  }
+}
+
+message UploadTransferOpen {
+  TransferIdentity identity = 1;
+}
+
+message UploadTransferComplete {
+  optional uint64 actual_size = 1;
+  string sha256 = 2;
+}
+
+message UploadTransferFrame {
+  oneof payload {
+    UploadTransferOpen open = 1;
+    TransferChunk chunk = 2;
+    UploadTransferComplete complete = 3;
+  }
+}
+
+message UploadTransferResult {
+  UploadTransferStatus status = 1;
+  optional uint64 actual_size = 2;
+  string sha256 = 3;
+}
