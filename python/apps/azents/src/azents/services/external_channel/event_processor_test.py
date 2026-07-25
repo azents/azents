@@ -84,6 +84,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelBindingCreate,
     ExternalChannelChannelDefaultCreate,
+    ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
     ExternalChannelConversationAdmissionCreate,
@@ -1434,10 +1435,10 @@ async def test_granted_initial_binding_reuses_existing_session_without_root_serv
     root_service.create_root_session.assert_not_awaited()
 
 
-async def test_bound_shortcut_reports_agent_without_releasing_or_waking(
+async def test_bound_shortcut_locks_connection_before_resource_and_decommission(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """A shortcut intent commits before concurrent route detachment."""
+    """A shortcut intent follows canonical lock order before route detachment."""
     async with rdb_session_manager() as session:
         connection_id, route_id, agent_id, repository = await _setup_route(session)
         route = await repository.get_agent_route(session, route_id=route_id)
@@ -1500,19 +1501,35 @@ async def test_bound_shortcut_reports_agent_without_releasing_or_waking(
         envelope=admitted.event.envelope,
     )
     assert isinstance(normalized, SlackNormalizedMessage)
-    connection_locked = asyncio.Event()
+    connection_lock_reached = asyncio.Event()
+    resource_lock_reached = asyncio.Event()
     continue_event = asyncio.Event()
+    original_lock_connection = repository.lock_connection_for_routing
     original_lock_resource = repository.lock_resource
+
+    async def tracking_lock_connection(
+        session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> ExternalChannelConnection | None:
+        connection = await original_lock_connection(
+            session,
+            connection_id=connection_id,
+        )
+        connection_lock_reached.set()
+        return connection
 
     async def pausing_lock_resource(
         session: AsyncSession,
         *,
         resource_id: str,
     ) -> ExternalChannelResource | None:
-        connection_locked.set()
+        assert connection_lock_reached.is_set()
+        resource_lock_reached.set()
         await continue_event.wait()
         return await original_lock_resource(session, resource_id=resource_id)
 
+    repository.lock_connection_for_routing = tracking_lock_connection
     repository.lock_resource = pausing_lock_resource
     persisted_task = asyncio.create_task(
         service.persist_message_event_for_test(
@@ -1522,24 +1539,18 @@ async def test_bound_shortcut_reports_agent_without_releasing_or_waking(
             original_url=None,
         )
     )
-    await asyncio.wait_for(connection_locked.wait(), timeout=5)
-
-    async def decommission_agent() -> None:
-        async with rdb_session_manager() as session:
-            await ExternalChannelLifecycleRepository().cleanup_decommissioned_agent(
-                session,
-                agent_id=agent_id,
-                now=_at(3),
-            )
-            await session.commit()
-
-    decommission_task = asyncio.create_task(decommission_agent())
-    await asyncio.sleep(0.1)
-    assert not decommission_task.done()
+    await asyncio.wait_for(resource_lock_reached.wait(), timeout=5)
     continue_event.set()
     persisted = await asyncio.wait_for(persisted_task, timeout=5)
-    await asyncio.wait_for(decommission_task, timeout=5)
+    repository.lock_connection_for_routing = original_lock_connection
     repository.lock_resource = original_lock_resource
+    async with rdb_session_manager() as session:
+        await ExternalChannelLifecycleRepository().cleanup_decommissioned_agent(
+            session,
+            agent_id=agent_id,
+            now=_at(3),
+        )
+        await session.commit()
 
     assert persisted.wake_up is None
     assert persisted.activity_delivery_attempt_id is None
