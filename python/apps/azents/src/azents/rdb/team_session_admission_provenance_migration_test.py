@@ -21,6 +21,7 @@ _WORKSPACE_ID = "workspace-migration"
 _AGENT_ID = "agent-migration"
 _SESSION_ID = "session-migration"
 _INPUT_BUFFER_ID = "input-buffer-migration"
+_AGENT_INPUT_BUFFER_ID = "input-buffer-agent-migration"
 _ACTION_EXECUTION_ID = "action-execution-migration"
 
 
@@ -211,6 +212,47 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
     connection.execute(
         sa.text(
             """
+            INSERT INTO input_buffers (
+                id,
+                session_id,
+                kind,
+                scheduling_mode,
+                requested_model_target_label,
+                requested_reasoning_effort,
+                actor_user_id,
+                content,
+                idempotency_key,
+                metadata,
+                action,
+                attachments,
+                file_parts
+            )
+            VALUES (
+                :input_buffer_id,
+                :session_id,
+                'agent_message',
+                'wake_session',
+                NULL,
+                NULL,
+                :user_id,
+                'Legacy Agent message',
+                'migration-agent-input',
+                '{}'::jsonb,
+                NULL,
+                '[]'::jsonb,
+                '[]'::jsonb
+            )
+            """
+        ),
+        {
+            "input_buffer_id": _AGENT_INPUT_BUFFER_ID,
+            "session_id": _SESSION_ID,
+            "user_id": _USER_ID,
+        },
+    )
+    connection.execute(
+        sa.text(
+            """
             INSERT INTO chat_write_requests (
                 id,
                 session_id,
@@ -376,6 +418,16 @@ def test_team_session_admission_provenance_migration(
                 ),
                 {"input_buffer_id": _INPUT_BUFFER_ID},
             )
+            agent_input_buffer_sender = connection.scalar(
+                sa.text(
+                    """
+                    SELECT sender_user_id
+                    FROM input_buffers
+                    WHERE id = :input_buffer_id
+                    """
+                ),
+                {"input_buffer_id": _AGENT_INPUT_BUFFER_ID},
+            )
             chat_write_requester = connection.scalar(
                 sa.text(
                     """
@@ -495,6 +547,7 @@ def test_team_session_admission_provenance_migration(
             }
 
         assert input_buffer_sender == _USER_ID
+        assert agent_input_buffer_sender is None
         assert chat_write_requester == _USER_ID
         assert session_provenance.pending_command_requester_user_id == _USER_ID
         assert session_provenance.stop_requester_user_id == _USER_ID
