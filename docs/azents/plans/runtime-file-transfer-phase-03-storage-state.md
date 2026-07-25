@@ -87,6 +87,23 @@ The Protocol exposes domain operations equivalent to:
 - list expired, stale-lease, or cleanup-pending records in bounded pages; and
 - purge expired content-free terminal metadata.
 
+The store owns authoritative time through an injected timezone-aware clock. Protocol
+callers do not supply mutation timestamps or expiry timestamps. Each operation captures
+one store-owned `now` value and uses it consistently for fencing, revision timestamps,
+lease calculation, logical expiry, and terminal metadata expiry.
+
+Attempt storage preserves retry fencing:
+
+- immutable attempt records are addressed by `(transfer_id, attempt_id)`;
+- a separate atomic current-attempt pointer identifies the attempt returned by
+  `get(transfer_id)`;
+- a new attempt can become current only after the previous current attempt has reached
+  terminal settlement, while the previous record remains available for bounded cleanup;
+- cleanup or terminal mutation for an older attempt updates only that exact attempt and
+  never changes the current-attempt pointer or newer record; and
+- purge removes an expired historical attempt and clears the current pointer only when
+  it still points to that exact purged attempt.
+
 Required atomic/fencing semantics:
 
 - admission checks all configured per-Runtime and deployment budgets before persisting the lease and attempt metadata;
@@ -112,7 +129,8 @@ Typed admission input includes declared size, applicable product/provider maximu
 `InMemoryRuntimeTransferStateStore`:
 
 - uses one `asyncio.Lock` for atomic contract operations;
-- accepts an injected timezone-aware clock;
+- accepts an injected timezone-aware clock and never trusts a caller-provided
+  timestamp;
 - actively expires records, leases, consumer claims, and terminal metadata on access/list operations;
 - applies the same admission counters, revision fencing, transition validation, and pagination semantics as Redis;
 - fails closed after process restart and never infers success from object presence; and
