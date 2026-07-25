@@ -24,6 +24,9 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelWork,
 )
+from azents.repos.external_channel.data import (
+    ExternalChannelMultiConnectionDisconnect,
+)
 from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
     progress_projection_state,
@@ -236,6 +239,85 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
         "commit",
         "delivery",
     ]
+
+
+async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -> None:
+    """Multi disconnect captures cleanup before it purges provider state."""
+    events: list[str] = []
+    session = AsyncMock(spec=AsyncSession)
+
+    async def commit() -> None:
+        events.append("commit")
+
+    session.commit.side_effect = commit
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    now = datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC)
+    connection = SimpleNamespace(id="connection-1", updated_at=now)
+    disconnected = ExternalChannelMultiConnectionDisconnect(
+        disconnected_route_count=1,
+        invalidated_default_count=0,
+        expired_admission_count=0,
+        expired_access_request_count=0,
+        unavailable_resource_count=0,
+        disconnected_binding_count=1,
+        deleted_pending_context_count=0,
+        progress_delete_intent_ids=("cleanup-1",),
+    )
+    repository = AsyncMock()
+    repository.get_multi_connection.return_value = connection
+    lifecycle_repository = AsyncMock()
+
+    async def disconnect_multi(*args: object, **kwargs: object) -> object:
+        events.append("disconnect")
+        assert kwargs["defer_provider_state_purge"] is True
+        return disconnected
+
+    async def purge(*args: object, **kwargs: object) -> int:
+        events.append("purge")
+        return 1
+
+    lifecycle_repository.disconnect_multi_connection.side_effect = disconnect_multi
+    lifecycle_repository.purge_disconnected_connection_provider_state.side_effect = (
+        purge
+    )
+    action_service = AsyncMock()
+    target = object()
+
+    async def prepare(*args: object, **kwargs: object) -> object:
+        events.append("prepare")
+        return target
+
+    async def deliver(value: object) -> None:
+        assert value is target
+        events.append("delivery")
+
+    action_service.prepare_delivery_in_session.side_effect = prepare
+    action_service.attempt_prepared_delivery.side_effect = deliver
+    service = ExternalChannelManagementService(
+        session_manager=session_manager,
+        repository=repository,
+        domain_repository=AsyncMock(),
+        lifecycle_repository=lifecycle_repository,
+        agent_repository=AsyncMock(),
+        agent_admin_repository=AsyncMock(),
+        workspace_user_repository=AsyncMock(),
+        connection_service=AsyncMock(),
+        action_service=action_service,
+        access_service=AsyncMock(),
+    )
+
+    result = await service.disconnect_multi_connection(
+        workspace_id="workspace-1",
+        connection_id=connection.id,
+        expected_generation=now,
+    )
+
+    assert result.disconnected_binding_count == 1
+    assert events == ["disconnect", "prepare", "purge", "commit", "delivery"]
 
 
 @pytest.mark.parametrize(

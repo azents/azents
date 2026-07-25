@@ -21,6 +21,8 @@ ROLE_PERMISSIONS: dict[WorkspaceUserRole, set[Permission]] = {
         Permissions.LLM_INTEGRATIONS_READ,
         Permissions.TOOLKITS_READ,
         Permissions.TOOLKITS_WRITE,
+        Permissions.EXTERNAL_CHANNELS_READ,
+        Permissions.EXTERNAL_CHANNELS_WRITE,
     },
     WorkspaceUserRole.MEMBER: {
         Permissions.WORKSPACE_READ,

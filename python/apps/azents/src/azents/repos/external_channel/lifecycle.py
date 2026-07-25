@@ -48,6 +48,9 @@ from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
     ExternalChannelArchiveTermination,
     ExternalChannelMultiConnectionDisconnect,
+    ExternalChannelMultiConnectionImpact,
+    ExternalChannelMultiImpactBinding,
+    ExternalChannelMultiImpactDefault,
     ExternalChannelMultiRouteImpact,
     ExternalChannelMultiRouteRemoval,
     ExternalChannelPurgeCleanup,
@@ -453,7 +456,101 @@ class ExternalChannelLifecycleRepository:
         )
         if route is None:
             return None
-        return await self._project_route_impact(session, route_id=route.id)
+        connection = await session.get(
+            RDBExternalChannelConnection,
+            route.connection_id,
+        )
+        if connection is None:
+            return None
+        return await self._project_route_impact(
+            session,
+            route_id=route.id,
+            generation=connection.updated_at,
+        )
+
+    async def project_multi_connection_impact(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> ExternalChannelMultiConnectionImpact | None:
+        """Project a sanitized deterministic whole-Multi-App disconnect impact."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.MULTI,
+                RDBExternalChannelConnection.status
+                != ExternalChannelConnectionStatus.DISCONNECTED,
+            )
+            .with_for_update()
+        )
+        if connection is None:
+            return None
+        routes = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelAgentRoute)
+                    .where(
+                        RDBExternalChannelAgentRoute.connection_id == connection.id,
+                        RDBExternalChannelAgentRoute.connection_app_mode
+                        == ExternalChannelAppMode.MULTI,
+                    )
+                    .order_by(RDBExternalChannelAgentRoute.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        route_ids = tuple(route.id for route in routes)
+        affected_defaults, affected_bindings = await self._impact_details(
+            session,
+            route_ids=route_ids,
+        )
+        return ExternalChannelMultiConnectionImpact(
+            connection_id=connection.id,
+            generation=connection.updated_at,
+            active_route_count=sum(
+                route.catalog_status is ExternalChannelRouteCatalogStatus.AVAILABLE
+                and route.agent_id is not None
+                for route in routes
+            ),
+            active_default_count=len(affected_defaults),
+            active_binding_count=len(affected_bindings),
+            bound_resource_count=len(
+                {binding.resource_id for binding in affected_bindings}
+            ),
+            open_admission_count=await self._count(
+                session,
+                RDBExternalChannelConversationAdmission,
+                sa.and_(
+                    RDBExternalChannelConversationAdmission.connection_id
+                    == connection.id,
+                    RDBExternalChannelConversationAdmission.status.in_(
+                        (
+                            ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+                            ExternalChannelConversationAdmissionStatus.SELECTED,
+                            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                        )
+                    ),
+                ),
+            ),
+            pending_access_request_count=await self._count(
+                session,
+                RDBExternalChannelAccessRequest,
+                sa.and_(
+                    RDBExternalChannelAccessRequest.route_id.in_(route_ids),
+                    RDBExternalChannelAccessRequest.status
+                    == ExternalChannelAccessRequestStatus.PENDING,
+                ),
+            ),
+            pending_context_count=await self._count(
+                session,
+                RDBExternalChannelPendingContext,
+                RDBExternalChannelPendingContext.route_id.in_(route_ids),
+            ),
+            affected_defaults=affected_defaults,
+            affected_bindings=affected_bindings,
+        )
 
     async def remove_multi_route(
         self,
@@ -472,7 +569,17 @@ class ExternalChannelLifecycleRepository:
         )
         if route is None:
             return None
-        impact = await self._project_route_impact(session, route_id=route.id)
+        connection = await session.get(
+            RDBExternalChannelConnection,
+            route.connection_id,
+        )
+        if connection is None:
+            return None
+        impact = await self._project_route_impact(
+            session,
+            route_id=route.id,
+            generation=connection.updated_at,
+        )
         already_removed = (
             route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED
         )
@@ -637,6 +744,7 @@ class ExternalChannelLifecycleRepository:
         connection_id: str,
         now: datetime.datetime,
         reason: str,
+        defer_provider_state_purge: bool = False,
     ) -> ExternalChannelMultiConnectionDisconnect | None:
         """Terminalize all live Multi-App routing state and credentials."""
         return await self._disconnect_connection(
@@ -645,7 +753,7 @@ class ExternalChannelLifecycleRepository:
             expected_app_mode=ExternalChannelAppMode.MULTI,
             now=now,
             reason=reason,
-            defer_provider_state_purge=False,
+            defer_provider_state_purge=defer_provider_state_purge,
         )
 
     async def disconnect_single_connection(
@@ -988,8 +1096,13 @@ class ExternalChannelLifecycleRepository:
         session: AsyncSession,
         *,
         route_id: str,
+        generation: datetime.datetime,
     ) -> ExternalChannelMultiRouteImpact:
-        """Return deterministic count-only route impact without provider content."""
+        """Return deterministic route impact without provider message content."""
+        affected_defaults, affected_bindings = await self._impact_details(
+            session,
+            route_ids=(route_id,),
+        )
         active_binding_count = await self._count(
             session,
             RDBExternalChannelBinding,
@@ -1008,15 +1121,8 @@ class ExternalChannelLifecycleRepository:
         )
         return ExternalChannelMultiRouteImpact(
             route_id=route_id,
-            active_default_count=await self._count(
-                session,
-                RDBExternalChannelChannelDefault,
-                sa.and_(
-                    RDBExternalChannelChannelDefault.route_id == route_id,
-                    RDBExternalChannelChannelDefault.status
-                    == ExternalChannelChannelDefaultStatus.ACTIVE,
-                ),
-            ),
+            generation=generation,
+            active_default_count=len(affected_defaults),
             active_binding_count=active_binding_count,
             bound_resource_count=bound_resource_count,
             open_admission_count=await self._count(
@@ -1047,7 +1153,100 @@ class ExternalChannelLifecycleRepository:
                 RDBExternalChannelPendingContext,
                 RDBExternalChannelPendingContext.route_id == route_id,
             ),
+            affected_defaults=affected_defaults,
+            affected_bindings=affected_bindings,
         )
+
+    async def _impact_details(
+        self,
+        session: AsyncSession,
+        *,
+        route_ids: Sequence[str],
+    ) -> tuple[
+        tuple[ExternalChannelMultiImpactDefault, ...],
+        tuple[ExternalChannelMultiImpactBinding, ...],
+    ]:
+        """Load bounded, sanitized default and binding identities for confirmation."""
+        if not route_ids:
+            return (), ()
+        default_rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelChannelDefault,
+                    RDBExternalChannelAgentRoute,
+                    RDBAgent.name,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelChannelDefault.route_id,
+                )
+                .outerjoin(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                )
+                .where(
+                    RDBExternalChannelChannelDefault.route_id.in_(route_ids),
+                    RDBExternalChannelChannelDefault.status
+                    == ExternalChannelChannelDefaultStatus.ACTIVE,
+                )
+                .order_by(
+                    RDBExternalChannelChannelDefault.provider_channel_id,
+                    RDBExternalChannelChannelDefault.id,
+                )
+            )
+        ).all()
+        binding_rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelResource,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .where(
+                    RDBExternalChannelBinding.route_id.in_(route_ids),
+                    RDBExternalChannelBinding.status
+                    == ExternalChannelBindingStatus.ACTIVE,
+                )
+                .order_by(
+                    RDBExternalChannelBinding.agent_session_id,
+                    RDBExternalChannelBinding.id,
+                )
+            )
+        ).all()
+        defaults = tuple(
+            ExternalChannelMultiImpactDefault(
+                id=channel_default.id,
+                provider_channel_id=channel_default.provider_channel_id,
+                route_id=route.id,
+                agent_id=route.agent_id,
+                agent_name=agent_name,
+            )
+            for channel_default, route, agent_name in default_rows
+        )
+        bindings = tuple(
+            ExternalChannelMultiImpactBinding(
+                id=binding.id,
+                route_id=binding.route_id,
+                agent_session_id=binding.agent_session_id,
+                resource_id=resource.id,
+                channel_label=_impact_label(
+                    resource.labels,
+                    preferred=("channel_name", "channel_id"),
+                    fallback=resource.id,
+                ),
+                thread_label=_impact_optional_label(
+                    resource.labels,
+                    preferred=("thread_label", "thread_ts"),
+                ),
+            )
+            for binding, resource in binding_rows
+        )
+        return defaults, bindings
 
     async def _terminalize_bindings(
         self,
@@ -1262,3 +1461,28 @@ def _provider_payload(
         "thread_ts": thread_ts,
         "provider_message_key": provider_message_key,
     }
+
+
+def _impact_label(
+    labels: dict[str, object] | None,
+    *,
+    preferred: Sequence[str],
+    fallback: str,
+) -> str:
+    """Return one bounded non-secret provider label for management confirmation."""
+    value = _impact_optional_label(labels, preferred=preferred)
+    return fallback if value is None else value
+
+
+def _impact_optional_label(
+    labels: dict[str, object] | None,
+    *,
+    preferred: Sequence[str],
+) -> str | None:
+    """Return the first bounded visible label without provider payload content."""
+    labels = labels or {}
+    for key in preferred:
+        value = labels.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:255]
+    return None
