@@ -119,6 +119,11 @@ class RuntimeOperationMetadata:
     operation_id: str
     runtime_id: str
     target: RuntimeCoordinationTarget
+    generation: int
+    operation_type: str
+    transfer_id: str | None
+    transfer_attempt_id: str | None
+    transfer_dispatch_id: str | None
     request_stream_id: str
     reply_stream_id: str
     status: RuntimeOperationStatus

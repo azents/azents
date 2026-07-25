@@ -19,6 +19,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferPhase,
+    RuntimeTransferRecord,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.redis import RedisRuntimeTransferStateStore
@@ -90,6 +91,7 @@ async def store_harness(
         deployment_bytes=10,
         admission_lease=timedelta(minutes=5),
         consumer_lease=timedelta(minutes=1),
+        stream_lease=timedelta(seconds=30),
         terminal_ttl=timedelta(minutes=5),
         list_page_size=2,
     )
@@ -148,6 +150,7 @@ def _admission() -> RuntimeTransferAdmission:
         desired_generation=1,
         operation_id="operation",
         session_id=None,
+        agent_id=None,
         runtime_path="/workspace/file",
         overwrite=False,
         expected_size=1,
@@ -157,6 +160,57 @@ def _admission() -> RuntimeTransferAdmission:
         deadline_at=_TEST_STARTED_AT + timedelta(minutes=5),
         source_expires_at=None,
         resource_class="default",
+    )
+
+
+async def _claim_stream(
+    store: RuntimeTransferStateStore,
+    transfer_id: str,
+    *,
+    attempt_id: str,
+    runtime_id: str,
+    desired_generation: int,
+    accepted_runner_generation: int,
+    expected_revision: int,
+    claim_id: str,
+) -> RuntimeTransferRecord | None:
+    """Bind one test dispatch before claiming its bounded stream."""
+    del expected_revision
+    ready = await store.get(transfer_id)
+    if ready is None:
+        return None
+    dispatch_id = f"dispatch:{transfer_id}"
+    request_id = f"request:{transfer_id}"
+    bound = await store.bind_dispatch(
+        transfer_id,
+        attempt_id=attempt_id,
+        runtime_id=runtime_id,
+        desired_generation=desired_generation,
+        accepted_runner_generation=accepted_runner_generation,
+        expected_revision=ready.revision,
+        dispatch_id=dispatch_id,
+        dispatch_request_id=request_id,
+    )
+    if bound is None:
+        return None
+    deliverable = await store.mark_dispatch_deliverable(
+        transfer_id,
+        attempt_id=attempt_id,
+        expected_revision=bound.revision,
+        dispatch_id=dispatch_id,
+        dispatch_request_id=request_id,
+    )
+    if deliverable is None:
+        return None
+    return await store.claim_stream(
+        transfer_id,
+        attempt_id=attempt_id,
+        runtime_id=runtime_id,
+        desired_generation=desired_generation,
+        accepted_runner_generation=accepted_runner_generation,
+        expected_revision=deliverable.revision,
+        claim_id=claim_id,
+        owner_replica_id="test-replica",
     )
 
 
@@ -188,6 +242,127 @@ async def test_rejects_invalid_size_and_expired_source_without_record(
     )
     assert await store_harness.store.admit(expired, lease_id="lease") is None
     assert await store_harness.store.get("expired") is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_indexes_stream_lease_and_cleanup_handle(
+    store_harness: _StoreHarness,
+) -> None:
+    """Dispatch promotion, owner expiry, and cleanup evidence remain fenced."""
+    store = store_harness.store
+    admitted = await store.admit(
+        replace(
+            _admission(),
+            transfer_id="dispatch",
+            direction=RuntimeTransferDirection.UPLOAD,
+        ),
+        lease_id="lease",
+    )
+    assert admitted is not None
+    ready = await store.mark_ready(
+        "dispatch",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("object", 1, "a" * 64),
+    )
+    assert ready is not None
+    bound = await store.bind_dispatch(
+        "dispatch",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        dispatch_id="dispatch-id",
+        dispatch_request_id="request-id",
+    )
+    assert bound is not None
+    assert (await store.list_pending_dispatches(cursor=None, limit=2)).records == (
+        bound,
+    )
+    assert (
+        await store.bind_dispatch(
+            "dispatch",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            expected_revision=ready.revision,
+            dispatch_id="dispatch-id",
+            dispatch_request_id="request-id",
+        )
+        == bound
+    )
+    assert (
+        await store.bind_dispatch(
+            "dispatch",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            expected_revision=ready.revision,
+            dispatch_id="other-dispatch",
+            dispatch_request_id="request-id",
+        )
+        is None
+    )
+    deliverable = await store.mark_dispatch_deliverable(
+        "dispatch",
+        attempt_id="attempt",
+        expected_revision=bound.revision,
+        dispatch_id="dispatch-id",
+        dispatch_request_id="request-id",
+    )
+    assert deliverable is not None
+    stream = await store.claim_stream(
+        "dispatch",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=deliverable.revision,
+        claim_id="claim",
+        owner_replica_id="replica",
+    )
+    assert stream is not None
+    assert (await store.list_pending_dispatches(cursor=None, limit=2)).records == ()
+    assert (await store.list_generation_dispatches(cursor=None, limit=2)).records == (
+        stream,
+    )
+    handled = await store.record_multipart_cleanup_handle(
+        "dispatch",
+        attempt_id="attempt",
+        accepted_runner_generation=2,
+        expected_revision=stream.revision,
+        claim_id="claim",
+        owner_replica_id="replica",
+        cleanup_handle="multipart-handle",
+    )
+    assert handled is not None
+    store_harness.clock.now += store_harness.config.stream_lease
+    stale = await store.list_stale_stream_claims(cursor=None, limit=2)
+    assert stale.records == (handled,)
+    assert (
+        await store.renew_stream_lease(
+            "dispatch",
+            attempt_id="attempt",
+            accepted_runner_generation=2,
+            expected_revision=handled.revision,
+            claim_id="claim",
+            owner_replica_id="replica",
+        )
+        is None
+    )
+    cleared = await store.record_cleanup(
+        "dispatch",
+        attempt_id="attempt",
+        expected_revision=handled.revision,
+        status=RuntimeTransferCleanupStatus.COMPLETE,
+    )
+    assert cleared is not None
+    assert cleared.multipart_cleanup_handle is None
 
 
 @pytest.mark.asyncio
@@ -369,7 +544,8 @@ async def test_download_lifecycle_fences_stream_claim_and_progress(
 
     claims = await asyncio.gather(
         *(
-            store_harness.store.claim_stream(
+            _claim_stream(
+                store_harness.store,
                 "download",
                 attempt_id="attempt",
                 runtime_id="runtime",
@@ -575,7 +751,8 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
         object=object,
     )
     assert ready is not None
-    stream = await store_harness.store.claim_stream(
+    stream = await _claim_stream(
+        store_harness.store,
         "upload",
         attempt_id="attempt",
         runtime_id="runtime",
@@ -723,7 +900,8 @@ async def test_consumer_and_admission_expiry_reclaim_capacity_atomically(
         object=RuntimeTransferObject("object", 1, "a" * 64),
     )
     assert ready is not None
-    stream = await store_harness.store.claim_stream(
+    stream = await _claim_stream(
+        store_harness.store,
         "simultaneous",
         attempt_id="attempt",
         runtime_id="runtime",
@@ -801,7 +979,8 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
         object=RuntimeTransferObject("cancellation-object", 1, "a" * 64),
     )
     assert ready is not None
-    stream = await store_harness.store.claim_stream(
+    stream = await _claim_stream(
+        store_harness.store,
         "cancellation",
         attempt_id="attempt",
         runtime_id="runtime",
@@ -1001,7 +1180,8 @@ async def test_final_manifest_matches_ready_object_without_admission_sha(
         object=RuntimeTransferObject("object", 1, "a" * 64),
     )
     assert ready is not None
-    stream = await store_harness.store.claim_stream(
+    stream = await _claim_stream(
+        store_harness.store,
         "object-manifest",
         attempt_id="attempt",
         runtime_id="runtime",
@@ -1086,6 +1266,7 @@ async def test_redis_terminal_keys_expire_together(
         deployment_bytes=10,
         admission_lease=timedelta(minutes=1),
         consumer_lease=timedelta(minutes=1),
+        stream_lease=timedelta(seconds=30),
         terminal_ttl=timedelta(seconds=2),
         list_page_size=1,
     )
@@ -1164,6 +1345,7 @@ async def test_redis_new_current_pointer_outlives_old_terminal_ttl(
         deployment_bytes=10,
         admission_lease=timedelta(minutes=1),
         consumer_lease=timedelta(minutes=1),
+        stream_lease=timedelta(seconds=30),
         terminal_ttl=timedelta(seconds=2),
         list_page_size=1,
     )
@@ -1228,6 +1410,7 @@ async def test_redis_stale_pagination_continues_after_dangling_members(
         deployment_bytes=10,
         admission_lease=timedelta(minutes=1),
         consumer_lease=timedelta(minutes=1),
+        stream_lease=timedelta(seconds=30),
         terminal_ttl=timedelta(minutes=1),
         list_page_size=1,
     )

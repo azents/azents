@@ -45,6 +45,15 @@ class RuntimeTransferCleanupStatus(enum.StrEnum):
     RETRYABLE_FAILURE = "retryable_failure"
 
 
+class RuntimeTransferDispatchStatus(enum.StrEnum):
+    """Durable metadata-only dispatch delivery state."""
+
+    NOT_BOUND = "not_bound"
+    BOUND = "bound"
+    DELIVERABLE = "deliverable"
+    ENQUEUED = "enqueued"
+
+
 class RuntimeTransferFailure(enum.StrEnum):
     """Bounded failure classification without provider diagnostics."""
 
@@ -67,6 +76,7 @@ class RuntimeTransferConfig:
     deployment_bytes: int
     admission_lease: timedelta
     consumer_lease: timedelta
+    stream_lease: timedelta
     terminal_ttl: timedelta
     list_page_size: int
 
@@ -84,7 +94,12 @@ class RuntimeTransferConfig:
         ):
             raise ValueError("transfer limits must be positive")
         if (
-            min(self.admission_lease, self.consumer_lease, self.terminal_ttl)
+            min(
+                self.admission_lease,
+                self.consumer_lease,
+                self.stream_lease,
+                self.terminal_ttl,
+            )
             <= timedelta()
         ):
             raise ValueError("transfer durations must be positive")
@@ -105,6 +120,7 @@ class RuntimeTransferAdmission:
     desired_generation: int
     operation_id: str
     session_id: str | None
+    agent_id: str | None
     runtime_path: str
     overwrite: bool
     expected_size: int
@@ -123,6 +139,10 @@ class RuntimeTransferAdmission:
         _required(self.operation_id, "operation_id")
         _required(self.runtime_path, "runtime_path")
         _required(self.resource_class, "resource_class")
+        if self.session_id is not None:
+            _required(self.session_id, "session_id")
+        if self.agent_id is not None:
+            _required(self.agent_id, "agent_id")
         if (
             min(
                 self.desired_generation,
@@ -180,10 +200,16 @@ class RuntimeTransferRecord:
     updated_at: datetime
     logical_expires_at: datetime
     accepted_runner_generation: int | None
+    dispatch_id: str | None
+    dispatch_status: RuntimeTransferDispatchStatus
+    dispatch_request_id: str | None
     object: RuntimeTransferObject | None
     actual_size: int | None
     actual_sha256: str | None
     stream_claim_id: str | None
+    stream_owner_replica_id: str | None
+    stream_lease_expires_at: datetime | None
+    multipart_cleanup_handle: str | None
     progress: RuntimeTransferProgress | None
     cancellation_requested_at: datetime | None
     consumer_claim_id: str | None
@@ -211,6 +237,39 @@ class RuntimeTransferRecord:
             raise ValueError(
                 "logical_expires_at must be the authoritative absolute expiry"
             )
+        if self.accepted_runner_generation is not None and (
+            self.accepted_runner_generation <= 0
+        ):
+            raise ValueError("accepted_runner_generation must be positive")
+        if self.dispatch_status is RuntimeTransferDispatchStatus.NOT_BOUND:
+            if (
+                self.dispatch_id is not None
+                or self.dispatch_request_id is not None
+                or self.accepted_runner_generation is not None
+            ):
+                raise ValueError("unbound dispatch must not retain dispatch authority")
+        elif (
+            self.dispatch_id is None
+            or self.dispatch_request_id is None
+            or self.accepted_runner_generation is None
+        ):
+            raise ValueError("bound dispatch requires complete dispatch authority")
+        if self.stream_claim_id is None:
+            if (
+                self.stream_owner_replica_id is not None
+                or self.stream_lease_expires_at is not None
+            ):
+                raise ValueError("stream lease requires a stream claim")
+        elif (
+            self.stream_owner_replica_id is None or self.stream_lease_expires_at is None
+        ):
+            raise ValueError("stream claim requires complete owner lease")
+        if self.stream_owner_replica_id is not None:
+            _required(self.stream_owner_replica_id, "stream_owner_replica_id")
+        if self.stream_lease_expires_at is not None:
+            _aware(self.stream_lease_expires_at, "stream_lease_expires_at")
+        if self.multipart_cleanup_handle is not None:
+            _opaque_handle(self.multipart_cleanup_handle, "multipart_cleanup_handle")
         if self.actual_size is not None and self.actual_size < 0:
             raise ValueError("actual_size must not be negative")
         _sha(self.actual_sha256)
@@ -279,3 +338,8 @@ def _sha(value: str | None) -> None:
         or any(character not in "0123456789abcdef" for character in value)
     ):
         raise ValueError("SHA-256 must be lowercase hexadecimal")
+
+
+def _opaque_handle(value: str, name: str) -> None:
+    if not value or len(value.encode("utf-8")) > 512 or "://" in value:
+        raise ValueError(f"{name} must be a bounded opaque handle")

@@ -96,6 +96,15 @@ class RuntimeCoordinationStore(Protocol):
         """Create or replace operation metadata."""
         ...
 
+    async def ensure_operation_metadata(
+        self,
+        metadata: RuntimeOperationMetadata,
+        *,
+        ttl_seconds: int | None,
+    ) -> RuntimeOperationMetadata | None:
+        """Create metadata once or return an exactly compatible existing record."""
+        ...
+
     async def get_operation(
         self,
         operation_id: str,

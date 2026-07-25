@@ -49,7 +49,76 @@ class RuntimeTransferStateStore(Protocol):
         accepted_runner_generation: int,
         expected_revision: int,
         claim_id: str,
+        owner_replica_id: str,
     ) -> RuntimeTransferRecord | None: ...
+
+    async def bind_dispatch(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        dispatch_id: str,
+        dispatch_request_id: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def mark_dispatch_deliverable(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        dispatch_id: str,
+        dispatch_request_id: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def mark_dispatch_enqueued(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        operation_id: str,
+        expected_revision: int,
+        dispatch_id: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def list_pending_dispatches(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage: ...
+
+    async def list_generation_dispatches(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage: ...
+
+    async def renew_stream_lease(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def record_multipart_cleanup_handle(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+        cleanup_handle: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def list_stale_stream_claims(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage: ...
 
     async def record_progress(
         self,

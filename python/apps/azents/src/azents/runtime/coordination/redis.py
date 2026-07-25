@@ -143,6 +143,33 @@ end
 return cursor
 """
 
+_ENSURE_OPERATION_METADATA_SCRIPT = """
+local current = redis.call('GET', KEYS[1])
+if not current then
+  if ARGV[2] ~= '' then
+    redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+  else
+    redis.call('SET', KEYS[1], ARGV[1])
+  end
+  return ARGV[1]
+end
+local existing = cjson.decode(current)
+local proposed = cjson.decode(ARGV[1])
+if existing['status'] == 'final' then
+  return nil
+end
+if existing['runtime_id'] ~= proposed['runtime_id']
+  or existing['generation'] ~= proposed['generation']
+  or existing['operation_type'] ~= proposed['operation_type']
+  or existing['deadline_at'] ~= proposed['deadline_at']
+  or existing['transfer_id'] ~= proposed['transfer_id']
+  or existing['transfer_attempt_id'] ~= proposed['transfer_attempt_id']
+  or existing['transfer_dispatch_id'] ~= proposed['transfer_dispatch_id'] then
+  return nil
+end
+return current
+"""
+
 
 class RedisRuntimeCoordinationStore:
     """Redis Streams and keys implementation of RuntimeCoordinationStore."""
@@ -324,6 +351,24 @@ class RedisRuntimeCoordinationStore:
             _operation_to_json(metadata),
             ex=ttl_seconds,
         )
+
+    async def ensure_operation_metadata(
+        self,
+        metadata: RuntimeOperationMetadata,
+        *,
+        ttl_seconds: int | None,
+    ) -> RuntimeOperationMetadata | None:
+        """Create metadata once or return an exactly compatible existing record."""
+        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+            _ENSURE_OPERATION_METADATA_SCRIPT,
+            1,
+            self._operation_key(metadata.operation_id),
+            _operation_to_json(metadata),
+            "" if ttl_seconds is None else str(ttl_seconds),
+        )
+        if raw is None:
+            return None
+        return _operation_from_json(_decode_text(raw))
 
     async def get_operation(
         self,
@@ -791,6 +836,11 @@ def _operation_to_json(metadata: RuntimeOperationMetadata) -> str:
             "operation_id": metadata.operation_id,
             "runtime_id": metadata.runtime_id,
             "target": metadata.target.value,
+            "generation": metadata.generation,
+            "operation_type": metadata.operation_type,
+            "transfer_id": metadata.transfer_id,
+            "transfer_attempt_id": metadata.transfer_attempt_id,
+            "transfer_dispatch_id": metadata.transfer_dispatch_id,
             "request_stream_id": metadata.request_stream_id,
             "reply_stream_id": metadata.reply_stream_id,
             "status": metadata.status.value,
@@ -812,6 +862,11 @@ def _operation_from_json(raw: str) -> RuntimeOperationMetadata:
         operation_id=str(payload["operation_id"]),
         runtime_id=str(payload["runtime_id"]),
         target=RuntimeCoordinationTarget(str(payload["target"])),
+        generation=int(payload["generation"]),
+        operation_type=str(payload["operation_type"]),
+        transfer_id=_optional_str(payload.get("transfer_id")),
+        transfer_attempt_id=_optional_str(payload.get("transfer_attempt_id")),
+        transfer_dispatch_id=_optional_str(payload.get("transfer_dispatch_id")),
         request_stream_id=str(payload["request_stream_id"]),
         reply_stream_id=str(payload["reply_stream_id"]),
         status=RuntimeOperationStatus(str(payload["status"])),

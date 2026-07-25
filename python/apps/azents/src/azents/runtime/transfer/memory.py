@@ -13,6 +13,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
+    RuntimeTransferDispatchStatus,
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
@@ -79,10 +80,16 @@ class InMemoryRuntimeTransferStateStore:
                 updated_at=now,
                 logical_expires_at=logical_expiry(now, admission.source_expires_at),
                 accepted_runner_generation=None,
+                dispatch_id=None,
+                dispatch_status=RuntimeTransferDispatchStatus.NOT_BOUND,
+                dispatch_request_id=None,
                 object=None,
                 actual_size=None,
                 actual_sha256=None,
                 stream_claim_id=None,
+                stream_owner_replica_id=None,
+                stream_lease_expires_at=None,
+                multipart_cleanup_handle=None,
                 progress=None,
                 cancellation_requested_at=None,
                 consumer_claim_id=None,
@@ -134,17 +141,316 @@ class InMemoryRuntimeTransferStateStore:
         accepted_runner_generation: int,
         expected_revision: int,
         claim_id: str,
+        owner_replica_id: str,
     ) -> RuntimeTransferRecord | None:
-        return await self._move(
-            transfer_id,
-            attempt_id,
-            expected_revision,
-            RuntimeTransferPhase.READY,
-            RuntimeTransferPhase.STREAMING,
-            runtime_id=runtime_id,
-            generation=desired_generation,
-            claim_id=claim_id,
-            accepted_runner_generation=accepted_runner_generation,
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.READY,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+            )
+            if (
+                record is None
+                or record.dispatch_status
+                not in {
+                    RuntimeTransferDispatchStatus.DELIVERABLE,
+                    RuntimeTransferDispatchStatus.ENQUEUED,
+                }
+                or record.accepted_runner_generation != accepted_runner_generation
+                or not phase_transition_allowed(
+                    record.admission.direction,
+                    record.phase,
+                    RuntimeTransferPhase.STREAMING,
+                )
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.STREAMING,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    dispatch_status=RuntimeTransferDispatchStatus.ENQUEUED,
+                    stream_claim_id=claim_id,
+                    stream_owner_replica_id=owner_replica_id,
+                    stream_lease_expires_at=now + self.config.stream_lease,
+                )
+            )
+
+    async def bind_dispatch(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        dispatch_id: str,
+        dispatch_request_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Bind one stable dispatch identity and accepted Runner generation."""
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            record = self._exact(transfer_id, attempt_id)
+            if (
+                record is None
+                or self.current_attempts.get(transfer_id) != attempt_id
+                or record.admission.runtime_id != runtime_id
+                or record.admission.desired_generation != desired_generation
+                or record.lease_expires_at <= now
+                or record.logical_expires_at <= now
+                or record.cancellation_requested_at is not None
+                or record.phase is RuntimeTransferPhase.TERMINAL
+            ):
+                return None
+            if record.dispatch_status is not RuntimeTransferDispatchStatus.NOT_BOUND:
+                return (
+                    record
+                    if expected_revision <= record.revision
+                    and record.dispatch_id == dispatch_id
+                    and record.dispatch_request_id == dispatch_request_id
+                    and record.accepted_runner_generation == accepted_runner_generation
+                    else None
+                )
+            if (
+                record.phase is not RuntimeTransferPhase.READY
+                or record.revision != expected_revision
+                or accepted_runner_generation <= 0
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    accepted_runner_generation=accepted_runner_generation,
+                    dispatch_id=dispatch_id,
+                    dispatch_status=RuntimeTransferDispatchStatus.BOUND,
+                    dispatch_request_id=dispatch_request_id,
+                )
+            )
+
+    async def mark_dispatch_deliverable(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        dispatch_id: str,
+        dispatch_request_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Persist the authorization barrier before intent append."""
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            record = self._exact(transfer_id, attempt_id)
+            if (
+                record is None
+                or self.current_attempts.get(transfer_id) != attempt_id
+                or record.dispatch_id != dispatch_id
+                or record.dispatch_request_id != dispatch_request_id
+                or record.phase is RuntimeTransferPhase.TERMINAL
+            ):
+                return None
+            if record.dispatch_status in {
+                RuntimeTransferDispatchStatus.DELIVERABLE,
+                RuntimeTransferDispatchStatus.ENQUEUED,
+            }:
+                return record if expected_revision <= record.revision else None
+            if (
+                record.dispatch_status is not RuntimeTransferDispatchStatus.BOUND
+                or record.revision != expected_revision
+                or record.phase is not RuntimeTransferPhase.READY
+                or record.cancellation_requested_at is not None
+                or record.lease_expires_at <= now
+                or record.logical_expires_at <= now
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    dispatch_status=RuntimeTransferDispatchStatus.DELIVERABLE,
+                )
+            )
+
+    async def mark_dispatch_enqueued(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        operation_id: str,
+        expected_revision: int,
+        dispatch_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Record a duplicate-safe successful logical intent append."""
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            record = self._exact(transfer_id, attempt_id)
+            if (
+                record is None
+                or record.admission.operation_id != operation_id
+                or record.dispatch_id != dispatch_id
+            ):
+                return None
+            if record.dispatch_status is RuntimeTransferDispatchStatus.ENQUEUED:
+                return record if expected_revision <= record.revision else None
+            if (
+                self.current_attempts.get(transfer_id) != attempt_id
+                or record.dispatch_status
+                is not RuntimeTransferDispatchStatus.DELIVERABLE
+                or record.phase is not RuntimeTransferPhase.READY
+                or record.revision != expected_revision
+                or record.cancellation_requested_at is not None
+                or record.lease_expires_at <= now
+                or record.logical_expires_at <= now
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    dispatch_status=RuntimeTransferDispatchStatus.ENQUEUED,
+                )
+            )
+
+    async def list_pending_dispatches(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage:
+        """List live bound work that still needs delivery repair."""
+        return await self._list_records(
+            cursor=cursor,
+            limit=limit,
+            selected=lambda record: (
+                record.phase is not RuntimeTransferPhase.TERMINAL
+                and record.dispatch_status
+                in {
+                    RuntimeTransferDispatchStatus.BOUND,
+                    RuntimeTransferDispatchStatus.DELIVERABLE,
+                }
+            ),
+        )
+
+    async def list_generation_dispatches(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage:
+        """List all live generation-bound dispatches for repair."""
+        return await self._list_records(
+            cursor=cursor,
+            limit=limit,
+            selected=lambda record: (
+                record.phase is not RuntimeTransferPhase.TERMINAL
+                and record.dispatch_status
+                is not RuntimeTransferDispatchStatus.NOT_BOUND
+            ),
+        )
+
+    async def renew_stream_lease(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Renew one owner-fenced short stream lease."""
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            )
+            if (
+                record is None
+                or record.stream_owner_replica_id != owner_replica_id
+                or record.stream_lease_expires_at is None
+                or record.stream_lease_expires_at <= now
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    stream_lease_expires_at=now + self.config.stream_lease,
+                )
+            )
+
+    async def record_multipart_cleanup_handle(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+        cleanup_handle: str,
+    ) -> RuntimeTransferRecord | None:
+        """Persist bounded upload-abort evidence before the first multipart part."""
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            )
+            if (
+                record is None
+                or record.admission.direction is not RuntimeTransferDirection.UPLOAD
+                or record.stream_owner_replica_id != owner_replica_id
+            ):
+                return None
+            if record.multipart_cleanup_handle is not None:
+                return (
+                    record
+                    if record.multipart_cleanup_handle == cleanup_handle
+                    and expected_revision <= record.revision
+                    else None
+                )
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    multipart_cleanup_handle=cleanup_handle,
+                )
+            )
+
+    async def list_stale_stream_claims(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage:
+        """List expired owner leases without automatically settling their attempts."""
+        now = self._now()
+        return await self._list_records(
+            cursor=cursor,
+            limit=limit,
+            selected=lambda record: (
+                record.phase is not RuntimeTransferPhase.TERMINAL
+                and record.stream_lease_expires_at is not None
+                and record.stream_lease_expires_at <= now
+            ),
         )
 
     async def record_progress(
@@ -459,6 +765,11 @@ class InMemoryRuntimeTransferStateStore:
                     revision=record.revision + 1,
                     updated_at=now,
                     cleanup_status=status,
+                    multipart_cleanup_handle=(
+                        None
+                        if status is RuntimeTransferCleanupStatus.COMPLETE
+                        else record.multipart_cleanup_handle
+                    ),
                 )
             )
 
@@ -691,6 +1002,7 @@ class InMemoryRuntimeTransferStateStore:
                     updated_at=now,
                     actual_size=actual_size,
                     actual_sha256=actual_sha256,
+                    multipart_cleanup_handle=None,
                 )
             )
 
@@ -716,6 +1028,37 @@ class InMemoryRuntimeTransferStateStore:
             + admission.expected_size
             <= self.config.per_runtime_bytes
         )
+
+    async def _list_records(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        selected: Callable[[RuntimeTransferRecord], bool],
+    ) -> RuntimeTransferPage:
+        """Return one deterministic bounded page after applying expiry."""
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            if limit <= 0 or limit > self.config.list_page_size:
+                raise ValueError("invalid page limit")
+            keys = sorted(
+                key for key, record in self.records.items() if selected(record)
+            )
+            start = (
+                0
+                if cursor is None
+                else bisect_right(keys, _decode_memory_stale_cursor(cursor))
+            )
+            page_keys = keys[start : start + limit]
+            return RuntimeTransferPage(
+                records=tuple(self.records[key] for key in page_keys),
+                cursor=(
+                    _encode_memory_stale_cursor(page_keys[-1])
+                    if page_keys and start + len(page_keys) < len(keys)
+                    else None
+                ),
+            )
 
     def _expire(self, now: datetime) -> None:
         for key, original in list(self.records.items()):

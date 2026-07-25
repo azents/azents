@@ -20,6 +20,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
+    RuntimeTransferDispatchStatus,
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
@@ -34,7 +35,7 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.policy import phase_transition_allowed
 
 _DEFAULT_NAMESPACE = "azents:runtime:transfer"
-_RECORD_SCHEMA_VERSION = 1
+_RECORD_SCHEMA_VERSION = 2
 _MAX_SERIALIZED_RECORD_BYTES = 16 * 1024
 _LOCK_TTL_MILLISECONDS = 5_000
 _LOCK_ACQUIRE_TIMEOUT_SECONDS = 5.0
@@ -132,10 +133,16 @@ _RECORD_FIELDS = frozenset(
         "updated_at",
         "logical_expires_at",
         "accepted_runner_generation",
+        "dispatch_id",
+        "dispatch_status",
+        "dispatch_request_id",
         "object",
         "actual_size",
         "actual_sha256",
         "stream_claim_id",
+        "stream_owner_replica_id",
+        "stream_lease_expires_at",
+        "multipart_cleanup_handle",
         "progress",
         "cancellation_requested_at",
         "consumer_claim_id",
@@ -156,6 +163,7 @@ _ADMISSION_FIELDS = frozenset(
         "desired_generation",
         "operation_id",
         "session_id",
+        "agent_id",
         "runtime_path",
         "overwrite",
         "expected_size",
@@ -240,6 +248,18 @@ class _RedisTransferKeys:
     def consumer_lease_index(self) -> str:
         """Return the consumer-lease expiry index key."""
         return f"{self.namespace}:index:consumer-lease"
+
+    def stream_lease_index(self) -> str:
+        """Return the stream-owner lease expiry index key."""
+        return f"{self.namespace}:index:stream-lease"
+
+    def pending_dispatch_index(self) -> str:
+        """Return the live dispatch-repair index key."""
+        return f"{self.namespace}:index:dispatch-pending"
+
+    def generation_dispatch_index(self) -> str:
+        """Return the live generation-bound dispatch index key."""
+        return f"{self.namespace}:index:dispatch-generation"
 
     def active_index(self) -> str:
         """Return the bounded active-attempt index key."""
@@ -333,10 +353,18 @@ def _record_to_value(record: RuntimeTransferRecord) -> dict[str, object]:
         "updated_at": _datetime_to_value(record.updated_at),
         "logical_expires_at": _datetime_to_value(record.logical_expires_at),
         "accepted_runner_generation": record.accepted_runner_generation,
+        "dispatch_id": record.dispatch_id,
+        "dispatch_status": record.dispatch_status.value,
+        "dispatch_request_id": record.dispatch_request_id,
         "object": None if record.object is None else _object_to_value(record.object),
         "actual_size": record.actual_size,
         "actual_sha256": record.actual_sha256,
         "stream_claim_id": record.stream_claim_id,
+        "stream_owner_replica_id": record.stream_owner_replica_id,
+        "stream_lease_expires_at": _optional_datetime_to_value(
+            record.stream_lease_expires_at
+        ),
+        "multipart_cleanup_handle": record.multipart_cleanup_handle,
         "progress": None
         if record.progress is None
         else _progress_to_value(record.progress),
@@ -383,10 +411,30 @@ def _record_from_value(value: object) -> RuntimeTransferRecord:
             record["accepted_runner_generation"],
             "accepted_runner_generation",
         ),
+        dispatch_id=_optional_string(record["dispatch_id"], "dispatch_id"),
+        dispatch_status=RuntimeTransferDispatchStatus(
+            _require_string(record["dispatch_status"], "dispatch_status")
+        ),
+        dispatch_request_id=_optional_string(
+            record["dispatch_request_id"],
+            "dispatch_request_id",
+        ),
         object=_optional_object_from_value(record["object"]),
         actual_size=_optional_int(record["actual_size"], "actual_size"),
         actual_sha256=_optional_string(record["actual_sha256"], "actual_sha256"),
         stream_claim_id=_optional_string(record["stream_claim_id"], "stream_claim_id"),
+        stream_owner_replica_id=_optional_string(
+            record["stream_owner_replica_id"],
+            "stream_owner_replica_id",
+        ),
+        stream_lease_expires_at=_optional_datetime_from_value(
+            record["stream_lease_expires_at"],
+            "stream_lease_expires_at",
+        ),
+        multipart_cleanup_handle=_optional_string(
+            record["multipart_cleanup_handle"],
+            "multipart_cleanup_handle",
+        ),
         progress=_optional_progress_from_value(record["progress"]),
         cancellation_requested_at=_optional_datetime_from_value(
             record["cancellation_requested_at"],
@@ -432,6 +480,7 @@ def _admission_to_value(admission: RuntimeTransferAdmission) -> dict[str, object
         "desired_generation": admission.desired_generation,
         "operation_id": admission.operation_id,
         "session_id": admission.session_id,
+        "agent_id": admission.agent_id,
         "runtime_path": admission.runtime_path,
         "overwrite": admission.overwrite,
         "expected_size": admission.expected_size,
@@ -460,6 +509,7 @@ def _admission_from_value(value: object) -> RuntimeTransferAdmission:
         ),
         operation_id=_require_string(admission["operation_id"], "operation_id"),
         session_id=_optional_string(admission["session_id"], "session_id"),
+        agent_id=_optional_string(admission["agent_id"], "agent_id"),
         runtime_path=_require_string(admission["runtime_path"], "runtime_path"),
         overwrite=_require_bool(admission["overwrite"], "overwrite"),
         expected_size=_require_int(admission["expected_size"], "expected_size"),
@@ -673,10 +723,16 @@ class RedisRuntimeTransferStateStore:
                 updated_at=now,
                 logical_expires_at=logical_expiry(now, admission.source_expires_at),
                 accepted_runner_generation=None,
+                dispatch_id=None,
+                dispatch_status=RuntimeTransferDispatchStatus.NOT_BOUND,
+                dispatch_request_id=None,
                 object=None,
                 actual_size=None,
                 actual_sha256=None,
                 stream_claim_id=None,
+                stream_owner_replica_id=None,
+                stream_lease_expires_at=None,
+                multipart_cleanup_handle=None,
                 progress=None,
                 cancellation_requested_at=None,
                 consumer_claim_id=None,
@@ -764,19 +820,276 @@ class RedisRuntimeTransferStateStore:
         accepted_runner_generation: int,
         expected_revision: int,
         claim_id: str,
+        owner_replica_id: str,
     ) -> RuntimeTransferRecord | None:
         """Claim a READY attempt for one Runner stream."""
-        return await self._move(
-            transfer_id,
-            attempt_id=attempt_id,
-            expected_revision=expected_revision,
-            current=RuntimeTransferPhase.READY,
-            target=RuntimeTransferPhase.STREAMING,
-            runtime_id=runtime_id,
-            desired_generation=desired_generation,
-            object=None,
-            claim_id=claim_id,
-            accepted_runner_generation=accepted_runner_generation,
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries,
+                transfer_id,
+                attempt_id,
+                now,
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.READY,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+            ) or (
+                envelope is not None
+                and (
+                    envelope.record.dispatch_status
+                    not in {
+                        RuntimeTransferDispatchStatus.DELIVERABLE,
+                        RuntimeTransferDispatchStatus.ENQUEUED,
+                    }
+                    or envelope.record.accepted_runner_generation
+                    != accepted_runner_generation
+                    or not phase_transition_allowed(
+                        envelope.record.admission.direction,
+                        envelope.record.phase,
+                        RuntimeTransferPhase.STREAMING,
+                    )
+                )
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            record = dataclasses.replace(
+                envelope.record,
+                phase=RuntimeTransferPhase.STREAMING,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                dispatch_status=RuntimeTransferDispatchStatus.ENQUEUED,
+                stream_claim_id=claim_id,
+                stream_owner_replica_id=owner_replica_id,
+                stream_lease_expires_at=now + self.config.stream_lease,
+            )
+            entries[key] = dataclasses.replace(envelope, record=record)
+            await self._commit(token, entries, now)
+            return record
+
+    async def bind_dispatch(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        dispatch_id: str,
+        dispatch_request_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Bind one stable dispatch identity and accepted Runner generation."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            record = None if envelope is None else envelope.record
+            if (
+                key is None
+                or record is None
+                or envelope is None
+                or await self._current_key(transfer_id) != key
+                or record.admission.runtime_id != runtime_id
+                or record.admission.desired_generation != desired_generation
+                or envelope.admission_released
+                or record.lease_expires_at <= now
+                or record.logical_expires_at <= now
+                or record.cancellation_requested_at is not None
+                or record.phase is RuntimeTransferPhase.TERMINAL
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert envelope is not None
+            if record.dispatch_status is not RuntimeTransferDispatchStatus.NOT_BOUND:
+                await self._commit(token, entries, now)
+                return (
+                    record
+                    if expected_revision <= record.revision
+                    and record.dispatch_id == dispatch_id
+                    and record.dispatch_request_id == dispatch_request_id
+                    and record.accepted_runner_generation == accepted_runner_generation
+                    else None
+                )
+            if (
+                record.phase is not RuntimeTransferPhase.READY
+                or record.revision != expected_revision
+                or accepted_runner_generation <= 0
+            ):
+                await self._commit(token, entries, now)
+                return None
+            updated = dataclasses.replace(
+                record,
+                revision=record.revision + 1,
+                updated_at=now,
+                accepted_runner_generation=accepted_runner_generation,
+                dispatch_id=dispatch_id,
+                dispatch_status=RuntimeTransferDispatchStatus.BOUND,
+                dispatch_request_id=dispatch_request_id,
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
+
+    async def mark_dispatch_deliverable(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        dispatch_id: str,
+        dispatch_request_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Persist the authorization barrier before intent append."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            record = None if envelope is None else envelope.record
+            if (
+                key is None
+                or record is None
+                or await self._current_key(transfer_id) != key
+                or record.dispatch_id != dispatch_id
+                or record.dispatch_request_id != dispatch_request_id
+                or record.phase is RuntimeTransferPhase.TERMINAL
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert envelope is not None
+            if record.dispatch_status in {
+                RuntimeTransferDispatchStatus.DELIVERABLE,
+                RuntimeTransferDispatchStatus.ENQUEUED,
+            }:
+                await self._commit(token, entries, now)
+                return record if expected_revision <= record.revision else None
+            if (
+                record.dispatch_status is not RuntimeTransferDispatchStatus.BOUND
+                or record.revision != expected_revision
+                or record.phase is not RuntimeTransferPhase.READY
+                or envelope.admission_released
+                or record.cancellation_requested_at is not None
+                or record.lease_expires_at <= now
+                or record.logical_expires_at <= now
+            ):
+                await self._commit(token, entries, now)
+                return None
+            updated = dataclasses.replace(
+                record,
+                revision=record.revision + 1,
+                updated_at=now,
+                dispatch_status=RuntimeTransferDispatchStatus.DELIVERABLE,
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
+
+    async def mark_dispatch_enqueued(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        operation_id: str,
+        expected_revision: int,
+        dispatch_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Record a duplicate-safe successful logical intent append."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            record = None if envelope is None else envelope.record
+            if (
+                key is None
+                or record is None
+                or record.admission.operation_id != operation_id
+                or record.dispatch_id != dispatch_id
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert envelope is not None
+            if record.dispatch_status is RuntimeTransferDispatchStatus.ENQUEUED:
+                await self._commit(token, entries, now)
+                return record if expected_revision <= record.revision else None
+            if (
+                await self._current_key(transfer_id) != key
+                or record.dispatch_status
+                is not RuntimeTransferDispatchStatus.DELIVERABLE
+                or record.phase is not RuntimeTransferPhase.READY
+                or record.revision != expected_revision
+                or envelope.admission_released
+                or record.cancellation_requested_at is not None
+                or record.lease_expires_at <= now
+                or record.logical_expires_at <= now
+            ):
+                await self._commit(token, entries, now)
+                return None
+            updated = dataclasses.replace(
+                record,
+                revision=record.revision + 1,
+                updated_at=now,
+                dispatch_status=RuntimeTransferDispatchStatus.ENQUEUED,
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
+
+    async def list_pending_dispatches(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage:
+        """List live bound work that still needs delivery repair."""
+        return await self._list_index_records(
+            self.keys.pending_dispatch_index(),
+            cursor=cursor,
+            limit=limit,
+            selected=lambda record: (
+                record.dispatch_status
+                in {
+                    RuntimeTransferDispatchStatus.BOUND,
+                    RuntimeTransferDispatchStatus.DELIVERABLE,
+                }
+            ),
+        )
+
+    async def list_generation_dispatches(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage:
+        """List all live generation-bound dispatches for repair."""
+        return await self._list_index_records(
+            self.keys.generation_dispatch_index(),
+            cursor=cursor,
+            limit=limit,
+            selected=lambda record: (
+                record.dispatch_status is not RuntimeTransferDispatchStatus.NOT_BOUND
+            ),
+        )
+
+    async def list_stale_stream_claims(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage:
+        """List expired owner leases without automatically settling attempts."""
+        now = self._now()
+        return await self._list_stream_lease_records(
+            cursor=cursor,
+            limit=limit,
+            selected=lambda record: (
+                record.stream_lease_expires_at is not None
+                and record.stream_lease_expires_at <= now
+            ),
         )
 
     async def record_progress(
@@ -835,6 +1148,109 @@ class RedisRuntimeTransferStateStore:
             entries[key] = dataclasses.replace(envelope, record=record)
             await self._commit(token, entries, now)
             return record
+
+    async def renew_stream_lease(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Renew one owner-fenced short stream lease."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            ) or (
+                envelope is not None
+                and (
+                    envelope.record.stream_owner_replica_id != owner_replica_id
+                    or envelope.record.stream_lease_expires_at is None
+                    or envelope.record.stream_lease_expires_at <= now
+                )
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            updated = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                stream_lease_expires_at=now + self.config.stream_lease,
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
+
+    async def record_multipart_cleanup_handle(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+        cleanup_handle: str,
+    ) -> RuntimeTransferRecord | None:
+        """Persist bounded upload-abort evidence before the first multipart part."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            ) or (
+                envelope is not None
+                and (
+                    envelope.record.admission.direction
+                    is not RuntimeTransferDirection.UPLOAD
+                    or envelope.record.stream_owner_replica_id != owner_replica_id
+                )
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            if envelope.record.multipart_cleanup_handle is not None:
+                await self._commit(token, entries, now)
+                return (
+                    envelope.record
+                    if envelope.record.multipart_cleanup_handle == cleanup_handle
+                    and expected_revision <= envelope.record.revision
+                    else None
+                )
+            updated = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                multipart_cleanup_handle=cleanup_handle,
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
 
     async def request_cancellation(
         self, transfer_id: str, *, attempt_id: str, expected_revision: int
@@ -1147,6 +1563,11 @@ class RedisRuntimeTransferStateStore:
                 revision=envelope.record.revision + 1,
                 updated_at=now,
                 cleanup_status=status,
+                multipart_cleanup_handle=(
+                    None
+                    if status is RuntimeTransferCleanupStatus.COMPLETE
+                    else envelope.record.multipart_cleanup_handle
+                ),
             )
             entries[key] = dataclasses.replace(envelope, record=record)
             await self._commit(token, entries, now)
@@ -1525,6 +1946,7 @@ class RedisRuntimeTransferStateStore:
                 updated_at=now,
                 actual_size=actual_size,
                 actual_sha256=actual_sha256,
+                multipart_cleanup_handle=None,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
             await self._commit(token, entries, now)
@@ -1837,6 +2259,95 @@ class RedisRuntimeTransferStateStore:
             <= self.config.per_runtime_bytes
         )
 
+    async def _list_index_records(
+        self,
+        index: str,
+        *,
+        cursor: str | None,
+        limit: int,
+        selected: Callable[[RuntimeTransferRecord], bool],
+    ) -> RuntimeTransferPage:
+        """Return one deterministic page from a lexicographic state index."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            if limit <= 0 or limit > self.config.list_page_size:
+                await self._commit(token, entries, now)
+                raise ValueError("invalid page limit")
+            after = None if cursor is None else _decode_dispatch_cursor(cursor)
+            members = _decode_redis_texts(
+                await self.redis.zrangebylex(
+                    index,
+                    "-" if after is None else f"({after}",
+                    "+",
+                    start=0,
+                    num=limit + 1,
+                )
+            )
+            page_keys: list[str] = []
+            for member in members:
+                envelope = await self._load_entry(entries, member, now)
+                if (
+                    envelope is not None
+                    and envelope.record.phase is not RuntimeTransferPhase.TERMINAL
+                    and selected(envelope.record)
+                ):
+                    page_keys.append(member)
+                if len(page_keys) == limit:
+                    break
+            await self._commit(token, entries, now)
+            return RuntimeTransferPage(
+                records=tuple(entries[key].record for key in page_keys),
+                cursor=(
+                    _encode_dispatch_cursor(page_keys[-1])
+                    if page_keys and len(members) == limit + 1
+                    else None
+                ),
+            )
+
+    async def _list_stream_lease_records(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        selected: Callable[[RuntimeTransferRecord], bool],
+    ) -> RuntimeTransferPage:
+        """Return one deterministic page from the bounded lease-score index."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            if limit <= 0 or limit > self.config.list_page_size:
+                await self._commit(token, entries, now)
+                raise ValueError("invalid page limit")
+            after = None if cursor is None else _decode_dispatch_cursor(cursor)
+            members = sorted(
+                _decode_redis_texts(
+                    await self.redis.zrange(
+                        self.keys.stream_lease_index(),
+                        0,
+                        self.config.deployment_attempts,
+                    )
+                )
+            )
+            page_keys: list[str] = []
+            for member in members:
+                if after is not None and member <= after:
+                    continue
+                envelope = await self._load_entry(entries, member, now)
+                if envelope is not None and selected(envelope.record):
+                    page_keys.append(member)
+                if len(page_keys) == limit:
+                    break
+            await self._commit(token, entries, now)
+            return RuntimeTransferPage(
+                records=tuple(entries[key].record for key in page_keys),
+                cursor=(
+                    _encode_dispatch_cursor(page_keys[-1])
+                    if page_keys and any(member > page_keys[-1] for member in members)
+                    else None
+                ),
+            )
+
     async def _commit(
         self,
         token: str,
@@ -1950,6 +2461,9 @@ class RedisRuntimeTransferStateStore:
             pipeline.zrem(self.keys.stale_index(), key)
             pipeline.zrem(self.keys.admission_lease_index(), key)
             pipeline.zrem(self.keys.consumer_lease_index(), key)
+            pipeline.zrem(self.keys.stream_lease_index(), key)
+            pipeline.zrem(self.keys.pending_dispatch_index(), key)
+            pipeline.zrem(self.keys.generation_dispatch_index(), key)
         for bucket, members in terminal_bucket_removals.items():
             if members:
                 pipeline.zrem(bucket, *members)
@@ -2039,6 +2553,31 @@ class RedisRuntimeTransferStateStore:
             )
         else:
             pipeline.zrem(self.keys.consumer_lease_index(), key)
+        if (
+            active
+            and record.phase is RuntimeTransferPhase.STREAMING
+            and record.stream_lease_expires_at is not None
+        ):
+            pipeline.zadd(
+                self.keys.stream_lease_index(),
+                {key: record.stream_lease_expires_at.timestamp()},
+            )
+        else:
+            pipeline.zrem(self.keys.stream_lease_index(), key)
+        if active and record.dispatch_status in {
+            RuntimeTransferDispatchStatus.BOUND,
+            RuntimeTransferDispatchStatus.DELIVERABLE,
+        }:
+            pipeline.zadd(self.keys.pending_dispatch_index(), {key: 0.0})
+        else:
+            pipeline.zrem(self.keys.pending_dispatch_index(), key)
+        if (
+            record.phase is not RuntimeTransferPhase.TERMINAL
+            and record.dispatch_status is not RuntimeTransferDispatchStatus.NOT_BOUND
+        ):
+            pipeline.zadd(self.keys.generation_dispatch_index(), {key: 0.0})
+        else:
+            pipeline.zrem(self.keys.generation_dispatch_index(), key)
 
 
 def _capacity_active(envelope: _RedisTransferRecordEnvelope) -> bool:
@@ -2176,3 +2715,20 @@ def _decode_stale_cursor(cursor: str) -> _RedisStaleCursor:
     ):
         raise ValueError("invalid stale page cursor")
     return _RedisStaleCursor(kind, member, bucket_epoch)
+
+
+def _encode_dispatch_cursor(record_key: str) -> str:
+    """Encode one opaque bounded dispatch-page cursor."""
+    return base64.urlsafe_b64encode(record_key.encode("utf-8")).decode("ascii")
+
+
+def _decode_dispatch_cursor(cursor: str) -> str:
+    """Decode one opaque bounded dispatch-page cursor."""
+    try:
+        return base64.b64decode(
+            cursor.encode("ascii"),
+            altchars=b"-_",
+            validate=True,
+        ).decode("utf-8")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("invalid dispatch page cursor") from exc

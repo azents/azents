@@ -10,6 +10,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCleanupStatus,
     RuntimeTransferDirection,
+    RuntimeTransferDispatchStatus,
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
@@ -41,6 +42,7 @@ def _record() -> RuntimeTransferRecord:
         desired_generation=3,
         operation_id="operation",
         session_id="session",
+        agent_id="agent",
         runtime_path="/workspace/file",
         overwrite=True,
         expected_size=3,
@@ -61,10 +63,16 @@ def _record() -> RuntimeTransferRecord:
         updated_at=_NOW + timedelta(minutes=2),
         logical_expires_at=_NOW + timedelta(minutes=30),
         accepted_runner_generation=4,
+        dispatch_id="dispatch",
+        dispatch_status=RuntimeTransferDispatchStatus.ENQUEUED,
+        dispatch_request_id="request",
         object=RuntimeTransferObject("object-key", 3, _DIGEST),
         actual_size=3,
         actual_sha256=_DIGEST,
         stream_claim_id="stream",
+        stream_owner_replica_id="replica",
+        stream_lease_expires_at=_NOW + timedelta(seconds=30),
+        multipart_cleanup_handle="cleanup",
         progress=RuntimeTransferProgress(2, _NOW + timedelta(seconds=30)),
         cancellation_requested_at=_NOW + timedelta(seconds=10),
         consumer_claim_id="consumer",
@@ -201,7 +209,7 @@ def test_record_codec_rejects_schema_and_domain_failures() -> None:
         _decode_record_envelope(json.dumps(missing).encode())
 
     wrong_version = _json_payload(record)
-    wrong_version["version"] = 2
+    wrong_version["version"] = 3
     with pytest.raises(ValueError, match="version"):
         _decode_record_envelope(json.dumps(wrong_version).encode())
 

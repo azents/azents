@@ -115,6 +115,7 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_transfer_deployment_bytes: int = 32 * 1024 * 1024
     runtime_control_transfer_admission_lease_seconds: float = 300.0
     runtime_control_transfer_consumer_lease_seconds: float = 60.0
+    runtime_control_transfer_stream_lease_seconds: float = 30.0
     runtime_control_transfer_terminal_ttl_seconds: float = 300.0
     runtime_control_transfer_list_page_size: int = 100
     runtime_control_allow_insecure: bool
