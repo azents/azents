@@ -9,6 +9,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
+    RuntimeTransferDirection,
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
@@ -147,6 +148,10 @@ class InMemoryRuntimeTransferStateStore:
         transfer_id: str,
         *,
         attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
         expected_revision: int,
         bytes_transferred: int,
     ) -> RuntimeTransferRecord | None:
@@ -158,6 +163,10 @@ class InMemoryRuntimeTransferStateStore:
                 expected_revision,
                 RuntimeTransferPhase.STREAMING,
                 now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
             )
             if (
                 record is None
@@ -200,7 +209,15 @@ class InMemoryRuntimeTransferStateStore:
             )
 
     async def begin_verification(
-        self, transfer_id: str, *, attempt_id: str, expected_revision: int
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        expected_revision: int,
     ) -> RuntimeTransferRecord | None:
         return await self._move(
             transfer_id,
@@ -208,6 +225,10 @@ class InMemoryRuntimeTransferStateStore:
             expected_revision,
             RuntimeTransferPhase.STREAMING,
             RuntimeTransferPhase.VERIFYING,
+            runtime_id=runtime_id,
+            generation=desired_generation,
+            required_runner_generation=accepted_runner_generation,
+            required_claim_id=claim_id,
         )
 
     async def publish_available(
@@ -215,6 +236,10 @@ class InMemoryRuntimeTransferStateStore:
         transfer_id: str,
         *,
         attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
         expected_revision: int,
         actual_size: int,
         actual_sha256: str,
@@ -226,6 +251,10 @@ class InMemoryRuntimeTransferStateStore:
             RuntimeTransferPhase.AVAILABLE,
             actual_size,
             actual_sha256,
+            runtime_id,
+            desired_generation,
+            accepted_runner_generation,
+            claim_id,
         )
 
     async def mark_committed(
@@ -233,6 +262,10 @@ class InMemoryRuntimeTransferStateStore:
         transfer_id: str,
         *,
         attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
         expected_revision: int,
         actual_size: int,
         actual_sha256: str,
@@ -244,6 +277,10 @@ class InMemoryRuntimeTransferStateStore:
             RuntimeTransferPhase.COMMITTED,
             actual_size,
             actual_sha256,
+            runtime_id,
+            desired_generation,
+            accepted_runner_generation,
+            claim_id,
         )
 
     async def claim_consumer(
@@ -301,6 +338,7 @@ class InMemoryRuntimeTransferStateStore:
                     revision=record.revision + 1,
                     updated_at=now,
                     consumer_acknowledged_at=now,
+                    consumer_lease_expires_at=None,
                 )
             )
 
@@ -345,6 +383,7 @@ class InMemoryRuntimeTransferStateStore:
     ) -> RuntimeTransferRecord | None:
         now = self._now()
         async with self.lock:
+            self._expire(now)
             record = self._exact(transfer_id, attempt_id)
             if record is None or record.revision != expected_revision:
                 return None
@@ -357,6 +396,21 @@ class InMemoryRuntimeTransferStateStore:
             if (
                 record.cancellation_requested_at is not None
                 and outcome is RuntimeTransferOutcome.SUCCEEDED
+            ):
+                return None
+            if outcome is RuntimeTransferOutcome.SUCCEEDED and (
+                self.current_attempts.get(transfer_id) != attempt_id
+                or (transfer_id, attempt_id) in self.released
+                or record.lease_expires_at <= now
+                or record.logical_expires_at <= now
+                or (
+                    record.admission.direction is RuntimeTransferDirection.DOWNLOAD
+                    and record.phase is not RuntimeTransferPhase.COMMITTED
+                )
+                or (
+                    record.admission.direction is RuntimeTransferDirection.UPLOAD
+                    and record.phase is not RuntimeTransferPhase.CONSUMED
+                )
             ):
                 return None
             return self._put(
@@ -474,6 +528,11 @@ class InMemoryRuntimeTransferStateStore:
         revision: int,
         phase: RuntimeTransferPhase,
         now: datetime,
+        *,
+        runtime_id: str | None = None,
+        desired_generation: int | None = None,
+        accepted_runner_generation: int | None = None,
+        claim_id: str | None = None,
     ) -> RuntimeTransferRecord | None:
         self._expire(now)
         record = self._exact(transfer_id, attempt_id)
@@ -485,6 +544,17 @@ class InMemoryRuntimeTransferStateStore:
             or (transfer_id, attempt_id) in self.released
             or record.lease_expires_at <= now
             or record.logical_expires_at <= now
+            or record.cancellation_requested_at is not None
+            or (runtime_id is not None and record.admission.runtime_id != runtime_id)
+            or (
+                desired_generation is not None
+                and record.admission.desired_generation != desired_generation
+            )
+            or (
+                accepted_runner_generation is not None
+                and record.accepted_runner_generation != accepted_runner_generation
+            )
+            or (claim_id is not None and record.stream_claim_id != claim_id)
         ):
             return None
         return record
@@ -502,18 +572,34 @@ class InMemoryRuntimeTransferStateStore:
         object: RuntimeTransferObject | None = None,
         claim_id: str | None = None,
         accepted_runner_generation: int | None = None,
+        required_runner_generation: int | None = None,
+        required_claim_id: str | None = None,
     ) -> RuntimeTransferRecord | None:
         now = self._now()
         async with self.lock:
-            record = self._active(transfer_id, attempt_id, revision, current, now)
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                revision,
+                current,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=generation,
+                accepted_runner_generation=required_runner_generation,
+                claim_id=required_claim_id,
+            )
             if (
                 record is None
                 or (
-                    runtime_id is not None and record.admission.runtime_id != runtime_id
-                )
-                or (
-                    generation is not None
-                    and record.admission.desired_generation != generation
+                    target is RuntimeTransferPhase.READY
+                    and (
+                        object is None
+                        or object.size != record.admission.expected_size
+                        or (
+                            record.admission.expected_sha256 is not None
+                            and object.sha256 != record.admission.expected_sha256
+                        )
+                    )
                 )
                 or not phase_transition_allowed(
                     record.admission.direction, current, target
@@ -544,15 +630,31 @@ class InMemoryRuntimeTransferStateStore:
         target: RuntimeTransferPhase,
         actual_size: int,
         actual_sha256: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
     ) -> RuntimeTransferRecord | None:
         now = self._now()
         async with self.lock:
             record = self._active(
-                transfer_id, attempt_id, revision, RuntimeTransferPhase.VERIFYING, now
+                transfer_id,
+                attempt_id,
+                revision,
+                RuntimeTransferPhase.VERIFYING,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
             )
             if (
                 record is None
-                or record.cancellation_requested_at is not None
+                or actual_size != record.admission.expected_size
+                or (
+                    record.admission.expected_sha256 is not None
+                    and actual_sha256 != record.admission.expected_sha256
+                )
                 or not phase_transition_allowed(
                     record.admission.direction, record.phase, target
                 )
@@ -593,12 +695,23 @@ class InMemoryRuntimeTransferStateStore:
         )
 
     def _expire(self, now: datetime) -> None:
-        for key, record in list(self.records.items()):
+        for key, original in list(self.records.items()):
+            record = original
+            if (
+                record.phase is RuntimeTransferPhase.TERMINAL
+                and record.terminal_expires_at is not None
+                and record.terminal_expires_at <= now
+            ):
+                del self.records[key]
+                self.released.discard(key)
+                if self.current_attempts.get(key[0]) == key[1]:
+                    self.current_attempts.pop(key[0])
+                continue
             if (
                 record.phase is not RuntimeTransferPhase.TERMINAL
                 and record.logical_expires_at <= now
             ):
-                self.records[key] = dataclasses.replace(
+                record = dataclasses.replace(
                     record,
                     phase=RuntimeTransferPhase.TERMINAL,
                     revision=record.revision + 1,
@@ -607,12 +720,14 @@ class InMemoryRuntimeTransferStateStore:
                     failure=RuntimeTransferFailure.EXPIRED,
                     terminal_expires_at=now + self.config.terminal_ttl,
                 )
+                self.records[key] = record
                 self.released.add(key)
-            elif (
-                record.consumer_lease_expires_at is not None
+            if (
+                record.phase is RuntimeTransferPhase.CONSUMING
+                and record.consumer_lease_expires_at is not None
                 and record.consumer_lease_expires_at <= now
             ):
-                self.records[key] = dataclasses.replace(
+                record = dataclasses.replace(
                     record,
                     phase=RuntimeTransferPhase.AVAILABLE,
                     revision=record.revision + 1,
@@ -620,7 +735,8 @@ class InMemoryRuntimeTransferStateStore:
                     consumer_claim_id=None,
                     consumer_lease_expires_at=None,
                 )
-            elif record.lease_expires_at <= now:
+                self.records[key] = record
+            if record.lease_expires_at <= now:
                 self.released.add(key)
 
     def _put(self, record: RuntimeTransferRecord) -> RuntimeTransferRecord:

@@ -65,6 +65,8 @@ class _RedisTransferPipeline(Protocol):
 
     def set(self, name: str, value: str | bytes) -> object: ...
 
+    def pexpireat(self, name: str, when: int) -> object: ...
+
     def delete(self, *names: str) -> object: ...
 
     def zadd(self, name: str, mapping: dict[str, float]) -> object: ...
@@ -91,6 +93,8 @@ class _RedisTransferClient(Protocol):
     async def mget(self, keys: list[str]) -> list[object]: ...
 
     async def zrange(self, name: str, start: int, end: int) -> list[object]: ...
+
+    async def zrank(self, name: str, value: str) -> int | None: ...
 
     async def zrangebyscore(
         self,
@@ -684,9 +688,21 @@ class RedisRuntimeTransferStateStore:
         now = self._now()
         async with self._locked() as token:
             entries = await self._load_reclaimed_entries(now)
-            current = await self._load_current_entry(entries, transfer_id, now)
+            current_key = await self._current_key(transfer_id)
+            if current_key is None:
+                await self._commit(token, entries)
+                return None
+            envelope = await self._load_entry(entries, current_key, now)
+            if envelope is None:
+                await self._commit(
+                    token,
+                    entries,
+                    pointer_deletes={self.keys.current(transfer_id)},
+                    record_deletes={current_key},
+                )
+                return None
             await self._commit(token, entries)
-            return None if current is None else current[1].record
+            return envelope.record
 
     async def mark_ready(
         self,
@@ -742,6 +758,10 @@ class RedisRuntimeTransferStateStore:
         transfer_id: str,
         *,
         attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
         expected_revision: int,
         bytes_transferred: int,
     ) -> RuntimeTransferRecord | None:
@@ -762,6 +782,10 @@ class RedisRuntimeTransferStateStore:
                 expected_revision,
                 RuntimeTransferPhase.STREAMING,
                 now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
             ) or (
                 envelope is not None
                 and (
@@ -820,7 +844,15 @@ class RedisRuntimeTransferStateStore:
             return record
 
     async def begin_verification(
-        self, transfer_id: str, *, attempt_id: str, expected_revision: int
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        expected_revision: int,
     ) -> RuntimeTransferRecord | None:
         """Move a STREAMING attempt to VERIFYING."""
         return await self._move(
@@ -834,6 +866,10 @@ class RedisRuntimeTransferStateStore:
             object=None,
             claim_id=None,
             accepted_runner_generation=None,
+            required_runtime_id=runtime_id,
+            required_desired_generation=desired_generation,
+            required_runner_generation=accepted_runner_generation,
+            required_claim_id=claim_id,
         )
 
     async def publish_available(
@@ -841,6 +877,10 @@ class RedisRuntimeTransferStateStore:
         transfer_id: str,
         *,
         attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
         expected_revision: int,
         actual_size: int,
         actual_sha256: str,
@@ -853,6 +893,10 @@ class RedisRuntimeTransferStateStore:
             target=RuntimeTransferPhase.AVAILABLE,
             actual_size=actual_size,
             actual_sha256=actual_sha256,
+            runtime_id=runtime_id,
+            desired_generation=desired_generation,
+            accepted_runner_generation=accepted_runner_generation,
+            claim_id=claim_id,
         )
 
     async def mark_committed(
@@ -860,6 +904,10 @@ class RedisRuntimeTransferStateStore:
         transfer_id: str,
         *,
         attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
         expected_revision: int,
         actual_size: int,
         actual_sha256: str,
@@ -872,6 +920,10 @@ class RedisRuntimeTransferStateStore:
             target=RuntimeTransferPhase.COMMITTED,
             actual_size=actual_size,
             actual_sha256=actual_sha256,
+            runtime_id=runtime_id,
+            desired_generation=desired_generation,
+            accepted_runner_generation=accepted_runner_generation,
+            claim_id=claim_id,
         )
 
     async def claim_consumer(
@@ -989,6 +1041,23 @@ class RedisRuntimeTransferStateStore:
             ):
                 await self._commit(token, entries)
                 return None
+            if outcome is RuntimeTransferOutcome.SUCCEEDED and (
+                key is None
+                or await self._current_key(transfer_id) != key
+                or envelope.admission_released
+                or record.lease_expires_at <= now
+                or record.logical_expires_at <= now
+                or (
+                    record.admission.direction is RuntimeTransferDirection.DOWNLOAD
+                    and record.phase is not RuntimeTransferPhase.COMMITTED
+                )
+                or (
+                    record.admission.direction is RuntimeTransferDirection.UPLOAD
+                    and record.phase is not RuntimeTransferPhase.CONSUMED
+                )
+            ):
+                await self._commit(token, entries)
+                return None
             assert key is not None
             settled = dataclasses.replace(
                 record,
@@ -1072,7 +1141,13 @@ class RedisRuntimeTransferStateStore:
             await self._commit(token, entries)
             if limit <= 0 or limit > self.config.list_page_size:
                 raise ValueError("invalid page limit")
-            start = _cursor_offset(cursor)
+            start = 0
+            if cursor is not None:
+                cursor_member = _decode_stale_cursor(cursor)
+                rank = await self.redis.zrank(self.keys.stale_index(), cursor_member)
+                if rank is None:
+                    raise ValueError("stale page cursor is no longer available")
+                start = rank
             members = _decode_redis_texts(
                 await self.redis.zrange(
                     self.keys.stale_index(),
@@ -1082,16 +1157,30 @@ class RedisRuntimeTransferStateStore:
             )
             page_members = members[:limit]
             records: list[RuntimeTransferRecord] = []
+            deleted: set[str] = set()
+            pointer_deletes: set[str] = set()
             for member in page_members:
                 envelope = await self._load_record(member)
-                if envelope is None:
-                    raise RuntimeError(
-                        "stale transfer index references a missing record"
-                    )
+                if envelope is None or _terminal_expired(envelope.record, now):
+                    deleted.add(member)
+                    transfer_id = self._record_transfer_id(member)
+                    if await self._current_key(transfer_id) == member:
+                        pointer_deletes.add(self.keys.current(transfer_id))
+                    continue
                 records.append(envelope.record)
+            await self._commit(
+                token,
+                entries,
+                pointer_deletes=pointer_deletes,
+                record_deletes=deleted,
+            )
             return RuntimeTransferPage(
                 records=tuple(records),
-                cursor=str(start + limit) if len(members) > limit else None,
+                cursor=(
+                    _encode_stale_cursor(members[limit])
+                    if len(members) > limit
+                    else None
+                ),
             )
 
     async def purge_terminal(self, *, limit: int) -> int:
@@ -1115,9 +1204,11 @@ class RedisRuntimeTransferStateStore:
             pointer_deletes: set[str] = set()
             for member in members:
                 envelope = await self._load_record(member)
+                if envelope is None:
+                    deleted.add(member)
+                    continue
                 if (
-                    envelope is None
-                    or envelope.record.terminal_expires_at is None
+                    envelope.record.terminal_expires_at is None
                     or envelope.record.terminal_expires_at > now
                 ):
                     continue
@@ -1151,6 +1242,10 @@ class RedisRuntimeTransferStateStore:
         object: RuntimeTransferObject | None,
         claim_id: str | None,
         accepted_runner_generation: int | None,
+        required_runtime_id: str | None = None,
+        required_desired_generation: int | None = None,
+        required_runner_generation: int | None = None,
+        required_claim_id: str | None = None,
     ) -> RuntimeTransferRecord | None:
         """Apply one runtime-fenced phase transition."""
         now = self._now()
@@ -1170,6 +1265,10 @@ class RedisRuntimeTransferStateStore:
                     expected_revision,
                     current,
                     now,
+                    runtime_id=required_runtime_id,
+                    desired_generation=required_desired_generation,
+                    accepted_runner_generation=required_runner_generation,
+                    claim_id=required_claim_id,
                 )
                 or (
                     envelope is not None
@@ -1184,6 +1283,19 @@ class RedisRuntimeTransferStateStore:
                         desired_generation is not None
                         and envelope.record.admission.desired_generation
                         != desired_generation
+                    )
+                )
+                or (
+                    envelope is not None
+                    and target is RuntimeTransferPhase.READY
+                    and (
+                        object is None
+                        or object.size != envelope.record.admission.expected_size
+                        or (
+                            envelope.record.admission.expected_sha256 is not None
+                            and object.sha256
+                            != envelope.record.admission.expected_sha256
+                        )
                     )
                 )
                 or (
@@ -1224,6 +1336,10 @@ class RedisRuntimeTransferStateStore:
         target: RuntimeTransferPhase,
         actual_size: int,
         actual_sha256: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
     ) -> RuntimeTransferRecord | None:
         """Complete one VERIFYING attempt on its direction-valid path."""
         now = self._now()
@@ -1242,10 +1358,18 @@ class RedisRuntimeTransferStateStore:
                 expected_revision,
                 RuntimeTransferPhase.VERIFYING,
                 now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
             ) or (
                 envelope is not None
                 and (
-                    envelope.record.cancellation_requested_at is not None
+                    actual_size != envelope.record.admission.expected_size
+                    or (
+                        envelope.record.admission.expected_sha256 is not None
+                        and actual_sha256 != envelope.record.admission.expected_sha256
+                    )
                     or not phase_transition_allowed(
                         envelope.record.admission.direction,
                         envelope.record.phase,
@@ -1309,9 +1433,7 @@ class RedisRuntimeTransferStateStore:
                 consumer_claim_id=(
                     envelope.record.consumer_claim_id if acknowledged else None
                 ),
-                consumer_lease_expires_at=(
-                    envelope.record.consumer_lease_expires_at if acknowledged else None
-                ),
+                consumer_lease_expires_at=None,
                 consumer_acknowledged_at=now if acknowledged else None,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
@@ -1416,9 +1538,7 @@ class RedisRuntimeTransferStateStore:
             return None
         envelope = await self._load_entry(entries, key, now)
         if envelope is None:
-            raise RuntimeError(
-                "Runtime transfer current pointer references a missing record"
-            )
+            return None
         return key, envelope
 
     async def _current_key(self, transfer_id: str) -> str | None:
@@ -1446,9 +1566,21 @@ class RedisRuntimeTransferStateStore:
         envelope = await self._load_record(key)
         if envelope is None:
             return None
+        if _terminal_expired(envelope.record, now):
+            return None
         reclaimed = self._reclaim(envelope, now)
         entries[key] = reclaimed
         return reclaimed
+
+    def _record_transfer_id(self, key: str) -> str:
+        """Decode the transfer identifier from one namespaced record key."""
+        prefix = f"{self.keys.namespace}:record:"
+        if not key.startswith(prefix):
+            raise RuntimeError("Runtime transfer record key is outside its namespace")
+        components = key[len(prefix) :].split(":")
+        if len(components) != 2:
+            raise RuntimeError("Runtime transfer record key is malformed")
+        return _decode_key_component(components[0])
 
     async def _load_record(self, key: str) -> _RedisTransferRecordEnvelope | None:
         """Load one exact bounded record envelope."""
@@ -1460,43 +1592,43 @@ class RedisRuntimeTransferStateStore:
         envelope: _RedisTransferRecordEnvelope,
         now: datetime,
     ) -> _RedisTransferRecordEnvelope:
-        """Apply logical, consumer, then admission-lease expiry in memory."""
+        """Apply all due logical, consumer, and admission lease expiry."""
         record = envelope.record
+        admission_released = envelope.admission_released
         if (
             record.phase is not RuntimeTransferPhase.TERMINAL
             and record.logical_expires_at <= now
         ):
-            return dataclasses.replace(
-                envelope,
-                record=dataclasses.replace(
-                    record,
-                    phase=RuntimeTransferPhase.TERMINAL,
-                    revision=record.revision + 1,
-                    updated_at=now,
-                    terminal_outcome=RuntimeTransferOutcome.EXPIRED,
-                    failure=RuntimeTransferFailure.EXPIRED,
-                    terminal_expires_at=now + self.config.terminal_ttl,
-                ),
-                admission_released=True,
+            record = dataclasses.replace(
+                record,
+                phase=RuntimeTransferPhase.TERMINAL,
+                revision=record.revision + 1,
+                updated_at=now,
+                terminal_outcome=RuntimeTransferOutcome.EXPIRED,
+                failure=RuntimeTransferFailure.EXPIRED,
+                terminal_expires_at=now + self.config.terminal_ttl,
             )
+            admission_released = True
         if (
-            record.consumer_lease_expires_at is not None
+            record.phase is RuntimeTransferPhase.CONSUMING
+            and record.consumer_lease_expires_at is not None
             and record.consumer_lease_expires_at <= now
         ):
-            return dataclasses.replace(
-                envelope,
-                record=dataclasses.replace(
-                    record,
-                    phase=RuntimeTransferPhase.AVAILABLE,
-                    revision=record.revision + 1,
-                    updated_at=now,
-                    consumer_claim_id=None,
-                    consumer_lease_expires_at=None,
-                ),
+            record = dataclasses.replace(
+                record,
+                phase=RuntimeTransferPhase.AVAILABLE,
+                revision=record.revision + 1,
+                updated_at=now,
+                consumer_claim_id=None,
+                consumer_lease_expires_at=None,
             )
         if record.lease_expires_at <= now:
-            return dataclasses.replace(envelope, admission_released=True)
-        return envelope
+            admission_released = True
+        return dataclasses.replace(
+            envelope,
+            record=record,
+            admission_released=admission_released,
+        )
 
     async def _active_matches(
         self,
@@ -1506,6 +1638,11 @@ class RedisRuntimeTransferStateStore:
         expected_revision: int,
         phase: RuntimeTransferPhase,
         now: datetime,
+        *,
+        runtime_id: str | None = None,
+        desired_generation: int | None = None,
+        accepted_runner_generation: int | None = None,
+        claim_id: str | None = None,
     ) -> bool:
         """Return whether one exact current attempt remains active and fenced."""
         if key is None or envelope is None:
@@ -1519,6 +1656,20 @@ class RedisRuntimeTransferStateStore:
             and envelope.record.phase is phase
             and envelope.record.lease_expires_at > now
             and envelope.record.logical_expires_at > now
+            and envelope.record.cancellation_requested_at is None
+            and (
+                runtime_id is None or envelope.record.admission.runtime_id == runtime_id
+            )
+            and (
+                desired_generation is None
+                or envelope.record.admission.desired_generation == desired_generation
+            )
+            and (
+                accepted_runner_generation is None
+                or envelope.record.accepted_runner_generation
+                == accepted_runner_generation
+            )
+            and (claim_id is None or envelope.record.stream_claim_id == claim_id)
         )
 
     def _has_capacity(
@@ -1622,6 +1773,11 @@ class RedisRuntimeTransferStateStore:
         """Queue one owner-fenced bounded state rewrite."""
         for key, envelope in entries.items():
             pipeline.set(key, _encode_record_envelope(envelope))
+            if envelope.record.terminal_expires_at is not None:
+                pipeline.pexpireat(
+                    key,
+                    int(envelope.record.terminal_expires_at.timestamp() * 1000),
+                )
             self._queue_indexes(pipeline, key, envelope, key in active)
         for key in record_deletes:
             pipeline.delete(key)
@@ -1684,7 +1840,7 @@ class RedisRuntimeTransferStateStore:
             or envelope.admission_released
             or record.cleanup_status is not RuntimeTransferCleanupStatus.NOT_REQUIRED
         ):
-            pipeline.zadd(self.keys.stale_index(), {key: record.updated_at.timestamp()})
+            pipeline.zadd(self.keys.stale_index(), {key: record.created_at.timestamp()})
         else:
             pipeline.zrem(self.keys.stale_index(), key)
         if (
@@ -1718,6 +1874,15 @@ def _capacity_active(envelope: _RedisTransferRecordEnvelope) -> bool:
     )
 
 
+def _terminal_expired(record: RuntimeTransferRecord, now: datetime) -> bool:
+    """Return whether content-free terminal metadata reached its expiry."""
+    return (
+        record.phase is RuntimeTransferPhase.TERMINAL
+        and record.terminal_expires_at is not None
+        and record.terminal_expires_at <= now
+    )
+
+
 def _decode_redis_text(value: object) -> str:
     """Decode one Redis binary or decoded text response."""
     if isinstance(value, str):
@@ -1725,6 +1890,15 @@ def _decode_redis_text(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8")
     raise RuntimeError("Redis returned an unexpected text response type")
+
+
+def _decode_key_component(value: str) -> str:
+    """Decode one URL-safe base64 Redis key component."""
+    padding = "=" * (-len(value) % 4)
+    try:
+        return base64.urlsafe_b64decode(f"{value}{padding}").decode("utf-8")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeError("Runtime transfer record key is malformed") from exc
 
 
 def _decode_redis_texts(values: object) -> list[str]:
@@ -1750,14 +1924,16 @@ def _redis_integer(value: object, name: str) -> int:
     return value
 
 
-def _cursor_offset(cursor: str | None) -> int:
-    """Decode one non-negative stale-page offset."""
-    if cursor is None:
-        return 0
+def _encode_stale_cursor(member: str) -> str:
+    """Encode one opaque stable stale-page member cursor."""
+    return base64.urlsafe_b64encode(member.encode("utf-8")).decode("ascii")
+
+
+def _decode_stale_cursor(cursor: str) -> str:
+    """Decode one opaque stable stale-page member cursor."""
     try:
-        offset = int(cursor)
-    except ValueError as exc:
+        return base64.b64decode(
+            cursor.encode("ascii"), altchars=b"-_", validate=True
+        ).decode("utf-8")
+    except (UnicodeDecodeError, ValueError) as exc:
         raise ValueError("invalid stale page cursor") from exc
-    if offset < 0:
-        raise ValueError("invalid stale page cursor")
-    return offset

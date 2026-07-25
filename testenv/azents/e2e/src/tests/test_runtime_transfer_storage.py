@@ -164,6 +164,13 @@ async def test_rustfs_multipart_upload_copy_abort_zero_byte_and_cleanup(
             expected_sha256=digest,
         )
         assert verified.metadata.content_length == len(body)
+        uploaded_hasher = hashlib.sha256()
+        async with service.iter_chunks(
+            upload_destination, maximum_chunk_size=1024 * 1024
+        ) as chunks:
+            async for chunk in chunks:
+                uploaded_hasher.update(chunk)
+        assert uploaded_hasher.hexdigest() == digest
 
         copied = await service.copy_immutable(
             source=upload_destination,
@@ -174,6 +181,13 @@ async def test_rustfs_multipart_upload_copy_abort_zero_byte_and_cleanup(
             multipart_part_size=5 * 1024 * 1024,
         )
         assert copied.sha256 == digest
+        copied_hasher = hashlib.sha256()
+        async with service.iter_chunks(
+            copy_destination, maximum_chunk_size=1024 * 1024
+        ) as chunks:
+            async for chunk in chunks:
+                copied_hasher.update(chunk)
+        assert copied_hasher.hexdigest() == digest
 
         aborted = await service.create_multipart_upload(
             destination=abort_destination,
@@ -196,13 +210,21 @@ async def test_rustfs_multipart_upload_copy_abort_zero_byte_and_cleanup(
         cleanup_prefix = _key("cleanup/")
         for index in range(3):
             await service.upload(s3_bucket_name, f"{cleanup_prefix}{index}", b"x")
-        cleanup = await service.delete_prefix_bounded(
-            bucket=s3_bucket_name,
-            prefix=cleanup_prefix,
-            page_size=2,
-        )
-        assert len(cleanup.deleted) == 3
-        assert not cleanup.failed
+        deleted = 0
+        continuation_token: str | None = None
+        while True:
+            cleanup = await service.delete_prefix_bounded(
+                bucket=s3_bucket_name,
+                prefix=cleanup_prefix,
+                page_size=2,
+                continuation_token=continuation_token,
+            )
+            deleted += len(cleanup.deleted)
+            assert not cleanup.failed
+            continuation_token = cleanup.next_continuation_token
+            if continuation_token is None:
+                break
+        assert deleted == 3
         page = await service.list_page(
             bucket=s3_bucket_name,
             prefix=cleanup_prefix,

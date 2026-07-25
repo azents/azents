@@ -56,6 +56,10 @@ class RuntimeTransferStateStore(Protocol):
         transfer_id: str,
         *,
         attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
         expected_revision: int,
         bytes_transferred: int,
     ) -> RuntimeTransferRecord | None: ...
@@ -65,7 +69,15 @@ class RuntimeTransferStateStore(Protocol):
     ) -> RuntimeTransferRecord | None: ...
 
     async def begin_verification(
-        self, transfer_id: str, *, attempt_id: str, expected_revision: int
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        expected_revision: int,
     ) -> RuntimeTransferRecord | None: ...
 
     async def publish_available(
@@ -73,6 +85,10 @@ class RuntimeTransferStateStore(Protocol):
         transfer_id: str,
         *,
         attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
         expected_revision: int,
         actual_size: int,
         actual_sha256: str,
@@ -83,6 +99,10 @@ class RuntimeTransferStateStore(Protocol):
         transfer_id: str,
         *,
         attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
         expected_revision: int,
         actual_size: int,
         actual_sha256: str,

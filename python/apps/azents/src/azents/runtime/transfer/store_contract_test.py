@@ -15,6 +15,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
+    RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferPhase,
@@ -22,6 +23,8 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.redis import RedisRuntimeTransferStateStore
 from azents.runtime.transfer.store import RuntimeTransferStateStore
+
+_TEST_STARTED_AT = datetime.now(timezone.utc)
 
 
 class _Clock:
@@ -67,7 +70,7 @@ async def store_harness(
     request: pytest.FixtureRequest,
 ) -> AsyncIterator[_StoreHarness]:
     """Create one memory or real-Redis contract harness."""
-    clock = _Clock(datetime(2026, 7, 25, tzinfo=timezone.utc))
+    clock = _Clock(_TEST_STARTED_AT)
     config = RuntimeTransferConfig(
         per_runtime_attempts=2,
         per_runtime_bytes=10,
@@ -139,7 +142,7 @@ def _admission() -> RuntimeTransferAdmission:
         expected_sha256="a" * 64,
         product_maximum_size=10,
         provider_maximum_size=10,
-        deadline_at=datetime(2026, 7, 25, 0, 5, tzinfo=timezone.utc),
+        deadline_at=_TEST_STARTED_AT + timedelta(minutes=5),
         source_expires_at=None,
         resource_class="default",
     )
@@ -173,6 +176,41 @@ async def test_rejects_invalid_size_and_expired_source_without_record(
     )
     assert await store_harness.store.admit(expired, lease_id="lease") is None
     assert await store_harness.store.get("expired") is None
+
+
+@pytest.mark.asyncio
+async def test_admission_lease_expiry_reclaims_capacity_and_fences_old_owner(
+    store_harness: _StoreHarness,
+) -> None:
+    """One access reclaims all expired leases before admitting new work."""
+    first = await store_harness.store.admit(
+        replace(_admission(), transfer_id="first", expected_size=5),
+        lease_id="first-lease",
+    )
+    second = await store_harness.store.admit(
+        replace(_admission(), transfer_id="second", expected_size=5),
+        lease_id="second-lease",
+    )
+    assert first is not None and second is not None
+
+    store_harness.clock.now += store_harness.config.admission_lease
+    replacement = await store_harness.store.admit(
+        replace(_admission(), transfer_id="replacement", expected_size=10),
+        lease_id="replacement-lease",
+    )
+
+    assert replacement is not None
+    assert (
+        await store_harness.store.mark_ready(
+            "first",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            expected_revision=first.revision,
+            object=RuntimeTransferObject("stale-object", 5, "a" * 64),
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -285,6 +323,28 @@ async def test_download_lifecycle_fences_stream_claim_and_progress(
         )
         is None
     )
+    assert (
+        await store_harness.store.mark_ready(
+            "download",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            expected_revision=admitted.revision,
+            object=RuntimeTransferObject("wrong-size", 2, "a" * 64),
+        )
+        is None
+    )
+    assert (
+        await store_harness.store.mark_ready(
+            "download",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            expected_revision=admitted.revision,
+            object=RuntimeTransferObject("wrong-sha", 3, "b" * 64),
+        )
+        is None
+    )
     ready = await store_harness.store.mark_ready(
         "download",
         attempt_id="attempt",
@@ -318,6 +378,36 @@ async def test_download_lifecycle_fences_stream_claim_and_progress(
         await store_harness.store.record_progress(
             "download",
             attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=3,
+            claim_id=stream.stream_claim_id or "",
+            expected_revision=stream.revision,
+            bytes_transferred=1,
+        )
+        is None
+    )
+    assert (
+        await store_harness.store.record_progress(
+            "download",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="stale-claim",
+            expected_revision=stream.revision,
+            bytes_transferred=1,
+        )
+        is None
+    )
+    assert (
+        await store_harness.store.record_progress(
+            "download",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=stream.stream_claim_id or "",
             expected_revision=stream.revision,
             bytes_transferred=4,
         )
@@ -326,6 +416,10 @@ async def test_download_lifecycle_fences_stream_claim_and_progress(
     progress = await store_harness.store.record_progress(
         "download",
         attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id=stream.stream_claim_id or "",
         expected_revision=stream.revision,
         bytes_transferred=2,
     )
@@ -338,6 +432,10 @@ async def test_download_lifecycle_fences_stream_claim_and_progress(
         await store_harness.store.record_progress(
             "download",
             attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=stream.stream_claim_id or "",
             expected_revision=progress.revision,
             bytes_transferred=1,
         )
@@ -346,6 +444,10 @@ async def test_download_lifecycle_fences_stream_claim_and_progress(
     latest = await store_harness.store.record_progress(
         "download",
         attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id=stream.stream_claim_id or "",
         expected_revision=progress.revision,
         bytes_transferred=3,
     )
@@ -357,6 +459,10 @@ async def test_download_lifecycle_fences_stream_claim_and_progress(
         await store_harness.store.begin_verification(
             "download",
             attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=stream.stream_claim_id or "",
             expected_revision=latest.revision + 1,
         )
         is None
@@ -364,23 +470,72 @@ async def test_download_lifecycle_fences_stream_claim_and_progress(
     verifying = await store_harness.store.begin_verification(
         "download",
         attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id=stream.stream_claim_id or "",
         expected_revision=latest.revision,
     )
     assert verifying is not None
+    assert (
+        await store_harness.store.mark_committed(
+            "download",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=stream.stream_claim_id or "",
+            expected_revision=verifying.revision,
+            actual_size=2,
+            actual_sha256="a" * 64,
+        )
+        is None
+    )
+    assert (
+        await store_harness.store.mark_committed(
+            "download",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=stream.stream_claim_id or "",
+            expected_revision=verifying.revision,
+            actual_size=3,
+            actual_sha256="b" * 64,
+        )
+        is None
+    )
     committed = await store_harness.store.mark_committed(
         "download",
         attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id=stream.stream_claim_id or "",
         expected_revision=verifying.revision,
         actual_size=3,
         actual_sha256="a" * 64,
     )
     assert committed is not None
     assert committed.phase is RuntimeTransferPhase.COMMITTED
+    terminal = await store_harness.store.settle(
+        "download",
+        attempt_id="attempt",
+        expected_revision=committed.revision,
+        outcome=RuntimeTransferOutcome.SUCCEEDED,
+        failure=None,
+    )
+    assert terminal is not None
+    assert terminal.terminal_outcome is RuntimeTransferOutcome.SUCCEEDED
     assert (
         await store_harness.store.publish_available(
             "download",
             attempt_id="attempt",
-            expected_revision=committed.revision,
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=stream.stream_claim_id or "",
+            expected_revision=terminal.revision,
             actual_size=3,
             actual_sha256="a" * 64,
         )
@@ -421,6 +576,10 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
     verifying = await store_harness.store.begin_verification(
         "upload",
         attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="upload-stream",
         expected_revision=stream.revision,
     )
     assert verifying is not None
@@ -428,6 +587,10 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
         await store_harness.store.mark_committed(
             "upload",
             attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="upload-stream",
             expected_revision=verifying.revision,
             actual_size=1,
             actual_sha256="a" * 64,
@@ -437,6 +600,10 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
     available = await store_harness.store.publish_available(
         "upload",
         attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="upload-stream",
         expected_revision=verifying.revision,
         actual_size=1,
         actual_sha256="a" * 64,
@@ -519,6 +686,88 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
     )
     assert consumed is not None
     assert consumed.phase is RuntimeTransferPhase.CONSUMED
+    store_harness.clock.now += timedelta(minutes=2)
+    retained = await store_harness.store.get("upload")
+    assert retained is not None
+    assert retained.phase is RuntimeTransferPhase.CONSUMED
+
+
+@pytest.mark.asyncio
+async def test_consumer_and_admission_expiry_reclaim_capacity_atomically(
+    store_harness: _StoreHarness,
+) -> None:
+    """Simultaneous lease expiry releases both claim and admission capacity."""
+    admitted = await store_harness.store.admit(
+        replace(_admission(), transfer_id="simultaneous"),
+        lease_id="simultaneous-lease",
+    )
+    assert admitted is not None
+    ready = await store_harness.store.mark_ready(
+        "simultaneous",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("object", 1, "a" * 64),
+    )
+    assert ready is not None
+    stream = await store_harness.store.claim_stream(
+        "simultaneous",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        claim_id="stream",
+    )
+    assert stream is not None
+    verifying = await store_harness.store.begin_verification(
+        "simultaneous",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="stream",
+        expected_revision=stream.revision,
+    )
+    assert verifying is not None
+    available = await store_harness.store.publish_available(
+        "simultaneous",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="stream",
+        expected_revision=verifying.revision,
+        actual_size=1,
+        actual_sha256="a" * 64,
+    )
+    assert available is not None
+
+    store_harness.clock.now += timedelta(minutes=4)
+    blocker = await store_harness.store.admit(
+        replace(_admission(), transfer_id="blocker", expected_size=9),
+        lease_id="blocker-lease",
+    )
+    assert blocker is not None
+    consuming = await store_harness.store.claim_consumer(
+        "simultaneous",
+        attempt_id="attempt",
+        expected_revision=available.revision,
+        claim_id="consumer",
+    )
+    assert consuming is not None
+
+    store_harness.clock.now += timedelta(minutes=1)
+    replacement = await store_harness.store.admit(
+        replace(_admission(), transfer_id="after-reclaim"),
+        lease_id="replacement-lease",
+    )
+
+    assert replacement is not None
+    reclaimed = await store_harness.store.get("simultaneous")
+    assert reclaimed is not None
+    assert reclaimed.phase is RuntimeTransferPhase.AVAILABLE
 
 
 @pytest.mark.asyncio
@@ -565,10 +814,27 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
         == cancelled
     )
     assert (
+        await store_harness.store.record_progress(
+            "cancellation",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="cancellation-stream",
+            expected_revision=cancelled.revision,
+            bytes_transferred=1,
+        )
+        is None
+    )
+    assert (
         await store_harness.store.begin_verification(
             "cancellation",
             attempt_id="attempt",
-            expected_revision=stream.revision,
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="cancellation-stream",
+            expected_revision=cancelled.revision,
         )
         is None
     )
@@ -610,6 +876,94 @@ async def test_cancellation_fences_concurrent_verification_and_terminal_settleme
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_stale_pagination_remains_stable_when_prior_page_mutates(
+    store_harness: _StoreHarness,
+) -> None:
+    """Updating a processed record cannot skip the next stale record."""
+    for transfer_id in ("page-a", "page-b", "page-c"):
+        admitted = await store_harness.store.admit(
+            replace(_admission(), transfer_id=transfer_id),
+            lease_id=f"{transfer_id}-lease",
+        )
+        assert admitted is not None
+        terminal = await store_harness.store.settle(
+            transfer_id,
+            attempt_id="attempt",
+            expected_revision=admitted.revision,
+            outcome=RuntimeTransferOutcome.FAILED,
+            failure=RuntimeTransferFailure.STREAM,
+        )
+        assert terminal is not None
+
+    first_page = await store_harness.store.list_stale(cursor=None, limit=1)
+    assert len(first_page.records) == 1
+    assert first_page.cursor is not None
+    first = first_page.records[0]
+    mutated = await store_harness.store.record_cleanup(
+        first.admission.transfer_id,
+        attempt_id=first.admission.attempt_id,
+        expected_revision=first.revision,
+        status=RuntimeTransferCleanupStatus.PENDING,
+    )
+    assert mutated is not None
+
+    second_page = await store_harness.store.list_stale(
+        cursor=first_page.cursor,
+        limit=1,
+    )
+
+    assert len(second_page.records) == 1
+    assert second_page.records[0].admission.transfer_id != first.admission.transfer_id
+
+
+@pytest.mark.asyncio
+async def test_success_requires_direction_final_phase(
+    store_harness: _StoreHarness,
+) -> None:
+    """Fresh preparation cannot be settled as successful."""
+    admitted = await store_harness.store.admit(
+        replace(_admission(), transfer_id="premature-success"),
+        lease_id="lease",
+    )
+    assert admitted is not None
+    assert (
+        await store_harness.store.settle(
+            "premature-success",
+            attempt_id="attempt",
+            expected_revision=admitted.revision,
+            outcome=RuntimeTransferOutcome.SUCCEEDED,
+            failure=None,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_terminal_metadata_expires_on_access(
+    store_harness: _StoreHarness,
+) -> None:
+    """Terminal metadata is no longer observable at the configured boundary."""
+    admitted = await store_harness.store.admit(
+        replace(_admission(), transfer_id="terminal-expiry"),
+        lease_id="lease",
+    )
+    assert admitted is not None
+    terminal = await store_harness.store.settle(
+        "terminal-expiry",
+        attempt_id="attempt",
+        expected_revision=admitted.revision,
+        outcome=RuntimeTransferOutcome.FAILED,
+        failure=RuntimeTransferFailure.STREAM,
+    )
+    assert terminal is not None
+    assert terminal.terminal_expires_at is not None
+
+    store_harness.clock.now = terminal.terminal_expires_at
+
+    assert await store_harness.store.get("terminal-expiry") is None
 
 
 @pytest.mark.asyncio

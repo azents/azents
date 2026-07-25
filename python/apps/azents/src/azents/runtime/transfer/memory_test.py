@@ -251,6 +251,10 @@ async def test_ready_stream_progress_and_download_commit() -> None:
     progress = await store.record_progress(
         "download",
         attempt_id="a",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id=stream.stream_claim_id or "",
         expected_revision=stream.revision,
         bytes_transferred=2,
     )
@@ -263,18 +267,32 @@ async def test_ready_stream_progress_and_download_commit() -> None:
         await store.record_progress(
             "download",
             attempt_id="a",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=stream.stream_claim_id or "",
             expected_revision=progress.revision,
             bytes_transferred=1,
         )
         is None
     )
     verifying = await store.begin_verification(
-        "download", attempt_id="a", expected_revision=progress.revision
+        "download",
+        attempt_id="a",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id=stream.stream_claim_id or "",
+        expected_revision=progress.revision,
     )
     assert verifying is not None
     committed = await store.mark_committed(
         "download",
         attempt_id="a",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id=stream.stream_claim_id or "",
         expected_revision=verifying.revision,
         actual_size=3,
         actual_sha256=_DIGEST,
@@ -284,6 +302,10 @@ async def test_ready_stream_progress_and_download_commit() -> None:
         await store.publish_available(
             "download",
             attempt_id="a",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id=stream.stream_claim_id or "",
             expected_revision=committed.revision,
             actual_size=3,
             actual_sha256=_DIGEST,
@@ -319,12 +341,22 @@ async def test_upload_consumer_cancellation_terminal_and_historical_safety() -> 
     )
     assert stream is not None
     verifying = await store.begin_verification(
-        "upload", attempt_id="a", expected_revision=stream.revision
+        "upload",
+        attempt_id="a",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="stream",
+        expected_revision=stream.revision,
     )
     assert verifying is not None
     available = await store.publish_available(
         "upload",
         attempt_id="a",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="stream",
         expected_revision=verifying.revision,
         actual_size=1,
         actual_sha256=_DIGEST,
