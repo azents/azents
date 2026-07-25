@@ -102,6 +102,14 @@ async def test_repeated_disconnect_reterminalizes_connection() -> None:
 
     assert cleanup_ids == ()
     assert connection.status is ExternalChannelConnectionStatus.DISCONNECTING
+    repository.get_connection.assert_awaited_once_with(
+        session,
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        connection_id="connection-1",
+        lock=True,
+        include_disconnected=True,
+    )
     session.flush.assert_awaited_once()
 
 

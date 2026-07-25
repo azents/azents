@@ -1459,6 +1459,63 @@ async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
     )
 
 
+async def test_disconnect_lookup_uses_detached_single_route_snapshot(
+    rdb_session: AsyncSession,
+) -> None:
+    """Only disconnect retries can resolve a detached disconnected Single App."""
+    workspace_id = await _workspace(rdb_session, "disconnect-snapshot-lookup")
+    agent = await _agent(rdb_session, workspace_id, "disconnect-snapshot-owner")
+    other_agent = await _agent(rdb_session, workspace_id, "disconnect-snapshot-other")
+    repository = ExternalChannelRepository()
+    management = ExternalChannelManagementRepository()
+    connection = await repository.create_connection(
+        rdb_session,
+        _connection_create(
+            workspace_id,
+            provider_app_id="AD-snapshot",
+            provider_tenant_id="TD-snapshot",
+        ),
+    )
+    route = await repository.create_agent_route(
+        rdb_session,
+        _route_create(connection.id, agent.id, mode=ExternalChannelAppMode.SINGLE),
+    )
+    connection.status = ExternalChannelConnectionStatus.DISCONNECTED
+    route.agent_id = None
+    route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
+    await rdb_session.flush()
+
+    assert (
+        await management.get_connection(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            connection_id=connection.id,
+        )
+        is None
+    )
+    disconnected = await management.get_connection(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        connection_id=connection.id,
+        include_disconnected=True,
+    )
+    assert disconnected is not None
+    assert disconnected[0].id == connection.id
+    assert disconnected[1].id == route.id
+    assert (
+        await management.get_connection(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=other_agent.id,
+            connection_id=connection.id,
+            include_disconnected=True,
+        )
+        is None
+    )
+
+
 async def test_multi_route_removal_preserves_route_identity_and_other_routes(
     rdb_session: AsyncSession,
 ) -> None:

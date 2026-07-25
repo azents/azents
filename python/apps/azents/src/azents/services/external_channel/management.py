@@ -269,11 +269,11 @@ class ExternalChannelManagementService:
         workspace_user_id: str,
         connection_id: str,
     ) -> ManagedConnection:
-        await self._require_owned_connection(
+        await self._require_agent(
             workspace_id=workspace_id,
             agent_id=agent_id,
             workspace_user_id=workspace_user_id,
-            connection_id=connection_id,
+            admin=True,
         )
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:

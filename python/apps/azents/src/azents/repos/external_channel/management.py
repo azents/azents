@@ -107,7 +107,26 @@ class ExternalChannelManagementRepository:
         agent_id: str,
         connection_id: str,
         lock: bool = False,
+        include_disconnected: bool = False,
     ) -> tuple[RDBExternalChannelConnection, RDBExternalChannelAgentRoute] | None:
+        route_owner = RDBExternalChannelAgentRoute.agent_id == agent_id
+        if include_disconnected:
+            route_owner = sa.or_(
+                route_owner,
+                sa.and_(
+                    RDBExternalChannelConnection.status
+                    == ExternalChannelConnectionStatus.DISCONNECTED,
+                    RDBExternalChannelAgentRoute.agent_id_snapshot == agent_id,
+                ),
+            )
+        status_predicates = (
+            ()
+            if include_disconnected
+            else (
+                RDBExternalChannelConnection.status
+                != ExternalChannelConnectionStatus.DISCONNECTED,
+            )
+        )
         statement = (
             sa.select(RDBExternalChannelConnection, RDBExternalChannelAgentRoute)
             .join(
@@ -118,13 +137,12 @@ class ExternalChannelManagementRepository:
             .where(
                 RDBExternalChannelConnection.id == connection_id,
                 RDBExternalChannelConnection.workspace_id == workspace_id,
-                RDBExternalChannelAgentRoute.agent_id == agent_id,
+                route_owner,
                 RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.SINGLE,
                 RDBExternalChannelAgentRoute.connection_app_mode
                 == ExternalChannelAppMode.SINGLE,
                 self._has_sole_route(),
-                RDBExternalChannelConnection.status
-                != ExternalChannelConnectionStatus.DISCONNECTED,
+                *status_predicates,
             )
         )
         row = (await session.execute(statement)).one_or_none()
@@ -139,20 +157,27 @@ class ExternalChannelManagementRepository:
                 RDBExternalChannelConnection.id == connection_snapshot.id,
                 RDBExternalChannelConnection.workspace_id == workspace_id,
                 RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.SINGLE,
-                RDBExternalChannelConnection.status
-                != ExternalChannelConnectionStatus.DISCONNECTED,
                 self._has_sole_route(),
+                *status_predicates,
             )
             .with_for_update()
         )
         if connection is None:
             return None
+        locked_route_owner = RDBExternalChannelAgentRoute.agent_id == agent_id
+        if (
+            include_disconnected
+            and connection.status is ExternalChannelConnectionStatus.DISCONNECTED
+        ):
+            locked_route_owner = (
+                RDBExternalChannelAgentRoute.agent_id_snapshot == agent_id
+            )
         route = await session.scalar(
             sa.select(RDBExternalChannelAgentRoute)
             .where(
                 RDBExternalChannelAgentRoute.id == route_snapshot.id,
                 RDBExternalChannelAgentRoute.connection_id == connection.id,
-                RDBExternalChannelAgentRoute.agent_id == agent_id,
+                locked_route_owner,
                 RDBExternalChannelAgentRoute.connection_app_mode
                 == ExternalChannelAppMode.SINGLE,
             )
@@ -461,6 +486,7 @@ class ExternalChannelManagementRepository:
             agent_id=agent_id,
             connection_id=connection_id,
             lock=True,
+            include_disconnected=True,
         )
         if row is None:
             return None
