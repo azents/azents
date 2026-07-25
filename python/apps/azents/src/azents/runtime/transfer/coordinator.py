@@ -26,6 +26,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
+    RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
     cancellation_settlement,
 )
@@ -327,6 +328,11 @@ class RuntimeTransferCoordinator:
             and current.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
             and current.multipart_cleanup_handle is None
             and not current.completed_object_cleanup_required
+            and (
+                current.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            )
+            and current.pre_ready_object_handle is None
         )
         if not cleanup_completed:
             current = await self._cleanup_before_terminal(current)
@@ -357,8 +363,18 @@ class RuntimeTransferCoordinator:
             and record.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
             and record.multipart_cleanup_handle is None
             and not record.completed_object_cleanup_required
+            and (
+                record.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            )
+            and record.pre_ready_object_handle is None
         ):
             return record
+        preparation_required = (
+            record.preparation_cleanup_state
+            is not RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+        )
+        pre_ready_object_required = record.pre_ready_object_handle is not None
         multipart_required = record.multipart_cleanup_handle is not None
         completed_required = record.completed_object_cleanup_required or (
             record.object is not None
@@ -369,7 +385,12 @@ class RuntimeTransferCoordinator:
                 in {"verifying", "available", "consuming", "consumed"}
             )
         )
-        if not multipart_required and not completed_required:
+        if (
+            not preparation_required
+            and not pre_ready_object_required
+            and not multipart_required
+            and not completed_required
+        ):
             return record
         if completed_required:
             marked = await self._state_store.record_completed_object_cleanup(
@@ -404,6 +425,16 @@ class RuntimeTransferCoordinator:
                 },
             )
             return marked
+        if preparation_required or pre_ready_object_required:
+            cleared = await self._state_store.clear_preparation_cleanup(
+                marked.admission.transfer_id,
+                attempt_id=marked.admission.attempt_id,
+                expected_revision=marked.revision,
+            )
+            if cleared is None:
+                current = await self._state_store.get(marked.admission.transfer_id)
+                return current or marked
+            marked = cleared
         if completed_required:
             cleaned = await self._state_store.record_completed_object_cleanup(
                 marked.admission.transfer_id,

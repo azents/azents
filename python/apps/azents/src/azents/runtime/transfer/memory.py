@@ -20,6 +20,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferOutcome,
     RuntimeTransferPage,
     RuntimeTransferPhase,
+    RuntimeTransferPreparationCleanupState,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
     cancellation_settlement,
@@ -138,6 +139,168 @@ class InMemoryRuntimeTransferStateStore:
             generation=desired_generation,
             object=object,
         )
+
+    async def register_preparation_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        preparation_object_handle: str,
+        multipart_cleanup_handle: str,
+    ) -> RuntimeTransferRecord | None:
+        """Persist source-preparation multipart cleanup before body streaming."""
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.PREPARING,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+            )
+            if record is None:
+                return None
+            if (
+                record.preparation_cleanup_state
+                is not RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            ):
+                return (
+                    record
+                    if (
+                        record.preparation_cleanup_state
+                        is RuntimeTransferPreparationCleanupState.MULTIPART_PENDING
+                        and record.preparation_object_handle
+                        == preparation_object_handle
+                        and record.preparation_multipart_cleanup_handle
+                        == multipart_cleanup_handle
+                    )
+                    else None
+                )
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    preparation_object_handle=preparation_object_handle,
+                    preparation_multipart_cleanup_handle=multipart_cleanup_handle,
+                    preparation_cleanup_state=(
+                        RuntimeTransferPreparationCleanupState.MULTIPART_PENDING
+                    ),
+                )
+            )
+
+    async def promote_preparation_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        preparation_object_handle: str,
+    ) -> RuntimeTransferRecord | None:
+        """Retain completed preparation-object deletion responsibility."""
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.PREPARING,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+            )
+            if record is None:
+                return None
+            if (
+                record.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+            ):
+                if record.preparation_object_handle == preparation_object_handle:
+                    return record
+                if record.pre_ready_object_handle == preparation_object_handle:
+                    return record
+                return self._put(
+                    dataclasses.replace(
+                        record,
+                        revision=record.revision + 1,
+                        updated_at=now,
+                        pre_ready_object_handle=preparation_object_handle,
+                    )
+                )
+            if (
+                record.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            ):
+                return self._put(
+                    dataclasses.replace(
+                        record,
+                        revision=record.revision + 1,
+                        updated_at=now,
+                        preparation_object_handle=preparation_object_handle,
+                        preparation_cleanup_state=(
+                            RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                        ),
+                    )
+                )
+            if (
+                record.preparation_cleanup_state
+                is not RuntimeTransferPreparationCleanupState.MULTIPART_PENDING
+                or record.preparation_object_handle != preparation_object_handle
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    preparation_multipart_cleanup_handle=None,
+                    preparation_cleanup_state=(
+                        RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                    ),
+                )
+            )
+
+    async def clear_preparation_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+    ) -> RuntimeTransferRecord | None:
+        """Clear only exact preparation cleanup evidence after owned cleanup."""
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            record = self._exact(transfer_id, attempt_id)
+            if record is None:
+                return None
+            if (
+                record.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            ):
+                return record if expected_revision <= record.revision else None
+            if record.revision != expected_revision:
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    preparation_object_handle=None,
+                    preparation_multipart_cleanup_handle=None,
+                    preparation_cleanup_state=(
+                        RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                    ),
+                    pre_ready_object_handle=None,
+                )
+            )
 
     async def claim_stream(
         self,
@@ -1228,6 +1391,21 @@ class InMemoryRuntimeTransferStateStore:
                     target is RuntimeTransferPhase.READY
                     and (
                         object is None
+                        or not (
+                            record.preparation_cleanup_state
+                            is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                            or (
+                                record.preparation_cleanup_state
+                                is (
+                                    RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                                )
+                                and object.key
+                                in {
+                                    record.preparation_object_handle,
+                                    record.pre_ready_object_handle,
+                                }
+                            )
+                        )
                         or object.size != record.admission.expected_size
                         or (
                             record.admission.expected_sha256 is not None
@@ -1253,6 +1431,26 @@ class InMemoryRuntimeTransferStateStore:
                     accepted_runner_generation=accepted_runner_generation
                     if accepted_runner_generation is not None
                     else record.accepted_runner_generation,
+                    preparation_object_handle=(
+                        None
+                        if target is RuntimeTransferPhase.READY
+                        else record.preparation_object_handle
+                    ),
+                    preparation_multipart_cleanup_handle=(
+                        None
+                        if target is RuntimeTransferPhase.READY
+                        else record.preparation_multipart_cleanup_handle
+                    ),
+                    preparation_cleanup_state=(
+                        RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                        if target is RuntimeTransferPhase.READY
+                        else record.preparation_cleanup_state
+                    ),
+                    pre_ready_object_handle=(
+                        None
+                        if target is RuntimeTransferPhase.READY
+                        else record.pre_ready_object_handle
+                    ),
                 )
             )
 

@@ -27,6 +27,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferOutcome,
     RuntimeTransferPage,
     RuntimeTransferPhase,
+    RuntimeTransferPreparationCleanupState,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
     cancellation_settlement,
@@ -38,7 +39,7 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.policy import phase_transition_allowed
 
 _DEFAULT_NAMESPACE = "azents:runtime:transfer"
-_RECORD_SCHEMA_VERSION = 5
+_RECORD_SCHEMA_VERSION = 7
 _MAX_SERIALIZED_RECORD_BYTES = 16 * 1024
 _LOCK_TTL_MILLISECONDS = 5_000
 _LOCK_ACQUIRE_TIMEOUT_SECONDS = 5.0
@@ -160,6 +161,10 @@ _RECORD_FIELDS = frozenset(
         "terminal_expires_at",
         "cleanup_status",
         "failure",
+        "preparation_object_handle",
+        "preparation_multipart_cleanup_handle",
+        "preparation_cleanup_state",
+        "pre_ready_object_handle",
     }
 )
 _ADMISSION_FIELDS = frozenset(
@@ -407,6 +412,12 @@ def _record_to_value(record: RuntimeTransferRecord) -> dict[str, object]:
         "terminal_expires_at": _optional_datetime_to_value(record.terminal_expires_at),
         "cleanup_status": record.cleanup_status.value,
         "failure": None if record.failure is None else record.failure.value,
+        "preparation_object_handle": record.preparation_object_handle,
+        "preparation_multipart_cleanup_handle": (
+            record.preparation_multipart_cleanup_handle
+        ),
+        "preparation_cleanup_state": record.preparation_cleanup_state.value,
+        "pre_ready_object_handle": record.pre_ready_object_handle,
     }
 
 
@@ -516,6 +527,24 @@ def _record_from_value(value: object) -> RuntimeTransferRecord:
         failure=None
         if failure is None
         else RuntimeTransferFailure(_require_string(failure, "failure")),
+        preparation_object_handle=_optional_string(
+            record["preparation_object_handle"],
+            "preparation_object_handle",
+        ),
+        preparation_multipart_cleanup_handle=_optional_string(
+            record["preparation_multipart_cleanup_handle"],
+            "preparation_multipart_cleanup_handle",
+        ),
+        preparation_cleanup_state=RuntimeTransferPreparationCleanupState(
+            _require_string(
+                record["preparation_cleanup_state"],
+                "preparation_cleanup_state",
+            )
+        ),
+        pre_ready_object_handle=_optional_string(
+            record["pre_ready_object_handle"],
+            "pre_ready_object_handle",
+        ),
     )
 
 
@@ -863,6 +892,198 @@ class RedisRuntimeTransferStateStore:
             claim_id=None,
             accepted_runner_generation=None,
         )
+
+    async def register_preparation_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        preparation_object_handle: str,
+        multipart_cleanup_handle: str,
+    ) -> RuntimeTransferRecord | None:
+        """Persist source-preparation multipart cleanup before body streaming."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.PREPARING,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            record = envelope.record
+            if (
+                record.preparation_cleanup_state
+                is not RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            ):
+                await self._commit(token, entries, now)
+                return (
+                    record
+                    if (
+                        record.preparation_cleanup_state
+                        is RuntimeTransferPreparationCleanupState.MULTIPART_PENDING
+                        and record.preparation_object_handle
+                        == preparation_object_handle
+                        and record.preparation_multipart_cleanup_handle
+                        == multipart_cleanup_handle
+                    )
+                    else None
+                )
+            updated = dataclasses.replace(
+                record,
+                revision=record.revision + 1,
+                updated_at=now,
+                preparation_object_handle=preparation_object_handle,
+                preparation_multipart_cleanup_handle=multipart_cleanup_handle,
+                preparation_cleanup_state=(
+                    RuntimeTransferPreparationCleanupState.MULTIPART_PENDING
+                ),
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
+
+    async def promote_preparation_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        preparation_object_handle: str,
+    ) -> RuntimeTransferRecord | None:
+        """Retain completed preparation-object deletion responsibility."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.PREPARING,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            record = envelope.record
+            if (
+                record.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+            ):
+                if record.preparation_object_handle == preparation_object_handle:
+                    await self._commit(token, entries, now)
+                    return record
+                if record.pre_ready_object_handle == preparation_object_handle:
+                    await self._commit(token, entries, now)
+                    return record
+                updated = dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    pre_ready_object_handle=preparation_object_handle,
+                )
+                entries[key] = dataclasses.replace(envelope, record=updated)
+                await self._commit(token, entries, now)
+                return updated
+            if (
+                record.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            ):
+                updated = dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    preparation_object_handle=preparation_object_handle,
+                    preparation_cleanup_state=(
+                        RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                    ),
+                )
+                entries[key] = dataclasses.replace(envelope, record=updated)
+                await self._commit(token, entries, now)
+                return updated
+            if (
+                record.preparation_cleanup_state
+                is not RuntimeTransferPreparationCleanupState.MULTIPART_PENDING
+                or record.preparation_object_handle != preparation_object_handle
+            ):
+                await self._commit(token, entries, now)
+                return None
+            updated = dataclasses.replace(
+                record,
+                revision=record.revision + 1,
+                updated_at=now,
+                preparation_multipart_cleanup_handle=None,
+                preparation_cleanup_state=(
+                    RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                ),
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
+
+    async def clear_preparation_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+    ) -> RuntimeTransferRecord | None:
+        """Clear only exact preparation cleanup evidence after owned cleanup."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            if envelope is None:
+                await self._commit(token, entries, now)
+                return None
+            record = envelope.record
+            if (
+                record.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            ):
+                await self._commit(token, entries, now)
+                return record if expected_revision <= record.revision else None
+            if record.revision != expected_revision:
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None
+            updated = dataclasses.replace(
+                record,
+                revision=record.revision + 1,
+                updated_at=now,
+                preparation_object_handle=None,
+                preparation_multipart_cleanup_handle=None,
+                preparation_cleanup_state=(
+                    RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                ),
+                pre_ready_object_handle=None,
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
 
     async def claim_stream(
         self,
@@ -2238,6 +2459,21 @@ class RedisRuntimeTransferStateStore:
                     and target is RuntimeTransferPhase.READY
                     and (
                         object is None
+                        or not (
+                            envelope.record.preparation_cleanup_state
+                            is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                            or (
+                                envelope.record.preparation_cleanup_state
+                                is (
+                                    RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+                                )
+                                and object.key
+                                in {
+                                    envelope.record.preparation_object_handle,
+                                    envelope.record.pre_ready_object_handle,
+                                }
+                            )
+                        )
                         or object.size != envelope.record.admission.expected_size
                         or (
                             envelope.record.admission.expected_sha256 is not None
@@ -2270,6 +2506,26 @@ class RedisRuntimeTransferStateStore:
                 accepted_runner_generation=accepted_runner_generation
                 if accepted_runner_generation is not None
                 else envelope.record.accepted_runner_generation,
+                preparation_object_handle=(
+                    None
+                    if target is RuntimeTransferPhase.READY
+                    else envelope.record.preparation_object_handle
+                ),
+                preparation_multipart_cleanup_handle=(
+                    None
+                    if target is RuntimeTransferPhase.READY
+                    else envelope.record.preparation_multipart_cleanup_handle
+                ),
+                preparation_cleanup_state=(
+                    RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+                    if target is RuntimeTransferPhase.READY
+                    else envelope.record.preparation_cleanup_state
+                ),
+                pre_ready_object_handle=(
+                    None
+                    if target is RuntimeTransferPhase.READY
+                    else envelope.record.pre_ready_object_handle
+                ),
                 runner_commit_expires_at=(
                     now + self.config.stream_lease
                     if target is RuntimeTransferPhase.VERIFYING

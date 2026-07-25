@@ -45,6 +45,14 @@ class RuntimeTransferCleanupStatus(enum.StrEnum):
     RETRYABLE_FAILURE = "retryable_failure"
 
 
+class RuntimeTransferPreparationCleanupState(enum.StrEnum):
+    """Physical source-preparation cleanup responsibility."""
+
+    NOT_REQUIRED = "not_required"
+    MULTIPART_PENDING = "multipart_pending"
+    COMPLETED_OBJECT_PENDING = "completed_object_pending"
+
+
 class RuntimeTransferDispatchStatus(enum.StrEnum):
     """Durable metadata-only dispatch delivery state."""
 
@@ -241,6 +249,12 @@ class RuntimeTransferRecord:
     terminal_expires_at: datetime | None
     cleanup_status: RuntimeTransferCleanupStatus
     failure: RuntimeTransferFailure | None
+    preparation_object_handle: str | None = None
+    preparation_multipart_cleanup_handle: str | None = None
+    preparation_cleanup_state: RuntimeTransferPreparationCleanupState = (
+        RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+    )
+    pre_ready_object_handle: str | None = None
 
     def __post_init__(self) -> None:
         if self.revision <= 0:
@@ -292,6 +306,43 @@ class RuntimeTransferRecord:
             _aware(self.stream_lease_expires_at, "stream_lease_expires_at")
         if self.multipart_cleanup_handle is not None:
             _opaque_handle(self.multipart_cleanup_handle, "multipart_cleanup_handle")
+        if self.preparation_object_handle is not None:
+            _opaque_handle(self.preparation_object_handle, "preparation_object_handle")
+        if self.preparation_multipart_cleanup_handle is not None:
+            _opaque_handle(
+                self.preparation_multipart_cleanup_handle,
+                "preparation_multipart_cleanup_handle",
+            )
+        if self.pre_ready_object_handle is not None:
+            _opaque_handle(self.pre_ready_object_handle, "pre_ready_object_handle")
+        if (
+            self.preparation_cleanup_state
+            is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+        ) != (
+            self.preparation_object_handle is None
+            and self.preparation_multipart_cleanup_handle is None
+        ):
+            raise ValueError("preparation cleanup evidence and state must agree")
+        if (
+            self.preparation_cleanup_state
+            is RuntimeTransferPreparationCleanupState.MULTIPART_PENDING
+            and self.preparation_multipart_cleanup_handle is None
+        ):
+            raise ValueError("multipart preparation cleanup requires an upload handle")
+        if (
+            self.preparation_cleanup_state
+            is RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+            and self.preparation_multipart_cleanup_handle is not None
+        ):
+            raise ValueError(
+                "completed preparation cleanup must not retain a multipart handle"
+            )
+        if (
+            self.preparation_cleanup_state
+            is not RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            and self.preparation_object_handle is None
+        ):
+            raise ValueError("preparation cleanup requires an object handle")
         if self.completed_object_cleanup_required and (
             self.object is None
             or self.cleanup_status is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE

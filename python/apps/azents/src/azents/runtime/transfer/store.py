@@ -117,6 +117,37 @@ class RuntimeTransferStateStore(Protocol):
         cleanup_handle: str,
     ) -> RuntimeTransferRecord | None: ...
 
+    async def register_preparation_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        preparation_object_handle: str,
+        multipart_cleanup_handle: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def promote_preparation_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        preparation_object_handle: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def clear_preparation_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+    ) -> RuntimeTransferRecord | None: ...
+
     async def list_stale_stream_claims(
         self, *, cursor: str | None, limit: int
     ) -> RuntimeTransferPage: ...
