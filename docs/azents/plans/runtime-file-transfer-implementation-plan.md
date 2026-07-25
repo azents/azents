@@ -27,7 +27,9 @@ Control. Runtime Runner remains untrusted and receives no object-storage
 credentials, URLs, keys, bucket names, or topology. Runtime Control streams
 between Runner and immutable attempt-scoped S3-compatible transfer objects, and
 trusted feature services use object-store-native copy when both endpoints are
-managed objects.
+managed objects. Runtime Control also owns all transfer state; Server and Worker
+feature services use an authenticated internal coordinator RPC that carries
+bounded metadata and opaque trusted-service handles only.
 
 The stack removes complete-file bytes from Runner Control operation messages,
 operation events, and Runtime Coordination Store. It preserves ordinary bounded
@@ -53,15 +55,18 @@ and provider semantics.
 - Object/provider/Runner preparation starts only after admission. Runner intent
   dispatch starts only after the immutable source object and manifest are
   `ready`.
-- The first delivery uses one Runtime Control process-wide state-backend
-  selection. `memory` constructs both process-local Coordination and Transfer
-  Store adapters; `redis` constructs both shared adapters and may share one
-  Redis client lifecycle. Their domain interfaces and key namespaces remain
-  separate. Existing deployed configuration remains Redis-backed unless
-  `memory` is explicitly selected with a single-process assertion. Hybrid
-  backends are outside this delivery.
-- Memory state is valid only for a single Runtime Control process. Invalid
-  memory plus multi-replica or autoscaling configuration fails closed.
+- Existing Runtime Coordination remains Redis-backed because API/Worker and
+  Runtime Control are separate processes sharing Runner connections,
+  request/reply streams, operation metadata, and cancellation.
+- Runtime Control solely owns Runtime Transfer State and selects its backend
+  independently. `memory` is valid only when every internal coordinator and
+  Runner transfer RPC reaches one Runtime Control process; `redis` supports
+  multiple replicas. Redis transfer state may share the existing Redis client
+  lifecycle while retaining a separate interface and key namespace.
+- Server and Worker never instantiate Transfer State. They call an authenticated
+  internal Runtime Transfer Coordinator service. Its messages contain bounded
+  metadata and opaque handles, never complete file bodies. Invalid memory plus
+  multi-replica or autoscaling configuration fails closed.
 - Every attempt has an absolute logical content expiry of
   `min(attempt_created_at + 1 hour, authoritative_source_expires_at)` when the
   source has an earlier expiry. Heartbeats and retries do not extend it.
@@ -138,7 +143,8 @@ flowchart LR
 - Phase 3 fixes bounded object and state contracts before any external Runner
   protocol depends on them.
 - Phase 4 fixes protobuf, authorization, transfer-service, and control-operation
-  correlation contracts before Runner implementation.
+  correlation contracts, including the internal trusted coordinator service,
+  before Runner implementation.
 - Phase 5 implements the untrusted external endpoint against those fixed
   contracts before production consumers adopt it.
 - Phase 6 owns Server-to-Runtime source preparation. Phases 7 and 8 split the
@@ -211,8 +217,8 @@ Purpose:
 - Add bounded S3-compatible transfer primitives.
 - Add transfer domain values, admission, memory and Redis state stores,
   expiry/cleanup state, and contract tests.
-- Make Runtime Control state-backend composition explicit without introducing
-  file bytes into either store.
+- Add Runtime Control-owned transfer-state backend composition while preserving
+  existing Redis-backed Runtime Coordination.
 
 Included behavior:
 
@@ -227,17 +233,19 @@ Included behavior:
 - Atomic admission-reservation and metadata-only preparing-attempt creation,
   single claim, cancellation, terminal idempotency, consumer
   claim/acknowledgement, lease release, and stale attempt fencing.
-- Runtime Control process composition for the memory or Redis Coordination and
-  Transfer Store adapters. Redis remains the default deployed backend; memory
-  requires explicit single-process selection. Phase 9 owns only deployment
-  propagation and replica/HPA validation for this already-fixed semantic.
+- Runtime Control-only composition for memory or Redis Transfer State. Existing
+  Redis Coordination construction remains unchanged. Phase 9 owns deployment
+  propagation and validates that memory routes every coordinator and Runner
+  transfer RPC to one Runtime Control process.
 - Shared parameterized state-store contract tests for memory and Redis.
+- Composition tests proving memory Transfer State coexists with Redis Runtime
+  Coordination without changing existing operation routing.
 - RustFS integration coverage for real copy, multipart, abort, bounded read,
   verification, and cleanup behavior.
 
 Excluded behavior:
 
-- Runner-facing protobuf or gRPC service.
+- Runner-facing or internal coordinator protobuf and gRPC services.
 - Runner filesystem changes.
 - Product consumer migration.
 - Provider or Helm cutover wiring beyond configuration primitives required to
@@ -247,6 +255,8 @@ Primary validation:
 
 - `az-common` Ruff, formatting, Pyright, and Pytest.
 - Azents backend targeted transfer-state and coordination contract suites.
+- Regression tests proving existing Redis Coordination behavior and
+  API/Worker-to-Control routing remain unchanged.
 - Focused real RustFS transfer-object integration tests under
   `testenv/azents/e2e`, including that project's Ruff, formatting, Pyright, and
   targeted Pytest commands.
@@ -266,6 +276,8 @@ Purpose:
 
 - Add the dedicated versioned Runner transfer protobuf and generated Python
   artifacts.
+- Add the authenticated internal transfer-coordinator protobuf, client, and
+  Runtime Control service used by trusted Server and Worker callers.
 - Implement Runtime Control upload/download services, authentication,
   authorization, transfer-object streaming, cancellation, terminal error
   mapping, and control-operation correlation.
@@ -273,6 +285,19 @@ Purpose:
 Included behavior:
 
 - Typed Runner-initiated `DownloadTransfer` and `UploadTransfer` RPCs.
+- Typed internal coordinator RPCs for admission, preparation/ready, dispatch,
+  cancellation, verified-object handoff, consumer claim/acknowledgement,
+  terminal settlement, and bounded cleanup status.
+- Trusted-service authentication on every coordinator RPC, distinct from
+  Runner credentials and bound to service identity, operation, Runtime,
+  Session/Agent when applicable, direction, attempt, and allowed transition.
+- Short-lived trusted-service credential issuance and verification rooted in
+  the existing Runtime Control trusted credential authority. Every RPC validates
+  expiry, not-before time, service identity, and coordinator-specific audience;
+  static long-lived shared bearer tokens are excluded.
+- Runtime Control as the sole Transfer State owner. Internal coordinator
+  messages contain bounded metadata and opaque trusted-service handles but no
+  complete file bodies.
 - A bounded transfer-intent contract on the existing Runner Control stream,
   carrying transfer identity, authorized Runtime path, overwrite policy,
   expected length/SHA-256, deadline, cancellation, and result correlation but
@@ -300,10 +325,11 @@ Excluded behavior:
 
 Generated-artifact gate:
 
-- Add `runtime_runner_transfer.proto` to the generator input set.
-- Regenerate and commit the new transfer modules and the changed Runner Control
-  modules. The drift check covers every generated module, not only the new
-  service.
+- Add `runtime_runner_transfer.proto` and
+  `runtime_transfer_coordinator.proto` to the generator input set.
+- Regenerate and commit both new service module pairs and the changed Runner
+  Control modules. The drift check covers every generated module, not only the
+  new services.
 
 ```bash
 cd python/libs/azents-runtime-control
@@ -317,6 +343,12 @@ Primary validation:
   targeted Pytest suites.
 - Unauthorized, stale generation, wrong direction, duplicate claim, invalid
   frame, size, checksum, deadline, and cancellation tests.
+- Internal coordinator tests proving unauthorized callers fail before state
+  access, Runner and trusted-service credentials are non-interchangeable,
+  memory state works through the real cross-process RPC boundary, and no
+  coordinator message carries file bytes.
+- Expired, not-yet-valid, wrong-service, and wrong-audience trusted credential
+  tests.
 - A real gRPC transfer above 4 MiB through a synthetic authenticated test Runner
   proving that no individual message is proportional to the complete file and
   that a concurrent registered Runner Control stream and heartbeat remain
@@ -504,8 +536,11 @@ Included behavior:
   state comparison, and reconciliation updates.
 - Runtime Control workspace S3 composition, state backend, TTL, chunk, part,
   buffer, concurrency, reconciliation, and transfer prefix settings.
-- Helm values, schema, templates, render tests, and memory/single-replica/HPA
-  rejection.
+- API Server and Worker internal coordinator endpoint, TLS trust, and
+  short-lived trusted-service credential root/issuance configuration.
+- Helm values, schema, templates, render tests, and transfer-state
+  memory/single-owner/HPA rejection. Redis Runtime Coordination remains
+  configured for API/Worker-to-Control communication in every mode.
 - Portable transfer-prefix lifecycle and incomplete-multipart-abort
   configuration where the deployment owns the bucket lifecycle.
 - An explicit operator action and evidence contract for production or other
@@ -535,6 +570,9 @@ Primary validation:
 - Helm render tests and CI-equivalent `helm lint`.
 - Configuration validation for TTL at most 3,600 seconds and calculable bounded
   process memory.
+- Memory transfer-state validation proving every internal coordinator and
+  Runner transfer endpoint resolves to the one Runtime Control owner while
+  Runtime Coordination remains Redis-backed.
 - Static and rendered-manifest assertions that Runner has no object-storage
   authority.
 - Cutover tests proving that strict registration enforcement is activated only
@@ -553,8 +591,8 @@ PR title: `Runtime File Transfer [10/12]: E2E and validation`
 Purpose:
 
 - Prove the complete integrated behavior through real Runtime Control, Runner,
-  Redis/memory state, RustFS, deterministic provider fixtures, and product
-  surfaces.
+  Redis Runtime Coordination with both memory and Redis Transfer State, RustFS,
+  deterministic provider fixtures, and product surfaces.
 - Record validation evidence and fix defects found without broadening scope.
 
 Included behavior:
@@ -649,8 +687,8 @@ Verification:
 
 | Phase | Data/state | API/protocol | Runtime/feature behavior |
 | --- | --- | --- | --- |
-| 3 | Ephemeral transfer records, leases, object metadata, cleanup state; no RDB migration | Internal S3 and state-store contracts | Bounded object/state foundation only |
-| 4 | Transfer object streaming and terminal evidence | New Runner transfer protobuf/service and generated client | Runtime Control terminates data RPC and correlates control outcomes |
+| 3 | Ephemeral transfer records, leases, object metadata, cleanup state; no RDB migration | Internal S3 and transfer-state contracts | Bounded object/state foundation; existing Redis Coordination unchanged |
+| 4 | Transfer object streaming and terminal evidence | New Runner transfer and internal coordinator protobuf/services and generated clients | Runtime Control solely owns state, terminates data RPC, and correlates trusted feature/control outcomes |
 | 5 | Runner temp/snapshot files only | Runner transfer client and capability/version | Atomic local download commit and bounded upload snapshot |
 | 6 | Transfer snapshots from managed/provider/VFS sources | Internal `AuthorizedTransferSource` and download service interfaces | Complete-file import and inbound External Channel use the common transfer path |
 | 7 | Verified transfer object to managed destination | Internal verified-object product publication interfaces | `present_file`, Exchange, and Artifact use S3-native publication |
@@ -678,7 +716,7 @@ their existing ownership and retention semantics.
 | `REQ-8` Observability | 3-10 | Structured log, metric, phase, and failure evidence in 10 |
 | `REQ-9` Untrusted Runner boundary | 4-5, 9 | Unauthorized-before-byte and no-Runner-S3 evidence in 10 |
 | `REQ-10` Object-store-native movement | 3, 6-7 | No-eager-read/copy assertions and managed-object E2E in 10 |
-| `REQ-11` Optional state backend | 3, 9 | Memory restart and Redis handoff evidence in 10 |
+| `REQ-11` Optional state backend | 3-4, 9 | Cross-process memory coordinator, memory restart, and Redis handoff evidence in 10 |
 | `REQ-12` Short-lived retention | 3, 6-10 | Earlier-source expiry, one-hour expiry, lifecycle, and delete-failure evidence in 10 |
 
 ## Test strategy by phase
@@ -686,7 +724,7 @@ their existing ownership and retention semantics.
 | Phase | Required test layers |
 | --- | --- |
 | 3 | S3 unit/fake tests, real RustFS integration, memory/Redis shared state-store contract suite, injected-clock expiry and admission tests |
-| 4 | Protobuf generation drift, domain/service tests, real gRPC integration under default limits, auth and adversarial frame tests |
+| 4 | Protobuf generation drift, internal coordinator and Runner service tests, real gRPC integration under default limits, auth and adversarial frame tests |
 | 5 | Runner filesystem and channel tests, source mutation/race/cancellation tests, Control/Runner integration |
 | 6 | Import, resolver, managed-object copy, VFS, Slack/provider ingress, authorization and no-eager-read tests |
 | 7 | `present_file`, Exchange/Artifact publication, preview, compensation, and managed consumer acknowledgement tests |
@@ -740,8 +778,8 @@ Expected Python projects include:
 | Provider delivery failure | Transfer success remains distinct; no provider success; no product-file side effect | 8 | 10 |
 | Earlier source expiry | Access and publication fail at the authoritative source expiry even before one hour | 3 and 6-8 | 10 |
 | Logical expiry with failed physical delete | Every access fails after expiry; cleanup evidence remains; completed feature result is not reversed | 3 | 10 |
-| Memory backend restart | Active work fails closed and orphan presence is never inferred as success | 3 | 10 |
-| Redis replica handoff | Shared state fences duplicates and preserves terminal outcome | 3 | 10 |
+| Memory backend restart | Active work fails closed through the internal coordinator boundary and orphan presence is never inferred as success | 3-4 | 10 |
+| Redis replica handoff | Shared transfer state fences duplicates and preserves terminal outcome through coordinator and Runner services | 3-4 | 10 |
 | Old Runner registration | Exact protocol/capability rejection before transfer or ordinary work resumes | 9 | 10 |
 
 Every E2E evidence record includes the operation result, transfer phase and
@@ -754,8 +792,13 @@ attempt, and absence of file content or secrets in diagnostics.
 - **RustFS:** real S3-compatible copy, multipart, abort, bounded read, metadata,
   lifecycle-defense, and cleanup behavior. Unit fakes are insufficient for the
   storage acceptance gate.
-- **Redis/Valkey:** shared-state contract and replica/fencing tests. Memory tests
-  remain mandatory and independent from Redis availability.
+- **Redis/Valkey:** required for every integrated API/Worker-to-Runtime-Control
+  lane because existing Runtime Coordination remains Redis-backed, including
+  E2E with memory Transfer State. Redis Transfer State also uses it for shared
+  replica/fencing tests.
+- **Isolated memory Transfer State:** state-store contract tests remain
+  mandatory and run without Redis. They do not substitute for the integrated
+  memory Transfer State lane with Redis Runtime Coordination.
 - **Runtime Control and Runner:** real gRPC service/client using default message
   limits and distinct transfer/control channels.
 - **Deterministic Slack provider:** streaming body fixture with declared size,
@@ -770,8 +813,10 @@ attempt, and absence of file content or secrets in diagnostics.
   disconnect, Runner disconnect, source mutation, checksum mismatch, and
   destination race.
 - **Helm/provider fixtures:** memory/Redis backend, replica/HPA combinations,
-  transfer endpoint/TLS propagation, and assertions that Runner receives no S3
-  authority.
+  Runner transfer endpoint/TLS propagation, internal coordinator
+  endpoint/TLS/short-lived trusted-service authority propagation, persistent
+  Redis Runtime Coordination in both transfer-backend modes, and assertions
+  that Runner receives no S3 authority.
 - **Lifecycle evidence:** testenv/RustFS lifecycle or incomplete-multipart
   policy where supported, plus an operator-managed production bucket
   acknowledgement when lifecycle is outside repository control.
