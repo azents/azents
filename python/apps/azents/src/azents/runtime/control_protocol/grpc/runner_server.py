@@ -20,6 +20,7 @@ from azents_runtime_control.grpc_runner_client import (
 from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
     runtime_runner_control_pb2_grpc,
+    runtime_runner_transfer_pb2,
 )
 from azents_runtime_control.runner import RunnerStateReport as SharedRunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
@@ -110,6 +111,7 @@ class RuntimeRunnerControlGrpcServicer(
         self._runner_authenticator = runner_authenticator
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
         self._operation_block_ms = operation_block_ms
+        self._transfer_dispatch_request_ids: dict[str, str] = {}
 
     async def ConnectRunner(
         self,
@@ -375,6 +377,26 @@ class RuntimeRunnerControlGrpcServicer(
                     return
                 await self._append_runner_event(message)
                 continue
+            if payload == "transfer_result":
+                if message.transfer_result.identity.runtime_id != runtime_id:
+                    await outbound.put(
+                        _error(message.request_id, "RUNNER_IDENTITY_MISMATCH")
+                    )
+                    return
+                if message.transfer_result.identity.runner_generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_RUNNER_GENERATION")
+                    )
+                    return
+                if not await self._runner_generation_current(
+                    runtime_id=runtime_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
+                await self._append_transfer_result(message)
+                continue
             if payload == "operation_start":
                 if message.operation_start.runtime_id != runtime_id:
                     await outbound.put(
@@ -462,6 +484,29 @@ class RuntimeRunnerControlGrpcServicer(
                                     operation_id=operation_id,
                                 )
                             ),
+                        ),
+                        ack_envelope=envelope,
+                    )
+                )
+                continue
+            if envelope.operation_type == "file.transfer.v1":
+                intent = _runner_transfer_intent(envelope)
+                existing_request_id = self._transfer_dispatch_request_ids.get(
+                    intent.dispatch_id
+                )
+                if existing_request_id is not None:
+                    if existing_request_id != envelope.request_id:
+                        raise ValueError("Conflicting Runner transfer dispatch ID")
+                    await self._control_protocol.ack_claimed_request(envelope)
+                    continue
+                self._transfer_dispatch_request_ids[intent.dispatch_id] = (
+                    envelope.request_id
+                )
+                await outbound.put(
+                    _RunnerOutboundItem(
+                        message=runtime_runner_control_pb2.RunnerControlMessage(
+                            request_id=envelope.request_id,
+                            transfer_intent=intent,
                         ),
                         ack_envelope=envelope,
                     )
@@ -580,6 +625,49 @@ class RuntimeRunnerControlGrpcServicer(
             if any(record.chunk.final for record in batch):
                 return records
             after_cursor = batch[-1].cursor
+
+    async def _append_transfer_result(
+        self,
+        message: runtime_runner_control_pb2.RunnerMessage,
+    ) -> None:
+        result = message.transfer_result
+        operation = await self._coordination_store.get_operation(result.operation_id)
+        if (
+            operation is None
+            or operation.status is RuntimeOperationStatus.FINAL
+            or operation.transfer_id != result.identity.transfer_id
+            or operation.transfer_attempt_id != result.identity.attempt_id
+            or operation.transfer_dispatch_id != result.dispatch_id
+        ):
+            return
+        valid, success = _valid_transfer_result(result)
+        if not valid:
+            success = False
+        await self._control_protocol.append_reply_event(
+            RuntimeReplyEvent(
+                request_id=message.request_id,
+                runtime_id=result.identity.runtime_id,
+                generation=result.identity.runner_generation,
+                event_type=(
+                    RuntimeReplyEventType.FINAL_SUCCESS
+                    if success
+                    else RuntimeReplyEventType.FINAL_ERROR
+                ),
+                payload={
+                    "transfer_id": result.identity.transfer_id,
+                    "attempt_id": result.identity.attempt_id,
+                    "dispatch_id": result.dispatch_id,
+                    "outcome": result.outcome,
+                    "protocol_violation": not valid,
+                },
+                created_at=datetime.now(UTC),
+                final=True,
+            ),
+            reply_stream_id=operation.reply_stream_id,
+            operation_id=operation.operation_id,
+            expected_target=RuntimeCoordinationTarget.RUNNER,
+            expected_subject_id=result.identity.runtime_id,
+        )
 
     async def _append_runner_event(
         self,
@@ -732,6 +820,94 @@ def _registration(
         connection_id=message.connection_id,
         owner_replica_id=owner_replica_id,
     )
+
+
+def _runner_transfer_intent(
+    envelope: RuntimeRequestEnvelope,
+) -> runtime_runner_control_pb2.RunnerTransferIntent:
+    payload = envelope.payload
+    transfer_id = _str_payload(payload, "transfer_id")
+    attempt_id = _str_payload(payload, "attempt_id")
+    runtime_id = _str_payload(payload, "runtime_id")
+    _int_payload(payload, "desired_generation")
+    direction = _str_payload(payload, "direction")
+    operation_id = _str_payload(payload, "operation_id")
+    dispatch_id = _str_payload(payload, "dispatch_id")
+    deadline_at = envelope.deadline_at
+    if deadline_at is None or envelope.body_stream_id is not None:
+        raise ValueError("Transfer intent requires metadata-only deadline routing")
+    message = runtime_runner_control_pb2.RunnerTransferIntent(
+        identity=runtime_runner_transfer_pb2.TransferIdentity(
+            transfer_id=transfer_id,
+            attempt_id=attempt_id,
+            runtime_id=runtime_id,
+            runner_generation=envelope.generation,
+        ),
+        direction=(
+            runtime_runner_transfer_pb2.TRANSFER_DIRECTION_DOWNLOAD
+            if direction == "download"
+            else runtime_runner_transfer_pb2.TRANSFER_DIRECTION_UPLOAD
+        ),
+        operation_id=operation_id,
+        runtime_path=_str_payload(payload, "runtime_path"),
+        deadline_at=_timestamp(deadline_at),
+        protocol_version="2026-07-25",
+        capability="file.transfer.v1",
+        dispatch_id=dispatch_id,
+    )
+    owner_session_id = payload.get("owner_session_id")
+    if isinstance(owner_session_id, str):
+        message.owner_session_id = owner_session_id
+    overwrite = payload.get("overwrite")
+    if isinstance(overwrite, bool):
+        message.overwrite = overwrite
+    expected_size = payload.get("expected_size")
+    if isinstance(expected_size, int):
+        message.expected_size = expected_size
+    expected_sha256 = payload.get("expected_sha256")
+    if isinstance(expected_sha256, str):
+        message.expected_sha256 = expected_sha256
+    return message
+
+
+def _valid_transfer_result(
+    result: runtime_runner_control_pb2.RunnerTransferResult,
+) -> tuple[bool, bool]:
+    has_size = result.HasField("actual_size")
+    has_sha256 = result.HasField("sha256")
+    has_commit = result.HasField("destination_committed")
+    has_failure = result.HasField("failure")
+    paired_manifest = has_size == has_sha256
+    if result.outcome == runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_SUCCEEDED:
+        return (
+            paired_manifest
+            and has_size
+            and has_commit
+            and has_failure is False
+            and result.destination_committed,
+            True,
+        )
+    if result.outcome == runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_FAILED:
+        return (
+            paired_manifest
+            and has_commit
+            and not result.destination_committed
+            and has_failure
+            and result.failure
+            != runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_CANCELLED,
+            False,
+        )
+    if result.outcome == runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_CANCELLED:
+        return (
+            paired_manifest
+            and has_commit
+            and not result.destination_committed
+            and has_failure
+            and result.failure
+            == runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_CANCELLED,
+            False,
+        )
+    return False, False
 
 
 def _copy_operation_payload(
