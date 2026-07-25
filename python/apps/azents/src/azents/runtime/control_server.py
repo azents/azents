@@ -8,6 +8,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal
 
 import boto3
 import grpc
@@ -106,6 +107,16 @@ class RuntimeControlSettings(BaseSettings):
     )
     runtime_control_start_timeout_seconds: float = _DEFAULT_START_TIMEOUT_SECONDS
     runtime_control_kubernetes_token_review_enabled: bool = False
+    runtime_control_transfer_backend: Literal["memory", "redis"] = "redis"
+    runtime_control_transfer_redis_namespace: str = "azents:runtime:transfer"
+    runtime_control_transfer_per_runtime_attempts: int = 8
+    runtime_control_transfer_per_runtime_bytes: int = 8 * 1024 * 1024
+    runtime_control_transfer_deployment_attempts: int = 32
+    runtime_control_transfer_deployment_bytes: int = 32 * 1024 * 1024
+    runtime_control_transfer_admission_lease_seconds: float = 300.0
+    runtime_control_transfer_consumer_lease_seconds: float = 60.0
+    runtime_control_transfer_terminal_ttl_seconds: float = 300.0
+    runtime_control_transfer_list_page_size: int = 100
     runtime_control_allow_insecure: bool
     runtime_control_tls_certificate_file: str | None = None
     runtime_control_tls_private_key_file: str | None = None
