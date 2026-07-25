@@ -1,14 +1,23 @@
 """Runtime Control gRPC metadata authentication."""
 
 from collections.abc import Iterable
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 import grpc
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    coordinator_credential_request,
+)
+from google.protobuf.message import Message
 
 from azents.core.enums import RuntimeProviderAuthMethod
 from azents.core.runtime_runner_credential import (
     RuntimeRunnerCredential,
     RuntimeRunnerCredentialInvalid,
+)
+from azents.core.runtime_transfer_coordinator_credential import (
+    RuntimeTransferCoordinatorCredentialClaims,
+    RuntimeTransferCoordinatorCredentialInvalid,
+    RuntimeTransferCoordinatorCredentialVerifier,
 )
 from azents.services.runtime_provider_control.data import (
     RuntimeProviderCredentialAuthentication,
@@ -20,6 +29,22 @@ _AUTH_METHOD_HEADER = "x-azents-runtime-provider-auth-method"
 _BEARER_PREFIX = "bearer "
 
 GrpcMetadata = grpc.aio.Metadata | Iterable[tuple[str, str | bytes]] | None
+
+
+class GrpcAbortContext(Protocol):
+    """gRPC call context methods needed for unary metadata authentication."""
+
+    def invocation_metadata(self) -> GrpcMetadata:
+        """Return inbound call metadata."""
+        ...
+
+    async def abort(
+        self,
+        code: grpc.StatusCode,
+        details: str,
+    ) -> NoReturn:
+        """Abort the active gRPC call."""
+        ...
 
 
 class RuntimeProviderCredentialAuthenticator(Protocol):
@@ -59,6 +84,60 @@ class RuntimeRunnerCredentialAuthenticator(Protocol):
     ) -> bool:
         """Return whether verified claims still match durable Runtime state."""
         ...
+
+
+class RuntimeTransferCoordinatorCredentialGrpcAuth:
+    """Authenticate one trusted-service coordinator RPC before state access."""
+
+    def __init__(
+        self,
+        verifier: RuntimeTransferCoordinatorCredentialVerifier,
+    ) -> None:
+        """Initialize trusted coordinator credential authentication.
+
+        :param verifier: deployment-rooted coordinator credential verifier
+        """
+        self._verifier = verifier
+
+    async def authenticate(
+        self,
+        context: GrpcAbortContext,
+        *,
+        operation: str,
+        request: Message,
+    ) -> RuntimeTransferCoordinatorCredentialClaims:
+        """Verify one metadata bearer against the exact protobuf request.
+
+        :param context: active gRPC call context
+        :param operation: exact coordinator RPC operation
+        :param request: complete protobuf request to bind to the credential
+        :returns: verified trusted-service claims
+        """
+        credential = _single_bearer_credential(context.invocation_metadata())
+        if credential is None:
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "Trusted-service credential is missing",
+            )
+            raise AssertionError("unreachable")
+        try:
+            expected = coordinator_credential_request(operation, request)
+            return self._verifier.verify(
+                credential,
+                expected_operation=expected.operation,
+                expected_request_sha256=expected.request_sha256,
+                expected_identity=expected.identity,
+            )
+        except (
+            KeyError,
+            RuntimeTransferCoordinatorCredentialInvalid,
+            ValueError,
+        ):
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "Trusted-service credential is invalid or unavailable",
+            )
+            raise AssertionError("unreachable") from None
 
 
 class RuntimeRunnerCredentialGrpcAuth:
