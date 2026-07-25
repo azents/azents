@@ -121,10 +121,9 @@ Transfer phase, terminal outcome, and cleanup status are separate fields. Cleanu
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Preparing
+    [*] --> Preparing: admission granted and attempt record created
     Preparing --> Ready: snapshot complete
-    Ready --> Admitted: resource lease acquired
-    Admitted --> Streaming: one RPC claims attempt
+    Ready --> Streaming: one RPC claims attempt
     Streaming --> Verifying: stream ended
     Verifying --> Available: bytes and object verified
     Available --> Consuming: trusted consumer claim
@@ -133,7 +132,6 @@ stateDiagram-v2
 
     Preparing --> Terminal: failure or cancellation
     Ready --> Terminal: failure, cancellation, expiry
-    Admitted --> Terminal: failure, cancellation, expiry
     Streaming --> Terminal: disconnect, failure, cancellation, expiry
     Verifying --> Terminal: integrity or commit failure
     Available --> Terminal: abandonment or expiry
@@ -154,9 +152,9 @@ A transition includes the expected attempt ID, Runtime generation, current phase
 
 A dedicated `RuntimeTransferStateStore` Protocol exposes domain operations rather than Redis commands:
 
-- create an immutable attempt;
+- atomically admit expected transfer metadata and create an immutable `preparing`
+  attempt bound to the resulting lease;
 - get the current record;
-- acquire or reject admission;
 - claim the one data RPC allowed for an attempt;
 - refresh bounded heartbeat and progress evidence;
 - request cancellation;
@@ -168,6 +166,11 @@ A dedicated `RuntimeTransferStateStore` Protocol exposes domain operations rathe
 - list expired or cleanup-pending records in bounded pages.
 
 No API accepts or returns file chunks.
+
+The atomic admit-and-create operation evaluates all admission budgets before it persists
+the attempt record. Rejection creates neither a lease nor an attempt. Acceptance creates
+the bounded state record and its lease in one store transaction, but allocates no S3
+object and starts no provider, copy, multipart, Runner snapshot, or data-stream work.
 
 ### Redis implementation
 
@@ -205,7 +208,11 @@ Runtime Control constructs an async S3 client for its full process lifespan usin
 
 ### Snapshot creation
 
-An attempt becomes `ready` only after its immutable object exists and its manifest is known.
+Source authorization and expected transfer metadata are resolved before admission.
+The coordinator atomically validates admission and creates the bounded `preparing`
+attempt record before reading a provider body, allocating an object, or starting an S3
+copy or multipart upload. The admitted attempt becomes `ready` only after its immutable
+object exists and its manifest is known.
 
 - **Existing S3 source:** the feature owner authorizes the product object and uses S3 copy into the transfer namespace. It supplies the trusted product size and SHA-256. The destination object is checked before the attempt becomes ready.
 - **External provider source:** the provider adapter streams response bytes into multipart upload, computes actual size and SHA-256, enforces declared and actual limits, and completes the object only on success.
@@ -351,10 +358,9 @@ sequenceDiagram
     participant Runner as Runtime Runner
 
     Feature->>Feature: authorize source and destination
-    Feature->>State: create attempt
+    Feature->>State: admit and create preparing attempt
     Feature->>S3: copy source to immutable transfer key
     Feature->>State: mark ready with size and SHA-256
-    Feature->>State: acquire admission
     Feature->>Control: dispatch download intent
     Control->>Runner: transfer ID, path, manifest, deadline
     Runner->>Transfer: DownloadTransfer(identity)
@@ -373,7 +379,10 @@ The Feature service never downloads the source body. Runtime Control never sees 
 
 Slack metadata and credentials remain owned by the External Channel service. The Slack client exposes an async byte iterator rather than a complete `bytes` result. The adapter streams to multipart upload, enforces declared and actual configured limits, computes SHA-256, and marks the attempt ready. The Runtime portion then uses the same download flow.
 
-Provider authentication failures, rate limiting, source disappearance, actual-size excess, and stream interruption settle source preparation before Runner receives an intent.
+The feature resolves provider metadata and acquires admission before it opens the provider
+body stream or allocates the multipart upload. Provider authentication failures, rate
+limiting, source disappearance, actual-size excess, and stream interruption settle source
+preparation before Runner receives an intent.
 
 ### Runtime to Exchange through `present_file`
 
@@ -389,7 +398,7 @@ sequenceDiagram
     participant DB as PostgreSQL
 
     Tool->>Runner: bounded stat intent
-    Tool->>State: create and admit upload attempt
+    Tool->>State: admit and create preparing upload attempt
     Control->>Runner: upload intent with source path
     Runner->>Runner: create bounded local snapshot
     Runner->>Transfer: UploadTransfer(open and chunks)
@@ -495,7 +504,9 @@ Object listing and cleanup are paginated. Reconciliation never interprets an obj
 
 ## Admission and Backpressure
 
-Admission occurs before object allocation or Runner intent dispatch. The service applies existing product and provider size limits and separate configurable budgets for:
+Admission occurs before attempt creation, provider body reads, object allocation, S3
+copy or multipart work, or Runner intent dispatch. The service applies existing product
+and provider size limits and separate configurable budgets for:
 
 - active transfers per Runtime;
 - admitted bytes per Runtime;
