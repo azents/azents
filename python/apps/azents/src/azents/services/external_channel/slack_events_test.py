@@ -130,6 +130,7 @@ def test_normalizes_bounded_file_metadata_and_fail_closed_modes() -> None:
         envelope=_envelope(
             {
                 "type": "message",
+                "subtype": "file_share",
                 "channel": "C1",
                 "channel_type": "channel",
                 "user": "U1",
@@ -155,6 +156,58 @@ def test_normalizes_bounded_file_metadata_and_fail_closed_modes() -> None:
     assert projected[5]["unsupported_reason"] == "invalid_size"
     assert "url_private" not in repr(projected)
     assert "must not survive" not in repr(projected)
+
+
+@pytest.mark.parametrize(
+    "subtype",
+    ["channel_join", "thread_broadcast", "reply_broadcast"],
+)
+def test_normalizes_all_user_visible_message_subtypes(subtype: str) -> None:
+    """User-visible Slack message subtypes remain available to the Agent."""
+    normalized = normalize_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        envelope=_envelope(
+            {
+                "type": "message",
+                "subtype": subtype,
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U1",
+                "ts": "1721600000.000100",
+                "text": "Visible Slack message",
+            }
+        ),
+    )
+
+    assert isinstance(normalized, SlackNormalizedMessage)
+    assert normalized.normalized_body == "Visible Slack message"
+    assert normalized.invocation is False
+
+
+def test_normalizes_nested_user_visible_message_subtype() -> None:
+    """Subtypes with a nested visible message retain its canonical identity."""
+    normalized = normalize_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        envelope=_envelope(
+            {
+                "type": "message",
+                "subtype": "message_replied",
+                "channel": "C1",
+                "channel_type": "channel",
+                "message": {
+                    "user": "U1",
+                    "ts": "1721600000.000100",
+                    "text": "Visible threaded reply",
+                },
+            }
+        ),
+    )
+
+    assert isinstance(normalized, SlackNormalizedMessage)
+    assert normalized.provider_message_key == "slack:T1:C1:1721600000.000100"
+    assert normalized.normalized_body == "Visible threaded reply"
 
 
 def test_bot_mention_is_context_only_and_never_invokes() -> None:
@@ -590,8 +643,8 @@ async def test_thread_page_uses_cursor_and_normalizes_messages() -> None:
     assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
 
 
-async def test_thread_page_skips_unsupported_history_subtypes() -> None:
-    """One unsupported history item does not block the remaining thread."""
+async def test_thread_page_includes_all_user_visible_history_subtypes() -> None:
+    """Hydration preserves user-visible history regardless of subtype."""
 
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -624,8 +677,7 @@ async def test_thread_page_skips_unsupported_history_subtypes() -> None:
             limit=100,
         )
 
-    assert len(page.messages) == 1
-    assert page.messages[0].normalized_body == "root"
+    assert [message.normalized_body for message in page.messages] == ["joined", "root"]
 
 
 async def test_thread_page_surfaces_rate_limit_for_inbound_retry() -> None:
