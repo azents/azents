@@ -1,25 +1,27 @@
 ---
-title: "Team Session execution boundaries phase 8: deterministic validation report"
+title: "Team Session Execution Boundaries Testenv Validation Report"
 created: 2026-07-24
+document_role: supporting
+document_type: supporting-validation-report
 tags: [session, authorization, validation, e2e, testenv, migration, security]
 ---
 
-# Team Session execution boundaries phase 8: deterministic validation report
+# Team Session Execution Boundaries Testenv Validation Report
 
 ## Scope and Boundaries
 
-- Phase: `8/10 — Deterministic E2E and validation`
+- Origin: `8/10 — Deterministic E2E and validation`
 - Branch/base: `validate/team-session-execution-boundaries` → Phase 5 (`083f49d7`)
 - Requirements: [session-260724/REQ](../requirements/session-260724-team-session-execution-boundaries.md)
 - ADR: [session-260724/ADR](../adr/session-260724-team-session-execution-boundaries.md)
-- Design: [session-260724/DESIGN](../design/session-260724-team-session-execution-boundaries.md)
-- Delivery plan: [Team Session execution boundaries implementation plan](./team-session-execution-boundaries-implementation-plan.md)
-- Earlier phase plans: [Phase 1](./team-session-execution-boundaries-phase-1-admission-provenance.md), [Phase 2](./team-session-execution-boundaries-phase-2-canonical-execution.md), [Phase 3](./team-session-execution-boundaries-phase-3-userless-engine.md), [Phase 4](./team-session-execution-boundaries-phase-4-resource-authority.md), and [Phase 5](./team-session-execution-boundaries-phase-5-cutover-replay.md)
+- Design: [session-260724/DESIGN](session-260724-team-session-execution-boundaries.md)
 
-This phase adds only deterministic testenv/E2E validation evidence, fixture support, and fixes that
-are directly demonstrated by validation. It does not promote living specifications, set `implemented`
-dates, remove plans, create a compatibility path, perform a live cutover, or write to a shared or
-production database.
+This persistent report retains the exact deterministic validation evidence and blockers recorded
+during the former Phase 8 validation work. It remains under `design/` after plan cleanup because
+required deterministic product E2E, Runtime Provider, bounded Worker-restart, post-commit
+broker-notification-fault, and migration-integration evidence is still blocked or absent. It is not
+a living spec, an implementation plan, a cutover record, or evidence that the Requirements and
+primary Design may receive an `implemented` date.
 
 ## Environment and Readiness Contract
 
@@ -125,12 +127,13 @@ The following support remains absent:
   explicit `null` Human sender, `migration` Exchange provenance, and nullable unmatched ModelFile Run
   counts when the fixture is runnable.
 
-## Implemented Behavior Versus Current Living Specs
+## Historical Pre-Promotion Spec Comparison
 
-This phase intentionally does not modify living specs. The strict comparison below identifies the
-expected Phase 9 promotion work and validation evidence needed to support it.
+This comparison was recorded before the later living-spec promotion. It is retained as the
+then-current gap analysis and validation-evidence inventory; it does not change the current living
+specs or claim that the blocked deterministic scenarios have since executed.
 
-| Current living spec | Implemented behavior under comparison | Current spec coverage | Phase 8 action |
+| Living spec at Phase 8 | Implemented behavior under comparison | Coverage recorded at Phase 8 | Phase 8 action |
 | --- | --- | --- | --- |
 | `spec/domain/conversation.md` | Team admission, sender-bearing inputs, requester/public read separation, canonical Session work | Does not yet describe this complete `session-260724` boundary set | collect evidence only; promote in Phase 9 |
 | `spec/flow/agent-execution-loop.md` | pure wake-ups, canonical snapshots, Userless execution, recovery, resource authority | Does not yet describe the complete Phase 1–5 cutover contract | collect evidence only; promote in Phase 9 |
