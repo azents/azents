@@ -92,8 +92,8 @@ def _abort_on_legacy_ambiguity() -> None:
     ).scalar_one_or_none()
     if resource_id is not None:
         raise RuntimeError(
-            "Cannot add External Channel App mode: resource has multiple active "
-            f"{resource_id}."
+            "Cannot add External Channel App mode: resource has multiple "
+            f"active bindings: {resource_id}."
         )
     route_id = bind.execute(
         sa.text("""
