@@ -30,6 +30,7 @@ class ActionExecutionResponse(BaseModel):
     """ # noqa: E501
     id: StrictStr = Field(description="Action execution ID")
     input_buffer_id: StrictStr = Field(description="Durable source input buffer ID")
+    sender_user_id: Optional[StrictStr]
     action_type: StrictStr = Field(description="Action discriminator")
     action: Action
     status: StrictStr = Field(description="Execution status")
@@ -42,7 +43,7 @@ class ActionExecutionResponse(BaseModel):
     cancelled_at: Optional[datetime] = None
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "input_buffer_id", "action_type", "action", "status", "owner_generation", "failure_summary", "cancellation_summary", "started_at", "completed_at", "failed_at", "cancelled_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "input_buffer_id", "sender_user_id", "action_type", "action", "status", "owner_generation", "failure_summary", "cancellation_summary", "started_at", "completed_at", "failed_at", "cancelled_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -93,6 +94,11 @@ class ActionExecutionResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if sender_user_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.sender_user_id is None and "sender_user_id" in self.model_fields_set:
+            _dict['sender_user_id'] = None
+
         # set to None if failure_summary (nullable) is None
         # and model_fields_set contains the field
         if self.failure_summary is None and "failure_summary" in self.model_fields_set:
@@ -137,6 +143,7 @@ class ActionExecutionResponse(BaseModel):
         _obj = cls.model_validate({
             "id": obj.get("id"),
             "input_buffer_id": obj.get("input_buffer_id"),
+            "sender_user_id": obj.get("sender_user_id"),
             "action_type": obj.get("action_type"),
             "action": Action.from_dict(obj["action"]) if obj.get("action") is not None else None,
             "status": obj.get("status"),

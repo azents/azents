@@ -814,7 +814,7 @@ class TestAgentSessionRepository:
             rdb_session,
             session_id=root_session.id,
             stop_request_id="stop-before-spawn",
-            user_id=None,
+            stop_requester_user_id=None,
         )
         assert stopped is not None
 
@@ -876,7 +876,7 @@ class TestAgentSessionRepository:
                 stop_session,
                 session_id=root_session.id,
                 stop_request_id="concurrent-stop",
-                user_id=None,
+                stop_requester_user_id=None,
             )
             assert stopped is not None
 
@@ -955,7 +955,7 @@ class TestAgentSessionRepository:
                 stop_session,
                 session_id=parent.agent_session_id,
                 stop_request_id="concurrent-child-stop",
-                user_id=None,
+                stop_requester_user_id=None,
             )
             assert stopped is not None
 

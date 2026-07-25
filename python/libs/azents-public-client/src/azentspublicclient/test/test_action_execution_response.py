@@ -37,6 +37,7 @@ class TestActionExecutionResponse(unittest.TestCase):
             return ActionExecutionResponse(
                 id = '',
                 input_buffer_id = '',
+                sender_user_id = '',
                 action_type = '',
                 action = None,
                 status = '',
@@ -53,6 +54,7 @@ class TestActionExecutionResponse(unittest.TestCase):
             return ActionExecutionResponse(
                 id = '',
                 input_buffer_id = '',
+                sender_user_id = '',
                 action_type = '',
                 action = None,
                 status = '',

@@ -38,7 +38,6 @@ class AgentMailboxService:
         source: SessionAgent,
         target: SessionAgent,
         content: str,
-        actor_user_id: str | None,
     ) -> InputBuffer:
         """Enqueue a wake-producing initial child assignment."""
         return await self._enqueue_instruction(
@@ -47,7 +46,6 @@ class AgentMailboxService:
             target=target,
             message_kind="spawn_agent",
             content=content,
-            actor_user_id=actor_user_id,
             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
         )
 
@@ -58,7 +56,6 @@ class AgentMailboxService:
         source: SessionAgent,
         target: SessionAgent,
         content: str,
-        actor_user_id: str | None,
     ) -> InputBuffer:
         """Enqueue an ordinary message without waking the target session."""
         return await self._enqueue_instruction(
@@ -67,7 +64,6 @@ class AgentMailboxService:
             target=target,
             message_kind="send_message",
             content=content,
-            actor_user_id=actor_user_id,
             scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
         )
 
@@ -78,7 +74,6 @@ class AgentMailboxService:
         source: SessionAgent,
         target: SessionAgent,
         content: str,
-        actor_user_id: str | None,
     ) -> InputBuffer:
         """Enqueue a wake-producing follow-up assignment."""
         return await self._enqueue_instruction(
@@ -87,7 +82,6 @@ class AgentMailboxService:
             target=target,
             message_kind="followup_task",
             content=content,
-            actor_user_id=actor_user_id,
             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
         )
 
@@ -135,7 +129,6 @@ class AgentMailboxService:
             source=source,
             target=target,
             content=content,
-            actor_user_id=None,
             scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
             idempotency_key=f"agent_result:{run.id}",
             metadata=metadata,
@@ -149,7 +142,6 @@ class AgentMailboxService:
         target: SessionAgent,
         message_kind: InstructionMessageKind,
         content: str,
-        actor_user_id: str | None,
         scheduling_mode: InputBufferSchedulingMode,
     ) -> InputBuffer:
         self._validate_tree(source, target)
@@ -158,7 +150,6 @@ class AgentMailboxService:
             source=source,
             target=target,
             content=content,
-            actor_user_id=actor_user_id,
             scheduling_mode=scheduling_mode,
             idempotency_key=None,
             metadata=self._base_metadata(
@@ -175,7 +166,6 @@ class AgentMailboxService:
         source: SessionAgent,
         target: SessionAgent,
         content: str,
-        actor_user_id: str | None,
         scheduling_mode: InputBufferSchedulingMode,
         idempotency_key: str | None,
         metadata: dict[str, str],
@@ -207,7 +197,7 @@ class AgentMailboxService:
                 scheduling_mode=scheduling_mode,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
-                actor_user_id=actor_user_id,
+                sender_user_id=None,
                 content=content,
                 idempotency_key=idempotency_key,
                 metadata=metadata,

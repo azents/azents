@@ -68,6 +68,11 @@ class RDBActionExecution(RDBModel):
         sa.String(32),
         nullable=False,
     )
+    sender_user_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     action_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
     action: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     owner_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)

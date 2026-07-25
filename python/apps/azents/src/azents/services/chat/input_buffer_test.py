@@ -253,7 +253,7 @@ async def _create_session_with_buffer(
             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label="main",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
-            actor_user_id=user_id,
+            sender_user_id=user_id,
             content="pending input",
             idempotency_key=None,
             metadata={"source": "chat"},

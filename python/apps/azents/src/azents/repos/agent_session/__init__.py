@@ -1305,7 +1305,7 @@ class AgentSessionRepository:
         else:
             values.update(
                 stop_requested_at=None,
-                stop_requested_by=None,
+                stop_requester_user_id=None,
                 stop_request_id=None,
             )
         result = await session.execute(
@@ -1329,7 +1329,7 @@ class AgentSessionRepository:
         command_id: str,
         command_name: str,
         payload: dict[str, object],
-        user_id: str | None,
+        requester_user_id: str | None,
     ) -> AgentSession | None:
         """Store single pending command in idle AgentSession and mark running."""
         result = await session.execute(
@@ -1344,7 +1344,7 @@ class AgentSessionRepository:
                 pending_command_id=command_id,
                 pending_command_name=command_name,
                 pending_command_payload=payload,
-                pending_command_user_id=user_id,
+                pending_command_requester_user_id=requester_user_id,
                 pending_command_created_at=sa.func.now(),
                 run_state=AgentSessionRunState.RUNNING,
                 run_heartbeat_at=sa.func.now(),
@@ -1382,7 +1382,7 @@ class AgentSessionRepository:
             id=rdb.pending_command_id,
             name=rdb.pending_command_name,
             payload=dict(rdb.pending_command_payload),
-            user_id=rdb.pending_command_user_id,
+            requester_user_id=rdb.pending_command_requester_user_id,
             created_at=rdb.pending_command_created_at,
         )
 
@@ -1404,7 +1404,7 @@ class AgentSessionRepository:
                 pending_command_id=None,
                 pending_command_name=None,
                 pending_command_payload=None,
-                pending_command_user_id=None,
+                pending_command_requester_user_id=None,
                 pending_command_created_at=None,
             )
         )
@@ -1416,7 +1416,7 @@ class AgentSessionRepository:
         *,
         session_id: str,
         stop_request_id: str,
-        user_id: str | None,
+        stop_requester_user_id: str | None,
     ) -> AgentSession | None:
         """Record stop intent on running AgentSession."""
         result = await session.execute(
@@ -1427,7 +1427,7 @@ class AgentSessionRepository:
             )
             .values(
                 stop_requested_at=sa.func.now(),
-                stop_requested_by=user_id,
+                stop_requester_user_id=stop_requester_user_id,
                 stop_request_id=stop_request_id,
             )
             .returning(RDBAgentSession)
@@ -1463,7 +1463,7 @@ class AgentSessionRepository:
             .where(RDBAgentSession.id == session_id)
             .values(
                 stop_requested_at=None,
-                stop_requested_by=None,
+                stop_requester_user_id=None,
                 stop_request_id=None,
             )
         )
@@ -1477,7 +1477,7 @@ class AgentSessionRepository:
             .values(
                 run_state=AgentSessionRunState.IDLE,
                 stop_requested_at=None,
-                stop_requested_by=None,
+                stop_requester_user_id=None,
                 stop_request_id=None,
             )
         )
@@ -1675,10 +1675,10 @@ class AgentSessionRepository:
             pending_command_id=rdb.pending_command_id,
             pending_command_name=rdb.pending_command_name,
             pending_command_payload=rdb.pending_command_payload,
-            pending_command_user_id=rdb.pending_command_user_id,
+            pending_command_requester_user_id=rdb.pending_command_requester_user_id,
             pending_command_created_at=rdb.pending_command_created_at,
             stop_requested_at=rdb.stop_requested_at,
-            stop_requested_by=rdb.stop_requested_by,
+            stop_requester_user_id=rdb.stop_requester_user_id,
             stop_request_id=rdb.stop_request_id,
             archived_at=rdb.archived_at,
             purge_after=rdb.purge_after,

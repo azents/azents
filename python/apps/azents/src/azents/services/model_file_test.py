@@ -20,6 +20,7 @@ from azents.services.model_file import (
     ModelFileInvalidImage,
     ModelFileOversized,
     ModelFileService,
+    ModelFileSessionNotFound,
     model_file_size_limit_message,
     normalize_model_file_body,
 )
@@ -46,6 +47,7 @@ class _ModelFileRepository:
 
     def __init__(self, boundary: _SessionBoundary) -> None:
         self.boundary = boundary
+        self.create_calls = 0
         self.discarded_ids: list[str] = []
 
     async def create(
@@ -56,6 +58,7 @@ class _ModelFileRepository:
         """Persist metadata only while the DB scope is active."""
         del session
         assert self.boundary.active == 1
+        self.create_calls += 1
         return ModelFile(
             id=create.id,
             workspace_id=create.workspace_id,
@@ -208,6 +211,95 @@ async def test_model_file_upload_closes_db_session_before_s3_io() -> None:
 
     assert isinstance(result, Success)
     assert s3.objects[result.value.storage_key] == b"hello"
+    assert boundary.active == 0
+
+
+@pytest.mark.asyncio
+async def test_admitted_model_file_creation_ignores_workspace_membership() -> None:
+    """Accepted attachment promotion is authorized by root lineage, not a User."""
+    boundary = _SessionBoundary()
+    s3 = _S3Service(boundary)
+    agent_session_repository = AsyncMock()
+    agent_session_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+    )
+    agent_session_repository.get_root_session_agent_by_session_id.return_value = (
+        SimpleNamespace(agent_session_id="root-session-1")
+    )
+    agent_run_repository = AsyncMock()
+    agent_run_repository.next_run_index.return_value = 1
+    workspace_user_repository = AsyncMock()
+    workspace_user_repository.get_by_workspace_and_user.return_value = None
+    service = ModelFileService(
+        model_file_repository=cast(Any, _ModelFileRepository(boundary)),
+        agent_session_repository=agent_session_repository,
+        agent_run_repository=agent_run_repository,
+        workspace_user_repository=workspace_user_repository,
+        session_manager=boundary.session_manager,
+        s3_service=cast(Any, s3),
+        config=cast(
+            Any,
+            SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
+        ),
+    )
+
+    result = await service.create_for_admitted_input(
+        agent_id="agent-1",
+        session_id="session-1",
+        filename="accepted.txt",
+        media_type="text/plain",
+        body=b"accepted",
+    )
+
+    assert isinstance(result, Success)
+    assert s3.objects[result.value.storage_key] == b"accepted"
+    workspace_user_repository.get_by_workspace_and_user.assert_not_awaited()
+    assert boundary.active == 0
+
+
+@pytest.mark.asyncio
+async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> None:
+    """A lineage change after S3 upload aborts metadata creation and compensates."""
+    boundary = _SessionBoundary()
+    s3 = _S3Service(boundary)
+    agent_session_repository = AsyncMock()
+    agent_session_repository.get_by_id.side_effect = [
+        SimpleNamespace(workspace_id="workspace-1", agent_id="agent-1"),
+        SimpleNamespace(workspace_id="workspace-1", agent_id="agent-1"),
+    ]
+    agent_session_repository.get_root_session_agent_by_session_id.side_effect = [
+        SimpleNamespace(agent_session_id="root-session-1"),
+        SimpleNamespace(agent_session_id="new-root-session"),
+    ]
+    model_file_repository = _ModelFileRepository(boundary)
+    workspace_user_repository = AsyncMock()
+    service = ModelFileService(
+        model_file_repository=cast(Any, model_file_repository),
+        agent_session_repository=agent_session_repository,
+        agent_run_repository=AsyncMock(),
+        workspace_user_repository=workspace_user_repository,
+        session_manager=boundary.session_manager,
+        s3_service=cast(Any, s3),
+        config=cast(
+            Any,
+            SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
+        ),
+    )
+
+    result = await service.create_for_admitted_input(
+        agent_id="agent-1",
+        session_id="session-1",
+        filename="accepted.txt",
+        media_type="text/plain",
+        body=b"accepted",
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, ModelFileSessionNotFound)
+    assert s3.objects == {}
+    workspace_user_repository.get_by_workspace_and_user.assert_not_awaited()
+    assert model_file_repository.create_calls == 0
     assert boundary.active == 0
 
 

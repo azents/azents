@@ -485,6 +485,9 @@ class ActionExecutionResponse(BaseModel):
 
     id: str = Field(description="Action execution ID")
     input_buffer_id: str = Field(description="Durable source input buffer ID")
+    sender_user_id: str | None = Field(
+        description="Human sender User ID, or null when unavailable",
+    )
     action_type: str = Field(description="Action discriminator")
     action: ChatAction = Field(description="Durable action payload")
     status: str = Field(description="Execution status")
@@ -514,6 +517,7 @@ class ActionExecutionResponse(BaseModel):
         return cls(
             id=execution.id,
             input_buffer_id=execution.input_buffer_id,
+            sender_user_id=execution.sender_user_id,
             action_type=execution.action_type,
             action=_CHAT_ACTION_ADAPTER.validate_python(execution.action),
             status=execution.status.value,

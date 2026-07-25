@@ -1795,6 +1795,7 @@
       "unknownProvenance": "아직 실행 출처 정보를 확인할 수 없습니다."
     },
     "editMessage": "편집",
+    "senderUnavailable": "보낸 사람을 확인할 수 없음",
     "editingMessage": "메시지 편집 중",
     "cancelEdit": "편집 취소",
     "editBlockedDuringRun": "에이전트가 처리 중이라 편집 발송이 막혀 있습니다.",

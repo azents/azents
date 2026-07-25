@@ -310,7 +310,9 @@ async def test_attachment_availability_filter_marks_expired_attachment() -> None
     event = _event(
         "1",
         EventKind.USER_MESSAGE,
-        UserMessagePayload(content="see file", attachments=[attachment]),
+        UserMessagePayload(
+            sender_user_id=None, content="see file", attachments=[attachment]
+        ),
     )
     transcript = [event]
     transcript_repo = _TranscriptRepo(transcript)
@@ -337,7 +339,9 @@ async def test_attachment_availability_filter_marks_missing_exchange_unavailable
     event = _event(
         "1",
         EventKind.USER_MESSAGE,
-        UserMessagePayload(content="see file", attachments=[attachment]),
+        UserMessagePayload(
+            sender_user_id=None, content="see file", attachments=[attachment]
+        ),
     )
     transcript = [event]
     transcript_repo = _TranscriptRepo(transcript)
@@ -359,7 +363,9 @@ async def test_attachment_availability_filter_ignores_non_exchange_uri() -> None
     event = _event(
         "1",
         EventKind.USER_MESSAGE,
-        UserMessagePayload(content="see file", attachments=[attachment]),
+        UserMessagePayload(
+            sender_user_id=None, content="see file", attachments=[attachment]
+        ),
     )
     transcript = [event]
     transcript_repo = _TranscriptRepo(transcript)
@@ -425,7 +431,7 @@ async def test_filepart_placeholder_filter_rewrites_deleted_user_filepart() -> N
     event = _event(
         "1",
         EventKind.USER_MESSAGE,
-        UserMessagePayload(content=[file_part]),
+        UserMessagePayload(sender_user_id=None, content=[file_part]),
     )
     transcript = [event]
     transcript_repo = _TranscriptRepo(transcript)
@@ -536,7 +542,7 @@ async def test_filepart_placeholder_filter_keeps_available_filepart() -> None:
     event = _event(
         "1",
         EventKind.USER_MESSAGE,
-        UserMessagePayload(content=[file_part]),
+        UserMessagePayload(sender_user_id=None, content=[file_part]),
     )
     transcript = [event]
     transcript_repo = _TranscriptRepo(transcript)
@@ -555,8 +561,16 @@ async def test_filepart_placeholder_filter_keeps_available_filepart() -> None:
 async def test_compactor_appends_marker_summary_and_moves_head() -> None:
     """Compaction atomically appends marker and summary before moving the head."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old")),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old"),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
@@ -619,7 +633,13 @@ async def test_compactor_appends_marker_summary_and_moves_head() -> None:
 
 async def test_compactor_opens_no_transaction_during_external_summary_call() -> None:
     """Compaction opens no database transaction during model latency."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     transcript_repo = _TranscriptRepo(events)
 
@@ -650,7 +670,13 @@ async def test_compactor_opens_no_transaction_during_external_summary_call() -> 
 
 async def test_compactor_preserves_input_appended_during_summary() -> None:
     """Input appended during summary remains after the new model-input head."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     concurrent_session = _Session()
     transcript_repo = _TranscriptRepo(events)
@@ -668,7 +694,9 @@ async def test_compactor_preserves_input_appended_during_summary() -> None:
             EventCreate(
                 session_id="session-1",
                 kind=EventKind.USER_MESSAGE,
-                payload=UserMessagePayload(content="during compaction").model_dump(
+                payload=UserMessagePayload(
+                    sender_user_id=None, content="during compaction"
+                ).model_dump(
                     mode="json",
                     exclude_none=True,
                 ),
@@ -707,7 +735,13 @@ async def test_compactor_preserves_input_appended_during_summary() -> None:
 
 async def test_compactor_rejects_stale_model_input_head_before_commit() -> None:
     """A concurrent head move prevents marker, summary, and head mutation."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old"),
+        )
+    ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
 
@@ -741,7 +775,7 @@ async def test_compactor_continuity_uses_concise_transcript_labels() -> None:
         _event(
             "1",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="run it"),
+            UserMessagePayload(sender_user_id=None, content="run it"),
         ),
         _event(
             "2",
@@ -905,7 +939,7 @@ async def test_compactor_summary_enricher_runs_before_continuity_append() -> Non
         _event(
             "1",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="old request"),
+            UserMessagePayload(sender_user_id=None, content="old request"),
         )
     ]
     covered_until_event_id = events[-1].id
@@ -984,7 +1018,7 @@ async def test_compactor_runs_commit_action_after_head_move_before_commit() -> N
         _event(
             "1",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="old request"),
+            UserMessagePayload(sender_user_id=None, content="old request"),
         )
     ]
     transcript_repo = _TranscriptRepo(events)
@@ -1027,7 +1061,7 @@ async def test_compactor_commit_action_failure_prevents_final_commit() -> None:
         _event(
             "1",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="old request"),
+            UserMessagePayload(sender_user_id=None, content="old request"),
         )
     ]
     session_manager = _SessionManager()
@@ -1065,7 +1099,7 @@ async def test_compactor_continuity_uses_last_five_completed_turns() -> None:
         _event(
             "1",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="initial request"),
+            UserMessagePayload(sender_user_id=None, content="initial request"),
         )
     ]
     for turn in range(1, 7):
@@ -1139,7 +1173,7 @@ async def test_compactor_continuity_user_message_section_uses_last_five_users() 
             _event(
                 str((turn * 3) - 2),
                 EventKind.USER_MESSAGE,
-                UserMessagePayload(content=f"user request {turn}"),
+                UserMessagePayload(sender_user_id=None, content=f"user request {turn}"),
             )
         )
         events.append(
@@ -1197,7 +1231,7 @@ async def test_compactor_truncates_large_continuity_events() -> None:
         _event(
             "1",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="x" * 10_000),
+            UserMessagePayload(sender_user_id=None, content="x" * 10_000),
         )
     ]
     transcript_repo = _TranscriptRepo(events)
@@ -1230,8 +1264,16 @@ async def test_compactor_truncates_large_continuity_events() -> None:
 async def test_compactor_propagates_summary_failure_without_durable_marker() -> None:
     """Summary failure leaves transcript and model-input head unchanged."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old")),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old"),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
@@ -1261,7 +1303,13 @@ async def test_compactor_propagates_summary_failure_without_durable_marker() -> 
 
 async def test_compactor_propagates_summary_enrichment_error_without_marker() -> None:
     """Summary enrichment failure leaves no durable compaction lifecycle event."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     transcript_repo = _TranscriptRepo(events)
 
@@ -1304,7 +1352,13 @@ async def test_compactor_propagates_summary_enrichment_error_without_marker() ->
 
 async def test_compactor_propagates_cancelled_start_callback_without_marker() -> None:
     """Cancellation in the start callback leaves transcript unchanged."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     transcript_repo = _TranscriptRepo(events)
 
@@ -1339,7 +1393,13 @@ async def test_compactor_propagates_cancelled_start_callback_without_marker() ->
 
 async def test_compactor_propagates_summary_cancellation_without_marker() -> None:
     """Cancellation during summary leaves transcript unchanged."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     transcript_repo = _TranscriptRepo(events)
 
@@ -1370,8 +1430,16 @@ async def test_compactor_propagates_summary_cancellation_without_marker() -> Non
 async def test_compactor_raises_when_summary_is_empty() -> None:
     """Empty summary propagates failure without durable lifecycle markers."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old")),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old"),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
@@ -1402,8 +1470,16 @@ async def test_compactor_raises_when_summary_is_empty() -> None:
 async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
     """Auto compaction persists only the successful summary."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old" * 100)),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old" * 100),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
@@ -1449,8 +1525,16 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
 async def test_auto_compaction_calls_started_before_summary_without_marker() -> None:
     """Auto compaction reports live start before the external summary call."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old" * 100)),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="old" * 100),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
@@ -1499,12 +1583,12 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
         _event(
             "1",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="old" * 100),
+            UserMessagePayload(sender_user_id=None, content="old" * 100),
         ),
         _event(
             "2",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="recent"),
+            UserMessagePayload(sender_user_id=None, content="recent"),
         ),
     ]
     transcript_repo = _TranscriptRepo(events)
@@ -1549,7 +1633,7 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
         _event(
             "1",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="short"),
+            UserMessagePayload(sender_user_id=None, content="short"),
         )
     ]
     transcript_repo = _TranscriptRepo(events)
@@ -1589,7 +1673,7 @@ async def test_auto_compaction_uses_explicit_threshold_override() -> None:
         _event(
             "1",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="short"),
+            UserMessagePayload(sender_user_id=None, content="short"),
         )
     ]
     transcript_repo = _TranscriptRepo(events)
@@ -1673,7 +1757,7 @@ async def test_auto_compaction_counts_events_after_latest_turn_marker() -> None:
         _event(
             "2",
             EventKind.USER_MESSAGE,
-            UserMessagePayload(content="u" * 400),
+            UserMessagePayload(sender_user_id=None, content="u" * 400),
         ),
     ]
     transcript_repo = _TranscriptRepo(events)
@@ -1708,7 +1792,7 @@ async def test_pre_lower_pipeline_and_native_request_guard() -> None:
     event = _event(
         "1",
         EventKind.USER_MESSAGE,
-        UserMessagePayload(content="hello"),
+        UserMessagePayload(sender_user_id=None, content="hello"),
     )
     result = await EventPreLowerFilterPipeline([NoopPreLowerFilter()]).apply(
         _Session(),

@@ -9446,6 +9446,18 @@
             "title": "Input Buffer Id",
             "description": "Durable source input buffer ID"
           },
+          "sender_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender User Id",
+            "description": "Human sender User ID, or null when unavailable"
+          },
           "action_type": {
             "type": "string",
             "title": "Action Type",
@@ -9575,6 +9587,7 @@
         "required": [
           "id",
           "input_buffer_id",
+          "sender_user_id",
           "action_type",
           "action",
           "status",

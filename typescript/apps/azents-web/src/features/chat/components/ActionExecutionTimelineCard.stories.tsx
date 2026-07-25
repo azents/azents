@@ -18,6 +18,7 @@ export const FailedWorktreeAction = {
       execution: {
         id: "action-execution-1",
         input_buffer_id: "buffer-action-1",
+        sender_user_id: null,
         action_type: "create_git_worktree",
         action: {
           type: "create_git_worktree",
@@ -67,6 +68,7 @@ export const CompletedWorktreeAction = {
       execution: {
         id: "action-execution-2",
         input_buffer_id: "buffer-action-2",
+        sender_user_id: null,
         action_type: "create_git_worktree",
         action: {
           type: "create_git_worktree",
@@ -104,6 +106,7 @@ export const RunningWorktreeAction = {
       execution: {
         id: "action-execution-3",
         input_buffer_id: "buffer-action-3",
+        sender_user_id: null,
         action_type: "create_git_worktree",
         action: {
           type: "create_git_worktree",
@@ -142,6 +145,7 @@ export const CancelledWorktreeAction = {
       execution: {
         id: "action-execution-4",
         input_buffer_id: "buffer-action-4",
+        sender_user_id: null,
         action_type: "create_git_worktree",
         action: {
           type: "create_git_worktree",

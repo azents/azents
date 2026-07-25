@@ -10,6 +10,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -76,7 +77,7 @@ async def _create_agent_session(
     *,
     handle: str,
     slug: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, str, str]:
     """Create AgentSession fixture satisfying ChatWriteRequest FK."""
     workspace_id = await _create_workspace(session, handle)
     user_id = await _create_user(session, f"{handle}@example.com")
@@ -88,7 +89,7 @@ async def _create_agent_session(
             agent_id=agent_id,
         )
     ).session
-    return agent_session.id, user_id
+    return agent_session.id, user_id, agent_id, workspace_id
 
 
 def _create_payload(
@@ -100,7 +101,8 @@ def _create_payload(
     """Make ChatWriteRequest creation payload."""
     return ChatWriteRequestCreate(
         session_id=session_id,
-        user_id=user_id,
+        requester_user_id=user_id,
+        creation_agent_id=None,
         client_request_id=client_request_id,
         write_type=ChatWriteRequestType.COMMAND,
         accepted_type=ChatWriteRequestType.COMMAND,
@@ -118,7 +120,7 @@ class TestChatWriteRequestRepository:
         rdb_session: AsyncSession,
     ) -> None:
         """First request creates record and returns created=True."""
-        session_id, user_id = await _create_agent_session(
+        session_id, user_id, _agent_id, _workspace_id = await _create_agent_session(
             rdb_session,
             handle="chat-write-request-create",
             slug="chat-write-request-create",
@@ -137,7 +139,7 @@ class TestChatWriteRequestRepository:
         assert created is True
         assert len(record.id) == 32
         assert record.session_id == session_id
-        assert record.user_id == user_id
+        assert record.requester_user_id == user_id
         assert record.client_request_id == "request-1"
         assert record.write_type == ChatWriteRequestType.COMMAND
         assert record.accepted_id == "compact"
@@ -149,7 +151,7 @@ class TestChatWriteRequestRepository:
         rdb_session: AsyncSession,
     ) -> None:
         """Retry with same session/user/client_request_id returns existing record."""
-        session_id, user_id = await _create_agent_session(
+        session_id, user_id, _agent_id, _workspace_id = await _create_agent_session(
             rdb_session,
             handle="chat-write-request-retry",
             slug="chat-write-request-retry",
@@ -168,3 +170,55 @@ class TestChatWriteRequestRepository:
         assert second_created is False
         assert second.id == first.id
         assert second.payload == first.payload
+
+    async def test_agent_scoped_creation_key_returns_original_session_record(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A new-Session retry cannot create a record for another Session."""
+        session_id, user_id, agent_id, workspace_id = await _create_agent_session(
+            rdb_session,
+            handle="chat-write-request-session-create",
+            slug="chat-write-request-session-create",
+        )
+        another_session = await AgentSessionRepository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = ChatWriteRequestRepository()
+        first_create = ChatWriteRequestCreate(
+            session_id=session_id,
+            requester_user_id=user_id,
+            creation_agent_id=agent_id,
+            client_request_id="new-session-request",
+            write_type=ChatWriteRequestType.MESSAGE,
+            accepted_type=ChatWriteRequestType.MESSAGE,
+            accepted_id="input-buffer-1",
+            history_reload_required=False,
+            payload={"message": "hello"},
+        )
+        conflicting_create = first_create.model_copy(
+            update={
+                "session_id": another_session.id,
+                "accepted_id": "input-buffer-2",
+            }
+        )
+
+        first, first_created = await repo.create_idempotent(
+            rdb_session,
+            first_create,
+        )
+        second, second_created = await repo.create_idempotent(
+            rdb_session,
+            conflicting_create,
+        )
+
+        assert first_created is True
+        assert second_created is False
+        assert second.id == first.id
+        assert second.session_id == session_id
+        assert second.accepted_id == "input-buffer-1"

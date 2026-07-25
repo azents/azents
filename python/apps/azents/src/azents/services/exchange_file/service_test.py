@@ -119,6 +119,19 @@ class _FakeExchangeFileRepository:
                 return file
         return None
 
+    async def get_by_object_key_for_agent(
+        self,
+        session: AsyncSession,
+        *,
+        object_key: str,
+        agent_id: str,
+    ) -> ExchangeFile | None:
+        """Fetch one file only when it belongs to the requested Agent."""
+        file = await self.get_by_object_key(session, object_key)
+        if file is None or file.agent_id != agent_id:
+            return None
+        return file
+
     async def delete_by_id(
         self,
         session: AsyncSession,
@@ -757,6 +770,171 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     )
     assert isinstance(conflict, Failure)
     assert isinstance(conflict.error, FileRetentionOwnerConflict)
+
+
+@pytest.mark.asyncio
+async def test_admitted_attachment_uses_root_claim_without_membership() -> None:
+    """Promotion uses the admission root claim, never current Workspace membership."""
+    service, repository, s3_service = _make_service(workspace_user=None)
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.txt",
+        media_type="text/plain",
+        body=b"accepted input",
+    )
+    assert isinstance(created, Failure)
+
+    # Seed an already-admitted file directly: the promotion boundary must not
+    # need the original uploader to remain a Workspace member.
+    file = ExchangeFile(
+        id="accepted-file",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        origin_type=ExchangeFileOrigin.UPLOAD,
+        status=ExchangeFileStatus.AVAILABLE,
+        object_key="exchange/workspace-1/files/accepted-file/original",
+        filename="report.txt",
+        media_type="text/plain",
+        size_bytes=14,
+        sha256="sha256",
+        created_by_user_id="former-member",
+        retention_root_session_id="root-session-1",
+        retention_bound_at=_NOW,
+        expires_at=_NOW + datetime.timedelta(days=1),
+        created_at=_NOW,
+    )
+    repository.files[file.id] = file
+    s3_service.objects[file.object_key] = b"accepted input"
+
+    metadata = await service.resolve_admitted_input_attachment_metadata(
+        uri=file.uri,
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    downloaded = await service.resolve_admitted_input_attachment(
+        uri=file.uri,
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+
+    assert isinstance(metadata, Success)
+    assert isinstance(downloaded, Success)
+    assert downloaded.value.body == b"accepted input"
+
+
+@pytest.mark.asyncio
+async def test_admitted_attachment_keeps_expired_metadata_but_denies_bytes() -> None:
+    """Promotion preserves an expired snapshot but never supplies its blob."""
+    service, repository, s3_service = _make_service(workspace_user=None)
+    file = ExchangeFile(
+        id="expired-accepted-file",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        origin_type=ExchangeFileOrigin.UPLOAD,
+        status=ExchangeFileStatus.AVAILABLE,
+        object_key="exchange/workspace-1/files/expired-accepted-file/original",
+        filename="expired.txt",
+        media_type="text/plain",
+        size_bytes=7,
+        sha256="sha256",
+        created_by_user_id="former-member",
+        retention_root_session_id="root-session-1",
+        retention_bound_at=_NOW,
+        expires_at=_NOW - datetime.timedelta(seconds=1),
+        created_at=_NOW,
+    )
+    repository.files[file.id] = file
+    s3_service.objects[file.object_key] = b"expired"
+
+    metadata = await service.resolve_admitted_input_attachment_metadata(
+        uri=file.uri,
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    downloaded = await service.resolve_admitted_input_attachment(
+        uri=file.uri,
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+
+    assert isinstance(metadata, Success)
+    assert metadata.value.status is ExchangeFileStatus.EXPIRED
+    assert isinstance(downloaded, Failure)
+    assert isinstance(downloaded.error, FileExpired)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retention_root_session_id", [None, "another-root"])
+async def test_admitted_input_attachment_denies_unclaimed_or_cross_root_file(
+    retention_root_session_id: str | None,
+) -> None:
+    """Internal promotion fails closed outside the exact admission root claim."""
+    service, repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    file = ExchangeFile(
+        id="wrong-root-file",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        origin_type=ExchangeFileOrigin.UPLOAD,
+        status=ExchangeFileStatus.AVAILABLE,
+        object_key="exchange/workspace-1/files/wrong-root-file/original",
+        filename="report.txt",
+        media_type="text/plain",
+        size_bytes=1,
+        sha256="sha256",
+        created_by_user_id="user-1",
+        retention_root_session_id=retention_root_session_id,
+        retention_bound_at=None,
+        expires_at=_NOW + datetime.timedelta(days=1),
+        created_at=_NOW,
+    )
+    repository.files[file.id] = file
+
+    result = await service.resolve_admitted_input_attachment_metadata(
+        uri=file.uri,
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, FileAccessDenied)
+
+
+@pytest.mark.asyncio
+async def test_admitted_input_attachment_denies_cross_agent_lookup() -> None:
+    """The root claim cannot be resolved through another Agent namespace."""
+    service, repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    file = ExchangeFile(
+        id="other-agent-file",
+        workspace_id="workspace-1",
+        agent_id="agent-2",
+        origin_type=ExchangeFileOrigin.UPLOAD,
+        status=ExchangeFileStatus.AVAILABLE,
+        object_key="exchange/workspace-1/files/other-agent-file/original",
+        filename="report.txt",
+        media_type="text/plain",
+        size_bytes=1,
+        sha256="sha256",
+        created_by_user_id="user-1",
+        retention_root_session_id="root-session-1",
+        retention_bound_at=_NOW,
+        expires_at=_NOW + datetime.timedelta(days=1),
+        created_at=_NOW,
+    )
+    repository.files[file.id] = file
+
+    result = await service.resolve_admitted_input_attachment_metadata(
+        uri=file.uri,
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, FileNotFound)
 
 
 @pytest.mark.asyncio

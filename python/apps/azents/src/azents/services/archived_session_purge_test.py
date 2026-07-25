@@ -355,9 +355,9 @@ class _AgentSessionRepository:
         *,
         session_id: str,
         stop_request_id: str,
-        user_id: str | None,
+        stop_requester_user_id: str | None,
     ) -> AgentSession | None:
-        del session, stop_request_id, user_id
+        del session, stop_request_id, stop_requester_user_id
         self.events.append(f"stop:{session_id}")
         return next(item for item in self.sessions if item.id == session_id)
 

@@ -335,6 +335,102 @@ class ModelFileService:
             if not succeeded:
                 await self._cleanup_uploaded_object(uploaded_object_key)
 
+    async def create_for_admitted_input(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        filename: str | None,
+        media_type: str,
+        body: bytes,
+        metadata: dict[str, object] | None = None,
+    ) -> Result[ModelFile, ModelFileCreateError]:
+        """Create pending ModelFile for an already-admitted Session input.
+
+        The accepted input attachment is authorized by its ExchangeFile root
+        claim. This internal materialization path verifies stable Agent/Session/
+        root lineage before and after object upload without consulting a Human
+        sender or current Workspace membership.
+        """
+        normalized = normalize_model_file_body(media_type=media_type, body=body)
+        if isinstance(normalized, Failure):
+            return Failure(normalized.error)
+
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None or agent_session.agent_id != agent_id:
+                return Failure(ModelFileSessionNotFound())
+            get_root = (
+                self.agent_session_repository.get_root_session_agent_by_session_id
+            )
+            root = await get_root(session, session_id)
+            if root is None:
+                return Failure(ModelFileSessionNotFound())
+            workspace_id = agent_session.workspace_id
+            root_session_id = root.agent_session_id
+
+        normalized_body = normalized.value
+        model_file_id = uuid7().hex
+        uploaded_object_key = model_file_storage_key(
+            workspace_id=workspace_id,
+            session_id=session_id,
+            model_file_id=model_file_id,
+        )
+        succeeded = False
+        try:
+            await self.s3_service.upload(
+                bucket=self.config.workspace_s3.bucket,
+                key=uploaded_object_key,
+                body=normalized_body.body,
+                content_type=normalized_body.media_type,
+            )
+            async with self.session_manager() as session:
+                agent_session = await self.agent_session_repository.get_by_id(
+                    session,
+                    session_id,
+                )
+                if (
+                    agent_session is None
+                    or agent_session.agent_id != agent_id
+                    or agent_session.workspace_id != workspace_id
+                ):
+                    return Failure(ModelFileSessionNotFound())
+                get_root = (
+                    self.agent_session_repository.get_root_session_agent_by_session_id
+                )
+                root = await get_root(session, session_id)
+                if root is None or root.agent_session_id != root_session_id:
+                    return Failure(ModelFileSessionNotFound())
+                next_run_index = await self.agent_run_repository.next_run_index(
+                    session,
+                    session_id=session_id,
+                )
+                created = await self.model_file_repository.create(
+                    session,
+                    ModelFileCreate(
+                        id=model_file_id,
+                        workspace_id=agent_session.workspace_id,
+                        session_id=session_id,
+                        agent_id=agent_session.agent_id,
+                        name=_sanitize_display_filename(filename),
+                        media_type=normalized_body.media_type,
+                        kind=normalized_body.kind,
+                        size_bytes=len(normalized_body.body),
+                        created_run_index=next_run_index,
+                        normalized_format=normalized_body.normalized_format,
+                        sha256=hashlib.sha256(normalized_body.body).hexdigest(),
+                        metadata=_json_metadata(metadata),
+                    ),
+                )
+            succeeded = True
+            return Success(created)
+        finally:
+            if not succeeded:
+                await self._cleanup_uploaded_object(uploaded_object_key)
+
     async def discard_pending_input(
         self,
         *,

@@ -128,7 +128,7 @@ def _event(content: str = "hello") -> Event:
         id="1" * 32,
         session_id="session-1",
         kind=EventKind.USER_MESSAGE,
-        payload=UserMessagePayload(content=content),
+        payload=UserMessagePayload(sender_user_id=None, content=content),
         created_at=datetime.datetime.now(datetime.UTC),
     )
 

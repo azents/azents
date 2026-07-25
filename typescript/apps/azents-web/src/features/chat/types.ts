@@ -124,6 +124,7 @@ export type ChatAction =
     };
 
 export interface ActionMessagePayload {
+  sender_user_id: string | null;
   action: ChatAction;
   message: string;
   requested_inference_profile?: RequestedInferenceProfile | null;
@@ -139,6 +140,7 @@ export interface AgentMessagePayload {
 }
 
 export interface UserMessagePayload {
+  sender_user_id: string | null;
   content: string | UserContentPart[];
   attachments: EventAttachment[];
   metadata: Record<string, string>;
@@ -811,6 +813,8 @@ export interface ChatMessage {
   usage?: Record<string, unknown> | null;
   /** selected action for action-message user input */
   action?: ChatAction | null;
+  /** durable Human sender provenance, never an execution identity */
+  senderUserId?: string | null;
   /** message metadata. */
   metadata?: Record<string, string> | null;
   /** requested or resolved profile for a run-producing human input */

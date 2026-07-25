@@ -352,7 +352,7 @@ class ArchivedSessionPurgeService:
                     session,
                     session_id=session_id,
                     stop_request_id=uuid7().hex,
-                    user_id=None,
+                    stop_requester_user_id=None,
                 )
             active = await self.agent_run_repository.has_active_for_session_ids(
                 session,

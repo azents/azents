@@ -32,12 +32,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
 import { useSubagentTreePanelContainer } from "@/features/agents/containers/useSubagentTreePanelContainer";
+import { trpc } from "@/trpc/client";
 import { resolveComposerSubscriptionSelection } from "../composerSubscriptionUsage";
 import { ComposerSubscriptionUsagePopoverContainer } from "../containers/ComposerSubscriptionUsageContainer";
 import { useChatSessionContainer } from "../containers/useChatSessionContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
 import { ChatView } from "./ChatView";
+import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type { ConnectionStatus } from "../types";
 import type {
   AgentResponse,
@@ -116,6 +118,18 @@ export function ChatSessionView({
     agent,
     onConnectionStatusChange,
   });
+  const currentWorkspaceProfileQuery = trpc.memberProfile.getMyProfile.useQuery(
+    { handle },
+    { retry: false },
+  );
+  const currentWorkspaceProfile =
+    useMemo<CurrentWorkspaceProfile | null>(() => {
+      const profile = currentWorkspaceProfileQuery.data;
+      if (profile == null) {
+        return null;
+      }
+      return { userId: profile.user_id, name: profile.name };
+    }, [currentWorkspaceProfileQuery.data]);
   const [composerInferenceProfileState, setComposerInferenceProfileState] =
     useState<{
       sessionId: string;
@@ -336,6 +350,7 @@ export function ChatSessionView({
           workspacePanel={workspacePanel}
           goal={output.goal}
           todo={output.todo}
+          currentWorkspaceProfile={currentWorkspaceProfile}
           readOnlyNotice={
             subagentNavigation === null
               ? null

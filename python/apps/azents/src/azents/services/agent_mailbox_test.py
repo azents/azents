@@ -100,7 +100,7 @@ class _InputBufferService:
                 scheduling_mode=input.scheduling_mode,
                 requested_model_target_label=input.requested_model_target_label,
                 requested_reasoning_effort=input.requested_reasoning_effort,
-                actor_user_id=input.actor_user_id,
+                sender_user_id=input.sender_user_id,
                 content=input.content,
                 idempotency_key=input.idempotency_key,
                 metadata=input.metadata,
@@ -250,12 +250,12 @@ async def test_instruction_operations_own_scheduling_intent(
         source=source,
         target=target,
         content="Do the work.",
-        actor_user_id="user-1",
     )
 
     [input] = input_service.inputs
     assert input.kind is InputBufferKind.AGENT_MESSAGE
     assert input.scheduling_mode is expected_mode
+    assert input.sender_user_id is None
     assert input.metadata["message_kind"] == expected_kind
     assert session_repository.activity_ids == ["root-agent", "child-agent"]
     assert session_repository.running_session_ids == (
@@ -303,7 +303,7 @@ async def test_terminal_result_is_queue_only_and_contains_run_metadata(
     [input] = input_service.inputs
     assert result.id == "buffer-1"
     assert input.scheduling_mode is InputBufferSchedulingMode.QUEUE_ONLY
-    assert input.actor_user_id is None
+    assert input.sender_user_id is None
     assert input.idempotency_key == f"agent_result:{_RUN_ID}"
     assert input.metadata == {
         "source": "agent_mailbox",
@@ -377,7 +377,6 @@ async def test_mailbox_rejects_archived_target_before_enqueue() -> None:
             source=source,
             target=target,
             content="Resume work.",
-            actor_user_id="user-1",
         )
 
     assert input_service.inputs == []
@@ -409,7 +408,6 @@ async def test_wake_mailbox_rejects_stopping_target_before_enqueue() -> None:
             source=source,
             target=target,
             content="Resume work.",
-            actor_user_id="user-1",
         )
 
     assert input_service.inputs == []

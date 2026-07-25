@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import cast
 
 import sqlalchemy as sa
@@ -10,6 +11,7 @@ from azcommon.result import Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentRunStatus,
     AgentSessionKind,
     AgentSessionRunState,
@@ -38,6 +40,7 @@ from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -49,11 +52,13 @@ from azents.repos.chat_write_request.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
+from azents.repos.input_buffer.data import InputBuffer
 from azents.repos.message import MessageRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.chat_write import ChatWriteService
 from azents.services.exchange_file import (
     ExchangeFileInputClaimError,
@@ -156,8 +161,30 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     return agent.id
 
 
+class _WorkspaceUserRepository:
+    """Workspace membership double for write-admission tests."""
+
+    def __init__(self, *, allowed: bool = True) -> None:
+        self.allowed = allowed
+        self.calls: list[tuple[str, str]] = []
+
+    async def lock_by_workspace_and_user(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        user_id: str,
+    ) -> object | None:
+        """Return locked membership according to the test-controlled state."""
+        del session
+        self.calls.append((workspace_id, user_id))
+        return object() if self.allowed else None
+
+
 def _service(
     rdb_session_manager: SessionManager[AsyncSession],
+    *,
+    workspace_user_repository: WorkspaceUserRepository | None = None,
 ) -> ChatWriteService:
     input_buffer_service = InputBufferService(
         session_manager=rdb_session_manager,
@@ -172,7 +199,12 @@ def _service(
         external_channel_repository=ExternalChannelRepository(),
     )
     return ChatWriteService(
+        agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
+        workspace_user_repository=(
+            workspace_user_repository
+            or cast(WorkspaceUserRepository, _WorkspaceUserRepository())
+        ),
         agent_run_repository=AgentRunRepository(),
         chat_write_request_repository=ChatWriteRequestRepository(),
         message_repository=MessageRepository(),
@@ -248,7 +280,8 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
             ChatWriteRequest(
                 id="write-request-1",
                 session_id=self.existing_session_id,
-                user_id=create.user_id,
+                requester_user_id=create.requester_user_id,
+                creation_agent_id=create.creation_agent_id,
                 client_request_id=create.client_request_id,
                 write_type=create.write_type,
                 accepted_type=create.accepted_type,
@@ -261,8 +294,433 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
         )
 
 
+def _control_session(
+    *,
+    run_state: AgentSessionRunState = AgentSessionRunState.IDLE,
+    pending_command_id: str | None = None,
+) -> AgentSession:
+    """Build a minimal active root Session for authorization-order tests."""
+    return AgentSession.model_construct(
+        id="session-1",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_kind=AgentSessionKind.ROOT,
+        status=AgentSessionStatus.ACTIVE,
+        run_state=run_state,
+        pending_command_id=pending_command_id,
+    )
+
+
+def _existing_record(
+    *,
+    write_type: ChatWriteRequestType,
+    payload: dict[str, object],
+    accepted_id: str = "accepted-1",
+) -> ChatWriteRequest:
+    """Build a replayable accepted request record."""
+    return ChatWriteRequest(
+        id="request-1",
+        session_id="session-1",
+        requester_user_id="user-1",
+        creation_agent_id=None,
+        client_request_id="request-1",
+        write_type=write_type,
+        accepted_type=write_type,
+        accepted_id=accepted_id,
+        history_reload_required=True,
+        payload=payload,
+        created_at=datetime.datetime(2026, 7, 24, tzinfo=datetime.UTC),
+    )
+
+
+class _ControlAgentSessionRepository:
+    """Record authorization/control ordering without a database."""
+
+    def __init__(
+        self,
+        session: AgentSession,
+        *,
+        subtree: list[AgentSession] | None = None,
+    ) -> None:
+        self.session = session
+        self.subtree = subtree or [session]
+        self.lock_calls = 0
+        self.tree_lock_calls = 0
+        self.stop_requests: list[str] = []
+
+    async def lock_by_id(
+        self,
+        db_session: AsyncSession,
+        session_id: str,
+    ) -> AgentSession:
+        del db_session
+        assert session_id == self.session.id
+        self.lock_calls += 1
+        return self.session
+
+    async def get_root_session_agent_by_session_id(
+        self,
+        db_session: AsyncSession,
+        session_id: str,
+    ) -> object:
+        del db_session
+        assert session_id == self.session.id
+        return SimpleNamespace(agent_session_id=self.session.id)
+
+    async def lock_root_tree_sessions(
+        self,
+        db_session: AsyncSession,
+        *,
+        root_session_id: str,
+    ) -> list[AgentSession]:
+        del db_session
+        assert root_session_id == self.session.id
+        self.tree_lock_calls += 1
+        return self.subtree
+
+    async def request_stop(
+        self,
+        db_session: AsyncSession,
+        *,
+        session_id: str,
+        stop_request_id: str,
+        stop_requester_user_id: str,
+    ) -> AgentSession:
+        del db_session, stop_request_id, stop_requester_user_id
+        self.stop_requests.append(session_id)
+        return self.session
+
+
+class _ControlAgentRepository:
+    """Return one active Agent whose Workspace matches the Session."""
+
+    async def lock_by_id(self, db_session: AsyncSession, agent_id: str) -> object:
+        del db_session
+        assert agent_id == "agent-1"
+        return SimpleNamespace(
+            lifecycle_status=AgentLifecycleStatus.ACTIVE,
+            workspace_id="workspace-1",
+        )
+
+
+class _ControlWorkspaceUserRepository:
+    """Toggle requester authorization after route-level prevalidation."""
+
+    def __init__(self, *, allowed: bool) -> None:
+        self.allowed = allowed
+        self.calls = 0
+
+    async def lock_by_workspace_and_user(
+        self,
+        db_session: AsyncSession,
+        *,
+        workspace_id: str,
+        user_id: str,
+    ) -> object | None:
+        del db_session
+        assert (workspace_id, user_id) == ("workspace-1", "user-1")
+        self.calls += 1
+        return object() if self.allowed else None
+
+
+class _ControlWriteRequestRepository:
+    """Record whether an accepted identity was consulted after authorization."""
+
+    def __init__(self, existing: ChatWriteRequest | None) -> None:
+        self.existing = existing
+        self.lookup_calls = 0
+
+    async def get_by_client_request_id(
+        self,
+        db_session: AsyncSession,
+        *,
+        session_id: str,
+        requester_user_id: str,
+        client_request_id: str,
+    ) -> ChatWriteRequest | None:
+        del db_session
+        assert (session_id, requester_user_id, client_request_id) == (
+            "session-1",
+            "user-1",
+            "request-1",
+        )
+        self.lookup_calls += 1
+        return self.existing
+
+
+class _ControlInputBufferService:
+    """Fail if a replay reaches mutable pending-input inspection."""
+
+    async def list_by_session_id(
+        self,
+        db_session: AsyncSession,
+        session_id: str,
+    ) -> list[InputBuffer]:
+        del db_session, session_id
+        raise AssertionError("Mutable pending-input state was inspected before replay")
+
+
+def _control_service(
+    *,
+    membership_allowed: bool,
+    existing: ChatWriteRequest | None = None,
+    control_session: AgentSession | None = None,
+    subtree: list[AgentSession] | None = None,
+) -> tuple[
+    ChatWriteService,
+    _ControlWorkspaceUserRepository,
+    _ControlWriteRequestRepository,
+    _ControlAgentSessionRepository,
+]:
+    """Build a service that pins public-control admission ordering."""
+    workspace_users = _ControlWorkspaceUserRepository(allowed=membership_allowed)
+    writes = _ControlWriteRequestRepository(existing)
+    sessions = _ControlAgentSessionRepository(
+        control_session or _control_session(),
+        subtree=subtree,
+    )
+    service = ChatWriteService(
+        agent_repository=cast(AgentRepository, _ControlAgentRepository()),
+        agent_session_repository=cast(AgentSessionRepository, sessions),
+        workspace_user_repository=cast(WorkspaceUserRepository, workspace_users),
+        agent_run_repository=cast(AgentRunRepository, object()),
+        chat_write_request_repository=cast(ChatWriteRequestRepository, writes),
+        message_repository=cast(MessageRepository, object()),
+        exchange_file_service=cast(ExchangeFileService, object()),
+        input_buffer_service=cast(InputBufferService, _ControlInputBufferService()),
+        session_manager=_session_manager_double,
+    )
+    return service, workspace_users, writes, sessions
+
+
 class TestChatWriteService:
     """REST chat write service behavior."""
+
+    async def test_edit_reauthorizes_before_idempotency_lookup(
+        self,
+    ) -> None:
+        """A revoked requester cannot inspect an accepted edit replay."""
+        service, workspace_users, writes, _ = _control_service(
+            membership_allowed=False,
+            existing=_existing_record(
+                write_type=ChatWriteRequestType.EDIT_MESSAGE,
+                payload={"message": "edited"},
+            ),
+        )
+
+        try:
+            await service.create_idempotent_edit_input(
+                agent_id="agent-1",
+                session_id="session-1",
+                user_id="user-1",
+                client_request_id="request-1",
+                message_id="message-1",
+                text="edited",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=ModelReasoningEffort.HIGH,
+                ),
+                metadata={},
+                attachments=[],
+                file_parts=[],
+                payload={"message": "edited"},
+            )
+        except ValueError as exc:
+            assert str(exc) == "Requester does not have session access"
+        else:
+            raise AssertionError("Expected ValueError")
+
+        assert workspace_users.calls == 1
+        assert writes.lookup_calls == 0
+
+    async def test_pending_command_reauthorizes_before_idempotency_lookup(
+        self,
+    ) -> None:
+        """A revoked requester cannot inspect an accepted command replay."""
+        service, workspace_users, writes, _ = _control_service(
+            membership_allowed=False,
+            existing=_existing_record(
+                write_type=ChatWriteRequestType.COMMAND,
+                payload={"command": "compact"},
+            ),
+        )
+
+        try:
+            await service.create_idempotent_pending_command(
+                agent_id="agent-1",
+                session_id="session-1",
+                user_id="user-1",
+                client_request_id="request-1",
+                command_name="compact",
+                payload={"command": "compact"},
+            )
+        except ValueError as exc:
+            assert str(exc) == "Requester does not have session access"
+        else:
+            raise AssertionError("Expected ValueError")
+
+        assert workspace_users.calls == 1
+        assert writes.lookup_calls == 0
+
+    async def test_failed_run_retry_reauthorizes_before_idempotency_lookup(
+        self,
+    ) -> None:
+        """A revoked requester cannot inspect an accepted retry replay."""
+        service, workspace_users, writes, _ = _control_service(
+            membership_allowed=False,
+            existing=_existing_record(
+                write_type=ChatWriteRequestType.FAILED_RUN_RETRY,
+                payload={"failed_event_id": "failed-event-1"},
+                accepted_id="failed-event-1",
+            ),
+        )
+
+        try:
+            await service.create_idempotent_failed_run_retry(
+                agent_id="agent-1",
+                session_id="session-1",
+                user_id="user-1",
+                client_request_id="request-1",
+                failed_event_id="failed-event-1",
+                payload={"failed_event_id": "failed-event-1"},
+            )
+        except ValueError as exc:
+            assert str(exc) == "Requester does not have session access"
+        else:
+            raise AssertionError("Expected ValueError")
+
+        assert workspace_users.calls == 1
+        assert writes.lookup_calls == 0
+
+    async def test_stop_reauthorizes_before_root_tree_lock(
+        self,
+    ) -> None:
+        """A revoked requester cannot enumerate or stop a root Session tree."""
+        service, workspace_users, writes, sessions = _control_service(
+            membership_allowed=False,
+        )
+
+        try:
+            await service.request_session_stop(
+                agent_id="agent-1",
+                session_id="session-1",
+                user_id="user-1",
+            )
+        except ValueError as exc:
+            assert str(exc) == "Requester does not have session access"
+        else:
+            raise AssertionError("Expected ValueError")
+
+        assert workspace_users.calls == 1
+        assert writes.lookup_calls == 0
+        assert sessions.tree_lock_calls == 0
+        assert sessions.stop_requests == []
+
+    async def test_replays_before_transient_idle_and_pending_input_checks(
+        self,
+    ) -> None:
+        """An authorized replay remains stable after the Session becomes running."""
+        running = _control_session(
+            run_state=AgentSessionRunState.RUNNING,
+            pending_command_id="pending-command-1",
+        )
+        command_service, command_users, command_writes, _ = _control_service(
+            membership_allowed=True,
+            control_session=running,
+            existing=_existing_record(
+                write_type=ChatWriteRequestType.COMMAND,
+                payload={"command": "compact"},
+            ),
+        )
+        command = await command_service.create_idempotent_pending_command(
+            agent_id="agent-1",
+            session_id="session-1",
+            user_id="user-1",
+            client_request_id="request-1",
+            command_name="compact",
+            payload={"command": "compact"},
+        )
+
+        edit_service, edit_users, edit_writes, _ = _control_service(
+            membership_allowed=True,
+            control_session=running,
+            existing=_existing_record(
+                write_type=ChatWriteRequestType.EDIT_MESSAGE,
+                payload={"message": "edited"},
+            ),
+        )
+        edit = await edit_service.create_idempotent_edit_input(
+            agent_id="agent-1",
+            session_id="session-1",
+            user_id="user-1",
+            client_request_id="request-1",
+            message_id="message-1",
+            text="edited",
+            inference_profile=RequestedInferenceProfile(
+                model_target_label="Primary",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            metadata={},
+            attachments=[],
+            file_parts=[],
+            payload={"message": "edited"},
+        )
+
+        retry_service, retry_users, retry_writes, _ = _control_service(
+            membership_allowed=True,
+            control_session=running,
+            existing=_existing_record(
+                write_type=ChatWriteRequestType.FAILED_RUN_RETRY,
+                payload={"failed_event_id": "failed-event-1"},
+                accepted_id="failed-event-1",
+            ),
+        )
+        retry = await retry_service.create_idempotent_failed_run_retry(
+            agent_id="agent-1",
+            session_id="session-1",
+            user_id="user-1",
+            client_request_id="request-1",
+            failed_event_id="failed-event-1",
+            payload={"failed_event_id": "failed-event-1"},
+        )
+
+        assert command.request.created is False
+        assert command.command_id is None
+        assert edit.request.created is False
+        assert edit.input_buffer is None
+        assert retry.request.created is False
+        assert retry.failed_event_id == "failed-event-1"
+        assert command_users.calls == edit_users.calls == retry_users.calls == 1
+        assert command_writes.lookup_calls == edit_writes.lookup_calls == 1
+        assert retry_writes.lookup_calls == 1
+
+    async def test_stop_rejects_a_mismatched_root_tree_before_side_effects(
+        self,
+    ) -> None:
+        """A corrupt tree cannot broaden stop effects beyond the locked root."""
+        mismatched_child = AgentSession.model_construct(
+            id="child-session-1",
+            workspace_id="workspace-2",
+            agent_id="agent-1",
+        )
+        service, _, _, sessions = _control_service(
+            membership_allowed=True,
+            subtree=[_control_session(), mismatched_child],
+        )
+
+        try:
+            await service.request_session_stop(
+                agent_id="agent-1",
+                session_id="session-1",
+                user_id="user-1",
+            )
+        except ValueError as exc:
+            assert str(exc) == "Session subtree is outside the root tree"
+        else:
+            raise AssertionError("Expected ValueError")
+
+        assert sessions.tree_lock_calls == 1
+        assert sessions.stop_requests == []
 
     async def test_pending_command_rejects_subagent_session_before_write(
         self,
@@ -270,7 +728,12 @@ class TestChatWriteService:
         """Direct REST control writes cannot target child subagent sessions."""
         calls: list[str] = []
         service = ChatWriteService(
+            agent_repository=cast(AgentRepository, object()),
             agent_session_repository=_SubagentLockRepository(calls),
+            workspace_user_repository=cast(
+                WorkspaceUserRepository,
+                _WorkspaceUserRepository(),
+            ),
             agent_run_repository=cast(AgentRunRepository, object()),
             chat_write_request_repository=cast(ChatWriteRequestRepository, object()),
             message_repository=cast(MessageRepository, object()),
@@ -300,7 +763,12 @@ class TestChatWriteService:
     ) -> None:
         """Reject existing idempotency records from another explicit session."""
         service = ChatWriteService(
+            agent_repository=AgentRepository(),
             agent_session_repository=AgentSessionRepository(),
+            workspace_user_repository=cast(
+                WorkspaceUserRepository,
+                _WorkspaceUserRepository(),
+            ),
             agent_run_repository=AgentRunRepository(),
             chat_write_request_repository=_ExistingWriteRequestRepository(
                 "2223456789abcdef0123456789abcdef"
@@ -380,6 +848,7 @@ class TestChatWriteService:
             await session_repo.mark_running(session, child_agent.agent_session_id)
 
         result = await _service(rdb_session_manager).request_session_stop(
+            agent_id=agent_id,
             session_id=root_session.id,
             user_id=user_id,
         )
@@ -428,9 +897,9 @@ class TestChatWriteService:
                 EventCreate(
                     session_id=agent_session.id,
                     kind=EventKind.USER_MESSAGE,
-                    payload=UserMessagePayload(content="original").model_dump(
-                        mode="json"
-                    ),
+                    payload=UserMessagePayload(
+                        sender_user_id=None, content="original"
+                    ).model_dump(mode="json"),
                 ),
             )
             later = await transcript_repo.append(
@@ -438,7 +907,9 @@ class TestChatWriteService:
                 EventCreate(
                     session_id=agent_session.id,
                     kind=EventKind.USER_MESSAGE,
-                    payload=UserMessagePayload(content="later").model_dump(mode="json"),
+                    payload=UserMessagePayload(
+                        sender_user_id=None, content="later"
+                    ).model_dump(mode="json"),
                 ),
             )
             await AgentSessionRepository().move_model_input_head(
@@ -522,9 +993,9 @@ class TestChatWriteService:
                 EventCreate(
                     session_id=agent_session.id,
                     kind=EventKind.USER_MESSAGE,
-                    payload=UserMessagePayload(content="do the task").model_dump(
-                        mode="json"
-                    ),
+                    payload=UserMessagePayload(
+                        sender_user_id=None, content="do the task"
+                    ).model_dump(mode="json"),
                 ),
             )
             failed_event = await transcript_repo.append(
@@ -667,9 +1138,9 @@ class TestChatWriteService:
                 EventCreate(
                     session_id=agent_session.id,
                     kind=EventKind.USER_MESSAGE,
-                    payload=UserMessagePayload(content="newer context").model_dump(
-                        mode="json"
-                    ),
+                    payload=UserMessagePayload(
+                        sender_user_id=None, content="newer context"
+                    ).model_dump(mode="json"),
                 ),
             )
 

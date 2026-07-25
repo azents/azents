@@ -1795,6 +1795,7 @@
       "unknownProvenance": "Run provenance is not available yet."
     },
     "editMessage": "Edit",
+    "senderUnavailable": "Sender unavailable",
     "editingMessage": "Editing message",
     "cancelEdit": "Cancel edit",
     "editBlockedDuringRun": "Editing is paused while the agent is processing.",

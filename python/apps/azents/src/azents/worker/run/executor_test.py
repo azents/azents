@@ -1287,6 +1287,7 @@ def _action_execution(*, owner_generation: int = 1) -> ActionExecution:
         id="action-execution-001",
         session_id="session-001",
         input_buffer_id="input-buffer-001",
+        sender_user_id=None,
         action_type=action.type,
         action=action.model_dump(mode="json"),
         status=ActionExecutionStatus.PENDING,
@@ -1308,7 +1309,7 @@ def _pending_command(name: str = "compact") -> PendingSessionCommand:
         id="command-001",
         name=name,
         payload={},
-        user_id="user-001",
+        requester_user_id="user-001",
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
@@ -2332,6 +2333,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     """Failed TurnActions are marked failed and the next FIFO input is promoted."""
     executor = _executor()
     user_message = make_run_user_message(
+        sender_user_id=None,
         content="continue after failed action",
         metadata={},
         attachments=[],
@@ -3157,7 +3159,9 @@ def test_actionable_tail_detects_goal_continuation_after_run_marker() -> None:
         id="1123456789abcdef0123456789abcdeb",
         session_id="session-1",
         kind=EventKind.GOAL_CONTINUATION,
-        payload=UserMessagePayload(content="", metadata={"source": "goal"}),
+        payload=UserMessagePayload(
+            sender_user_id=None, content="", metadata={"source": "goal"}
+        ),
         created_at=run_executor_module.tznow(),
     )
 
@@ -3178,6 +3182,7 @@ def test_actionable_tail_detects_goal_update_after_run_marker() -> None:
         session_id="session-1",
         kind=EventKind.GOAL_UPDATED,
         payload=UserMessagePayload(
+            sender_user_id=None,
             content="",
             metadata={
                 "source": "goal",

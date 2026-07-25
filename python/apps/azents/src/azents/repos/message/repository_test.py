@@ -70,7 +70,9 @@ async def _create_events(session: AsyncSession, session_id: str) -> list[str]:
     ids = [f"{order:032x}" for order in range(1, 6)]
     for order, event_id in enumerate(ids, start=1):
         payload = _JSON_PAYLOAD_ADAPTER.validate_python(
-            UserMessagePayload(content=f"event-{order}").model_dump(mode="json")
+            UserMessagePayload(
+                sender_user_id=None, content=f"event-{order}"
+            ).model_dump(mode="json")
         )
         event = RDBEvent(
             session_id=session_id,
@@ -85,7 +87,9 @@ async def _create_events(session: AsyncSession, session_id: str) -> list[str]:
         session_id=session_id,
         kind=EventKind.USER_MESSAGE,
         payload=_JSON_PAYLOAD_ADAPTER.validate_python(
-            UserMessagePayload(content="reverted").model_dump(mode="json")
+            UserMessagePayload(sender_user_id=None, content="reverted").model_dump(
+                mode="json"
+            )
         ),
         model_order=6,
         reverted=True,

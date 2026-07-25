@@ -286,6 +286,9 @@ class UserMessagePayload(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    sender_user_id: str | None = Field(
+        description="Human sender User ID, or null when provenance is unavailable",
+    )
     content: str | list[UserContentPart] = Field(description="User content")
     attachments: list[Attachment] = Field(default_factory=list)
     metadata: dict[str, str] = Field(default_factory=dict)
@@ -297,6 +300,24 @@ class UserMessagePayload(BaseModel):
         default=None,
         description="Resolved inference settings applied by this message",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_missing_sender_provenance(cls, data: object) -> object:
+        """Decode historical missing sender provenance as unavailable."""
+        if not isinstance(data, dict) or "sender_user_id" in data:
+            return data
+        return {**data, "sender_user_id": None}
+
+    @model_serializer(mode="wrap")
+    def serialize_sender_provenance(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """Preserve unavailable sender provenance in canonical event JSON."""
+        serialized: dict[str, object] = handler(self)
+        serialized["sender_user_id"] = self.sender_user_id
+        return serialized
 
 
 class AgentMessagePayload(BaseModel):

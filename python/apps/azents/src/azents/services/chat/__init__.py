@@ -934,7 +934,7 @@ class ChatSessionService:
                             scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                             requested_model_target_label=None,
                             requested_reasoning_effort=None,
-                            actor_user_id=user_id,
+                            sender_user_id=user_id,
                             content="",
                             idempotency_key=None,
                             metadata=metadata,

@@ -1795,6 +1795,7 @@
       "unknownProvenance": "La provenance de l’exécution n’est pas encore disponible."
     },
     "editMessage": "Modifier",
+    "senderUnavailable": "Expéditeur indisponible",
     "editingMessage": "Modification du message",
     "cancelEdit": "Annuler la modification",
     "editBlockedDuringRun": "La modification est en pause pendant le traitement.",

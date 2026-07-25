@@ -25,7 +25,7 @@ class InputBuffer(BaseModel):
     requested_reasoning_effort: ModelReasoningEffort | None = Field(
         description="Requested reasoning effort, or null for Default/inheritance",
     )
-    actor_user_id: str | None = Field(description="Author User ID")
+    sender_user_id: str | None = Field(description="Author User ID")
     content: str = Field(description="Input body")
     idempotency_key: str | None = Field(description="Source idempotency key")
     metadata: dict[str, str] = Field(description="Input metadata snapshot")
@@ -54,7 +54,7 @@ class InputBufferCreate(BaseModel):
     requested_reasoning_effort: ModelReasoningEffort | None = Field(
         description="Requested reasoning effort, or null for Default/inheritance",
     )
-    actor_user_id: str | None = Field(description="Author User ID")
+    sender_user_id: str | None = Field(description="Author User ID")
     content: str = Field(description="Input body")
     idempotency_key: str | None = Field(description="Source idempotency key")
     metadata: dict[str, str] = Field(description="Input metadata snapshot")

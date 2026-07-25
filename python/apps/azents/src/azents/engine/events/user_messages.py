@@ -21,6 +21,7 @@ from azents.engine.io.user_input import RunUserMessage
 
 def make_run_user_message(
     *,
+    sender_user_id: str | None,
     content: str,
     metadata: dict[str, str],
     attachments: Sequence[RuntimeAttachment],
@@ -40,6 +41,7 @@ def make_run_user_message(
         event_content = content
     return RunUserMessage(
         payload=UserMessagePayload(
+            sender_user_id=sender_user_id,
             content=event_content,
             attachments=[
                 event_attachment_from_runtime_attachment(

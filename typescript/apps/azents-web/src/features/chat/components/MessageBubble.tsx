@@ -32,6 +32,10 @@ import { useLocale, useTranslations } from "next-intl";
 import { memo } from "react";
 import { continuationPresentation } from "../continuationPresentation";
 import { externalChannelMessagePresentation } from "../externalChannelMessage";
+import {
+  type CurrentWorkspaceProfile,
+  humanSenderPresentation,
+} from "../senderPresentation";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import {
   chatChevronTransition,
@@ -57,6 +61,7 @@ interface FailedRunRetryAction {
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  currentWorkspaceProfile?: CurrentWorkspaceProfile | null;
   dimmed?: boolean;
   editable?: boolean;
   onEdit?: () => void;
@@ -66,6 +71,7 @@ interface MessageBubbleProps {
 interface TextMessageProps {
   message: ChatMessage;
   hasContent: boolean;
+  senderLabel: string;
 }
 
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
@@ -141,6 +147,7 @@ function TextMessageContent({
 function UserTextMessage({
   message,
   hasContent,
+  senderLabel,
   editable = false,
   onEdit,
 }: TextMessageProps & {
@@ -166,6 +173,9 @@ function UserTextMessage({
   if (message.action) {
     return (
       <MessageMetadataSurface>
+        <Text size="xs" c="dimmed" ta="right" mb={rem(4)}>
+          {senderLabel}
+        </Text>
         <InputBufferBubbleFrame
           content={message.content ?? ""}
           action={message.action}
@@ -201,6 +211,9 @@ function UserTextMessage({
     >
       <Box maw="75%" style={{ minWidth: 0 }}>
         <MessageMetadataSurface>
+          <Text size="xs" c="dimmed" ta="right" mb={rem(4)}>
+            {senderLabel}
+          </Text>
           {message.attachments && message.attachments.length > 0 && (
             <FileAttachmentList
               files={message.attachments}
@@ -331,7 +344,7 @@ function AgentMailboxMessage({
 function AssistantTextMessage({
   message,
   hasContent,
-}: TextMessageProps): React.ReactElement {
+}: Pick<TextMessageProps, "message" | "hasContent">): React.ReactElement {
   return (
     <Box mb="md" w="100%" style={{ minWidth: 0 }}>
       <Box style={{ maxWidth: "100%", minWidth: 0, overflowWrap: "anywhere" }}>
@@ -538,6 +551,7 @@ function AssistantToolCallMessage({
 
 export const MessageBubble = memo(function MessageBubble({
   message,
+  currentWorkspaceProfile = null,
   dimmed = false,
   editable = false,
   onEdit,
@@ -561,6 +575,12 @@ export const MessageBubble = memo(function MessageBubble({
     (message.providerToolCalls && message.providerToolCalls.length > 0);
   const hasAttachments = message.attachments && message.attachments.length > 0;
   const externalChannelSource = externalChannelMessagePresentation(message);
+  const sender = humanSenderPresentation(
+    message.senderUserId ?? null,
+    currentWorkspaceProfile,
+  );
+  const senderLabel =
+    sender.type === "AVAILABLE" ? sender.name : t("senderUnavailable");
 
   if (message.role === "goal_continuation") {
     const continuation = continuationPresentation(message);
@@ -645,6 +665,7 @@ export const MessageBubble = memo(function MessageBubble({
         <UserTextMessage
           message={message}
           hasContent={hasContent}
+          senderLabel={senderLabel}
           editable={editable}
           onEdit={onEdit}
         />

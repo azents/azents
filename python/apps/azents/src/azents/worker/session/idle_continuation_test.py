@@ -50,7 +50,7 @@ class _InputBufferService:
                     scheduling_mode=input.scheduling_mode,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
-                    actor_user_id=input.actor_user_id,
+                    sender_user_id=input.sender_user_id,
                     content=input.content,
                     idempotency_key=input.idempotency_key,
                     metadata=input.metadata,

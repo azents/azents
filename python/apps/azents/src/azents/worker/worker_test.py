@@ -334,7 +334,7 @@ class _AgentSessionRepository:
             id="command-001",
             name="compact",
             payload={},
-            user_id="user-001",
+            requester_user_id="user-001",
             created_at=datetime.now(timezone.utc),
         )
 
@@ -1422,6 +1422,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
         schedule_title,
     )
     user_message = make_run_user_message(
+        sender_user_id=None,
         content="buffered input",
         metadata={"source": "chat"},
         attachments=[],

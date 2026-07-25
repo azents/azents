@@ -96,9 +96,12 @@ from azents.services.kimi_oauth.runtime import (
     ensure_runtime_tokens as ensure_kimi_oauth_runtime_tokens,
 )
 from azents.services.model_file import (
+    ModelFileAccessDenied,
+    ModelFileCreateError,
     ModelFileInvalidImage,
     ModelFileOversized,
     ModelFileService,
+    ModelFileSessionNotFound,
     model_file_size_limit_message,
 )
 from azents.services.xai_oauth.data import (
@@ -702,6 +705,7 @@ async def resolve_invoke_input_with_model_source(
 
         user_messages.append(
             make_run_user_message(
+                sender_user_id=None,
                 content=msg.text,
                 metadata=msg.metadata,
                 attachments=msg_attachments,
@@ -857,6 +861,183 @@ async def materialize_user_input_exchange_file_attachments(
     )
 
 
+async def materialize_admitted_input_exchange_file_attachments(
+    attachment_uris: list[str],
+    *,
+    agent_id: str,
+    session_id: str,
+    exchange_file_service: ExchangeFileService,
+    model_file_service: ModelFileService | None,
+) -> MaterializedUserInputAttachments:
+    """Materialize attachments previously claimed by this Session tree's root.
+
+    This is intentionally separate from the user-authorized composer helper:
+    promotion must remain independent of sender provenance and any membership
+    changes that happen after the admission transaction committed.
+    """
+    attachments: list[RuntimeAttachment] = []
+    file_parts: list[FileOutputPart] = []
+
+    try:
+        for uri in attachment_uris:
+            materialized = await _materialize_admitted_input_exchange_file_attachment(
+                uri=uri,
+                agent_id=agent_id,
+                session_id=session_id,
+                exchange_file_service=exchange_file_service,
+                model_file_service=model_file_service,
+            )
+            if materialized is None:
+                continue
+            attachments.append(materialized.attachment)
+            if materialized.file_part is not None:
+                file_parts.append(materialized.file_part)
+    except asyncio.CancelledError:
+        await _discard_partial_user_input_model_files(
+            model_file_service=model_file_service,
+            file_parts=file_parts,
+            reason="admitted attachment materialization cancellation",
+        )
+        raise
+    except Exception:
+        await _discard_partial_user_input_model_files(
+            model_file_service=model_file_service,
+            file_parts=file_parts,
+            reason="admitted attachment materialization failure",
+        )
+        raise
+
+    return MaterializedUserInputAttachments(
+        attachments=attachments,
+        file_parts=file_parts,
+    )
+
+
+async def _materialize_admitted_input_exchange_file_attachment(
+    *,
+    uri: str,
+    agent_id: str,
+    session_id: str,
+    exchange_file_service: ExchangeFileService,
+    model_file_service: ModelFileService | None,
+) -> _MaterializedUserInputAttachment | None:
+    """Materialize one attachment through its admission-time root claim."""
+    metadata_result = (
+        await exchange_file_service.resolve_admitted_input_attachment_metadata(
+            uri=uri,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+    )
+    if isinstance(metadata_result, Failure):
+        logger.warning(
+            "Failed to resolve admitted attachment metadata",
+            extra={
+                "uri": uri,
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "error": metadata_result.error.__class__.__name__,
+            },
+        )
+        return _MaterializedUserInputAttachment(
+            attachment=_unavailable_attachment(uri),
+            file_part=None,
+        )
+
+    file = metadata_result.value
+    availability: Literal["available", "expired", "unavailable"] = (
+        "expired" if file.status == ExchangeFileStatus.EXPIRED else "available"
+    )
+    attachment = RuntimeAttachment(
+        attachment_id=file.id,
+        uri=file.uri,
+        media_type=file.media_type,
+        size=file.size_bytes,
+        name=file.filename,
+        text_preview=_attachment_text_preview(file, availability=availability),
+        preview_thumbnail_uri=file.preview_thumbnail_uri,
+        availability=availability,
+        preview_title=file.preview_title,
+        preview_thumbnail_media_type=file.preview_thumbnail_media_type,
+        preview_thumbnail_width=file.preview_thumbnail_width,
+        preview_thumbnail_height=file.preview_thumbnail_height,
+        preview_generated_at=file.preview_generated_at,
+    )
+    if availability != "available" or model_file_service is None:
+        return _MaterializedUserInputAttachment(
+            attachment=attachment,
+            file_part=None,
+        )
+
+    download_result = await exchange_file_service.resolve_admitted_input_attachment(
+        uri=uri,
+        agent_id=agent_id,
+        session_id=session_id,
+    )
+    if isinstance(download_result, Failure):
+        logger.warning(
+            "Failed to download admitted attachment for input FilePart",
+            extra={
+                "uri": uri,
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "error": download_result.error.__class__.__name__,
+            },
+        )
+        return _MaterializedUserInputAttachment(
+            attachment=attachment.model_copy(
+                update={
+                    "availability": "unavailable",
+                    "text_preview": _attachment_text_preview(
+                        file,
+                        availability="unavailable",
+                    ),
+                }
+            ),
+            file_part=None,
+        )
+
+    download = download_result.value
+    model_file_result = await model_file_service.create_for_admitted_input(
+        agent_id=agent_id,
+        session_id=session_id,
+        filename=download.file.filename,
+        media_type=download.file.media_type,
+        body=download.body,
+        metadata={
+            "source_kind": "user_upload",
+            "source_attachment_id": download.file.id,
+            "source_attachment_uri": download.file.uri,
+        },
+    )
+    if isinstance(model_file_result, Failure):
+        logger.warning(
+            "Failed to create ModelFile for admitted input attachment",
+            extra={
+                "uri": uri,
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "reason": _model_file_creation_failure_reason(model_file_result.error),
+            },
+        )
+        return _MaterializedUserInputAttachment(
+            attachment=attachment,
+            file_part=None,
+        )
+
+    return _MaterializedUserInputAttachment(
+        attachment=attachment,
+        file_part=file_output_part_from_model_file(
+            model_file_result.value,
+            metadata={
+                "source_kind": "user_upload",
+                "source_attachment_id": download.file.id,
+                "source_attachment_uri": download.file.uri,
+            },
+        ),
+    )
+
+
 async def _materialize_user_input_exchange_file_attachment(
     *,
     uri: str,
@@ -941,19 +1122,13 @@ async def _materialize_user_input_exchange_file_attachment(
         },
     )
     if isinstance(model_file_result, Failure):
-        if isinstance(model_file_result.error, ModelFileOversized):
-            reason = model_file_size_limit_message(model_file_result.error)
-        elif isinstance(model_file_result.error, ModelFileInvalidImage):
-            reason = "Uploaded image could not be normalized for model input."
-        else:
-            reason = model_file_result.error.__class__.__name__
         logger.warning(
             "Failed to create ModelFile for user input attachment",
             extra={
                 "uri": uri,
                 "session_id": session_id,
                 "agent_id": agent_id,
-                "reason": reason,
+                "reason": _model_file_creation_failure_reason(model_file_result.error),
             },
         )
         return _MaterializedUserInputAttachment(
@@ -972,6 +1147,34 @@ async def _materialize_user_input_exchange_file_attachment(
             },
         ),
     )
+
+
+def _unavailable_attachment(uri: str) -> RuntimeAttachment:
+    """Create a bounded unavailable projection without Exchange metadata."""
+    name = uri.rsplit("/", maxsplit=1)[-1] or "attachment"
+    return RuntimeAttachment(
+        uri=uri,
+        media_type="application/octet-stream",
+        size=0,
+        name=name,
+        text_preview=f"File unavailable as {uri}.",
+        availability="unavailable",
+    )
+
+
+def _model_file_creation_failure_reason(error: ModelFileCreateError) -> str:
+    """Return the stable operator reason for a terminal ModelFile result."""
+    match error:
+        case ModelFileOversized():
+            return model_file_size_limit_message(error)
+        case ModelFileInvalidImage():
+            return "Uploaded image could not be normalized for model input."
+        case ModelFileSessionNotFound():
+            return "Session was not found while creating model input."
+        case ModelFileAccessDenied():
+            return "Model input creation access was denied."
+        case _:
+            assert_never(error)
 
 
 async def _discard_partial_user_input_model_files(
