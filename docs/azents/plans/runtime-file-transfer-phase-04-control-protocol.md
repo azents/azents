@@ -27,6 +27,9 @@ tags: [runtime, files, transfer, grpc, security, backend]
 - Trusted-service credential maximum lifetime: 60 seconds, with at most 5 seconds of configured clock skew for not-before validation.
 - Maximum transfer chunk data: 256 KiB. Every sender rejects or splits larger data before protobuf serialization, and every receiver rejects an oversized frame before storage or checksum work.
 - Multipart aggregation uses the backend-compatible minimum non-final part size, 5 MiB, with one in-flight part per upload in this phase. Chunk messages remain 256 KiB or smaller; no multipart part is one gRPC message.
+- Stream-owner lease: 30 seconds, renewed at most once every 10 seconds.
+- Dispatch/generation/stream repair interval: 5 seconds, with pages bounded by the
+  configured Transfer State list-page limit.
 - The implementation must not set `grpc.max_send_message_length`, `grpc.max_receive_message_length`, or equivalent channel/server options.
 
 Protocol constants live in the shared `azents-runtime-control` library so Control, the synthetic Phase 4 Runner, and the production Phase 5 Runner use one definition. Phase 4 defines the exact registration acceptance matrix, but Phase 9 owns enabling strict production rejection during coordinated deployment.
@@ -285,7 +288,10 @@ dispatch metadata:
 - `dispatch_status` with `NOT_BOUND`, `BOUND`, `DELIVERABLE`, and `ENQUEUED`;
 - optional stable Runtime Coordination `dispatch_request_id`; and
 - `accepted_runner_generation`, which becomes dispatch-bound authority rather than a
-  value first selected by `claim_stream()`.
+  value first selected by `claim_stream()`; and
+- optional stream owner replica ID and stream-lease expiry after claim; and
+- an optional trusted multipart cleanup handle containing only the attempt-owned internal
+  object/upload identifiers required to abort work after owner loss.
 
 The store adds these dispatch operations:
 
@@ -305,15 +311,26 @@ The store adds these dispatch operations:
   settlement. It never accepts a different dispatch identity.
 - `list_pending_dispatches(...)` returns a bounded page of live `BOUND` or `DELIVERABLE`
   records for Runtime Control repair and never returns terminal or expired attempts.
+- `renew_stream_lease(...)` requires the exact attempt, generation, claim, and owner
+  replica and extends only the short stream-owner lease. It never extends the admission
+  deadline or absolute logical content expiry.
+- `record_multipart_cleanup_handle(...)` requires the exact upload claim and records the
+  bounded trusted cleanup handle before the first part upload. Completion or successful
+  abort clears it.
+- `list_stale_stream_claims(...)` returns a bounded page of expired stream-owner leases
+  with their cleanup evidence.
 
 `claim_stream()` changes to require `DELIVERABLE` or `ENQUEUED` and an exact match with
 the already bound accepted Runner generation. It no longer chooses or first persists that
 generation. When claiming from `DELIVERABLE`, the same atomic mutation also sets dispatch
 status to `ENQUEUED`, removes the pending-dispatch index entry, records the claim, advances
-the transfer phase, and increments the record revision. Claim from an already `ENQUEUED`
-attempt records only the one stream claim and phase transition. `BOUND` is not claimable.
-Dispatch status remains `ENQUEUED` through every later phase and terminal state. Memory
-and Redis implementations must pass the same updated contract suite.
+the transfer phase, records the Runtime Control owner replica, creates a 30-second stream
+lease, and increments the record revision. Claim from an already `ENQUEUED` attempt
+records only the one stream claim, owner lease, and phase transition. The active service
+renews that lease at most once every 10 seconds through a bounded heartbeat independent
+from per-chunk progress. `BOUND` is not claimable. Dispatch status remains `ENQUEUED`
+through every later phase and terminal state. Memory and Redis implementations must pass
+the same updated contract suite.
 
 Transfer State and Runtime Coordination remain separate authorities, so dispatch uses an
 explicit recoverable at-least-once saga rather than claiming cross-store exactly-once
@@ -323,13 +340,16 @@ delivery:
 2. resolve the current accepted Runner connection generation from Runtime Coordination;
 3. call `bind_dispatch()` with the client-supplied stable `dispatch_id` and deterministic
    request ID derived from transfer, attempt, operation, and dispatch IDs;
-4. idempotently ensure bounded operation metadata exists under the admission's stable
+4. re-read the current Runner connection after the generation-bound record is indexed;
+   if the connection is missing or its generation differs, settle the bound attempt as
+   superseded before any intent append;
+5. idempotently ensure bounded operation metadata exists under the admission's stable
    `operation_id`, with operation type `file.transfer.v1`, bound Runtime/generation, and
    deadline, but no body stream;
-5. call `mark_dispatch_deliverable()` before appending any intent;
-6. append the metadata-only intent using the stable request and dispatch IDs;
-7. call `mark_dispatch_enqueued()`; and
-8. return success only from `ENQUEUED`.
+6. call `mark_dispatch_deliverable()` before appending any intent;
+7. append the metadata-only intent using the stable request and dispatch IDs;
+8. call `mark_dispatch_enqueued()`; and
+9. return success only from `ENQUEUED`.
 
 Because `DELIVERABLE` is persisted before append, an immediately delivered intent can
 open its data RPC without racing a later authorization transition. If that claim wins
@@ -347,19 +367,18 @@ observed.
 
 `DispatchTransfer` client retry uses the same dispatch ID until the effective deadline.
 Runtime Control also runs one bounded dispatch repair loop that pages
-`list_pending_dispatches()`: it completes metadata setup for `BOUND`, moves it to
-`DELIVERABLE`, and appends or re-appends `DELIVERABLE` intents after rechecking the bound
-Runner generation against current Runtime Coordination. A generation mismatch settles
-the old attempt as superseded instead of delivering it. The repair loop marks
-`ENQUEUED` after append and uses bounded backoff; it neither scans arbitrary operations
-nor creates an unbounded queue. This is protocol delivery repair, not the Phase 9 object
-cleanup reconciler.
+`list_pending_dispatches()`: it completes metadata setup for `BOUND`, rechecks the current
+Runner connection after every bind, moves a still-current record to `DELIVERABLE`, and
+appends or re-appends `DELIVERABLE` intents. A missing or mismatched connection settles
+the old attempt before delivery. The repair loop marks `ENQUEUED` after append and uses
+bounded backoff; it neither scans arbitrary operations nor creates an unbounded queue.
+This is protocol delivery repair, not the Phase 9 object cleanup reconciler.
 
 The state store also maintains a bounded Runtime/generation dispatch index and exposes
-`list_generation_dispatches(runtime_id, cursor, limit)`. It returns every nonterminal
-bound dispatch, including `BOUND`, `DELIVERABLE`, `ENQUEUED`, and actively streaming
-records, with its accepted Runner generation. Pending and generation indexes are removed
-on terminal settlement or expiry.
+`list_generation_dispatches(cursor, limit)`. It returns every nonterminal bound dispatch
+across Runtimes, including `BOUND`, `DELIVERABLE`, `ENQUEUED`, and actively streaming
+records, with Runtime and accepted Runner generation. Pending and generation indexes are
+removed on terminal settlement or expiry.
 
 Runner Control invokes a transfer-generation fence hook after accepting a replacement
 Runner generation and after successfully revoking a closing generation. The hook pages
@@ -370,6 +389,32 @@ generation and cannot affect attempts already bound to a newer connection. Thus 
 unclaimed `ENQUEUED` intent left in an old generation-specific Runtime Coordination stream
 does not wait for the generic operation deadline. Active transfer RPCs independently
 observe state/current-generation loss and terminate.
+
+The repair task independently pages the complete generation index on a bounded interval,
+even when no registration or revoke callback occurs. For each record it reads the current
+Runtime Coordination Runner connection:
+
+- a newer or different generation settles the attempt as `SUPERSEDED` with `FENCED`;
+- a missing or TTL-expired connection settles an unclaimed attempt as `FAILED` with
+  `STREAM`, requests cancellation for an active claim, and releases admission; and
+- an exact current generation remains eligible.
+
+This periodic reconciliation closes passive connection TTL expiry, Control replica death,
+and the race where a replacement hook finishes before a stale dispatch finishes binding:
+the mandatory post-bind recheck catches that race before append, while the independent
+scan remains the loss-recovery defense.
+
+The same bounded task lists expired stream-owner leases. If the data-RPC owner disappears
+while the Runner Control connection remains current, it fences the exact claim, aborts an
+incomplete multipart upload or closes download work, settles `FAILED` with `STREAM`,
+releases admission, and records cleanup evidence. Lease heartbeat and repair never extend
+the attempt's effective deadline or one-hour logical expiry.
+
+Upload creates multipart work only after stream claim, immediately records the returned
+trusted cleanup handle before sending the first part, and then starts body writes. A
+process failure in the narrow create-before-record gap is handled by the object-store
+incomplete-multipart lifecycle defense; every recorded handle is handled by normal
+stream-lease repair.
 
 Cancellation and terminal correlation use the same stable operation, request, and dispatch
 identities. Operation metadata creation, local terminal append, and final folding are
@@ -583,6 +628,8 @@ Integration order:
 - dispatch binds the current accepted Runner connection generation before stream claim,
   uses stable operation/request/dispatch IDs, and reaches one `ENQUEUED` logical intent
   through idempotent retry;
+- direct dispatch and repair re-read the current connection after the bind is indexed and
+  fence a missing or mismatched generation before intent append;
 - the normal interleaving persists `DELIVERABLE` before append, so immediate Runner
   delivery can claim safely;
 - claim racing the direct `mark_dispatch_enqueued()` atomically promotes the dispatch and
@@ -593,6 +640,10 @@ Integration order:
   deduplicated by dispatch ID without starting another transfer task;
 - replacement or closure after `ENQUEUED` but before claim fences the old generation,
   settles the attempt promptly, and cannot mutate a newer-generation attempt;
+- a replacement hook that completes before a stale bind is closed by the mandatory
+  post-bind generation recheck;
+- passive connection TTL expiry without successful revoke is detected by periodic bounded
+  generation reconciliation;
 - cancellation is persistent/idempotent, orders one bounded cancel message, and promptly correlates terminal operation state;
 - verified-object handoff requires upload available state, live expiry, correct consumer scope, and an exclusive claim;
 - consumer acknowledge/abandon, settlement, cleanup status, and status reads preserve existing Phase 3 fencing/idempotency;
@@ -604,6 +655,8 @@ Integration order:
 - concurrent duplicate claims allow exactly one stream;
 - `claim_stream()` rejects `NOT_BOUND`/`BOUND`, accepts only
   `DELIVERABLE`/`ENQUEUED`, and cannot first select the accepted Runner generation;
+- stream claim records one owner replica and a short renewable lease; missing owner
+  heartbeat settles and cleans the exact claim without waiting for the generic deadline;
 - a claim between append and direct enqueue-mark, progress before enqueue-mark, and
   terminal settlement before enqueue-mark all leave Dispatch success idempotently
   observable for the same dispatch;
@@ -626,10 +679,18 @@ Integration order:
 - heartbeat and one bounded ordinary operation complete while a transfer stream is flow-controlled;
 - Runtime Control lifespan creates exactly one Transfer State owner and one process-lifetime S3 client, and closes both correctly;
 - memory Transfer State still coexists with Redis Runtime Coordination; selecting memory never creates state in API/Worker code.
-- pending-dispatch and generation indexes remove claimed/terminal/expired records,
-  paginate deterministically, and remain correct under concurrent repair and settlement;
+- the pending-dispatch index removes claimed, terminal, and expired records; the
+  generation index retains all nonterminal claimed records and removes terminal/expired
+  records; both paginate deterministically under concurrent repair and settlement;
+- stale-stream pagination removes renewed/completed claims and returns expired owner
+  leases with their persisted multipart cleanup handle;
 - Runner replacement after `ENQUEUED` but before stream claim promptly settles the old
   attempt as superseded instead of waiting for the generic operation timeout.
+- replacement hook pagination completing before a stale G1 bind is caught by the post-bind
+  recheck and produces no intent;
+- a G1 connection that expires without successful revoke is fenced by periodic
+  reconciliation, and a vanished data-RPC owner with a still-current Control connection
+  is fenced by stream-lease expiry.
 
 ### Real default-limit gRPC integration
 
@@ -700,6 +761,8 @@ Run pre-commit on every changed file before commit. Docker-backed Redis/RustFS c
 - enqueue marking is race-safe with claim/progress/terminal advancement, and Runner
   generation replacement promptly fences both unclaimed and active old-generation
   attempts;
+- post-bind generation recheck and event-independent generation/stream-lease
+  reconciliation close concurrent late bind, passive TTL expiry, and process-loss gaps;
 - coordinator credentials are short-lived, audience/service/operation/scope bound, and non-interchangeable with Runner credentials;
 - coordinator calls fail before state access when unauthorized and never carry bodies;
 - upload/download memory and message bounds are calculable and independent from complete file size;
