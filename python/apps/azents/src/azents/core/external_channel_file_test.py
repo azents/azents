@@ -9,6 +9,7 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
     ExternalChannelOutboundFileManifest,
+    ExternalChannelOutboundFileSource,
     add_external_channel_file_locators,
     external_channel_file_metadata_items,
 )
@@ -24,6 +25,7 @@ def test_outbound_manifest_is_bounded_and_requires_positive_size() -> None:
     )
 
     assert manifest.model_dump(mode="json") == {
+        "source": "runtime",
         "path": "/workspace/agent/report.csv",
         "filename": "report.csv",
         "media_type": "text/csv",
@@ -35,6 +37,24 @@ def test_outbound_manifest_is_bounded_and_requires_positive_size() -> None:
             filename="empty.csv",
             media_type="text/csv",
             expected_size=0,
+        )
+
+    exchange = ExternalChannelOutboundFileManifest(
+        source=ExternalChannelOutboundFileSource.EXCHANGE,
+        path="exchange://exchange/workspace-1/files/file-1/original",
+        filename="output.png",
+        media_type="image/png",
+        expected_size=42,
+    )
+    assert exchange.source is ExternalChannelOutboundFileSource.EXCHANGE
+
+    with pytest.raises(ValidationError, match="Exchange file source"):
+        ExternalChannelOutboundFileManifest(
+            source=ExternalChannelOutboundFileSource.EXCHANGE,
+            path="artifact://artifacts/file-1",
+            filename="output.png",
+            media_type="image/png",
+            expected_size=42,
         )
 
 

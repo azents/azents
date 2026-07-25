@@ -6,23 +6,32 @@ from contextlib import asynccontextmanager
 from typing import cast
 
 import pytest
+from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ExchangeFileOrigin,
+    ExchangeFileProvenanceKind,
+    ExchangeFileStatus,
     ExternalChannelActionMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
 )
-from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_file import (
+    ExternalChannelOutboundFileManifest,
+    ExternalChannelOutboundFileSource,
+)
 from azents.rdb.session import SessionManager
+from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import (
     ChannelActionCommit,
     ChannelDeliveryTarget,
     ChannelWorkDelivery,
 )
+from azents.services.exchange_file import ExchangeFileDownload, ExchangeFileService
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
@@ -34,6 +43,7 @@ from azents.services.external_channel.slack_events import (
     SlackOutboundFile,
 )
 from azents.services.file_storage import FileStorage
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 
 def _at(second: int) -> datetime.datetime:
@@ -275,6 +285,20 @@ class _RangedStorage:
         return self.body[offset : offset + max_bytes]
 
 
+class _ExchangeFileService:
+    def __init__(self, result: Success[ExchangeFileDownload] | None = None) -> None:
+        self.result = result
+        self.calls: list[dict[str, object]] = []
+
+    async def resolve_for_authority(
+        self, **kwargs: object
+    ) -> Success[ExchangeFileDownload]:
+        self.calls.append(kwargs)
+        if self.result is None:
+            raise AssertionError("Exchange resolution was not expected")
+        return self.result
+
+
 @asynccontextmanager
 async def _session_manager(
     events: list[str],
@@ -286,6 +310,7 @@ def _service(
     events: list[str],
     repository: _RepositoryDouble,
     slack_client: _SlackClient,
+    exchange_file_service: _ExchangeFileService | None = None,
 ) -> ExternalChannelActionService:
     return ExternalChannelActionService(
         session_manager=cast(
@@ -298,6 +323,59 @@ def _service(
             _CredentialsCodec(),
         ),
         slack_client=cast(SlackConversationClient, slack_client),
+        exchange_file_service=cast(
+            ExchangeFileService,
+            exchange_file_service or _ExchangeFileService(),
+        ),
+    )
+
+
+def _authority() -> SessionResourceAuthority:
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="root-session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
+    )
+
+
+def _exchange_file() -> ExchangeFile:
+    now = _at(1)
+    return ExchangeFile(
+        id="a" * 32,
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        origin_type=ExchangeFileOrigin.ARTIFACT,
+        status=ExchangeFileStatus.AVAILABLE,
+        object_key="exchange/workspace-1/files/a/original",
+        filename="generated.png",
+        media_type="image/png",
+        size_bytes=7,
+        sha256="0" * 64,
+        provenance_kind=ExchangeFileProvenanceKind.TOOL,
+        source_user_id=None,
+        source_agent_id="agent-1",
+        source_run_id="run-1",
+        source_tool_name="image_generation",
+        source_provider=None,
+        source_exchange_file_id=None,
+        retention_root_session_id="root-session-1",
+        retention_bound_at=now,
+        preview_thumbnail_file_id=None,
+        preview_thumbnail_uri=None,
+        preview_title="generated.png",
+        preview_summary=None,
+        preview_thumbnail_media_type=None,
+        preview_thumbnail_width=None,
+        preview_thumbnail_height=None,
+        preview_generated_at=None,
+        expires_at=now + datetime.timedelta(days=7),
+        expired_at=None,
+        blob_deleted_at=None,
+        created_at=now,
     )
 
 
@@ -432,6 +510,104 @@ async def test_file_delivery_streams_only_from_the_immediate_run_source() -> Non
         ("/workspace/agent/report.txt", "agent-1", 0, 6),
         ("/workspace/agent/report.txt", "agent-1", 6, 1),
     ]
+
+
+@pytest.mark.asyncio
+async def test_exchange_file_delivery_revalidates_the_current_authority() -> None:
+    """Post-commit Exchange delivery reads only the canonical execution source."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    exchange_file = _exchange_file()
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        source=ExternalChannelOutboundFileSource.EXCHANGE,
+                        path=exchange_file.uri,
+                        filename=exchange_file.filename,
+                        media_type=exchange_file.media_type,
+                        expected_size=exchange_file.size_bytes,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    exchange_file_service = _ExchangeFileService(
+        Success(ExchangeFileDownload(file=exchange_file, body=b"pngdata"))
+    )
+    slack_client = _SlackClient(
+        events,
+        SlackControlMessageResult(
+            status="delivered",
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
+        ),
+    )
+    service = _service(
+        events,
+        repository,
+        slack_client,
+        exchange_file_service=exchange_file_service,
+    )
+
+    await service.attempt_delivery("delivery-1", authority=_authority())
+
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+    assert slack_client.uploaded == [("generated.png", b"pngdata")]
+    assert exchange_file_service.calls == [
+        {"uri": exchange_file.uri, "authority": _authority()}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recovered_exchange_delivery_without_authority_fails() -> None:
+    """An Exchange source is never replayed without its execution authority."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    exchange_file = _exchange_file()
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        source=ExternalChannelOutboundFileSource.EXCHANGE,
+                        path=exchange_file.uri,
+                        filename=exchange_file.filename,
+                        media_type=exchange_file.media_type,
+                        expected_size=exchange_file.size_bytes,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.FAILED,
+            None,
+            "exchange_file_source_unavailable",
+        )
+    ]
+    assert "provider" not in events
 
 
 @pytest.mark.asyncio

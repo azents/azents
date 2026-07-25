@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import AsyncIterator
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -1206,15 +1207,23 @@ async def test_file_reply_streams_in_order_and_completes_once() -> None:
     assert "authorization" not in requests[1][2]
     assert requests[3][3] == b"1234"
     assert requests[3][2]["content-length"] == "4"
-    completion = json.loads(requests[4][3])
+    assert requests[4][2]["content-type"].startswith(
+        "application/x-www-form-urlencoded"
+    )
+    completion = parse_qs(requests[4][3].decode(), strict_parsing=True)
     assert completion == {
         "files": [
-            {"id": "F1", "title": "first.txt"},
-            {"id": "F2", "title": "second.txt"},
+            json.dumps(
+                [
+                    {"id": "F1", "title": "first.txt"},
+                    {"id": "F2", "title": "second.txt"},
+                ],
+                separators=(",", ":"),
+            )
         ],
-        "channel_id": "C1",
-        "thread_ts": "1721600000.000100",
-        "initial_comment": "Attached reports",
+        "channel_id": ["C1"],
+        "thread_ts": ["1721600000.000100"],
+        "initial_comment": ["Attached reports"],
     }
     assert requests[4][2]["authorization"] == "Bearer xoxb-secret"
 
