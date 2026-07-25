@@ -842,9 +842,9 @@ class SlackConversationClient:
                         "POST",
                         "/files.getUploadURLExternal",
                         bot_token=bot_token,
-                        json_body={
+                        form_data={
                             "filename": file.filename,
-                            "length": file.length,
+                            "length": str(file.length),
                         },
                     )
                 )
