@@ -1468,7 +1468,7 @@ async def test_disconnect_lookup_uses_detached_single_route_snapshot(
     other_agent = await _agent(rdb_session, workspace_id, "disconnect-snapshot-other")
     repository = ExternalChannelRepository()
     management = ExternalChannelManagementRepository()
-    connection = await repository.create_connection(
+    created_connection = await repository.create_connection(
         rdb_session,
         _connection_create(
             workspace_id,
@@ -1476,10 +1476,24 @@ async def test_disconnect_lookup_uses_detached_single_route_snapshot(
             provider_tenant_id="TD-snapshot",
         ),
     )
-    route = await repository.create_agent_route(
+    created_route = await repository.create_agent_route(
         rdb_session,
-        _route_create(connection.id, agent.id, mode=ExternalChannelAppMode.SINGLE),
+        _route_create(
+            created_connection.id,
+            agent.id,
+            mode=ExternalChannelAppMode.SINGLE,
+        ),
     )
+    connection = await rdb_session.get(
+        RDBExternalChannelConnection,
+        created_connection.id,
+    )
+    route = await rdb_session.get(
+        RDBExternalChannelAgentRoute,
+        created_route.id,
+    )
+    assert connection is not None
+    assert route is not None
     connection.status = ExternalChannelConnectionStatus.DISCONNECTED
     route.agent_id = None
     route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
