@@ -17,6 +17,7 @@ from azents.runtime.coordination.data import (
     RuntimeCoordinationTarget,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
+    RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
@@ -295,6 +296,7 @@ async def test_operation_metadata_heartbeat_status_and_delete(
         transfer_id=None,
         transfer_attempt_id=None,
         transfer_dispatch_id=None,
+        transfer_direction=None,
         request_stream_id="runner:runtime-1",
         reply_stream_id="reply:req-1",
         status=RuntimeOperationStatus.ACTIVE,
@@ -343,6 +345,7 @@ async def test_ensure_operation_metadata_is_atomic_and_fences_conflicts(
         transfer_id="transfer-1",
         transfer_attempt_id="attempt-1",
         transfer_dispatch_id="dispatch-1",
+        transfer_direction=RuntimeOperationTransferDirection.DOWNLOAD,
         request_stream_id="runner:runtime-1:generation:3",
         reply_stream_id="reply:transfer-operation",
         status=RuntimeOperationStatus.ACTIVE,
@@ -362,6 +365,14 @@ async def test_ensure_operation_metadata_is_atomic_and_fences_conflicts(
     assert ensured == [metadata, metadata]
     conflicting = dataclasses.replace(metadata, generation=4)
     assert await store.ensure_operation_metadata(conflicting, ttl_seconds=60) is None
+    conflicting_direction = dataclasses.replace(
+        metadata,
+        transfer_direction=RuntimeOperationTransferDirection.UPLOAD,
+    )
+    assert (
+        await store.ensure_operation_metadata(conflicting_direction, ttl_seconds=60)
+        is None
+    )
     final = await store.update_operation_status(
         metadata.operation_id,
         status=RuntimeOperationStatus.FINAL,
@@ -388,6 +399,7 @@ async def test_try_start_operation_is_atomic(
         transfer_id=None,
         transfer_attempt_id=None,
         transfer_dispatch_id=None,
+        transfer_direction=None,
         request_stream_id="runner:runtime-1",
         reply_stream_id="reply:req-start",
         status=RuntimeOperationStatus.ACTIVE,
@@ -446,6 +458,7 @@ async def test_cancel_requested_status_records_timestamp_and_blocks_start(
         transfer_id=None,
         transfer_attempt_id=None,
         transfer_dispatch_id=None,
+        transfer_direction=None,
         request_stream_id="runner:runtime-1",
         reply_stream_id="reply:req-cancel",
         status=RuntimeOperationStatus.ACTIVE,
@@ -492,6 +505,7 @@ async def test_append_reply_for_operation_rejects_late_final(
         transfer_id=None,
         transfer_attempt_id=None,
         transfer_dispatch_id=None,
+        transfer_direction=None,
         request_stream_id="runner:runtime-1",
         reply_stream_id="reply:req-final",
         status=RuntimeOperationStatus.ACTIVE,

@@ -16,6 +16,7 @@ from azents_runtime_control.grpc_runner_client import (
     runner_event_from_message,
     runner_execution_policy_evidence_from_message,
     runner_state_report_from_message,
+    runner_transfer_result_from_message,
 )
 from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
@@ -24,6 +25,7 @@ from azents_runtime_control.proto import (
 )
 from azents_runtime_control.runner import RunnerStateReport as SharedRunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
+from azents_runtime_control.runner_transfer import RunnerTransferDirection
 from google.protobuf import timestamp_pb2
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
@@ -44,6 +46,7 @@ from azents.runtime.coordination.data import (
     RuntimeBodyChunkRecord,
     RuntimeCoordinationTarget,
     RuntimeOperationStatus,
+    RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
@@ -638,27 +641,29 @@ class RuntimeRunnerControlGrpcServicer(
             or operation.transfer_id != result.identity.transfer_id
             or operation.transfer_attempt_id != result.identity.attempt_id
             or operation.transfer_dispatch_id != result.dispatch_id
+            or operation.transfer_direction is None
+            or operation.runtime_id != result.identity.runtime_id
+            or operation.generation != result.identity.runner_generation
         ):
             return
-        valid, success = _valid_transfer_result(result)
-        if not valid:
-            success = False
+        valid = _valid_transfer_result(
+            result,
+            direction=operation.transfer_direction,
+        )
+        if valid:
+            return
         await self._control_protocol.append_reply_event(
             RuntimeReplyEvent(
                 request_id=message.request_id,
                 runtime_id=result.identity.runtime_id,
                 generation=result.identity.runner_generation,
-                event_type=(
-                    RuntimeReplyEventType.FINAL_SUCCESS
-                    if success
-                    else RuntimeReplyEventType.FINAL_ERROR
-                ),
+                event_type=RuntimeReplyEventType.FINAL_ERROR,
                 payload={
                     "transfer_id": result.identity.transfer_id,
                     "attempt_id": result.identity.attempt_id,
                     "dispatch_id": result.dispatch_id,
                     "outcome": result.outcome,
-                    "protocol_violation": not valid,
+                    "protocol_violation": True,
                 },
                 created_at=datetime.now(UTC),
                 final=True,
@@ -872,42 +877,18 @@ def _runner_transfer_intent(
 
 def _valid_transfer_result(
     result: runtime_runner_control_pb2.RunnerTransferResult,
-) -> tuple[bool, bool]:
-    has_size = result.HasField("actual_size")
-    has_sha256 = result.HasField("sha256")
-    has_commit = result.HasField("destination_committed")
-    has_failure = result.HasField("failure")
-    paired_manifest = has_size == has_sha256
-    if result.outcome == runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_SUCCEEDED:
-        return (
-            paired_manifest
-            and has_size
-            and has_commit
-            and has_failure is False
-            and result.destination_committed,
-            True,
+    *,
+    direction: RuntimeOperationTransferDirection,
+) -> bool:
+    """Validate untrusted result structure against persisted transfer direction."""
+    try:
+        runner_transfer_result_from_message(
+            result,
+            direction=RunnerTransferDirection(direction.value),
         )
-    if result.outcome == runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_FAILED:
-        return (
-            paired_manifest
-            and has_commit
-            and not result.destination_committed
-            and has_failure
-            and result.failure
-            != runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_CANCELLED,
-            False,
-        )
-    if result.outcome == runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_CANCELLED:
-        return (
-            paired_manifest
-            and has_commit
-            and not result.destination_committed
-            and has_failure
-            and result.failure
-            == runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_CANCELLED,
-            False,
-        )
-    return False, False
+    except KeyError, ValueError:
+        return False
+    return True
 
 
 def _copy_operation_payload(

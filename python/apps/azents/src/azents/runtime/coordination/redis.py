@@ -19,6 +19,7 @@ from azents.runtime.coordination.data import (
     RuntimeCoordinationTarget,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
+    RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeReplyRecord,
@@ -164,7 +165,8 @@ if existing['runtime_id'] ~= proposed['runtime_id']
   or existing['deadline_at'] ~= proposed['deadline_at']
   or existing['transfer_id'] ~= proposed['transfer_id']
   or existing['transfer_attempt_id'] ~= proposed['transfer_attempt_id']
-  or existing['transfer_dispatch_id'] ~= proposed['transfer_dispatch_id'] then
+  or existing['transfer_dispatch_id'] ~= proposed['transfer_dispatch_id']
+  or existing['transfer_direction'] ~= proposed['transfer_direction'] then
   return nil
 end
 return current
@@ -841,6 +843,11 @@ def _operation_to_json(metadata: RuntimeOperationMetadata) -> str:
             "transfer_id": metadata.transfer_id,
             "transfer_attempt_id": metadata.transfer_attempt_id,
             "transfer_dispatch_id": metadata.transfer_dispatch_id,
+            "transfer_direction": (
+                metadata.transfer_direction.value
+                if metadata.transfer_direction is not None
+                else None
+            ),
             "request_stream_id": metadata.request_stream_id,
             "reply_stream_id": metadata.reply_stream_id,
             "status": metadata.status.value,
@@ -867,6 +874,11 @@ def _operation_from_json(raw: str) -> RuntimeOperationMetadata:
         transfer_id=_optional_str(payload.get("transfer_id")),
         transfer_attempt_id=_optional_str(payload.get("transfer_attempt_id")),
         transfer_dispatch_id=_optional_str(payload.get("transfer_dispatch_id")),
+        transfer_direction=(
+            RuntimeOperationTransferDirection(str(payload["transfer_direction"]))
+            if payload.get("transfer_direction") is not None
+            else None
+        ),
         request_stream_id=str(payload["request_stream_id"]),
         reply_stream_id=str(payload["reply_stream_id"]),
         status=RuntimeOperationStatus(str(payload["status"])),

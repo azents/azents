@@ -430,6 +430,7 @@ def _operation_identity(
     str | None,
     str | None,
     str | None,
+    object | None,
 ]:
     """Return the immutable identity used by atomic operation creation."""
     return (
@@ -440,4 +441,5 @@ def _operation_identity(
         metadata.transfer_id,
         metadata.transfer_attempt_id,
         metadata.transfer_dispatch_id,
+        metadata.transfer_direction,
     )

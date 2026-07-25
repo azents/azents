@@ -653,6 +653,7 @@ class RuntimeControlProtocolService:
                 transfer_id=None,
                 transfer_attempt_id=None,
                 transfer_dispatch_id=None,
+                transfer_direction=None,
                 request_stream_id=request_stream_id,
                 reply_stream_id=reply_stream_id,
                 status=RuntimeOperationStatus.ACTIVE,

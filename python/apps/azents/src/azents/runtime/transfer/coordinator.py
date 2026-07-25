@@ -12,6 +12,7 @@ from azents.runtime.coordination.data import (
     RuntimeCoordinationTarget,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
+    RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
@@ -384,6 +385,9 @@ class RuntimeTransferCoordinator:
             transfer_id=record.admission.transfer_id,
             transfer_attempt_id=record.admission.attempt_id,
             transfer_dispatch_id=record.dispatch_id,
+            transfer_direction=RuntimeOperationTransferDirection(
+                record.admission.direction.value
+            ),
             request_stream_id=request_stream_id,
             reply_stream_id=reply_stream_id,
             status=RuntimeOperationStatus.ACTIVE,
