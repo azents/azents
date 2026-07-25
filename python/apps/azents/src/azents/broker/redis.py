@@ -7,10 +7,12 @@ Sticky session: manages worker ownership with per-session Redis locks so the
 same worker handles messages for the same session.
 """
 
+import asyncio
 import json
 import logging
 import time
 from typing import Any, NamedTuple, cast
+from uuid import uuid4
 
 from pydantic import TypeAdapter
 from redis.asyncio import Redis
@@ -31,6 +33,9 @@ logger = logging.getLogger(__name__)
 _BUSYGROUP_PREFIX = "BUSYGROUP"
 _NOGROUP_PREFIX = "NOGROUP"
 _ACQUIRE_LOCK_SCRIPT = """
+if redis.call("EXISTS", KEYS[3]) == 1 then
+  return { "cutover", "" }
+end
 local owner = redis.call("GET", KEYS[1])
 if not owner then
   redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
@@ -77,6 +82,18 @@ _RELEASE_LOCK_SCRIPT = """
 if redis.call("GET", KEYS[1]) == ARGV[1] then
   redis.call("DEL", KEYS[2])
   return redis.call("DEL", KEYS[1])
+end
+return 0
+"""
+_RELEASE_CUTOVER_BARRIER_SCRIPT = """
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0
+"""
+_RENEW_CUTOVER_BARRIER_SCRIPT = """
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("EXPIRE", KEYS[1], ARGV[2])
 end
 return 0
 """
@@ -167,6 +184,7 @@ class RedisBroker:
     _ACTIVITY_TTL = 30  # seconds; TTL expiry cleans up after crashes
     _MESSAGE_TTL = 24 * 60 * 60  # seconds
     _INCOMING_RETENTION = 6 * 60 * 60  # seconds
+    _CUTOVER_REPLAY_BARRIER_TTL = 60 * 60
 
     def __init__(self, redis: Redis, *, worker_id: str | None = None) -> None:
         self._redis = redis
@@ -259,6 +277,15 @@ class RedisBroker:
 
             session_id = wake_up.session_id
             ownership = await self._acquire_or_find_owner(session_id)
+            if ownership.status == "cutover":
+                await self._redis.xadd(
+                    self._STREAM_KEY,
+                    {"session_id": session_id},
+                    minid=_stream_min_id(self._INCOMING_RETENTION),
+                    approximate=False,
+                )
+                await asyncio.sleep(self._RECEIVE_BLOCK_MS / 1000)
+                continue
             if ownership.status == "live_owner":
                 await self._redis.xadd(
                     _worker_stream_key(ownership.owner),
@@ -344,9 +371,13 @@ class RedisBroker:
         redis_any = cast(Any, self._redis)
         result = await redis_any.eval(
             _ACQUIRE_LOCK_SCRIPT,
-            2,
+            3,
             _session_lock_key(self._SESSION_PREFIX, session_id),
             _session_owner_heartbeat_key(self._SESSION_PREFIX, session_id),
+            _session_cutover_replay_barrier_key(
+                self._SESSION_PREFIX,
+                session_id,
+            ),
             self._worker_id,
             str(self._SESSION_TTL),
             str(self._OWNER_HEARTBEAT_TTL),
@@ -478,6 +509,75 @@ class RedisBroker:
         )
         await self._redis.delete(f"{self._SESSION_PREFIX}{session_id}:activity")
 
+    async def acquire_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+    ) -> str:
+        """Block ownership acquisition with cluster-safe per-Session barriers."""
+        token = uuid4().hex
+        acquired_session_ids: list[str] = []
+        try:
+            for session_id in session_ids:
+                acquired = await self._redis.set(
+                    _session_cutover_replay_barrier_key(
+                        self._SESSION_PREFIX,
+                        session_id,
+                    ),
+                    token,
+                    ex=self._CUTOVER_REPLAY_BARRIER_TTL,
+                    nx=True,
+                )
+                if not acquired:
+                    raise RuntimeError("Team Session cutover replay is already active")
+                acquired_session_ids.append(session_id)
+        except BaseException:
+            await self.release_cutover_replay_barrier(
+                tuple(acquired_session_ids),
+                token,
+            )
+            raise
+        return token
+
+    async def release_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+        token: str,
+    ) -> None:
+        """Release only the barrier acquired by this replay process."""
+        redis_any = cast(Any, self._redis)
+        for session_id in session_ids:
+            await redis_any.eval(
+                _RELEASE_CUTOVER_BARRIER_SCRIPT,
+                1,
+                _session_cutover_replay_barrier_key(
+                    self._SESSION_PREFIX,
+                    session_id,
+                ),
+                token,
+            )
+
+    async def renew_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+        token: str,
+    ) -> bool:
+        """Renew every exact barrier token without adopting another replay."""
+        redis_any = cast(Any, self._redis)
+        for session_id in session_ids:
+            renewed = await redis_any.eval(
+                _RENEW_CUTOVER_BARRIER_SCRIPT,
+                1,
+                _session_cutover_replay_barrier_key(
+                    self._SESSION_PREFIX,
+                    session_id,
+                ),
+                token,
+                str(self._CUTOVER_REPLAY_BARRIER_TTL),
+            )
+            if not renewed:
+                return False
+        return True
+
 
 def _stream_min_id(retention_seconds: int) -> str:
     """Return the minimum ID for time-based Redis Stream retention."""
@@ -491,6 +591,10 @@ def _session_lock_key(prefix: str, session_id: str) -> str:
 
 def _session_owner_heartbeat_key(prefix: str, session_id: str) -> str:
     return f"{prefix}{{{session_id}}}:owner-heartbeat"
+
+
+def _session_cutover_replay_barrier_key(prefix: str, session_id: str) -> str:
+    return f"{prefix}{{{session_id}}}:cutover-replay-barrier"
 
 
 def _worker_stream_key(worker_id: str) -> str:

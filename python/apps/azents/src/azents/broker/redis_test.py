@@ -1,7 +1,7 @@
 """RedisBroker integration tests."""
 
 from collections.abc import AsyncGenerator
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, call
 
 import pytest
@@ -44,6 +44,8 @@ class TestSessionWakeUpEncoding:
         [
             b'{"session_id":"session-1","type":"session_wake_up","agent_id":"agent-1"}',
             b'{"session_id":"session-1","type":"session_wake_up","user_id":"user-1"}',
+            b'{"session_id":"session-1","type":"session_wake_up","sender_user_id":"user-1"}',
+            b'{"session_id":"session-1","type":"session_wake_up","pending_command":{"name":"resume"}}',
         ],
     )
     def test_rejects_rich_legacy_payload(self, raw: bytes) -> None:
@@ -131,6 +133,27 @@ class TestRedisBrokerMessages:
         received = await worker.receive_messages()
 
         assert received == [message]
+
+    async def test_cutover_barrier_blocks_new_session_ownership(
+        self,
+        redis: Redis,
+    ) -> None:
+        """Workers cannot acquire Session ownership during replay fencing."""
+        operator = RedisBroker(redis)
+        worker = RedisBroker(redis, worker_id="worker-1")
+        worker_any = cast(Any, worker)
+
+        token = await operator.acquire_cutover_replay_barrier(("session-1",))
+        blocked = await worker_any._acquire_or_find_owner("session-1")
+        assert await operator.renew_cutover_replay_barrier(
+            ("session-1",),
+            token,
+        )
+        await operator.release_cutover_replay_barrier(("session-1",), token)
+        acquired = await worker_any._acquire_or_find_owner("session-1")
+
+        assert blocked.status == "cutover"
+        assert acquired.status == "acquired"
 
     async def test_recreates_missing_direct_stream_group(self, redis: Redis) -> None:
         """Worker recreates a missing owner direct stream group and receives."""

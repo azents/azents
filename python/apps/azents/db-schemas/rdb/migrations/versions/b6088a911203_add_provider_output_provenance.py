@@ -79,6 +79,13 @@ def upgrade() -> None:
         sa.Column("source_exchange_file_id", sa.String(length=32), nullable=True),
     ):
         op.add_column("exchange_files", column)
+    op.execute(
+        """
+        UPDATE exchange_files
+        SET provenance_kind = 'migration',
+            source_user_id = created_by_user_id
+        """
+    )
     op.create_foreign_key(
         "fk_exchange_files_source_user_id_users",
         "exchange_files",

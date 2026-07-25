@@ -60,6 +60,9 @@ dependencies = [
     "websockets==15.0.1",
 ]
 
+[project.scripts]
+team_session_cutover = "azents.cli.team_session_cutover:app"
+
 [dependency-groups]
 dev = [
     "ruff>=0.14.5",
