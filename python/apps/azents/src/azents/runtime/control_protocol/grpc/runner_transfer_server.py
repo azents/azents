@@ -43,6 +43,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferOutcome,
     RuntimeTransferRecord,
 )
+from azents.runtime.transfer.object_store import runtime_transfer_object_identity
 from azents.runtime.transfer.store import RuntimeTransferStateStore
 
 _DEFAULT_MAX_CONCURRENT_DOWNLOADS = 4
@@ -131,6 +132,9 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         clock: Callable[[], datetime],
         max_concurrent_downloads: int = _DEFAULT_MAX_CONCURRENT_DOWNLOADS,
         max_concurrent_uploads: int = _DEFAULT_MAX_CONCURRENT_UPLOADS,
+        object_prefix: str = "",
+        maximum_chunk_bytes: int = MAX_TRANSFER_CHUNK_BYTES,
+        multipart_part_bytes: int = MULTIPART_PART_BYTES,
     ) -> None:
         """Initialize state-owned transfer dependencies.
 
@@ -138,11 +142,14 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         :param coordination_store: current Runner generation registry
         :param object_store: trusted object-store service
         :param bucket: trusted object bucket selected by Control
+        :param object_prefix: internal transfer-object S3 key namespace
         :param owner_replica_id: Control replica owning stream claims
         :param runner_authenticator: durable Runner credential authority
         :param clock: timezone-aware clock for deadlines and lease renewal
         :param max_concurrent_downloads: per-replica bounded stream capacity
         :param max_concurrent_uploads: per-replica bounded upload capacity
+        :param maximum_chunk_bytes: maximum protobuf transfer payload size
+        :param multipart_part_bytes: bounded S3 multipart part aggregation size
         """
         if not bucket:
             raise ValueError("Runner transfer bucket is required")
@@ -150,16 +157,23 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             raise ValueError("max_concurrent_downloads must be positive")
         if max_concurrent_uploads <= 0:
             raise ValueError("max_concurrent_uploads must be positive")
+        if not 0 < maximum_chunk_bytes <= MAX_TRANSFER_CHUNK_BYTES:
+            raise ValueError("maximum_chunk_bytes exceeds the protocol bound")
+        if multipart_part_bytes < MULTIPART_PART_BYTES:
+            raise ValueError("multipart_part_bytes must satisfy the S3 part minimum")
         self._state_store = state_store
         self._coordination_store = coordination_store
         self._object_store = object_store
         self._bucket = bucket
+        self._object_prefix = object_prefix
         self._owner_replica_id = owner_replica_id
         self._runner_authenticator = runner_authenticator
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
         self._clock = clock
         self._downloads = asyncio.Semaphore(max_concurrent_downloads)
         self._uploads = asyncio.Semaphore(max_concurrent_uploads)
+        self._maximum_chunk_bytes = maximum_chunk_bytes
+        self._multipart_part_bytes = multipart_part_bytes
 
     async def DownloadTransfer(
         self,
@@ -211,7 +225,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 )
                 raise AssertionError("unreachable")
             transfer_object = claimed.object
-            identity = S3ObjectIdentity(bucket=self._bucket, key=transfer_object.key)
+            identity = self._object_identity(transfer_object.key)
             try:
                 await self._object_store.verify_transfer_object(
                     identity=identity,
@@ -230,11 +244,11 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             renewed_at = self._now()
             async with self._object_store.iter_chunks(
                 identity,
-                maximum_chunk_size=MAX_TRANSFER_CHUNK_BYTES,
+                maximum_chunk_size=self._maximum_chunk_bytes,
             ) as chunks:
                 async for chunk in chunks:
                     latest = await self._check_stream(latest, credential, context)
-                    if not chunk or len(chunk) > MAX_TRANSFER_CHUNK_BYTES:
+                    if not chunk or len(chunk) > self._maximum_chunk_bytes:
                         await self._fail(latest)
                         await context.abort(
                             grpc.StatusCode.DATA_LOSS,
@@ -385,14 +399,17 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     "Transfer object manifest is unavailable",
                 )
                 raise AssertionError("unreachable")
-            if _multipart_part_count(transfer_object.size) > _MAX_MULTIPART_PARTS:
+            if (
+                _multipart_part_count(transfer_object.size, self._multipart_part_bytes)
+                > _MAX_MULTIPART_PARTS
+            ):
                 await self._fail(latest)
                 await context.abort(
                     grpc.StatusCode.RESOURCE_EXHAUSTED,
                     "Transfer exceeds multipart part capacity",
                 )
                 raise AssertionError("unreachable")
-            identity = S3ObjectIdentity(bucket=self._bucket, key=transfer_object.key)
+            identity = self._object_identity(transfer_object.key)
             metadata = S3TransferObjectMetadata(
                 sha256=transfer_object.sha256,
                 content_type=None,
@@ -425,7 +442,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                             "Upload transfer chunks must not be empty",
                         )
                         raise AssertionError("unreachable")
-                    if len(data) > MAX_TRANSFER_CHUNK_BYTES:
+                    if len(data) > self._maximum_chunk_bytes:
                         await self._fail(latest)
                         await context.abort(
                             grpc.StatusCode.RESOURCE_EXHAUSTED,
@@ -493,16 +510,16 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     digest.update(data)
                     offset = next_offset
                     buffer.extend(data)
-                    if len(buffer) >= MULTIPART_PART_BYTES:
+                    if len(buffer) >= self._multipart_part_bytes:
                         latest = await self._upload_part(
                             latest,
                             credential,
                             context,
                             upload,
                             parts,
-                            bytes(buffer[:MULTIPART_PART_BYTES]),
+                            bytes(buffer[: self._multipart_part_bytes]),
                         )
-                        del buffer[:MULTIPART_PART_BYTES]
+                        del buffer[: self._multipart_part_bytes]
                     latest = await self._record_progress(latest, offset, context)
                     latest, renewed_at = await self._renew_if_due(
                         latest, renewed_at, context
@@ -906,6 +923,14 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             raise ValueError("Runner transfer clock must be timezone-aware")
         return now
 
+    def _object_identity(self, opaque_key: str) -> S3ObjectIdentity:
+        """Resolve one state-owned opaque key into the internal S3 namespace."""
+        return runtime_transfer_object_identity(
+            bucket=self._bucket,
+            object_prefix=self._object_prefix,
+            opaque_key=opaque_key,
+        )
+
 
 def add_runtime_runner_transfer_servicer(
     server: grpc.aio.Server,
@@ -919,6 +944,9 @@ def add_runtime_runner_transfer_servicer(
     clock: Callable[[], datetime],
     max_concurrent_downloads: int = _DEFAULT_MAX_CONCURRENT_DOWNLOADS,
     max_concurrent_uploads: int = _DEFAULT_MAX_CONCURRENT_UPLOADS,
+    object_prefix: str = "",
+    maximum_chunk_bytes: int = MAX_TRANSFER_CHUNK_BYTES,
+    multipart_part_bytes: int = MULTIPART_PART_BYTES,
 ) -> None:
     """Register the bounded Runner transfer servicer on one gRPC server."""
     pb_grpc.add_RuntimeRunnerTransferServicer_to_server(
@@ -932,6 +960,9 @@ def add_runtime_runner_transfer_servicer(
             clock=clock,
             max_concurrent_downloads=max_concurrent_downloads,
             max_concurrent_uploads=max_concurrent_uploads,
+            object_prefix=object_prefix,
+            maximum_chunk_bytes=maximum_chunk_bytes,
+            multipart_part_bytes=multipart_part_bytes,
         ),
         server,
     )
@@ -945,8 +976,8 @@ def _claim_id() -> str:
     return f"runner-transfer:{secrets.token_urlsafe(18)}"
 
 
-def _multipart_part_count(size: int) -> int:
-    return (size + MULTIPART_PART_BYTES - 1) // MULTIPART_PART_BYTES
+def _multipart_part_count(size: int, multipart_part_bytes: int) -> int:
+    return (size + multipart_part_bytes - 1) // multipart_part_bytes
 
 
 def _valid_identity(identity: pb.TransferIdentity) -> bool:

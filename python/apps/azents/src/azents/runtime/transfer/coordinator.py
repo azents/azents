@@ -39,7 +39,7 @@ class RuntimeTransferDispatchError(RuntimeError):
 class RuntimeTransferCleanup(Protocol):
     """Abort one bounded trusted multipart cleanup handle."""
 
-    async def abort(self, cleanup_handle: str) -> None:
+    async def abort(self, record: RuntimeTransferRecord) -> None:
         """Abort incomplete transfer work for one opaque cleanup handle."""
         ...
 
@@ -305,7 +305,7 @@ class RuntimeTransferCoordinator:
                 observed += 1
                 if cleanup is not None and record.multipart_cleanup_handle is not None:
                     try:
-                        await cleanup.abort(record.multipart_cleanup_handle)
+                        await cleanup.abort(record)
                     except Exception:
                         await self._state_store.record_cleanup(
                             record.admission.transfer_id,

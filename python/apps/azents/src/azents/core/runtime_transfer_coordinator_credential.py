@@ -60,6 +60,7 @@ class RuntimeTransferCoordinatorCredentialVerifier:
             _DEFAULT_ALLOWED_SERVICE_IDENTITIES
         ),
         clock_skew: timedelta = _DEFAULT_CLOCK_SKEW,
+        maximum_lifetime: timedelta = _MAX_LIFETIME,
     ) -> None:
         """Derive one coordinator-only HMAC key from deployment root material.
 
@@ -67,6 +68,7 @@ class RuntimeTransferCoordinatorCredentialVerifier:
         :param clock: timezone-aware clock used for time validation
         :param allowed_service_identities: trusted credential service identities
         :param clock_skew: maximum allowed future issuance or not-before skew
+        :param maximum_lifetime: maximum accepted credential validity duration
         :raises ValueError: if root material or verifier configuration is invalid
         """
         try:
@@ -81,6 +83,10 @@ class RuntimeTransferCoordinatorCredentialVerifier:
             raise ValueError("Invalid credential encryption key")
         if clock_skew < timedelta():
             raise ValueError("Coordinator credential clock skew must not be negative")
+        if not timedelta() < maximum_lifetime <= _MAX_LIFETIME:
+            raise ValueError(
+                "Coordinator credential maximum lifetime must be within 60 seconds"
+            )
         allowed_identities = frozenset(allowed_service_identities)
         if not allowed_identities or any(
             not _valid_text(value, maximum_bytes=128) for value in allowed_identities
@@ -90,6 +96,7 @@ class RuntimeTransferCoordinatorCredentialVerifier:
         self._clock = clock
         self._allowed_service_identities = allowed_identities
         self._clock_skew = clock_skew
+        self._maximum_lifetime = maximum_lifetime
 
     def issue(
         self,
@@ -180,7 +187,7 @@ class RuntimeTransferCoordinatorCredentialVerifier:
             or claims.issued_at > claims.not_before
             or claims.not_before > claims.expires_at
             or claims.expires_at <= claims.issued_at
-            or claims.expires_at - claims.issued_at > _MAX_LIFETIME
+            or claims.expires_at - claims.issued_at > self._maximum_lifetime
         ):
             _invalid_credential()
         if validate_time and (

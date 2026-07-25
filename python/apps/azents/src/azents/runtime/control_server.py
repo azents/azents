@@ -4,14 +4,16 @@ import asyncio
 import dataclasses
 import logging
 import signal
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-from datetime import timedelta
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
+import aioboto3
 import boto3
 import grpc
+from azcommon.infra.s3.service import S3Service
 from azcommon.logging import RuntimeEnvironment, configure_logging_for_runtime
 from kubernetes_asyncio.client.api.authentication_v1_api import AuthenticationV1Api
 from kubernetes_asyncio.client.api_client import ApiClient
@@ -25,6 +27,9 @@ from azents.core.config import PostgreSQLConfig
 from azents.core.redis import create_redis_client
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifier
+from azents.core.runtime_transfer_coordinator_credential import (
+    RuntimeTransferCoordinatorCredentialVerifier,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -41,15 +46,24 @@ from azents.repos.runtime_provider_control.repository import (
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
+from azents.runtime.control_protocol.grpc.auth import (
+    RuntimeTransferCoordinatorCredentialGrpcAuth,
+)
 from azents.runtime.control_protocol.grpc.provider_server import (
     add_runtime_provider_control_servicer,
 )
 from azents.runtime.control_protocol.grpc.runner_server import (
     add_runtime_runner_control_servicer,
 )
+from azents.runtime.control_protocol.grpc.runner_transfer_server import (
+    add_runtime_runner_transfer_servicer,
+)
 from azents.runtime.control_protocol.grpc.state_sinks import (
     RuntimeProviderReportRepositorySink,
     RuntimeRunnerStateRepositorySink,
+)
+from azents.runtime.control_protocol.grpc.transfer_coordinator_server import (
+    add_runtime_transfer_coordinator_servicer,
 )
 from azents.runtime.control_protocol.reconciler import (
     RuntimeLifecycleDispatchConfig,
@@ -60,6 +74,14 @@ from azents.runtime.control_protocol.service import (
 )
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
+)
+from azents.runtime.transfer.control import (
+    create_runtime_control_transfer_state_store,
+)
+from azents.runtime.transfer.coordinator import RuntimeTransferCoordinator
+from azents.runtime.transfer.object_store import RuntimeTransferS3Cleanup
+from azents.runtime.transfer.result_coordinator import (
+    RuntimeRunnerTransferResultCoordinator,
 )
 from azents.services.runtime_execution_policy.application_service import (
     RuntimeExecutionPolicyApplicationService,
@@ -81,6 +103,8 @@ _DEFAULT_PORT = 8030
 _DEFAULT_RECONCILE_INTERVAL_SECONDS = 15.0
 _DEFAULT_START_TIMEOUT_SECONDS = 300.0
 _DEFAULT_LIFECYCLE_RETRY_DELAY_SECONDS = 15.0
+_DEFAULT_TRANSFER_REPAIR_INTERVAL_SECONDS = 5.0
+_DEFAULT_TRANSFER_OBJECT_PREFIX = "runtime-transfer"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -118,6 +142,21 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_transfer_stream_lease_seconds: float = 30.0
     runtime_control_transfer_terminal_ttl_seconds: float = 300.0
     runtime_control_transfer_list_page_size: int = 100
+    runtime_control_transfer_max_concurrent_downloads: int = 4
+    runtime_control_transfer_max_concurrent_uploads: int = 4
+    runtime_control_transfer_chunk_bytes: int = 256 * 1024
+    runtime_control_transfer_multipart_part_bytes: int = 5 * 1024 * 1024
+    runtime_control_transfer_repair_interval_seconds: float = (
+        _DEFAULT_TRANSFER_REPAIR_INTERVAL_SECONDS
+    )
+    runtime_control_transfer_object_prefix: str = _DEFAULT_TRANSFER_OBJECT_PREFIX
+    runtime_control_transfer_coordinator_credential_skew_seconds: float = 5.0
+    runtime_control_transfer_coordinator_credential_lifetime_seconds: float = 30.0
+    runtime_control_workspace_s3_bucket: str = ""
+    runtime_control_workspace_s3_prefix: str = "v1"
+    runtime_control_workspace_s3_endpoint_url: str | None = None
+    runtime_control_workspace_s3_access_key_id: str | None = None
+    runtime_control_workspace_s3_secret_access_key: str | None = None
     runtime_control_allow_insecure: bool
     runtime_control_tls_certificate_file: str | None = None
     runtime_control_tls_private_key_file: str | None = None
@@ -152,7 +191,44 @@ async def runtime_control_server_lifespan(
     """Manage runtime-control gRPC server resources."""
     redis = create_redis_client(settings.redis_url)
     coordination_store = RedisRuntimeCoordinationStore(redis)
-    control_protocol = RuntimeControlProtocolService(coordination_store)
+    clock = _utc_now
+    transfer_state = create_runtime_control_transfer_state_store(
+        settings=settings,
+        redis=redis,
+        clock=clock,
+    )
+    transfer_coordinator = RuntimeTransferCoordinator(
+        state_store=transfer_state,
+        coordination_store=coordination_store,
+        clock=clock,
+    )
+    control_protocol = RuntimeControlProtocolService(
+        coordination_store,
+        runner_generation_observer=transfer_coordinator,
+    )
+    transfer_result_coordinator = RuntimeRunnerTransferResultCoordinator(
+        state_store=transfer_state,
+        coordination_store=coordination_store,
+        control_protocol=control_protocol,
+        clock=clock,
+    )
+    coordinator_credential_verifier = RuntimeTransferCoordinatorCredentialVerifier(
+        settings.credential_encryption_key,
+        clock=clock,
+        clock_skew=timedelta(
+            seconds=settings.runtime_control_transfer_coordinator_credential_skew_seconds
+        ),
+        maximum_lifetime=_coordinator_credential_lifetime(settings),
+    )
+    resources = AsyncExitStack()
+    transfer_s3 = await resources.enter_async_context(
+        _runtime_transfer_s3_service(settings)
+    )
+    transfer_cleanup = RuntimeTransferS3Cleanup(
+        object_store=transfer_s3,
+        bucket=settings.runtime_control_workspace_s3_bucket,
+        object_prefix=_transfer_object_prefix(settings),
+    )
     transport = runtime_control_transport(settings)
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
@@ -237,6 +313,17 @@ async def runtime_control_server_lifespan(
         ),
         name="runtime-lifecycle-reconciler",
     )
+    stop_transfer_repair = asyncio.Event()
+    transfer_repair_task = asyncio.create_task(
+        _run_transfer_repair(
+            transfer_coordinator,
+            cleanup=transfer_cleanup,
+            stop=stop_transfer_repair,
+            interval_seconds=settings.runtime_control_transfer_repair_interval_seconds,
+            page_size=settings.runtime_control_transfer_list_page_size,
+        ),
+        name="runtime-transfer-repair",
+    )
     server = grpc.aio.server()
     add_runtime_provider_control_servicer(
         server,
@@ -257,6 +344,31 @@ async def runtime_control_server_lifespan(
         owner_replica_id=settings.runtime_control_instance_id,
         consumer_id=f"{settings.runtime_control_instance_id}:runner",
         runner_authenticator=runner_authenticator,
+        transfer_result_sink=transfer_result_coordinator,
+    )
+    add_runtime_runner_transfer_servicer(
+        server,
+        state_store=transfer_state,
+        coordination_store=coordination_store,
+        object_store=transfer_s3,
+        bucket=settings.runtime_control_workspace_s3_bucket,
+        object_prefix=_transfer_object_prefix(settings),
+        owner_replica_id=settings.runtime_control_instance_id,
+        runner_authenticator=runner_authenticator,
+        clock=clock,
+        max_concurrent_downloads=(
+            settings.runtime_control_transfer_max_concurrent_downloads
+        ),
+        max_concurrent_uploads=settings.runtime_control_transfer_max_concurrent_uploads,
+        maximum_chunk_bytes=settings.runtime_control_transfer_chunk_bytes,
+        multipart_part_bytes=settings.runtime_control_transfer_multipart_part_bytes,
+    )
+    add_runtime_transfer_coordinator_servicer(
+        server,
+        coordinator=transfer_coordinator,
+        credential_auth=RuntimeTransferCoordinatorCredentialGrpcAuth(
+            coordinator_credential_verifier
+        ),
     )
     listen_address = f"0.0.0.0:{settings.runtime_control_port}"
     if transport.server_credentials is None:
@@ -284,14 +396,21 @@ async def runtime_control_server_lifespan(
         yield server
     finally:
         stop_reconciler.set()
+        stop_transfer_repair.set()
         reconciler_task.cancel()
+        transfer_repair_task.cancel()
         try:
             await reconciler_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await transfer_repair_task
         except asyncio.CancelledError:
             pass
         await server.stop(grace=5)
         if kubernetes_api_client is not None:
             await kubernetes_api_client.close()
+        await resources.aclose()
         await redis.aclose()
         await engine.dispose()
 
@@ -328,6 +447,120 @@ async def _run_reconciler(
             await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
         except TimeoutError:
             continue
+
+
+async def _run_transfer_repair(
+    coordinator: RuntimeTransferCoordinator,
+    *,
+    cleanup: RuntimeTransferS3Cleanup,
+    stop: asyncio.Event,
+    interval_seconds: float,
+    page_size: int,
+) -> None:
+    """Run bounded transfer dispatch, generation, and stale-stream repair."""
+    if interval_seconds <= 0:
+        raise ValueError("Runtime transfer repair interval must be positive")
+    while not stop.is_set():
+        try:
+            observed = await repair_transfer_once(
+                coordinator,
+                cleanup=cleanup,
+                page_size=page_size,
+            )
+            if observed:
+                _LOGGER.info(
+                    "Runtime transfer repair observed records",
+                    extra={"observed": observed},
+                )
+        except Exception:
+            _LOGGER.exception("Runtime transfer repair iteration failed")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
+
+
+async def repair_transfer_once(
+    coordinator: RuntimeTransferCoordinator,
+    *,
+    cleanup: RuntimeTransferS3Cleanup,
+    page_size: int,
+) -> int:
+    """Run one bounded transfer repair pass.
+
+    :param coordinator: process-owned transfer coordinator
+    :param cleanup: trusted S3 multipart cleanup collaborator
+    :param page_size: maximum records loaded per state-store list operation
+    :returns: number of records observed across repair categories
+    """
+    if page_size <= 0:
+        raise ValueError("Runtime transfer repair page size must be positive")
+    pending = await coordinator.repair_pending(page_size=page_size)
+    generations = await coordinator.reconcile_generations(page_size=page_size)
+    stale = await coordinator.repair_stale_stream_claims(
+        cleanup=cleanup,
+        page_size=page_size,
+    )
+    return pending + generations + stale
+
+
+@asynccontextmanager
+async def _runtime_transfer_s3_service(
+    settings: RuntimeControlSettings,
+) -> AsyncIterator[S3Service]:
+    """Create one process-lifetime trusted S3 service for transfer RPCs."""
+    bucket = settings.runtime_control_workspace_s3_bucket
+    if not bucket:
+        raise ValueError("Runtime Control workspace S3 bucket is required")
+    client_kwargs: dict[str, Any] = {}
+    if settings.runtime_control_workspace_s3_endpoint_url is not None:
+        client_kwargs["endpoint_url"] = (
+            settings.runtime_control_workspace_s3_endpoint_url
+        )
+    access_key_id = settings.runtime_control_workspace_s3_access_key_id
+    secret_access_key = settings.runtime_control_workspace_s3_secret_access_key
+    if (access_key_id is None) != (secret_access_key is None):
+        raise ValueError("Runtime Control S3 credentials must be configured together")
+    if access_key_id is not None and secret_access_key is not None:
+        client_kwargs["aws_access_key_id"] = access_key_id
+        client_kwargs["aws_secret_access_key"] = secret_access_key
+    session = aioboto3.Session()
+    async with session.client("s3", **client_kwargs) as client:
+        yield S3Service(s3_client=client)
+
+
+def _transfer_object_prefix(settings: RuntimeControlSettings) -> str:
+    """Return the internal workspace namespace for opaque transfer objects."""
+    prefix = "/".join(
+        value.strip("/")
+        for value in (
+            settings.runtime_control_workspace_s3_prefix,
+            settings.runtime_control_transfer_object_prefix,
+        )
+        if value.strip("/")
+    )
+    if not prefix:
+        raise ValueError("Runtime transfer object prefix is required")
+    return prefix
+
+
+def _coordinator_credential_lifetime(
+    settings: RuntimeControlSettings,
+) -> timedelta:
+    """Validate the configured trusted coordinator credential lifetime."""
+    lifetime = timedelta(
+        seconds=settings.runtime_control_transfer_coordinator_credential_lifetime_seconds
+    )
+    if not timedelta() < lifetime <= timedelta(seconds=60):
+        raise ValueError(
+            "Runtime transfer coordinator credential lifetime must be within 60 seconds"
+        )
+    return lifetime
+
+
+def _utc_now() -> datetime:
+    """Return the Runtime Control process clock."""
+    return datetime.now(UTC)
 
 
 def runtime_control_transport(
