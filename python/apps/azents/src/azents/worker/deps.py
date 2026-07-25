@@ -42,6 +42,7 @@ from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
@@ -292,6 +293,7 @@ def get_exchange_file_service(
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ],
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ],
@@ -301,6 +303,7 @@ def get_exchange_file_service(
         exchange_file_repository=exchange_file_repository,
         agent_repository=agent_repository,
         agent_session_repository=agent_session_repository,
+        agent_run_repository=agent_run_repository,
         workspace_user_repository=workspace_user_repository,
         session_manager=session_manager,
         s3_service=s3_service,

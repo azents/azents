@@ -21,7 +21,7 @@ class ModelFile(BaseModel):
     size_bytes: int = Field(description="Normalized blob size")
     created_run_id: str | None = Field(
         default=None,
-        description="Created AgentRun ID",
+        description="Created AgentRun ID, unavailable for unresolved historical rows",
     )
     created_run_index: int = Field(ge=1, description="Created run index")
     storage_key: str = Field(description="Object storage key")
@@ -51,10 +51,7 @@ class ModelFileCreate(BaseModel):
     media_type: str = Field(description="MIME type")
     kind: str = Field(description="Broad file kind")
     size_bytes: int = Field(description="Normalized blob size")
-    created_run_id: str | None = Field(
-        default=None,
-        description="Created AgentRun ID",
-    )
+    created_run_id: str = Field(description="Created AgentRun ID")
     created_run_index: int = Field(ge=1, description="Created run index")
     normalized_format: str = Field(description="Normalized blob format")
     sha256: str = Field(description="normalized blob SHA-256 digest")

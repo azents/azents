@@ -19,6 +19,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentType,
     ExchangeFileOrigin,
+    ExchangeFileProvenanceKind,
     ExchangeFileStatus,
     WorkspaceUserRole,
 )
@@ -80,6 +81,13 @@ class _FakeExchangeFileRepository:
             size_bytes=create.size_bytes,
             sha256=create.sha256,
             created_by_user_id=create.created_by_user_id,
+            provenance_kind=create.provenance_kind,
+            source_user_id=create.source_user_id,
+            source_agent_id=create.source_agent_id,
+            source_run_id=create.source_run_id,
+            source_tool_name=create.source_tool_name,
+            source_provider=create.source_provider,
+            source_exchange_file_id=create.source_exchange_file_id,
             retention_root_session_id=create.retention_root_session_id,
             retention_bound_at=create.retention_bound_at,
             preview_thumbnail_file_id=None,
@@ -440,6 +448,7 @@ def _make_service(
         exchange_file_repository=cast(Any, exchange_file_repository),
         agent_repository=agent_repository,
         agent_session_repository=agent_session_repository,
+        agent_run_repository=AsyncMock(),
         workspace_user_repository=workspace_user_repository,
         session_manager=session_boundary.session_manager,
         s3_service=cast(Any, s3_service),
@@ -707,8 +716,10 @@ async def test_create_image_upload_stores_preview_thumbnail() -> None:
     assert file.preview_thumbnail_width is not None
     assert file.preview_thumbnail_height is not None
     assert file.preview_generated_at is not None
+    assert file.created_by_user_id == "user-1"
     assert thumbnail.media_type == "image/jpeg"
     assert thumbnail.filename == "photo.jpg.preview.jpg"
+    assert thumbnail.created_by_user_id == "user-1"
     assert thumbnail.object_key in s3_service.objects
     assert len(s3_service.objects[thumbnail.object_key]) < len(_jpeg_bytes())
 
@@ -798,7 +809,13 @@ async def test_admitted_attachment_uses_root_claim_without_membership() -> None:
         media_type="text/plain",
         size_bytes=14,
         sha256="sha256",
-        created_by_user_id="former-member",
+        provenance_kind=ExchangeFileProvenanceKind.HUMAN,
+        source_user_id="former-member",
+        source_agent_id=None,
+        source_run_id=None,
+        source_tool_name=None,
+        source_provider=None,
+        source_exchange_file_id=None,
         retention_root_session_id="root-session-1",
         retention_bound_at=_NOW,
         expires_at=_NOW + datetime.timedelta(days=1),
@@ -838,7 +855,13 @@ async def test_admitted_attachment_keeps_expired_metadata_but_denies_bytes() -> 
         media_type="text/plain",
         size_bytes=7,
         sha256="sha256",
-        created_by_user_id="former-member",
+        provenance_kind=ExchangeFileProvenanceKind.HUMAN,
+        source_user_id="former-member",
+        source_agent_id=None,
+        source_run_id=None,
+        source_tool_name=None,
+        source_provider=None,
+        source_exchange_file_id=None,
         retention_root_session_id="root-session-1",
         retention_bound_at=_NOW,
         expires_at=_NOW - datetime.timedelta(seconds=1),
@@ -884,7 +907,13 @@ async def test_admitted_input_attachment_denies_unclaimed_or_cross_root_file(
         media_type="text/plain",
         size_bytes=1,
         sha256="sha256",
-        created_by_user_id="user-1",
+        provenance_kind=ExchangeFileProvenanceKind.HUMAN,
+        source_user_id="user-1",
+        source_agent_id=None,
+        source_run_id=None,
+        source_tool_name=None,
+        source_provider=None,
+        source_exchange_file_id=None,
         retention_root_session_id=retention_root_session_id,
         retention_bound_at=None,
         expires_at=_NOW + datetime.timedelta(days=1),
@@ -919,7 +948,13 @@ async def test_admitted_input_attachment_denies_cross_agent_lookup() -> None:
         media_type="text/plain",
         size_bytes=1,
         sha256="sha256",
-        created_by_user_id="user-1",
+        provenance_kind=ExchangeFileProvenanceKind.HUMAN,
+        source_user_id="user-1",
+        source_agent_id=None,
+        source_run_id=None,
+        source_tool_name=None,
+        source_provider=None,
+        source_exchange_file_id=None,
         retention_root_session_id="root-session-1",
         retention_bound_at=_NOW,
         expires_at=_NOW + datetime.timedelta(days=1),
@@ -989,6 +1024,7 @@ async def test_create_session_upload_uses_session_scope() -> None:
     assert file.agent_id == "agent-1"
     assert file.workspace_id == "workspace-1"
     assert file.origin_type == ExchangeFileOrigin.UPLOAD
+    assert file.created_by_user_id == "user-1"
     assert file.retention_root_session_id == "root-session-1"
     assert file.retention_bound_at is not None
     assert s3_service.objects[file.object_key] == b"a,b\n1,2\n"

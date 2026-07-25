@@ -26,6 +26,7 @@ from azents.services.model_file import (
     model_file_size_limit_message,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +57,13 @@ def make_read_image_tool(
     *,
     session_storage: FileStorage,
     model_file_service: ModelFileService,
-    session_id: str,
-    agent_id: str,
-    user_id: str,
-    run_index: int,
+    authority: SessionResourceAuthority,
 ) -> FunctionTool:
     """Create read_image tool.
 
     :param session_storage: runtime runner file storage
     :param model_file_service: ModelFile creation service
-    :param session_id: AgentSession ID
-    :param agent_id: Agent ID
-    :param user_id: User ID
-    :param run_index: Current run index
+    :param authority: Validated Session/Run resource authority
     :return: read_image Tool instance
     """
 
@@ -94,7 +89,7 @@ def make_read_image_tool(
         try:
             data = await session_storage.get(
                 abs_path,
-                agent_id=agent_id,
+                agent_id=authority.agent_id,
             )
         except FileNotFoundError:
             raise FunctionToolError(
@@ -120,9 +115,7 @@ def make_read_image_tool(
             )
 
         model_file_result = await model_file_service.create(
-            session_id=session_id,
-            user_id=user_id,
-            created_run_index=run_index,
+            authority=authority,
             filename=_filename_from_path(abs_path),
             media_type=media_type,
             body=data,

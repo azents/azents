@@ -78,6 +78,7 @@ from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,6 +90,7 @@ def _make_context(
     workspace_id: str = "ws-1",
     model: str = "test-model",
     run_id: str = "run-1",
+    resource_authority: SessionResourceAuthority | None = None,
 ) -> TurnContext:
     """Create TurnContext for tests."""
     return TurnContext(
@@ -96,6 +98,7 @@ def _make_context(
         model=model,
         run_id=run_id,
         publish_event=AsyncMock(),
+        resource_authority=resource_authority,
     )
 
 
@@ -794,6 +797,27 @@ class TestRuntimeToolkitUpdateContext:
         assert "apply_patch" in names
         assert {"read", "write", "delete", "glob", "grep"} <= names
         assert names.isdisjoint({"import_file", "present_file", "read_image"})
+
+    @pytest.mark.asyncio
+    async def test_includes_resource_file_tools_only_with_authority(self) -> None:
+        """Expose resource tools only under canonical Session/Run authority."""
+        toolkit = _make_toolkit()
+        authority = SessionResourceAuthority(
+            workspace_id="ws-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=1,
+        )
+
+        state = await toolkit.update_context(
+            _make_context(resource_authority=authority)
+        )
+
+        names = {tool.spec.name for tool in state.tools}
+        assert {"import_file", "present_file", "read_image"} <= names
 
     @pytest.mark.asyncio
     async def test_update_context_registers_instruction_context(self) -> None:
