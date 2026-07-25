@@ -41,7 +41,6 @@ from azents.core.mcp_transport import call_tool as mcp_call_tool
 from azents.core.mcp_transport import list_tools as mcp_list_tools
 from azents.core.tools import (
     McpToolkitConfig,
-    SessionType,
     Toolkit,
     ToolkitState,
     ToolkitStatus,
@@ -117,15 +116,8 @@ def build_mcp_artifact_sink(
     artifact_service: ArtifactService | None,
 ) -> McpArtifactSink | None:
     """Configure MCP artifact storage context from TurnContext."""
-    if artifact_service is None or context.user_id is None or not context.session_id:
-        return None
-    return McpArtifactSink(
-        artifact_service=artifact_service,
-        session_id=context.session_id,
-        user_id=context.user_id,
-        run_id=context.run_id,
-        run_index=context.run_index,
-    )
+    del context, artifact_service
+    return None
 
 
 def _build_mcp_tool_snapshot(
@@ -578,7 +570,6 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
     _secret: str | None
     on_auth_failure: Callable[[], Awaitable[str | None]] | None
     _proxy_url: str | None
-    _session_type: SessionType
     artifact_service: ArtifactService | None
     session_manager: SessionManager[AsyncSession] | None
     _agent_id: str

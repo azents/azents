@@ -158,7 +158,6 @@ async def test_todo_toolkit_exposes_unprefixed_update_tool() -> None:
     toolkit = TodoToolkit(store=store, agent_id="agent-1", session_id="session-1")
 
     context = TurnContext(
-        user_id="user-1",
         workspace_id="workspace-1",
         model="model",
         run_id="run-1",
@@ -184,7 +183,6 @@ async def test_update_todo_returns_compact_acknowledgement() -> None:
     toolkit = TodoToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="model",
             run_id="run-1",

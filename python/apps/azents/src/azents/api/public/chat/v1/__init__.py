@@ -673,7 +673,6 @@ def _create_chat_input_message(
     """Create a normalized chat input message for REST writes."""
     return InputMessage(
         text=text,
-        user_id=user_id,
         headers=[],
         metadata={
             "timestamp": datetime.now(tz).isoformat(),

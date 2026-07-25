@@ -166,7 +166,6 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
             )
         ],
         context=TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -226,7 +225,6 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
             ),
         ],
         context=TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -255,7 +253,6 @@ async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> N
             )
         ],
         context=TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -287,7 +284,6 @@ async def test_extend_tool_catalog_marks_runtime_builtin_direct() -> None:
     catalog = await build_tool_catalog(
         toolkit_bindings=[],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="grok-4",
             run_id="run-1",
@@ -324,7 +320,6 @@ async def test_build_tool_catalog_separates_dynamic_prompt_layer() -> None:
             )
         ],
         context=TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -364,7 +359,6 @@ async def test_native_tools_are_sorted_by_function_name() -> None:
             for tool in tools
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -387,7 +381,6 @@ async def test_client_tool_executor_returns_event_result() -> None:
             ToolkitBinding(toolkit=_Toolkit(), slug="", use_prefix=False)
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -442,7 +435,6 @@ async def test_client_tool_executor_binds_exact_call_identity() -> None:
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -493,7 +485,6 @@ async def test_client_tool_executor_preserves_failed_result_metadata() -> None:
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -547,7 +538,6 @@ async def test_client_tool_executor_applies_global_text_output_cap() -> None:
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -609,7 +599,6 @@ async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -671,7 +660,6 @@ async def test_client_tool_executor_carries_transient_generated_files() -> None:
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="grok-4",
             run_id="run-1",
@@ -731,7 +719,6 @@ async def test_client_tool_executor_preserves_function_tool_result_metadata() ->
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -790,7 +777,6 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -830,7 +816,6 @@ async def test_client_tool_executor_migrates_function_tool_result_parts() -> Non
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -867,7 +852,6 @@ async def test_client_tool_executor_returns_failed_for_unknown_tool() -> None:
         await build_tool_catalog(
             toolkit_bindings=[],
             context=TurnContext(
-                user_id=None,
                 workspace_id="workspace-1",
                 model="gpt-5.1",
                 run_id="run-1",
@@ -915,7 +899,6 @@ async def test_client_tool_executor_rejects_dialect_mismatch_before_handler() ->
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -978,7 +961,6 @@ async def test_client_tool_executor_rejects_json_for_custom_declaration() -> Non
             )
         ],
         context=TurnContext(
-            user_id=None,
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",

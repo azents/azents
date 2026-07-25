@@ -45,7 +45,6 @@ async def test_goal_toolkit_exposes_goal_tools() -> None:
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
 
     context = TurnContext(
-        user_id="user-1",
         workspace_id="workspace-1",
         model="model",
         run_id="run-1",
@@ -216,7 +215,6 @@ async def test_create_goal_rejects_existing_unfinished_goal() -> None:
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="model",
             run_id="run-1",
@@ -252,7 +250,6 @@ async def test_update_goal_complete_appends_briefing_event() -> None:
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="model",
             run_id="run-1",
@@ -287,7 +284,6 @@ async def test_update_goal_blocked_does_not_append_briefing_event() -> None:
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="model",
             run_id="run-1",

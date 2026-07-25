@@ -711,7 +711,6 @@ async def _make_toolkit() -> tuple[
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -799,7 +798,6 @@ async def test_subagent_static_prompt_matches_codex_root_prompt() -> None:
 
     prompt = await toolkit.get_static_prompt(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -819,7 +817,6 @@ async def test_subagent_static_prompt_matches_codex_child_prompt() -> None:
 
     prompt = await toolkit.get_static_prompt(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -915,7 +912,6 @@ async def test_spawn_agent_schema_lists_labels_without_model_identity() -> None:
 
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="secret-parent-runtime-model",
             run_id=_PARENT_RUN_ID,
@@ -952,7 +948,6 @@ async def test_spawn_agent_schema_explains_inherit_when_no_targets_are_enabled()
 
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -985,7 +980,6 @@ async def test_send_message_is_queue_only() -> None:
 
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1018,7 +1012,6 @@ async def test_send_message_from_child_can_target_root() -> None:
     toolkit, repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1058,7 +1051,6 @@ async def test_followup_task_wakes_target_child() -> None:
 
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1105,7 +1097,6 @@ async def test_followup_task_rejects_new_activation_over_capacity() -> None:
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1135,7 +1126,6 @@ async def test_followup_task_allows_already_active_target_at_capacity() -> None:
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1158,7 +1148,6 @@ async def test_followup_task_from_child_rejects_root() -> None:
     toolkit, _repo, input_service, broker, _run_repo, _events = await _make_toolkit()
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1183,7 +1172,6 @@ async def test_interrupt_agent_rejects_root_and_self() -> None:
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1207,7 +1195,6 @@ async def test_interrupt_agent_locks_root_before_stopping_child() -> None:
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1232,7 +1219,6 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1253,7 +1239,6 @@ async def test_wait_agent_schema_is_targetless() -> None:
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1278,7 +1263,6 @@ async def test_wait_agent_returns_for_current_mailbox_activity() -> None:
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1304,7 +1288,6 @@ async def test_concurrent_waits_do_not_consume_mailbox_activity() -> None:
     input_service.pending_agent_message_session_ids.add("root-session")
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1336,7 +1319,6 @@ async def test_wait_agent_waits_until_current_mailbox_changes() -> None:
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1380,7 +1362,6 @@ async def test_wait_agent_rechecks_mailbox_before_idle_return(
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1404,7 +1385,6 @@ async def test_wait_agent_returns_when_all_descendants_are_idle() -> None:
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1438,7 +1418,6 @@ async def test_wait_agent_timeout_reports_active_descendants() -> None:
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1470,7 +1449,6 @@ async def test_wait_agent_parent_repair_can_publish_terminal_mailbox() -> None:
     terminal_service.publish_mailbox_on_repair = True
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1495,7 +1473,6 @@ async def test_wait_agent_reports_when_no_descendants_exist() -> None:
     repo.tree = [repo.current]
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
@@ -1530,7 +1507,6 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1592,7 +1568,6 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1638,7 +1613,6 @@ async def test_spawn_agent_allows_effort_only_override_on_disabled_parent_target
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1676,7 +1650,6 @@ async def test_spawn_agent_rejects_disabled_explicit_target_without_child_residu
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1714,7 +1687,6 @@ async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> 
     toolkit, repo, input_service, broker, run_repo, events = await _make_toolkit()
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1757,7 +1729,6 @@ async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> 
 
     refreshed = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1799,7 +1770,6 @@ async def test_spawn_agent_rejects_invalid_override_without_child_residue(
     toolkit, repo, input_service, broker, run_repo, events = await _make_toolkit()
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1855,7 +1825,6 @@ async def test_spawn_agent_rejects_invalid_parent_run(
     run_repo.parent_run = run_repo.parent_run.model_copy(update=parent_updates)
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=parent_run_id,
@@ -1895,7 +1864,6 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
     ]
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1937,7 +1905,6 @@ async def test_spawn_agent_does_not_insert_boundary_without_forked_history() -> 
     event_repo = cast(_EventTranscriptRepository, toolkit.event_transcript_repository)
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -1969,7 +1936,6 @@ async def test_spawn_agent_rejects_when_active_subagent_limit_is_reached() -> No
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -2022,7 +1988,6 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
     )
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
@@ -2054,7 +2019,6 @@ async def test_spawn_agent_rejects_when_depth_limit_is_reached() -> None:
     toolkit.subagent_settings = SubagentSettings(max_subagents=3, max_depth=1)
     state = await toolkit.update_context(
         TurnContext(
-            user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,

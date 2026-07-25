@@ -171,10 +171,9 @@ class SessionRunner:
     async def prepare_toolkits(
         self,
         toolkits: Sequence[ToolkitBinding],
-        user_id: str | None,
     ) -> list[ToolkitBinding]:
         """Prepare Session-managed toolkit snapshot."""
-        return await self.toolkit_scope.prepare(toolkits, user_id)
+        return await self.toolkit_scope.prepare(toolkits)
 
     def _make_poll_fn(self) -> PollMessages:
         """Create poll_messages callback to inject into engine.run()."""

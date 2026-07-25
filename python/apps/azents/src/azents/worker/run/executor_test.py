@@ -1235,10 +1235,8 @@ async def test_idle_continuation_toolkits_use_persisted_session_workspace(
 
     async def prepare_toolkits(
         toolkits: Sequence[ToolkitBinding],
-        user_id: str | None,
     ) -> list[ToolkitBinding]:
         """Return the empty prepared toolkit set."""
-        del user_id
         return list(toolkits)
 
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", resolve_tools)

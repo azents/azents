@@ -5,9 +5,10 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, cast
 from unittest.mock import ANY, AsyncMock
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.engine.run.types import FunctionTool
+from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tools.memory import make_search_memories_tool
 from azents.rdb.session import SessionManager
 from azents.repos.memory import MemoryRepository
@@ -25,7 +26,6 @@ def _make_tool(repo: AsyncMock) -> FunctionTool:
     return make_search_memories_tool(
         repo=cast(MemoryRepository, repo),
         agent_id="agent-1",
-        user_id="user-1",
         session_manager=cast(SessionManager[AsyncSession], _session_context),
     )
 
@@ -45,16 +45,14 @@ class TestSearchMemoriesTool:
         ]
         tool = _make_tool(repo)
 
-        result = await tool.handler(
-            json.dumps({"query": "exact memory", "scope": "user"})
-        )
+        result = await tool.handler(json.dumps({"query": "exact memory"}))
 
         assert result == ("1. **exact-memory** (feedback) — Exact description")
         repo.search.assert_awaited_once_with(
             ANY,
             agent_id="agent-1",
-            user_id="user-1",
-            include_agent_scope=False,
+            user_id=None,
+            include_agent_scope=True,
             query="exact memory",
         )
         repo.search_partial.assert_not_awaited()
@@ -92,10 +90,26 @@ class TestSearchMemoriesTool:
         repo.search_partial.assert_awaited_once_with(
             ANY,
             agent_id="agent-1",
-            user_id="user-1",
+            user_id=None,
             include_agent_scope=True,
             query="one two three four",
         )
+
+    async def test_rejects_user_scope_without_querying_memory_repository(
+        self,
+    ) -> None:
+        """Team execution never projects User-scope Memory."""
+        repo = AsyncMock(spec=MemoryRepository)
+        tool = _make_tool(repo)
+
+        with pytest.raises(
+            FunctionToolError,
+            match="User-scope memories are unavailable in Team Sessions",
+        ):
+            await tool.handler(json.dumps({"query": "private", "scope": "user"}))
+
+        repo.search.assert_not_awaited()
+        repo.search_partial.assert_not_awaited()
 
     async def test_empty_search_result_points_to_loaded_summaries(self) -> None:
         """No lexical candidates directs the model back to the loaded index."""

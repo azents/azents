@@ -14,12 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
 from azents.core.credentials import ApiKeySecrets
-from azents.core.enums import AgentLifecycleStatus, AgentType, LLMProvider
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentType,
+    ExchangeFileOrigin,
+    ExchangeFileStatus,
+    LLMProvider,
+)
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import (
     ResolveContext,
-    SessionType,
     Toolkit,
     ToolkitContext,
     ToolkitExecutionMode,
@@ -38,6 +43,7 @@ from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent.data import Agent
+from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
 from azents.runtime.types import RuntimeDomainConfig
@@ -56,6 +62,37 @@ from .resolve import (
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
+
+
+def test_attachment_preview_does_not_advertise_withheld_resource_tools() -> None:
+    """Team attachment metadata states the current Runtime content boundary."""
+    file = ExchangeFile(
+        id="file-1",
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        origin_type=ExchangeFileOrigin.UPLOAD,
+        status=ExchangeFileStatus.AVAILABLE,
+        object_key="ws-1/file-1",
+        filename="notes.txt",
+        media_type="text/plain",
+        size_bytes=12,
+        sha256="0" * 64,
+        created_by_user_id="requester-1",
+        retention_root_session_id="session-1",
+        retention_bound_at=_NOW,
+        expires_at=_NOW + datetime.timedelta(hours=1),
+        created_at=_NOW,
+    )
+
+    preview = resolve_module._attachment_text_preview(  # pyright: ignore[reportPrivateUsage]
+        file,
+        availability="available",
+    )
+
+    assert preview is not None
+    assert "unavailable to Runtime tools in this run" in preview
+    assert "import_file" not in preview
+    assert "present_file" not in preview
 
 
 def _session_manager_for(
@@ -199,16 +236,12 @@ def _make_toolkit_context() -> ToolkitContext:
         session_id="session-1",
         workspace_id="ws-1",
         agent_id="agent-1",
-        user_id="user-1",
         run_id="run-1",
         publish_event=AsyncMock(),
-        session_type=SessionType.USER,
-        interface_type=None,
-        interface_channel_id=None,
     )
 
 
-def test_auto_toolkit_revision_changes_with_execution_context() -> None:
+def test_auto_toolkit_revision_changes_with_canonical_scope() -> None:
     """Auto-bound Toolkits replace retained instances after scope changes."""
     config = _TestToolkitConfig(value="same")
     context = _make_toolkit_context()
@@ -225,15 +258,15 @@ def test_auto_toolkit_revision_changes_with_execution_context() -> None:
         execution_mode=ToolkitExecutionMode.ROOT,
         context=dataclasses.replace(context, workspace_id="ws-2"),
     )
-    changed_actor = resolve_module._auto_toolkit_source_revision(  # pyright: ignore[reportPrivateUsage]
+    changed_session = resolve_module._auto_toolkit_source_revision(  # pyright: ignore[reportPrivateUsage]
         slug="skill",
         config=config,
         execution_mode=ToolkitExecutionMode.ROOT,
-        context=dataclasses.replace(context, user_id="user-2"),
+        context=dataclasses.replace(context, session_id="session-2"),
     )
 
     assert initial != changed_workspace
-    assert initial != changed_actor
+    assert initial != changed_session
 
 
 async def _resolve_failing_registered_toolkit(
@@ -291,7 +324,6 @@ async def _resolve_failing_registered_toolkit(
 def _make_turn_context() -> TurnContext:
     """Create TurnContext for resolved Toolkit tests."""
     return TurnContext(
-        user_id="user-1",
         workspace_id="ws-1",
         model="gpt-4o",
         run_id="run-1",
@@ -349,7 +381,6 @@ class TestResolveInvokeInput:
                 messages=[
                     InputMessage(
                         text="hello",
-                        user_id=None,
                         headers=[],
                         metadata={},
                         attachments=[],
@@ -525,7 +556,6 @@ class TestResolveInvokeInput:
                 agent_id="agent-1",
                 session_id="session-1",
                 messages=[],
-                user_id="user-1",
             ),
             agent_repository=agent_repository,
             integration_repository=integration_repository,

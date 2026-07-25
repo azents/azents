@@ -54,7 +54,6 @@ class ToolkitState:
 class TurnContext:
     """Context passed to toolkit each turn. Only information that changes per turn.
 
-    :param user_id: User ID; None for unlinked user or system context
     :param workspace_id: Workspace ID
     :param model: LLM model string
     :param session_id: Agent session ID
@@ -64,7 +63,6 @@ class TurnContext:
     :param check_stop: Callback that checks whether execution should stop
     """
 
-    user_id: str | None
     workspace_id: str
     model: str
     run_id: str
@@ -115,17 +113,6 @@ class ToolkitType(enum.StrEnum):
     ENVVAR = "envvar"
 
 
-class SessionType(enum.StrEnum):
-    """Session type.
-
-    USER: session where a real user is conversing
-    SYSTEM: session automatically run by the system
-    """
-
-    USER = "user"
-    SYSTEM = "system"
-
-
 class ToolkitExecutionMode(enum.StrEnum):
     """Execution mode used by Toolkit resolution filters."""
 
@@ -149,22 +136,15 @@ class ToolkitContext:
     :param session_id: Conversation session ID
     :param workspace_id: Workspace ID
     :param agent_id: Agent ID
-    :param user_id: User ID; None for unlinked user or system context
     :param run_id: Unique ID for message processing unit (for rate limiting)
     :param publish_event: Engine event publish callback
-    :param session_type: Session type (USER: user conversation, SYSTEM:
-        automatic execution)
     """
 
     session_id: str
     workspace_id: str
     agent_id: str
-    user_id: str | None
     run_id: str
     publish_event: PublishEventFn
-    session_type: SessionType
-    interface_type: str | None
-    interface_channel_id: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -176,7 +156,6 @@ class ResolveContext:
     :param credentials_json: Decrypted credential JSON; None means no authentication
     :param agent_id: Agent ID owning the current AgentSession
     :param session_id: Current AgentSession ID
-    :param user_id: User ID; None for system context
     :param session: Optional caller-owned DB session. Run-time Toolkit resolution
         passes None so providers cannot retain a snapshot transaction across I/O.
     :param web_url: Frontend URL for building OAuth redirect_uri
@@ -191,7 +170,6 @@ class ResolveContext:
     credentials_json: str | None
     agent_id: str
     session_id: str
-    user_id: str | None
     session: AsyncSession | None
     web_url: str
     oauth_secret_key: str
@@ -268,8 +246,8 @@ class Toolkit(ABC, Generic[ConfigT]):
 
         ``make_tool`` handlers can only receive JSON arguments and cannot access
         ``TurnContext``. Therefore this method has no arguments, and toolkit
-        instances must already have captured required context such as user_id
-        from ``ResolveContext`` during ``resolve()``.
+        instances must already have captured their required source identity during
+        ``resolve()``.
 
         :return: Environment variable mapping to inject (key -> value). Keys
             that do not match POSIX variable name rules
@@ -359,7 +337,8 @@ class ToolkitProvider(ABC, Generic[ConfigT]):
         """Resolve per-config credentials and return executable Toolkit.
 
         :param config: Validated toolkit settings
-        :param context: Resolve context such as credentials and user_id
+        :param context: Resolve context such as credentials and canonical workload
+            identity
         :return: Executable Toolkit instance
         """
         ...
@@ -450,8 +429,7 @@ class ShellToolkitConfig(BaseModel):
 
     agent_data_root: str = Field(
         default="/mnt/agent-data",
-        description="Agent data root path. "
-        "User folder is located at {agent_data_root}/users/{user_id}.",
+        description="Configured runtime data root path.",
     )
     allowed_domains: list[str] = Field(
         default_factory=list,

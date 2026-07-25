@@ -36,14 +36,12 @@ async def _collect_memory_prompt(
     repo: AsyncMock,
     session: AsyncMock,
     agent_id: str,
-    user_id: str,
 ) -> str:
-    """Collect memory prompt with root-session read/write rules."""
+    """Collect Agent-scope Memory prompt with root-session rules."""
     return await builtin_module.collect_memory_prompt(
         repo,
         session,
         agent_id,
-        user_id,
         _full_memory_rules_prompt(),
     )
 
@@ -54,9 +52,8 @@ class TestCollectMemoryPrompt:
     def _make_repo(
         self,
         agent_summaries: list[MemorySummary] | None = None,
-        user_summaries: list[MemorySummary] | None = None,
     ) -> AsyncMock:
-        """Create mock repo with return values by agent/user scope."""
+        """Create mock repo returning Team-visible Agent Memory."""
         repo = AsyncMock()
 
         async def _list_summaries(
@@ -66,18 +63,17 @@ class TestCollectMemoryPrompt:
             user_id: str | None,
             type: str | None = None,  # noqa: ARG001
         ) -> list[MemorySummary]:
-            if user_id is None:
-                return agent_summaries or []
-            return user_summaries or []
+            assert user_id is None
+            return agent_summaries or []
 
-        repo.list_summaries = _list_summaries
+        repo.list_summaries = AsyncMock(side_effect=_list_summaries)
         return repo
 
     async def test_no_memories_returns_rules_only(self) -> None:
         """Rules are returned even when memory is absent."""
         repo = self._make_repo()
         session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "ag", "u")
+        result = await _collect_memory_prompt(repo, session, "ag")
         assert "Memory Rules" in result
         assert "Agent Memories" not in result
         assert "Your Memories about this User" not in result
@@ -90,72 +86,55 @@ class TestCollectMemoryPrompt:
             ],
         )
         session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "ag", "")
+        result = await _collect_memory_prompt(repo, session, "ag")
         assert "Agent Memories (shared with all users)" in result
         assert "no-mock" in result
         assert "No mocking in tests" in result
 
-    async def test_user_memories_included(self) -> None:
-        """User memory is included in prompt."""
-        repo = self._make_repo(
-            user_summaries=[
-                _make_summary("profile", "user", "Go expert, React beginner"),
-            ],
-        )
+    async def test_user_memory_section_is_not_projected(self) -> None:
+        """Team execution never renders a User Memory prompt section."""
+        repo = self._make_repo()
         session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "ag", "u")
-        assert "Your Memories about this User" in result
-        assert "profile" in result
-        assert "Go expert" in result
+        result = await _collect_memory_prompt(repo, session, "ag")
+        assert "Your Memories about this User" not in result
 
-    async def test_both_scopes_included(self) -> None:
-        """Both agent and user memory are included in prompt."""
+    async def test_agent_scope_is_the_only_memory_scope_in_prompt(self) -> None:
+        """Team prompt retains shared Agent Memory without User Memory."""
         repo = self._make_repo(
             agent_summaries=[
                 _make_summary("deploy", "reference", "CI/CD pipeline"),
             ],
-            user_summaries=[
-                _make_summary("profile", "user", "Senior engineer"),
-            ],
         )
         session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "ag", "u")
+        result = await _collect_memory_prompt(repo, session, "ag")
         assert "Agent Memories" in result
-        assert "Your Memories about this User" in result
         assert "deploy" in result
-        assert "profile" in result
+        assert "Your Memories about this User" not in result
 
-    async def test_no_agent_id_skips_agent_section(self) -> None:
-        """Omit Agent Memories section when agent_id is empty."""
+    async def test_agent_scope_query_uses_no_user_id(self) -> None:
+        """Agent Memory lookup explicitly uses the shared scope."""
         repo = self._make_repo(
             agent_summaries=[_make_summary("x")],
         )
         session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "", "u")
-        assert "Agent Memories" not in result
-        assert "Memory Rules" in result
-
-    async def test_no_user_id_skips_user_section(self) -> None:
-        """Omit User Memories section when user_id is empty."""
-        repo = self._make_repo(
-            user_summaries=[_make_summary("x")],
+        result = await _collect_memory_prompt(repo, session, "ag")
+        assert "Agent Memories" in result
+        repo.list_summaries.assert_awaited_once_with(
+            session,
+            agent_id="ag",
+            user_id=None,
         )
-        session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "ag", "")
-        assert "Your Memories about this User" not in result
-        assert "Memory Rules" in result
 
-    async def test_agent_section_before_user_section(self) -> None:
-        """Agent Memories are displayed before User Memories."""
+    async def test_agent_memory_section_precedes_memory_rules(self) -> None:
+        """Agent Memory is injected before the model-facing rules."""
         repo = self._make_repo(
             agent_summaries=[_make_summary("a")],
-            user_summaries=[_make_summary("b")],
         )
         session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "ag", "u")
+        result = await _collect_memory_prompt(repo, session, "ag")
         agent_pos = result.index("Agent Memories")
-        user_pos = result.index("Your Memories about this User")
-        assert agent_pos < user_pos
+        rules_pos = result.index("Memory Rules")
+        assert agent_pos < rules_pos
 
     async def test_summaries_grouped_by_type(self) -> None:
         """Memories are grouped by type."""
@@ -167,7 +146,7 @@ class TestCollectMemoryPrompt:
             ],
         )
         session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "ag", "")
+        result = await _collect_memory_prompt(repo, session, "ag")
         assert "#### Feedback" in result
         assert "#### Reference" in result
         feedback_pos = result.index("#### Feedback")
@@ -181,7 +160,7 @@ class TestCollectMemoryPrompt:
         ]
         repo = self._make_repo(agent_summaries=summaries)
         session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "ag", "")
+        result = await _collect_memory_prompt(repo, session, "ag")
         assert "cleaning up old memories" in result.lower()
 
     @pytest.mark.parametrize(
@@ -207,5 +186,5 @@ class TestCollectMemoryPrompt:
         """Rules prompt includes core instructions."""
         repo = self._make_repo()
         session = AsyncMock()
-        result = await _collect_memory_prompt(repo, session, "ag", "u")
+        result = await _collect_memory_prompt(repo, session, "ag")
         assert expected in result
