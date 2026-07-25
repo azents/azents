@@ -1,5 +1,6 @@
 """External Channel event processing domain tests."""
 
+import asyncio
 import dataclasses
 import datetime
 from collections.abc import AsyncGenerator
@@ -53,6 +54,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
     RDBExternalChannelAccessRequest,
+    RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
     RDBExternalChannelConversationAdmission,
@@ -95,8 +97,12 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelResourceCreate,
 )
+from azents.repos.external_channel.lifecycle import (
+    ExternalChannelLifecycleRepository,
+)
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.work_data import ChannelDeliveryTarget
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
@@ -810,6 +816,7 @@ def _delivery_attempt(
 async def _unit_session_manager() -> AsyncGenerator[AsyncSession]:
     session = MagicMock(spec=AsyncSession)
     session.commit = AsyncMock()
+    session.get = AsyncMock(return_value=None)
     yield cast(AsyncSession, session)
 
 
@@ -918,6 +925,182 @@ async def test_late_control_delivery_deletes_message_after_decision() -> None:
         channel_id="C1",
         message_ts="2.000001",
     )
+
+
+@pytest.mark.asyncio
+async def test_selector_control_delivery_posts_one_idempotent_thread_button() -> None:
+    """A default-less Multi mention dispatches its retained selector control."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    selector_attempting = _delivery_attempt(
+        delivery_id="selector-1",
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        status=ExternalChannelDeliveryStatus.ATTEMPTING,
+        request_payload={
+            "provider": "slack",
+            "control_kind": "agent_selector",
+            "tenant_id": "T1",
+            "channel_id": "C1",
+            "thread_ts": "1.000001",
+            "conversation_admission_id": "admission-1",
+        },
+        provider_message_key=None,
+    ).model_copy(
+        update={
+            "origin_type": ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+            "origin_id": "admission-1",
+        }
+    )
+    selector_delivered = selector_attempting.model_copy(
+        update={
+            "status": ExternalChannelDeliveryStatus.DELIVERED,
+            "provider_message_key": "slack:T1:C1:2.000001",
+            "completed_at": _at(2),
+        }
+    )
+    repository.start_delivery_attempt = AsyncMock(return_value=selector_attempting)
+    repository.finish_delivery_attempt = AsyncMock(return_value=selector_delivered)
+    repository.mark_connection_reconnect_required = AsyncMock()
+    slack_client = MagicMock(spec=SlackConversationClient)
+    slack_client.post_blocks = AsyncMock(
+        return_value=SlackControlMessageResult(
+            status="delivered",
+            provider_message_key="slack:T1:C1:2.000001",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    service = _service(
+        cast(SessionManager[AsyncSession], _unit_session_manager),
+        cast(ExternalChannelRepository, repository),
+    )
+    service.slack_client = cast(SlackConversationClient, slack_client)
+    configuration = cast(
+        ExternalChannelConnectionConfiguration,
+        SimpleNamespace(id="connection-1", provider_tenant_id="T1"),
+    )
+
+    await service.attempt_control_delivery_for_test(
+        configuration=configuration,
+        delivery_attempt_id="selector-1",
+        bot_token="xoxb-test",
+    )
+
+    slack_client.post_blocks.assert_awaited_once_with(
+        bot_token="xoxb-test",
+        tenant_id="T1",
+        channel_id="C1",
+        thread_ts="1.000001",
+        text="Select an Agent to continue this conversation.",
+        blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Select an Agent to continue this conversation.",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Select Agent"},
+                        "action_id": "azents_agent_selector_open",
+                        "value": "admission-1",
+                    }
+                ],
+            },
+        ],
+        icon_url=None,
+    )
+    repository.create_access_request_control_delete_intent.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_bound_shortcut_uses_recorded_agent_after_route_detaches() -> None:
+    """A retained notice names its recorded Agent after live ownership is removed."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    attempt = _delivery_attempt(
+        delivery_id="bound-shortcut-1",
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        status=ExternalChannelDeliveryStatus.ATTEMPTING,
+        request_payload={
+            "provider": "slack",
+            "control_kind": "shortcut_already_bound",
+            "tenant_id": "T1",
+            "channel_id": "C1",
+            "thread_ts": "1.000001",
+            "recorded_agent_name": "Recorded <Agent>",
+        },
+        provider_message_key=None,
+    ).model_copy(
+        update={
+            "origin_type": ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+            "origin_id": "shortcut-event-1",
+            "binding_id": "binding-1",
+        }
+    )
+    repository.start_delivery_attempt = AsyncMock(return_value=attempt)
+    repository.finish_delivery_attempt = AsyncMock(
+        return_value=attempt.model_copy(
+            update={
+                "status": ExternalChannelDeliveryStatus.DELIVERED,
+                "provider_message_key": "slack:T1:C1:2.000001",
+                "completed_at": _at(2),
+            }
+        )
+    )
+    repository.mark_connection_reconnect_required = AsyncMock()
+    work_repository = MagicMock(spec=ExternalChannelWorkRepository)
+    work_repository.get_delivery_target = AsyncMock(
+        return_value=ChannelDeliveryTarget(
+            delivery_attempt_id=attempt.id,
+            operation=attempt.operation,
+            status=attempt.status,
+            binding_id="binding-1",
+            connection_id="connection-1",
+            provider=ExternalChannelProvider.SLACK,
+            encrypted_credentials="ciphertext",
+            provider_tenant_id="T1",
+            capabilities=None,
+            agent_name=None,
+            agent_avatar=None,
+            request_payload=dict(attempt.request_payload),
+        )
+    )
+    slack_client = MagicMock(spec=SlackConversationClient)
+    slack_client.post_blocks = AsyncMock(
+        return_value=SlackControlMessageResult(
+            status="delivered",
+            provider_message_key="slack:T1:C1:2.000001",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    service = _service(
+        cast(SessionManager[AsyncSession], _unit_session_manager),
+        cast(ExternalChannelRepository, repository),
+    )
+    service.work_repository = cast(ExternalChannelWorkRepository, work_repository)
+    service.slack_client = cast(SlackConversationClient, slack_client)
+    configuration = cast(
+        ExternalChannelConnectionConfiguration,
+        SimpleNamespace(id="connection-1", provider_tenant_id="T1"),
+    )
+
+    await service.attempt_control_delivery_for_test(
+        configuration=configuration,
+        delivery_attempt_id=attempt.id,
+        bot_token="xoxb-test",
+    )
+
+    call = slack_client.post_blocks.await_args.kwargs
+    assert call["text"].startswith("Recorded <Agent>\n")
+    assert call["blocks"][0] == {
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": "*Recorded &lt;Agent&gt;*"},
+    }
+    assert call["icon_url"] is None
 
 
 async def test_unlinked_message_defers_across_session_context(
@@ -1249,6 +1432,150 @@ async def test_granted_initial_binding_reuses_existing_session_without_root_serv
     assert reused.id == first_binding.id
     assert reused.agent_session_id == first_binding.agent_session_id
     root_service.create_root_session.assert_not_awaited()
+
+
+async def test_bound_shortcut_reports_agent_without_releasing_or_waking(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A shortcut intent commits before concurrent route detachment."""
+    async with rdb_session_manager() as session:
+        connection_id, route_id, agent_id, repository = await _setup_route(session)
+        route = await repository.get_agent_route(session, route_id=route_id)
+        assert route is not None
+        resource = await _create_active_resource(
+            session,
+            repository=repository,
+            connection_id=connection_id,
+        )
+        trigger_message = await _create_trigger_message(
+            session,
+            repository=repository,
+            resource_id=resource.id,
+        )
+        service = _service(rdb_session_manager, repository)
+        binding = await service.create_granted_initial_binding_for_test(
+            session,
+            route=route,
+            resource=resource,
+            trigger_message=trigger_message,
+        )
+        admitted = await repository.admit_event(
+            session,
+            ExternalChannelEventCreate(
+                connection_id=connection_id,
+                provider_event_id="shortcut-http-bound",
+                transport_envelope_id=None,
+                event_type="app_mention",
+                provider_app_id="A1",
+                provider_tenant_id="T1",
+                provider_enterprise_id=None,
+                resource_correlation_key="C1:1784678400.000100",
+                eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+                envelope={
+                    "event": {
+                        "type": "app_mention",
+                        "channel": "C1",
+                        "channel_type": "channel",
+                        "user": "U1",
+                        "ts": "1784678401.000100",
+                        "thread_ts": "1784678400.000100",
+                        "text": "Ask another Agent",
+                    }
+                },
+                status=ExternalChannelEventStatus.ACCEPTED,
+                provider_occurred_at=_at(2),
+                received_at=_at(2),
+            ),
+        )
+        configuration = await repository.get_connection_configuration(
+            session,
+            connection_id=connection_id,
+        )
+        assert configuration is not None
+        await session.commit()
+
+    normalized = normalize_slack_event(
+        event_type="app_mention",
+        tenant_id="T1",
+        envelope=admitted.event.envelope,
+    )
+    assert isinstance(normalized, SlackNormalizedMessage)
+    connection_locked = asyncio.Event()
+    continue_event = asyncio.Event()
+    original_lock_resource = repository.lock_resource
+
+    async def pausing_lock_resource(
+        session: AsyncSession,
+        *,
+        resource_id: str,
+    ) -> ExternalChannelResource | None:
+        connection_locked.set()
+        await continue_event.wait()
+        return await original_lock_resource(session, resource_id=resource_id)
+
+    repository.lock_resource = pausing_lock_resource
+    persisted_task = asyncio.create_task(
+        service.persist_message_event_for_test(
+            event=admitted.event,
+            configuration=configuration,
+            message=normalized,
+            original_url=None,
+        )
+    )
+    await asyncio.wait_for(connection_locked.wait(), timeout=5)
+
+    async def decommission_agent() -> None:
+        async with rdb_session_manager() as session:
+            await ExternalChannelLifecycleRepository().cleanup_decommissioned_agent(
+                session,
+                agent_id=agent_id,
+                now=_at(3),
+            )
+            await session.commit()
+
+    decommission_task = asyncio.create_task(decommission_agent())
+    await asyncio.sleep(0.1)
+    assert not decommission_task.done()
+    continue_event.set()
+    persisted = await asyncio.wait_for(persisted_task, timeout=5)
+    await asyncio.wait_for(decommission_task, timeout=5)
+    repository.lock_resource = original_lock_resource
+
+    assert persisted.wake_up is None
+    assert persisted.activity_delivery_attempt_id is None
+    assert persisted.hydration_required is False
+    assert persisted.control_delivery_attempt_id is not None
+    async with rdb_session_manager() as session:
+        attempts = (
+            await session.scalars(
+                sa.select(RDBExternalChannelDeliveryAttempt).where(
+                    RDBExternalChannelDeliveryAttempt.id
+                    == persisted.control_delivery_attempt_id
+                )
+            )
+        ).all()
+        batch_count = await session.scalar(
+            sa.select(sa.func.count(RDBExternalChannelInvocationBatch.id)).where(
+                RDBExternalChannelInvocationBatch.binding_id == binding.id
+            )
+        )
+        persisted_binding = await session.get(RDBExternalChannelBinding, binding.id)
+        persisted_route = await session.get(
+            RDBExternalChannelAgentRoute,
+            route_id,
+        )
+
+    assert len(attempts) == 1
+    assert attempts[0].binding_id == binding.id
+    assert attempts[0].request_payload["control_kind"] == "shortcut_already_bound"
+    assert attempts[0].request_payload["recorded_agent_name"] == (
+        "External Channel processor Agent"
+    )
+    assert batch_count == 0
+    assert persisted_binding is not None
+    assert persisted_binding.status is ExternalChannelBindingStatus.DISCONNECTED
+    assert persisted_route is not None
+    assert persisted_route.agent_id is None
 
 
 async def test_allow_reuses_existing_binding_without_root_service(
@@ -1874,6 +2201,17 @@ async def test_multi_without_default_persists_selection_required_source_only(
         batches = list(
             await session.scalars(sa.select(RDBExternalChannelInvocationBatch))
         )
+        selector_attempts = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelDeliveryAttempt).where(
+                    RDBExternalChannelDeliveryAttempt.origin_type
+                    == ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                    RDBExternalChannelDeliveryAttempt.origin_id == admissions[0].id,
+                    RDBExternalChannelDeliveryAttempt.operation
+                    == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                )
+            )
+        )
         source = await repository.get_message(
             session,
             message_id=admissions[0].source_message_id,
@@ -1893,7 +2231,9 @@ async def test_multi_without_default_persists_selection_required_source_only(
     assert bindings == []
     assert sessions == []
     assert batches == []
-    assert result.control_delivery_attempt_id is None
+    assert len(selector_attempts) == 1
+    assert selector_attempts[0].request_payload["control_kind"] == "agent_selector"
+    assert result.control_delivery_attempt_id == selector_attempts[0].id
     assert result.activity_delivery_attempt_id is None
     assert result.wake_up is None
     assert {route.id for route in routes}.isdisjoint(

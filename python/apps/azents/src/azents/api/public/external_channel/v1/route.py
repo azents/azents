@@ -3,7 +3,16 @@
 import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
 
 from azents.services.external_channel.http_admission import SlackHTTPAdmissionService
@@ -20,6 +29,7 @@ router = APIRouter()
 @router.post("/slack/events", include_in_schema=False)
 async def receive_slack_event(
     request: Request,
+    background_tasks: BackgroundTasks,
     service: Annotated[SlackHTTPAdmissionService, Depends(SlackHTTPAdmissionService)],
     x_slack_request_timestamp: Annotated[
         str | None,
@@ -56,6 +66,11 @@ async def receive_slack_event(
         ) from error
     if result.challenge is not None:
         return JSONResponse(content={"challenge": result.challenge})
+    if result.interaction_handoff is not None:
+        background_tasks.add_task(
+            service.run_interaction_handoff,
+            result.interaction_handoff,
+        )
     return Response(status_code=status.HTTP_200_OK)
 
 

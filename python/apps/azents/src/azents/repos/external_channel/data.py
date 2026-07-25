@@ -160,6 +160,13 @@ class ExternalChannelAgentRouteCreate(_Record):
     catalog_removed_by_user_id: str | None
 
 
+class ExternalChannelCatalogRoute(_Record):
+    """One current selector candidate with its canonical Agent display name."""
+
+    route: ExternalChannelAgentRoute
+    agent_name: str
+
+
 class ExternalChannelResource(_Record):
     """Canonical provider conversation or external work resource."""
 

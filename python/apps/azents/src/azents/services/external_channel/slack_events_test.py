@@ -16,6 +16,7 @@ from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
     SlackConversationClient,
     SlackEventExcluded,
+    SlackInteractionView,
     SlackNormalizedMessage,
     SlackOutboundFile,
     SlackOutboundFileContentError,
@@ -884,6 +885,9 @@ async def test_control_message_reports_ambiguous_network_outcome_without_retry()
             approval_url="https://azents.example/access/request-1",
             participant_label="Alice",
             participant_provider_user_id="U1",
+            agent_name=None,
+            agent_markdown_line=None,
+            icon_url=None,
         )
 
     assert result.status == "unknown"
@@ -905,12 +909,15 @@ async def test_control_message_reports_confirmed_provider_rejection() -> None:
             approval_url="https://azents.example/access/request-1",
             participant_label="Alice",
             participant_provider_user_id="U1",
+            agent_name=None,
+            agent_markdown_line=None,
+            icon_url=None,
         )
 
     assert result.status == "failed"
     assert result.error_kind == "provider_rejected"
     assert result.error_summary == (
-        "Slack rejected the control message (invalid_blocks)."
+        "Slack rejected the provider operation (invalid_blocks)."
     )
 
 
@@ -943,6 +950,7 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
                 channel_id="C1",
                 thread_ts="1721600000.000100",
                 markdown_text="Reply",
+                icon_url=None,
             )
         elif operation == "update":
             result = await client.update_message(
@@ -973,6 +981,107 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
     elif operation == "update":
         assert payload["parse"] == "none"
         assert payload["link_names"] is False
+
+
+async def test_interaction_view_open_uses_bounded_safe_payload() -> None:
+    """Modal mutation retains only opaque metadata and never returns a trigger."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True, "view": {"id": "V1"}})
+
+    view = SlackInteractionView(
+        callback_id="agent-selector",
+        title="Choose Agent",
+        private_metadata="interaction-1",
+        blocks=[
+            {
+                "type": "section",
+                "text": {"type": "plain_text", "text": "Choose an Agent."},
+            }
+        ],
+        submit_title="Select",
+        close_title="Cancel",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).open_interaction_view(
+            bot_token="xoxb-secret",
+            trigger_id="trigger-secret",
+            view=view,
+        )
+
+    assert result.status == "opened"
+    assert result.error_kind is None
+    assert len(requests) == 1
+    assert requests[0].url.path == "/api/views.open"
+    payload = json.loads(requests[0].content)
+    assert payload == {
+        "trigger_id": "trigger-secret",
+        "view": {
+            "type": "modal",
+            "callback_id": "agent-selector",
+            "private_metadata": "interaction-1",
+            "title": {"type": "plain_text", "text": "Choose Agent"},
+            "blocks": view.blocks,
+            "submit": {"type": "plain_text", "text": "Select"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+        },
+    }
+    assert "trigger-secret" not in repr(result)
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_status", "expected_kind"),
+    [
+        ("trigger_expired", "expired", "trigger_expired"),
+        ("invalid_hash", "conflict", "view_hash_conflict"),
+        ("invalid_arguments", "rejected", "provider_rejected"),
+    ],
+)
+async def test_interaction_view_provider_outcomes_are_explicit(
+    error_code: str,
+    expected_status: str,
+    expected_kind: str,
+) -> None:
+    """Provider responses never look like a successful selector mutation."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": False, "error": error_code})
+
+    view = SlackInteractionView(
+        callback_id="agent-selector",
+        title="Choose Agent",
+        private_metadata="interaction-1",
+        blocks=[],
+        submit_title=None,
+        close_title=None,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).update_interaction_view(
+            bot_token="xoxb-secret",
+            view_id="V1",
+            view_hash="hash-1",
+            view=view,
+        )
+
+    assert result.status == expected_status
+    assert result.error_kind == expected_kind
+
+
+def test_interaction_view_rejects_oversized_private_metadata_without_request() -> None:
+    """Oversized opaque state cannot produce a Slack modal request."""
+    view = SlackInteractionView(
+        callback_id="agent-selector",
+        title="Choose Agent",
+        private_metadata="x" * 3_001,
+        blocks=[],
+        submit_title=None,
+        close_title=None,
+    )
+
+    with pytest.raises(ValueError, match="private metadata is too long"):
+        SlackConversationClient._validate_interaction_view(view)  # pyright: ignore[reportPrivateUsage]  # Validate the provider payload boundary directly.
 
 
 async def test_missing_update_target_is_reported_as_confirmed_deletion() -> None:
@@ -1039,6 +1148,7 @@ async def test_operational_blocks_include_accessible_fallback_text() -> None:
                     "text": {"type": "mrkdwn", "text": "*Working*"},
                 }
             ],
+            icon_url=None,
         )
 
     assert result.status == "delivered"
@@ -1077,6 +1187,9 @@ async def test_approval_control_message_uses_block_kit_button() -> None:
             approval_url="https://azents.example/access/request-1",
             participant_label="Alice",
             participant_provider_user_id="U1",
+            agent_name=None,
+            agent_markdown_line=None,
+            icon_url=None,
         )
 
     assert result.status == "delivered"
@@ -1117,6 +1230,9 @@ async def test_approval_participant_identity_is_not_interpreted_as_mrkdwn() -> N
             approval_url="https://azents.example/access/request-1",
             participant_label="<@U999> *Admin* & _owner_",
             participant_provider_user_id="U1",
+            agent_name=None,
+            agent_markdown_line=None,
+            icon_url=None,
         )
 
     assert result.status == "delivered"
@@ -1150,11 +1266,47 @@ async def test_channel_action_rate_limit_is_terminal_failed_without_retry() -> N
             channel_id="C1",
             thread_ts="1721600000.000100",
             markdown_text="Reply",
+            icon_url=None,
         )
 
     assert calls == 1
     assert result.status == "failed"
     assert result.error_kind == "rate_limited"
+
+
+async def test_custom_icon_rejection_falls_back_without_replaying_content() -> None:
+    """A confirmed icon failure retries the same logical post with bot identity."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={"ok": False, "error": "missing_scope"},
+            )
+        return httpx.Response(
+            200,
+            json={"ok": True, "ts": "1721600001.000100"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="*Agent*\nReply",
+            icon_url="https://cdn.example/agent.png",
+        )
+
+    assert result.status == "delivered"
+    assert len(requests) == 2
+    first = json.loads(requests[0].content)
+    fallback = json.loads(requests[1].content)
+    assert first["icon_url"] == "https://cdn.example/agent.png"
+    assert "icon_url" not in fallback
+    assert first["markdown_text"] == fallback["markdown_text"] == "*Agent*\nReply"
 
 
 async def test_channel_action_rejects_over_limit_markdown_without_request() -> None:
@@ -1173,6 +1325,7 @@ async def test_channel_action_rejects_over_limit_markdown_without_request() -> N
             channel_id="C1",
             thread_ts="1721600000.000100",
             markdown_text="x" * 12_001,
+            icon_url=None,
         )
 
     assert calls == 0

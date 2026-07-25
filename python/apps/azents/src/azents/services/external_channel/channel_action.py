@@ -12,6 +12,8 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelActionMode,
     ExternalChannelDeliveryOperation,
@@ -42,6 +44,12 @@ from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferError,
     iter_external_channel_exchange_file_chunks,
     iter_external_channel_outbound_file_chunks,
+)
+from azents.services.external_channel.presentation import (
+    prepend_agent_blocks,
+    prepend_agent_fallback,
+    prepend_agent_markdown,
+    resolve_slack_agent_presentation,
 )
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
@@ -93,6 +101,7 @@ class ExternalChannelActionService:
         ExchangeFileService,
         Depends(ExchangeFileService),
     ]
+    config: Annotated[Config, Depends(get_config)]
 
     async def has_active_binding(self, *, session_id: str, agent_id: str) -> bool:
         """Return whether the tool should be exposed for this root Session."""
@@ -385,6 +394,10 @@ class ExternalChannelActionService:
         authority: SessionResourceAuthority | None,
     ) -> SlackControlMessageResult:
         payload = target.request_payload
+        presentation = resolve_slack_agent_presentation(
+            target,
+            avatar_cdn_base_url=self.config.avatar_cdn_base_url,
+        )
         tenant_id = target.provider_tenant_id
         channel_id = payload.get("channel_id")
         thread_ts = payload.get("thread_ts")
@@ -452,7 +465,7 @@ class ExternalChannelActionService:
                         tenant_id=tenant_id,
                         channel_id=channel_id,
                         thread_ts=thread_ts,
-                        markdown_text=text,
+                        markdown_text=prepend_agent_markdown(presentation, text),
                         files=[
                             SlackOutboundFile(
                                 filename=file.filename,
@@ -473,7 +486,8 @@ class ExternalChannelActionService:
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     thread_ts=thread_ts,
-                    markdown_text=text,
+                    markdown_text=prepend_agent_markdown(presentation, text),
+                    icon_url=(None if presentation is None else presentation.icon_url),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_CREATE:
                 text = payload.get("text")
@@ -485,8 +499,9 @@ class ExternalChannelActionService:
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     thread_ts=thread_ts,
-                    text=text,
-                    blocks=blocks,
+                    text=prepend_agent_fallback(presentation, text),
+                    blocks=prepend_agent_blocks(presentation, blocks),
+                    icon_url=(None if presentation is None else presentation.icon_url),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
                 text = payload.get("text")
@@ -499,8 +514,8 @@ class ExternalChannelActionService:
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     message_ts=message_ts,
-                    text=text,
-                    blocks=blocks,
+                    text=prepend_agent_fallback(presentation, text),
+                    blocks=prepend_agent_blocks(presentation, blocks),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
                 message_ts = _provider_message_ts(payload.get("provider_message_key"))

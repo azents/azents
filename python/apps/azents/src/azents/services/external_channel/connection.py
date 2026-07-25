@@ -180,6 +180,8 @@ class ExternalChannelConnectionService:
             if result.capabilities is not None
             else None
         )
+        if capabilities is not None:
+            capabilities["customize_messages"] = result.customize_messages
         async with self.session_manager() as session:
             connection = await self.repository.update_connection_health(
                 session,

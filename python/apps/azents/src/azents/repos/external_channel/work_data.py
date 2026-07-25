@@ -74,6 +74,9 @@ class ChannelDeliveryTarget(_Record):
     provider: ExternalChannelProvider
     encrypted_credentials: str | None
     provider_tenant_id: str | None
+    capabilities: dict[str, Any] | None
+    agent_name: str | None
+    agent_avatar: dict[str, Any] | None
     request_payload: dict[str, Any]
 
 

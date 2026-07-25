@@ -10,6 +10,10 @@ import pytest
 from websockets.exceptions import ConnectionClosedError
 
 from azents.repos.external_channel.data import ExternalChannelEventCreate
+from azents.services.external_channel.interaction import (
+    ExternalChannelInteractionHandoff,
+)
+from azents.services.external_channel.slack_http import SlackInteractionCallback
 from azents.services.external_channel.slack_socket import (
     MAX_SLACK_SOCKET_MESSAGE_BYTES,
     SlackSocketConnectionOpen,
@@ -71,14 +75,61 @@ def _events_api_envelope(
     )
 
 
+def _interactive_envelope(*, envelope_id: str = "interactive-envelope-1") -> str:
+    """Build one Socket Mode interaction envelope without persisted secrets."""
+    return json.dumps(
+        {
+            "envelope_id": envelope_id,
+            "type": "interactive",
+            "payload": {
+                "type": "message_action",
+                "api_app_id": "A-1",
+                "team": {"id": "T-1"},
+                "user": {"id": "U-1"},
+                "trigger_id": "trigger-secret-must-not-persist",
+                "response_url": "https://hooks.slack.com/actions/private",
+                "callback_id": "ask-agent",
+                "channel": {"id": "C-1"},
+                "message": {
+                    "ts": "100.0001",
+                    "thread_ts": "100.0001",
+                    "text": "private text",
+                },
+            },
+        }
+    )
+
+
 def _client(
     *,
     socket: FakeSocket,
     admitted: list[ExternalChannelEventCreate],
     admit: Callable[[ExternalChannelEventCreate], Awaitable[object]] | None = None,
+    admitted_interactions: list[SlackInteractionCallback] | None = None,
+    admitted_shortcut_sources: list[ExternalChannelEventCreate] | None = None,
+    admit_interaction: Callable[
+        [
+            SlackInteractionCallback,
+            ExternalChannelEventCreate | None,
+        ],
+        Awaitable[ExternalChannelInteractionHandoff | None],
+    ]
+    | None = None,
+    schedule_interaction: Callable[[ExternalChannelInteractionHandoff], None]
+    | None = None,
 ) -> SlackSocketModeClient:
     async def default_admit(event: ExternalChannelEventCreate) -> None:
         admitted.append(event)
+
+    async def default_admit_interaction(
+        callback: SlackInteractionCallback,
+        shortcut_source_event: ExternalChannelEventCreate | None,
+    ) -> ExternalChannelInteractionHandoff | None:
+        if admitted_interactions is not None:
+            admitted_interactions.append(callback)
+        if shortcut_source_event is not None and admitted_shortcut_sources is not None:
+            admitted_shortcut_sources.append(shortcut_source_event)
+        return None
 
     async def connector(
         endpoint_url: str,
@@ -95,6 +146,14 @@ def _client(
     return SlackSocketModeClient(
         web_api_client=SlackSocketWebAPIClient(httpx.AsyncClient()),
         admit_event=admit if admit is not None else default_admit,
+        admit_interaction=(
+            admit_interaction
+            if admit_interaction is not None
+            else default_admit_interaction
+            if admitted_interactions is not None
+            else None
+        ),
+        schedule_interaction=schedule_interaction,
         connector=connector,
         clock=lambda: _NOW,
         ping_interval_seconds=11.0,
@@ -302,6 +361,135 @@ async def test_events_api_does_not_acknowledge_failed_admission() -> None:
 
     assert socket.sent == []
     assert socket.closed is True
+
+
+@pytest.mark.asyncio
+async def test_interactive_envelope_acknowledges_only_after_durable_admission() -> None:
+    """A Socket interaction uses its envelope ID as the durable retry key."""
+    socket = FakeSocket(
+        [
+            _interactive_envelope(),
+            json.dumps(
+                {
+                    "type": "disconnect",
+                    "payload": {"reason": "link_disabled"},
+                }
+            ),
+        ]
+    )
+    admitted: list[ExternalChannelEventCreate] = []
+    interactions: list[SlackInteractionCallback] = []
+    shortcut_sources: list[ExternalChannelEventCreate] = []
+    client = _client(
+        socket=socket,
+        admitted=admitted,
+        admitted_interactions=interactions,
+        admitted_shortcut_sources=shortcut_sources,
+    )
+
+    result = await client.run_connection(
+        connection_id="connection-1",
+        endpoint_url="wss://socket.example.test/connection",
+    )
+
+    assert result.admitted_event_count == 1
+    assert admitted == []
+    assert len(interactions) == 1
+    interaction = interactions[0]
+    assert interaction.provider_interaction_key == "socket-interactive-envelope-1"
+    assert interaction.resource_correlation_key == "C-1:100.0001"
+    assert "trigger-secret" not in repr(interaction)
+    assert "hooks.slack.com" not in repr(interaction)
+    assert len(shortcut_sources) == 1
+    assert (
+        shortcut_sources[0].provider_event_id
+        == "shortcut-socket-interactive-envelope-1"
+    )
+    assert shortcut_sources[0].resource_correlation_key == "C-1:100.0001"
+    assert socket.sent == ['{"envelope_id":"interactive-envelope-1"}']
+
+
+@pytest.mark.asyncio
+async def test_interactive_envelope_does_not_acknowledge_failed_admission() -> None:
+    """Leave an interaction envelope unacknowledged when its transaction fails."""
+    socket = FakeSocket([_interactive_envelope()])
+    admitted: list[ExternalChannelEventCreate] = []
+
+    async def rejected_interaction(
+        _: SlackInteractionCallback,
+        __: ExternalChannelEventCreate | None,
+    ) -> None:
+        raise RuntimeError("transaction failed")
+
+    client = _client(
+        socket=socket,
+        admitted=admitted,
+        admit_interaction=rejected_interaction,
+    )
+
+    with pytest.raises(RuntimeError, match="transaction failed"):
+        await client.run_connection(
+            connection_id="connection-1",
+            endpoint_url="wss://socket.example.test/connection",
+        )
+
+    assert socket.sent == []
+    assert socket.closed is True
+
+
+@pytest.mark.asyncio
+async def test_interactive_handoff_is_scheduled_only_after_socket_ack() -> None:
+    """Socket provider work starts only after the durable claim and exact ACK."""
+    socket = FakeSocket(
+        [
+            _interactive_envelope(),
+            json.dumps(
+                {
+                    "type": "disconnect",
+                    "payload": {"reason": "link_disabled"},
+                }
+            ),
+        ]
+    )
+    admitted: list[ExternalChannelEventCreate] = []
+    scheduled: list[ExternalChannelInteractionHandoff] = []
+
+    async def admit_interaction(
+        callback: SlackInteractionCallback,
+        shortcut_source_event: ExternalChannelEventCreate | None,
+    ) -> ExternalChannelInteractionHandoff:
+        assert callback.trigger_id == "trigger-secret-must-not-persist"
+        assert shortcut_source_event is not None
+        return ExternalChannelInteractionHandoff(
+            interaction_id="interaction-1",
+            trigger_id=callback.trigger_id,
+        )
+
+    def schedule(handoff: ExternalChannelInteractionHandoff) -> None:
+        assert socket.sent == ['{"envelope_id":"interactive-envelope-1"}']
+        scheduled.append(handoff)
+
+    client = _client(
+        socket=socket,
+        admitted=admitted,
+        admit_interaction=admit_interaction,
+        schedule_interaction=schedule,
+    )
+
+    result = await client.run_connection(
+        connection_id="connection-1",
+        endpoint_url="wss://socket.example.test/connection",
+    )
+
+    assert result.admitted_event_count == 1
+    assert scheduled == [
+        ExternalChannelInteractionHandoff(
+            interaction_id="interaction-1",
+            trigger_id="trigger-secret-must-not-persist",
+        )
+    ]
+    assert "trigger-secret" not in repr(scheduled[0])
+    assert socket.sent == ['{"envelope_id":"interactive-envelope-1"}']
 
 
 @pytest.mark.asyncio
