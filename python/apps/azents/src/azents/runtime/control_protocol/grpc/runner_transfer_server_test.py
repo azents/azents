@@ -3,14 +3,25 @@
 # pyright: reportAttributeAccessIssue=false, reportArgumentType=false
 # ruff: noqa: E501
 
+import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import grpc
 import pytest
-from azcommon.infra.s3.service import S3ObjectIdentity, S3VerifiedObject
+from azcommon.infra.s3.service import (
+    S3CompletedPart,
+    S3MultipartUpload,
+    S3ObjectIdentity,
+    S3TransferObjectMetadata,
+    S3VerifiedObject,
+)
 from azents_runtime_control.proto import runtime_runner_transfer_pb2 as pb
+from azents_runtime_control.transfer import (
+    MAX_TRANSFER_CHUNK_BYTES,
+    MULTIPART_PART_BYTES,
+)
 
 from azents.core.runtime_runner_credential import (
     RuntimeRunnerCredential,
@@ -23,9 +34,11 @@ from azents.runtime.coordination.data import RuntimeConnectionKind
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
     RuntimeTransferObject,
+    RuntimeTransferPhase,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 
@@ -75,6 +88,13 @@ class _ObjectStore:
         self.chunks = chunks
         self.verify_calls = 0
         self.closed = False
+        self.multipart_creates = 0
+        self.uploaded_parts: list[tuple[int, bytes]] = []
+        self.completed_parts: tuple[S3CompletedPart, ...] | None = None
+        self.abort_calls = 0
+        self.empty_creates = 0
+        self.abort_error = False
+        self.complete_error = False
 
     async def verify_transfer_object(
         self,
@@ -105,6 +125,57 @@ class _ObjectStore:
             yield _chunks()
         finally:
             self.closed = True
+
+    async def create_multipart_upload(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        transfer_metadata: S3TransferObjectMetadata,
+    ) -> S3MultipartUpload:
+        del transfer_metadata
+        self.multipart_creates += 1
+        return S3MultipartUpload(identity=destination, upload_id="multipart-1")
+
+    async def upload_part(
+        self,
+        *,
+        upload: S3MultipartUpload,
+        part_number: int,
+        body: bytes,
+    ) -> S3CompletedPart:
+        del upload
+        self.uploaded_parts.append((part_number, body))
+        return S3CompletedPart(part_number=part_number, etag=f"etag-{part_number}")
+
+    async def complete_multipart_upload(
+        self,
+        *,
+        upload: S3MultipartUpload,
+        completed_parts: tuple[S3CompletedPart, ...],
+        expected_size: int,
+        expected_sha256: str,
+    ) -> S3VerifiedObject:
+        del upload, expected_size, expected_sha256
+        self.completed_parts = completed_parts
+        if self.complete_error:
+            raise RuntimeError("complete failed")
+        return object()  # type: ignore[return-value]
+
+    async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
+        del upload
+        self.abort_calls += 1
+        if self.abort_error:
+            raise RuntimeError("abort failed")
+
+    async def create_empty_immutable(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        transfer_metadata: S3TransferObjectMetadata,
+    ) -> S3VerifiedObject:
+        del destination, transfer_metadata
+        self.empty_creates += 1
+        return object()  # type: ignore[return-value]
 
 
 @pytest.mark.asyncio
@@ -180,6 +251,181 @@ async def test_wrong_direction_or_duplicate_claim_fails_before_s3() -> None:
     assert duplicate.object_store.verify_calls == 0
 
 
+@pytest.mark.asyncio
+async def test_upload_aggregates_bounded_parts_and_publishes_available() -> None:
+    data = b"a" * MULTIPART_PART_BYTES + b"z"
+    digest = hashlib.sha256(data).hexdigest()
+    harness = await _harness(
+        chunks=[],
+        size=len(data),
+        sha256=digest,
+        direction=RuntimeTransferDirection.UPLOAD,
+    )
+
+    result = await harness.servicer.UploadTransfer(
+        _upload_frames(
+            data[:MAX_TRANSFER_CHUNK_BYTES],
+            *(
+                data[offset : offset + MAX_TRANSFER_CHUNK_BYTES]
+                for offset in range(
+                    MAX_TRANSFER_CHUNK_BYTES,
+                    MULTIPART_PART_BYTES,
+                    MAX_TRANSFER_CHUNK_BYTES,
+                )
+            ),
+            b"z",
+        ),
+        _Context(),
+    )
+
+    assert result.status == pb.UPLOAD_TRANSFER_STATUS_SUCCEEDED
+    assert result.actual_size == len(data)
+    assert result.sha256 == digest
+    assert harness.object_store.multipart_creates == 1
+    assert [part[0] for part in harness.object_store.uploaded_parts] == [1, 2]
+    assert [len(part[1]) for part in harness.object_store.uploaded_parts] == [
+        MULTIPART_PART_BYTES,
+        1,
+    ]
+    assert harness.object_store.completed_parts is not None
+    record = await harness.state.get("transfer-1")
+    assert record is not None
+    assert record.phase is RuntimeTransferPhase.AVAILABLE
+    assert record.actual_size == len(data)
+    assert record.actual_sha256 == digest
+    assert record.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
+    assert record.multipart_cleanup_handle is None
+
+
+@pytest.mark.asyncio
+async def test_zero_byte_upload_uses_verified_empty_object_path() -> None:
+    empty_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    harness = await _harness(
+        chunks=[],
+        size=0,
+        sha256=empty_sha256,
+        direction=RuntimeTransferDirection.UPLOAD,
+    )
+
+    result = await harness.servicer.UploadTransfer(_upload_frames(), _Context())
+
+    assert result.status == pb.UPLOAD_TRANSFER_STATUS_SUCCEEDED
+    assert result.actual_size == 0
+    assert result.sha256 == empty_sha256
+    assert harness.object_store.empty_creates == 1
+    assert harness.object_store.multipart_creates == 0
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_invalid_frames_and_auth_before_s3() -> None:
+    invalid = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+    )
+    with pytest.raises(_Abort) as error:
+        await invalid.servicer.UploadTransfer(
+            _frames(
+                pb.UploadTransferFrame(chunk=pb.TransferChunk(offset=0, data=b"a"))
+            ),
+            _Context(),
+        )
+    assert error.value.code is grpc.StatusCode.FAILED_PRECONDITION
+    assert invalid.object_store.multipart_creates == 0
+
+    unauthorized = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+    )
+    with pytest.raises(_Abort) as error:
+        await unauthorized.servicer.UploadTransfer(
+            _upload_frames(b"abc"), _Context(token=None)
+        )
+    assert error.value.code is grpc.StatusCode.UNAUTHENTICATED
+    assert unauthorized.object_store.multipart_creates == 0
+
+    duplicate = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+    )
+    await duplicate.claim()
+    with pytest.raises(_Abort) as error:
+        await duplicate.servicer.UploadTransfer(_upload_frames(b"abc"), _Context())
+    assert error.value.code is grpc.StatusCode.ALREADY_EXISTS
+    assert duplicate.object_store.multipart_creates == 0
+
+
+@pytest.mark.asyncio
+async def test_upload_offset_failure_aborts_and_records_cleanup() -> None:
+    harness = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+    )
+    with pytest.raises(_Abort) as error:
+        await harness.servicer.UploadTransfer(
+            _frames(
+                pb.UploadTransferFrame(
+                    open=pb.UploadTransferOpen(identity=_upload_identity())
+                ),
+                pb.UploadTransferFrame(chunk=pb.TransferChunk(offset=0, data=b"a")),
+                pb.UploadTransferFrame(chunk=pb.TransferChunk(offset=2, data=b"bc")),
+            ),
+            _Context(),
+        )
+
+    assert error.value.code is grpc.StatusCode.DATA_LOSS
+    assert harness.object_store.abort_calls >= 1
+    record = await harness.state.get("transfer-1")
+    assert record is not None
+    assert record.phase is RuntimeTransferPhase.TERMINAL
+    assert record.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
+    assert record.multipart_cleanup_handle is None
+
+
+@pytest.mark.asyncio
+async def test_upload_complete_and_abort_failures_preserve_cleanup_evidence() -> None:
+    complete_failure = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+    )
+    complete_failure.object_store.complete_error = True
+    with pytest.raises(RuntimeError, match="complete failed"):
+        await complete_failure.servicer.UploadTransfer(
+            _upload_frames(b"abc"), _Context()
+        )
+    assert complete_failure.object_store.abort_calls >= 1
+    completed_record = await complete_failure.state.get("transfer-1")
+    assert completed_record is not None
+    assert completed_record.phase is RuntimeTransferPhase.TERMINAL
+    assert completed_record.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
+
+    abort_failure = await _harness(
+        chunks=[],
+        direction=RuntimeTransferDirection.UPLOAD,
+    )
+    abort_failure.object_store.abort_error = True
+    with pytest.raises(_Abort) as error:
+        await abort_failure.servicer.UploadTransfer(
+            _frames(
+                pb.UploadTransferFrame(
+                    open=pb.UploadTransferOpen(identity=_upload_identity())
+                ),
+                pb.UploadTransferFrame(chunk=pb.TransferChunk(offset=0, data=b"abc")),
+                pb.UploadTransferFrame(
+                    complete=pb.UploadTransferComplete(actual_size=3, sha256="0" * 64)
+                ),
+            ),
+            _Context(),
+        )
+    assert error.value.code is grpc.StatusCode.DATA_LOSS
+    failed_record = await abort_failure.state.get("transfer-1")
+    assert failed_record is not None
+    assert failed_record.phase is RuntimeTransferPhase.TERMINAL
+    assert (
+        failed_record.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+    )
+    assert failed_record.multipart_cleanup_handle == "multipart-1"
+
+
 class _Harness:
     def __init__(
         self,
@@ -215,7 +461,10 @@ async def _harness(
     sha256: str = _DIGEST,
     direction: RuntimeTransferDirection = RuntimeTransferDirection.DOWNLOAD,
 ) -> _Harness:
-    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    state = InMemoryRuntimeTransferStateStore(
+        config=_config(maximum_bytes=max(100, size)),
+        clock=lambda: _NOW,
+    )
     admitted = await state.admit(
         _admission(direction, size, sha256), lease_id="lease-1"
     )
@@ -286,6 +535,44 @@ def _request() -> pb.DownloadTransferRequest:
     )
 
 
+async def _frames(
+    *frames: pb.UploadTransferFrame,
+) -> AsyncIterator[pb.UploadTransferFrame]:
+    for frame in frames:
+        yield frame
+
+
+def _upload_identity() -> pb.TransferIdentity:
+    return pb.TransferIdentity(
+        transfer_id="transfer-1",
+        attempt_id="attempt-1",
+        runtime_id="runtime-1",
+        runner_generation=1,
+    )
+
+
+def _upload_frames(*chunks: bytes) -> AsyncIterator[pb.UploadTransferFrame]:
+    data = b"".join(chunks)
+    frames = [
+        pb.UploadTransferFrame(open=pb.UploadTransferOpen(identity=_upload_identity()))
+    ]
+    offset = 0
+    for chunk in chunks:
+        frames.append(
+            pb.UploadTransferFrame(chunk=pb.TransferChunk(offset=offset, data=chunk))
+        )
+        offset += len(chunk)
+    frames.append(
+        pb.UploadTransferFrame(
+            complete=pb.UploadTransferComplete(
+                actual_size=len(data),
+                sha256=hashlib.sha256(data).hexdigest(),
+            )
+        )
+    )
+    return _frames(*frames)
+
+
 def _admission(
     direction: RuntimeTransferDirection,
     size: int,
@@ -304,20 +591,20 @@ def _admission(
         overwrite=False,
         expected_size=size,
         expected_sha256=sha256,
-        product_maximum_size=10,
-        provider_maximum_size=10,
+        product_maximum_size=max(10, size),
+        provider_maximum_size=max(10, size),
         deadline_at=_NOW + timedelta(minutes=5),
         source_expires_at=None,
         resource_class="file",
     )
 
 
-def _config() -> RuntimeTransferConfig:
+def _config(*, maximum_bytes: int = 100) -> RuntimeTransferConfig:
     return RuntimeTransferConfig(
         per_runtime_attempts=4,
-        per_runtime_bytes=100,
+        per_runtime_bytes=maximum_bytes,
         deployment_attempts=4,
-        deployment_bytes=100,
+        deployment_bytes=maximum_bytes,
         admission_lease=timedelta(minutes=5),
         consumer_lease=timedelta(minutes=1),
         stream_lease=timedelta(seconds=30),
