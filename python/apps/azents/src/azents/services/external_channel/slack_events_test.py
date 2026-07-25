@@ -1198,13 +1198,19 @@ async def test_file_reply_streams_in_order_and_completes_once() -> None:
         "/upload/2",
         "/api/files.completeUploadExternal",
     ]
-    first_acquisition = json.loads(requests[0][3])
-    second_acquisition = json.loads(requests[2][3])
-    assert first_acquisition == {"filename": "first.txt", "length": 3}
-    assert second_acquisition == {"filename": "second.txt", "length": 4}
+    assert requests[0][2]["content-type"].startswith(
+        "application/x-www-form-urlencoded"
+    )
+    first_acquisition = parse_qs(requests[0][3].decode(), strict_parsing=True)
+    assert first_acquisition == {"filename": ["first.txt"], "length": ["3"]}
     assert requests[1][3] == b"abc"
     assert requests[1][2]["content-length"] == "3"
     assert "authorization" not in requests[1][2]
+    assert requests[2][2]["content-type"].startswith(
+        "application/x-www-form-urlencoded"
+    )
+    second_acquisition = parse_qs(requests[2][3].decode(), strict_parsing=True)
+    assert second_acquisition == {"filename": ["second.txt"], "length": ["4"]}
     assert requests[3][3] == b"1234"
     assert requests[3][2]["content-length"] == "4"
     assert requests[4][2]["content-type"].startswith(
