@@ -77,25 +77,86 @@ The bearer credential remains authoritative for Runtime ID and desired generatio
 
 The generator input set becomes Provider Control, Runner Control, Runner Transfer, and Transfer Coordinator. Generated `*_pb2.py` and `*_pb2_grpc.py` files and the Pyright generated-file exclusions cover all four services.
 
+### Exact Runner transfer message matrix
+
+All protobuf enums include only an `UNSPECIFIED = 0` sentinel plus the values listed
+below. Services reject the sentinel on every request and never emit it on success.
+
+| Message | Field | Type and presence | Validation |
+| --- | --- | --- | --- |
+| `TransferIdentity` | `transfer_id` | string, non-empty | 1–128 UTF-8 bytes |
+|  | `attempt_id` | string, non-empty | 1–128 UTF-8 bytes |
+|  | `runtime_id` | string, non-empty | 1–128 UTF-8 bytes |
+|  | `runner_generation` | required `uint64` | greater than zero |
+| `TransferChunk` | `offset` | required `uint64` | exactly next expected offset |
+|  | `data` | required `bytes` | 1–262,144 bytes |
+| `DownloadTransferRequest` | `identity` | required message | validated as above |
+| `DownloadTransferFrame` | `payload` | required `oneof` | `chunk` or `complete` |
+| `DownloadTransferComplete` | `actual_size` | `optional uint64`, required presence | exact admitted size, including zero |
+|  | `sha256` | required string | 64 lowercase hexadecimal characters |
+| `UploadTransferFrame` | `payload` | required `oneof` | `open`, `chunk`, or `complete` |
+| `UploadTransferOpen` | `identity` | required message | first frame only |
+| `UploadTransferComplete` | `actual_size` | `optional uint64`, required presence | Runner validation input, including zero |
+|  | `sha256` | required string | 64 lowercase hexadecimal characters |
+| `UploadTransferResult` | `status` | required enum | `SUCCEEDED` only; failures use gRPC status |
+|  | `actual_size` | `optional uint64`, required presence | Control-authoritative value, including zero |
+|  | `sha256` | required string | Control-authoritative value |
+
+`TransferDirection` is `DOWNLOAD` or `UPLOAD`. `UploadTransferStatus` contains only
+`SUCCEEDED`; the RPC does not return an error-as-success envelope.
+
 ## Interface contract: bounded Runner Control correlation
 
 Extend `runtime_runner_control.proto` without adding bytes to the Control stream.
 
-A top-level `RunnerTransferIntent` delivered in `RunnerControlMessage` contains:
+The exact added messages are:
 
-- shared transfer identity and direction;
-- initiating `operation_id` and nullable owner Session correlation already authorized by the trusted caller;
-- authorized Runtime path and overwrite policy;
-- expected size and optional expected SHA-256;
-- absolute deadline;
-- protocol version and capability; and
-- a bounded request/correlation ID.
+| Message | Field | Type and presence | Validation |
+| --- | --- | --- | --- |
+| `RunnerTransferIntent` | `identity` | required `TransferIdentity` | exact state-bound identity |
+|  | `direction` | required `TransferDirection` | non-sentinel |
+|  | `operation_id` | required string | 1–128 UTF-8 bytes |
+|  | `owner_session_id` | optional string | presence signed; 1–128 bytes when present |
+|  | `runtime_path` | required string | 1–4,096 UTF-8 bytes |
+|  | `overwrite` | `optional bool`, required presence | explicit policy value |
+|  | `expected_size` | `optional uint64`, required presence | admitted size, including zero |
+|  | `expected_sha256` | optional string | 64 lowercase hexadecimal characters |
+|  | `deadline_at` | required timestamp | timezone-aware and before logical expiry |
+|  | `protocol_version` | required string | exactly `2026-07-25` |
+|  | `capability` | required string | exactly `file.transfer.v1` |
+|  | `dispatch_id` | required string | 1–128 UTF-8 bytes; stable idempotency key |
+| `RunnerTransferCancel` | `identity` | required `TransferIdentity` | exact state-bound identity |
+|  | `operation_id` | required string | exact initiating operation |
+|  | `dispatch_id` | required string | exact bound dispatch |
+|  | `reason` | required enum | `CALLER`, `DEADLINE`, `SUPERSEDED`, or `SHUTDOWN` |
+| `RunnerTransferResult` | `identity` | required `TransferIdentity` | exact state-bound identity |
+|  | `operation_id` | required string | exact initiating operation |
+|  | `dispatch_id` | required string | exact bound dispatch |
+|  | `outcome` | required enum | `SUCCEEDED`, `FAILED`, or `CANCELLED` |
+|  | `actual_size` | optional `uint64` | present only with verified size evidence |
+|  | `sha256` | optional string | present only with verified hash evidence |
+|  | `destination_committed` | `optional bool`, required presence | meaningful only for download |
+|  | `failure` | optional enum | bounded transfer failure classification |
 
-A top-level `RunnerTransferCancel` contains only transfer/attempt/operation correlation and cancellation classification. A top-level `RunnerTransferResult` returned in `RunnerMessage` contains only identity, operation correlation, bounded terminal classification, actual size/SHA-256 when applicable, and Runtime destination commit evidence for download. It contains no file bytes, local temporary path, object identity, credential, or unbounded error text.
+`RunnerTransferIntent` and `RunnerTransferCancel` are new top-level alternatives in
+`RunnerControlMessage`; `RunnerTransferResult` is a new top-level alternative in
+`RunnerMessage`. No message contains unbounded free-form error text, file bytes, a local
+temporary path, object identity, credential, or storage authority.
+
+The added closed enums are exact:
+
+- `RunnerTransferCancelReason`: `CALLER`, `DEADLINE`, `SUPERSEDED`, `SHUTDOWN`;
+- `RunnerTransferOutcome`: `SUCCEEDED`, `FAILED`, `CANCELLED`; and
+- `RunnerTransferFailure`: `UNAVAILABLE`, `ALREADY_CLAIMED`,
+  `RESOURCE_EXHAUSTED`, `DEADLINE_EXCEEDED`, `CANCELLED`,
+  `INTEGRITY_FAILED`, `PROTOCOL_VIOLATION`, `STREAM_FAILED`,
+  `DESTINATION_FAILED`.
+
+Each also has an `UNSPECIFIED = 0` sentinel that is rejected on input.
 
 Routing reuses the existing Redis-backed Runtime Coordination request/reply and operation metadata boundary only for bounded intent and status:
 
-- coordinator dispatch appends one metadata-only transfer-intent request;
+- coordinator dispatch produces one stable logical metadata-only transfer intent;
 - the Runner gRPC bridge maps that request to `RunnerTransferIntent` rather than `RunnerOperationRequest.body_chunks`;
 - no transfer body stream is created or read from Runtime Coordination;
 - ordered cancellation maps to `RunnerTransferCancel` for the same operation;
@@ -109,25 +170,156 @@ Transfer intent admission and execution do not consume or block the data-stream 
 
 Add `proto/azents/runtime_control/v1/runtime_transfer_coordinator.proto`, generated artifacts, shared immutable request/result values, and `GrpcRuntimeTransferCoordinatorClient` in `python/libs/azents-runtime-control`.
 
-The coordinator service exposes metadata-only RPCs equivalent to:
+The exact service methods are:
 
-- `AdmitTransfer` — atomically admit a metadata-only preparing attempt and return bounded attempt state plus an opaque admitted object handle;
-- `MarkTransferReady` — accept trusted verified object metadata and transition a download attempt to ready;
-- `DispatchTransfer` — bind the current accepted Runner generation and append one bounded Runner Control intent;
-- `CancelTransfer` — persist cancellation, correlate ordered Runner cancellation, and return bounded state;
-- `GetVerifiedObject` — return an opaque unexpired verified-object handle and manifest only for an authorized upload consumer;
-- `ClaimConsumer`, `AcknowledgeConsumer`, and `AbandonConsumer` — own the trusted consumer lease lifecycle;
-- `SettleTransfer` — record one idempotent bounded terminal outcome;
-- `RecordCleanup` — record cleanup pending, complete, or retryable failure independently from feature success; and
-- `GetTransferStatus` — return bounded metadata/status for operation correlation and cleanup observation.
+```protobuf
+service RuntimeTransferCoordinator {
+  rpc AdmitTransfer(AdmitTransferRequest) returns (AdmitTransferResponse);
+  rpc MarkTransferReady(MarkTransferReadyRequest)
+      returns (TransferStatusResponse);
+  rpc DispatchTransfer(DispatchTransferRequest)
+      returns (TransferStatusResponse);
+  rpc CancelTransfer(CancelTransferRequest) returns (TransferStatusResponse);
+  rpc GetVerifiedObject(GetVerifiedObjectRequest)
+      returns (GetVerifiedObjectResponse);
+  rpc ClaimConsumer(ClaimConsumerRequest) returns (TransferStatusResponse);
+  rpc AcknowledgeConsumer(AcknowledgeConsumerRequest)
+      returns (TransferStatusResponse);
+  rpc AbandonConsumer(AbandonConsumerRequest)
+      returns (TransferStatusResponse);
+  rpc SettleTransfer(SettleTransferRequest)
+      returns (TransferStatusResponse);
+  rpc RecordCleanup(RecordCleanupRequest)
+      returns (TransferStatusResponse);
+  rpc GetTransferStatus(GetTransferStatusRequest)
+      returns (TransferStatusResponse);
+}
+```
 
-RPC naming may be adjusted only before generation if protobuf style or an existing symbol requires it; the operation set and authority boundaries may not be reduced or combined into a generic arbitrary-transition endpoint.
+Shared coordinator messages:
 
-Coordinator messages may contain transfer and attempt identity, Runtime identity/generation, operation/Session/Agent correlation when applicable, direction, Runtime path, overwrite, manifests, deadlines, source expiry, resource class, revisions, lease/claim identifiers, terminal classifications, cleanup status, and opaque internal handles. They must not contain `bytes` fields, Base64 body fields, repeated chunks, provider URLs, bearer credentials, public download URLs, or Runner credentials.
+| Message | Fields | Required semantics |
+| --- | --- | --- |
+| `CoordinatorTransferIdentity` | `transfer_id`, `attempt_id`, `runtime_id`, `desired_generation`, `direction`, `operation_id`, optional `session_id`, optional `agent_id` | IDs 1–128 bytes; generation greater than zero; optional presence is significant and signed |
+| `ExpectedManifest` | `size`, optional `sha256` | `size` is `optional uint64` with required presence; SHA-256 is 64 lowercase hexadecimal characters when present |
+| `ObjectManifest` | `size`, `sha256` | `size` is `optional uint64` with required presence; SHA-256 is exactly 64 lowercase hexadecimal characters |
+| `CoordinatorTransferStatus` | identity, `phase`, `revision`, optional `accepted_runner_generation`, optional `dispatch_id`, `dispatch_status`, optional expected/actual manifest, `deadline_at`, `logical_expires_at`, optional `outcome`, optional `failure`, `cleanup_status`, `cancellation_requested` | bounded projection of one state record; no body or storage authority |
+| `OpaqueObjectHandle` | `value` | 1–512 UTF-8 bytes; attempt-scoped; never parsed by Runner-facing code |
+
+Closed coordinator enums mirror the complete Phase 3 values:
+
+- phase: `PREPARING`, `READY`, `STREAMING`, `VERIFYING`, `AVAILABLE`,
+  `CONSUMING`, `CONSUMED`, `COMMITTED`, `TERMINAL`;
+- direction: `DOWNLOAD`, `UPLOAD`;
+- outcome: `SUCCEEDED`, `FAILED`, `CANCELLED`, `EXPIRED`, `SUPERSEDED`;
+- failure: `ADMISSION`, `CANCELLED`, `EXPIRED`, `FENCED`, `INTEGRITY`,
+  `STREAM`, `CONSUMER`;
+- cleanup: `NOT_REQUIRED`, `PENDING`, `COMPLETE`, `RETRYABLE_FAILURE`; and
+- cancellation reason: `CALLER`, `DEADLINE`, `SUPERSEDED`, `SHUTDOWN`; and
+- dispatch status: `NOT_BOUND`, `BOUND`, `ENQUEUED`.
+
+Every enum also has an `UNSPECIFIED = 0` sentinel rejected on requests.
+
+Exact RPC request and response fields:
+
+| RPC | Request fields beyond `CoordinatorTransferIdentity` | Response |
+| --- | --- | --- |
+| `AdmitTransfer` | `lease_id` (1–128), `runtime_path` (1–4,096), `optional bool overwrite` with required presence, required `ExpectedManifest`, `optional uint64` product/provider maxima with required presence, `deadline_at`, optional `source_expires_at`, `resource_class` (1–64) | status plus required admitted opaque handle |
+| `MarkTransferReady` | `expected_revision`, required opaque handle, required object manifest | status |
+| `DispatchTransfer` | `expected_revision`, `dispatch_id` (1–128 stable caller idempotency key) | status with bound generation, dispatch ID, and `ENQUEUED` |
+| `CancelTransfer` | `expected_revision`, cancellation reason enum | status |
+| `GetVerifiedObject` | `expected_revision`, `consumer_claim_id` (1–128) | status plus required verified opaque handle and actual manifest |
+| `ClaimConsumer` | `expected_revision`, `consumer_claim_id` (1–128) | status |
+| `AcknowledgeConsumer` | `expected_revision`, `consumer_claim_id` | status |
+| `AbandonConsumer` | `expected_revision`, `consumer_claim_id` | status |
+| `SettleTransfer` | `expected_revision`, outcome, optional failure in a `oneof` with explicit no-failure success marker | status |
+| `RecordCleanup` | `expected_revision`, cleanup status | status |
+| `GetTransferStatus` | no additional fields | status |
+
+`AdmitTransferRequest` carries the identity fields directly because no record exists yet.
+All other requests carry one required `CoordinatorTransferIdentity` message.
+`TransferStatusResponse` contains exactly one `CoordinatorTransferStatus`.
+`GetVerifiedObject` succeeds only after an exclusive consumer claim with the same claim
+ID. `SettleTransfer` accepts `SUCCEEDED` only with the explicit no-failure marker and
+requires the exact outcome/failure pair: `FAILED` with `ADMISSION`, `FENCED`,
+`INTEGRITY`, `STREAM`, or `CONSUMER`; `CANCELLED` with `CANCELLED`; `EXPIRED`
+with `EXPIRED`; and `SUPERSEDED` with `FENCED`.
+
+Coordinator messages must not contain `bytes` fields, Base64 body fields, repeated chunks,
+provider URLs, bearer credentials, public download URLs, Runner credentials, bucket
+fields, or object-key fields.
+
+Phase 4 adds nullable `agent_id` to `RuntimeTransferAdmission` and its memory/Redis
+serialization so the signed coordinator scope is preserved by the sole state authority.
+It remains bounded metadata and does not change product authorization ownership.
 
 Opaque object handles are attempt-scoped trusted-service values. They expose no bucket, endpoint, credential, or presigned authority and are never accepted from Runner-facing RPCs. Later feature phases may pass them only to trusted transfer/object helpers; Phase 4 does not add product identity or publication behavior.
 
+Runtime Control validates every opaque handle against the deterministic handle issued for
+that exact transfer attempt before resolving it to the state-owned internal object
+identity. A signed request cannot substitute a handle from another attempt.
+
 Runtime Control remains the only `RuntimeTransferStateStore` owner. The client library never constructs or imports a Transfer State implementation.
+
+## Interface contract: dispatch binding and recoverable delivery
+
+Phase 4 extends the Phase 3 transfer record and both state-store adapters with bounded
+dispatch metadata:
+
+- optional `dispatch_id`;
+- `dispatch_status` with `NOT_BOUND`, `BOUND`, and `ENQUEUED`;
+- optional stable Runtime Coordination `dispatch_request_id`; and
+- `accepted_runner_generation`, which becomes dispatch-bound authority rather than a
+  value first selected by `claim_stream()`.
+
+The store adds two revision-fenced operations:
+
+- `bind_dispatch(...)` requires a live `READY` attempt, current Runtime/desired
+  generation, no cancellation, the caller's stable `dispatch_id`, the current accepted
+  Runner generation, and a deterministic `dispatch_request_id`. It atomically persists
+  those values with `BOUND`. Replaying the identical original revision and values is
+  idempotent; a different dispatch or generation is fenced.
+- `mark_dispatch_enqueued(...)` requires the bound dispatch identity and original
+  operation identity and moves `BOUND` to `ENQUEUED`. Identical replay is idempotent.
+
+`claim_stream()` changes to require `ENQUEUED` and an exact match with the already bound
+accepted Runner generation. It no longer chooses or first persists that generation.
+Memory and Redis implementations must pass the same updated contract suite.
+
+Transfer State and Runtime Coordination remain separate authorities, so dispatch uses an
+explicit recoverable at-least-once saga rather than claiming cross-store exactly-once
+delivery:
+
+1. authenticate and authorize `DispatchTransfer`;
+2. resolve the current accepted Runner connection generation from Runtime Coordination;
+3. call `bind_dispatch()` with the client-supplied stable `dispatch_id` and deterministic
+   request ID derived from transfer, attempt, operation, and dispatch IDs;
+4. idempotently ensure bounded operation metadata exists under the admission's stable
+   `operation_id`, with operation type `file.transfer.v1`, bound Runtime/generation, and
+   deadline, but no body stream;
+5. append the metadata-only intent using the stable request and dispatch IDs;
+6. call `mark_dispatch_enqueued()`; and
+7. return success only from `ENQUEUED`.
+
+A crash before append leaves `BOUND` and retry resumes at step 4. A crash after append but
+before `ENQUEUED` may append the same logical intent again. Control and Runner therefore
+deduplicate identical delivery by `dispatch_id`; they acknowledge duplicate stream entries
+without starting a second transfer task. A conflicting duplicate fails closed. Atomic
+`claim_stream()` remains the final byte-path fence even if duplicate transport entries are
+observed.
+
+Cancellation and terminal correlation use the same stable operation, request, and dispatch
+identities. Operation metadata creation, local terminal append, and final folding are
+idempotent and cannot replace an existing final result. This phase does not introduce a
+distributed transaction or infer success from one store when the other is unavailable.
+
+The existing Runtime Coordination contract receives one additive atomic primitive:
+`ensure_operation_metadata()`. It creates metadata only when absent, returns the existing
+value only when Runtime, generation, operation type, deadline, and transfer correlation
+are identical, and rejects conflict or an incompatible final record without overwriting
+it. Memory and Redis adapters pass the same concurrency contract. Request-stream append
+remains at-least-once and may contain repeated entries with the same stable request and
+dispatch IDs; this does not change ordinary Runner operation routing.
 
 ## Interface contract: trusted-service credentials
 
@@ -141,17 +333,20 @@ Each signed credential contains and validates:
 - exact coordinator RPC operation;
 - issued-at, not-before, and expiry timestamps;
 - Runtime ID;
-- transfer ID and attempt ID when they exist for the operation;
-- direction when applicable;
+- transfer ID and attempt ID;
+- direction;
 - initiating operation ID;
-- nullable Session ID and Agent ID when applicable; and
+- exact nullable Session ID and Agent ID presence and values; and
+- SHA-256 of the canonical protobuf request, binding all request fields including
+  revision, lease/claim/dispatch IDs, manifests, handles, and optional-field presence; and
 - a signature over one canonical bounded encoding.
 
 Issuance requirements:
 
 - API/Worker callers issue a credential immediately before one RPC through a shared signer constructed from deployment root material;
 - lifetime is positive and no more than 60 seconds;
-- not-before cannot be after expiry;
+- `issued_at <= not_before <= expires_at`, future `issued_at` is rejected beyond the
+  configured skew, and maximum lifetime is calculated from `issued_at` to `expires_at`;
 - request fields duplicate applicable claims and must match exactly;
 - credential and bearer values are never logged, persisted in Transfer State, returned in responses, or placed in protobuf payload fields.
 
@@ -167,6 +362,14 @@ Missing, malformed, expired, not-yet-valid, wrong-audience, wrong-service, wrong
 
 The shared coordinator client accepts an injected credential supplier/signer abstraction and adds one bearer credential per call. The library does not read application globals or deployment secrets.
 
+Every RPC credential requires audience, service identity, exact RPC operation, canonical
+request digest, Runtime, transfer, attempt, desired generation, direction, initiating
+operation, and exact nullable Session/Agent presence. `DispatchTransfer` additionally
+binds the dispatch ID through the request digest; consumer methods bind the consumer claim
+ID; `MarkTransferReady` and verified-object methods bind the complete opaque handle and
+manifest; transition methods bind expected revision and terminal/cleanup values. No RPC
+uses a wildcard operation or partially scoped credential.
+
 ## Interface contract: Runner transfer authorization
 
 Every Runner transfer RPC performs this sequence before reading or sending one file byte:
@@ -177,7 +380,8 @@ Every Runner transfer RPC performs this sequence before reading or sending one f
 4. load the current attempt from `RuntimeTransferStateStore`;
 5. reject missing or logically expired state;
 6. require exact transfer ID, attempt ID, Runtime ID, desired generation, direction, deadline, and admissible phase;
-7. require the identity's accepted Runner generation to equal the generation bound by coordinator dispatch and current Runtime Coordination connection state;
+7. require dispatch status `ENQUEUED` and the identity's accepted Runner generation to
+   equal both the state-bound generation and current Runtime Coordination connection;
 8. acquire a direction-specific per-replica stream permit without an unbounded wait queue;
 9. atomically call `claim_stream()` with a fresh claim ID and expected revision; and
 10. begin S3 I/O only after the claim succeeds.
@@ -192,7 +396,7 @@ Terminal attempts are not reopened. An interrupted nonterminal stream requires a
 
 - acquires the transfer record and transfer-owned object only through state-derived internal identity;
 - verifies object metadata before streaming;
-- uses `S3Service.iter_object_body()` with the configured 256 KiB maximum chunk size and explicit context-managed close behavior;
+- uses `S3Service.iter_chunks()` with the configured 256 KiB maximum chunk size and explicit context-managed close behavior;
 - computes authoritative byte count and SHA-256 incrementally while yielding sequential frames;
 - records only coalesced bounded progress, never one state mutation per frame;
 - checks cancellation, context liveness, deadline, logical expiry, and durable Runner authority between bounded reads;
@@ -263,6 +467,7 @@ Phase 4 may add backend settings for workspace S3, chunk/part limits, per-replic
 | Workstream | Owner | Owned paths | Depends on | Output | Validation |
 | --- | --- | --- | --- | --- | --- |
 | Protocol and generated artifacts | `/root/runtime-transfer-implementer` | `proto/azents/runtime_control/v1/`; `python/libs/azents-runtime-control/scripts/generate_proto.py`; generated modules; shared protocol values/tests | This plan | Two typed services, Control intent additions, exact constants, drift-clean generation | library Ruff/format/Pyright/Pytest; generator drift command |
+| Dispatch state and coordination idempotency | `/root/runtime-transfer-implementer` | `python/apps/azents/src/azents/runtime/transfer/`; additive operation-metadata coordination contract/tests | Generated protocol; Phase 3 stores | Dispatch-bound generation/state, memory/Redis parity, stable operation identity | shared state/coordination contract, concurrency, crash-boundary tests |
 | Trusted coordinator client/auth/service | `/root/runtime-transfer-implementer` | shared coordinator client/value modules; backend credential/auth/coordinator modules and tests | Generated protocol; Phase 3 state | Per-RPC scoped credentials, typed coordinator service, metadata-only state ownership | auth matrix; real coordinator RPC with memory state; no-bytes schema inspection |
 | Runner transfer service and storage pipeline | `/root/runtime-transfer-implementer` | backend Runner transfer gRPC modules/tests; focused transfer helpers | Generated protocol; state; S3 primitives | Authenticated/fenced download and upload, bounded hashing/multipart/cancellation | protocol/adversarial tests; >4 MiB real gRPC tests |
 | Control intent and Runtime Control composition | `/root/runtime-transfer-implementer` | Runner Control bridge/mapping tests; `control_server.py` and focused tests | Coordinator dispatch; transfer service | Bounded intent/cancel/result correlation and single-owner lifespan wiring | heartbeat concurrency; existing Control regressions; shutdown tests |
@@ -275,7 +480,8 @@ Integration order:
 1. add and generate the two new proto services plus Runner Control metadata-only messages;
 2. add shared constants, immutable values, schema guards, and coordinator client contract;
 3. implement and test coordinator credential signing/authentication independently;
-4. implement typed coordinator state operations and bounded intent dispatch;
+4. extend the shared state contract with dispatch binding and implement the recoverable
+   duplicate-safe intent saga;
 5. implement Runner transfer per-RPC authorization and stream claim;
 6. implement bounded download and upload pipelines over Phase 3 S3 primitives;
 7. wire Transfer State and process-lifetime S3 into Runtime Control;
@@ -302,7 +508,8 @@ Integration order:
 - Runner credential is rejected by coordinator authentication;
 - coordinator credential is rejected by Runner Control and Runner Transfer authentication;
 - credential values and bearer metadata are absent from logs, responses, state serialization, and exception text;
-- injected-clock boundary cases cover exact not-before, expiry, and allowed skew.
+- injected-clock boundary cases cover future issued-at, exact not-before, expiry, allowed
+  skew, `issued_at <= not_before <= expires_at`, and lifetime measured from issued-at.
 
 ### Coordinator service
 
@@ -310,7 +517,12 @@ Integration order:
 - unauthorized calls invoke no state, Runtime Coordination, or S3 collaborator;
 - admission rejection performs no object allocation, dispatch, or S3 work;
 - ready and dispatch validate attempt, revision, direction, Runtime/generation, deadline, and object manifest;
-- dispatch binds the current accepted Runner connection generation and appends exactly one metadata-only intent;
+- dispatch binds the current accepted Runner connection generation before stream claim,
+  uses stable operation/request/dispatch IDs, and reaches one `ENQUEUED` logical intent
+  through idempotent retry;
+- crash before append and crash after append-before-state-mark recover without changing
+  generation or operation identity; repeated transport entries are acknowledged and
+  deduplicated by dispatch ID without starting another transfer task;
 - cancellation is persistent/idempotent, orders one bounded cancel message, and promptly correlates terminal operation state;
 - verified-object handoff requires upload available state, live expiry, correct consumer scope, and an exclusive claim;
 - consumer acknowledge/abandon, settlement, cleanup status, and status reads preserve existing Phase 3 fencing/idempotency;
@@ -320,6 +532,8 @@ Integration order:
 
 - unauthorized, stale desired generation, stale accepted Runner generation, wrong Runtime, wrong direction, wrong attempt, wrong phase, cancelled, expired, and terminal requests fail before S3 read/create;
 - concurrent duplicate claims allow exactly one stream;
+- `claim_stream()` rejects `NOT_BOUND`/`BOUND` dispatch status and cannot first select the
+  accepted Runner generation;
 - a same-desired-generation reconnect cannot reopen an already claimed attempt;
 - download object missing/metadata mismatch/read failure/midstream cancellation/deadline produces no completion frame;
 - download chunks use exact offsets, remain at or below 256 KiB, hash correctly, close S3 body on every exit, and never call `download_bytes()`;
@@ -345,6 +559,8 @@ Integration order:
 Run an actual `grpc.aio.server()` and real channels without message-size options:
 
 - authenticate a synthetic Runner and maintain a registered `ConnectRunner` stream;
+- create distinct Control and Transfer `grpc.aio.Channel` objects and verify they use
+  independent underlying connections even when both endpoints are identical;
 - transfer deterministic content larger than 4 MiB in each direction through the new RPC;
 - assert exact final size and SHA-256;
 - inspect every observed frame and assert serialized message size remains bounded independently from complete file size;
@@ -399,6 +615,8 @@ Run pre-commit on every changed file before commit. Docker-backed Redis/RustFS c
 - no global gRPC message-limit increase;
 - every Runner data RPC reauthenticates and rechecks durable generation before first byte;
 - transfer/attempt/direction/deadline/phase/accepted-generation fencing and atomic claim are complete;
+- dispatch generation binding and the cross-store at-least-once saga are revision-fenced,
+  stable-ID based, recoverable after each partial-failure boundary, and duplicate-safe;
 - coordinator credentials are short-lived, audience/service/operation/scope bound, and non-interchangeable with Runner credentials;
 - coordinator calls fail before state access when unauthorized and never carry bodies;
 - upload/download memory and message bounds are calculable and independent from complete file size;
