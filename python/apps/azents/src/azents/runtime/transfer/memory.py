@@ -1,0 +1,630 @@
+"""Process-local metadata-only Runtime transfer state store."""
+
+import asyncio
+import dataclasses
+from collections.abc import Callable
+from datetime import datetime
+
+from azents.runtime.transfer.data import (
+    RuntimeTransferAdmission,
+    RuntimeTransferCleanupStatus,
+    RuntimeTransferConfig,
+    RuntimeTransferFailure,
+    RuntimeTransferObject,
+    RuntimeTransferOutcome,
+    RuntimeTransferPage,
+    RuntimeTransferPhase,
+    RuntimeTransferProgress,
+    RuntimeTransferRecord,
+    logical_expiry,
+    validate_admission_time,
+)
+from azents.runtime.transfer.policy import phase_transition_allowed
+
+
+class InMemoryRuntimeTransferStateStore:
+    """One-process transfer store guarded by a single asyncio lock."""
+
+    def __init__(
+        self,
+        *,
+        config: RuntimeTransferConfig,
+        clock: Callable[[], datetime],
+    ) -> None:
+        self.config = config
+        self.clock = clock
+        self.lock = asyncio.Lock()
+        self.records: dict[tuple[str, str], RuntimeTransferRecord] = {}
+        self.current_attempts: dict[str, str] = {}
+        self.released: set[tuple[str, str]] = set()
+
+    async def admit(
+        self, admission: RuntimeTransferAdmission, *, lease_id: str
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            try:
+                validate_admission_time(admission, now)
+            except ValueError:
+                return None
+            key = (admission.transfer_id, admission.attempt_id)
+            existing = self.records.get(key)
+            if existing is not None:
+                return existing
+            current = self._current(admission.transfer_id)
+            if (
+                current is not None
+                and current.phase is not RuntimeTransferPhase.TERMINAL
+            ):
+                return None
+            if admission.expected_size > min(
+                admission.product_maximum_size, admission.provider_maximum_size
+            ):
+                return None
+            if not self._has_capacity(admission):
+                return None
+            record = RuntimeTransferRecord(
+                admission=admission,
+                phase=RuntimeTransferPhase.PREPARING,
+                revision=1,
+                lease_id=lease_id,
+                lease_expires_at=now + self.config.admission_lease,
+                created_at=now,
+                updated_at=now,
+                logical_expires_at=logical_expiry(now, admission.source_expires_at),
+                accepted_runner_generation=None,
+                object=None,
+                actual_size=None,
+                actual_sha256=None,
+                stream_claim_id=None,
+                progress=None,
+                cancellation_requested_at=None,
+                consumer_claim_id=None,
+                consumer_lease_expires_at=None,
+                consumer_acknowledged_at=None,
+                terminal_outcome=None,
+                terminal_expires_at=None,
+                cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
+                failure=None,
+            )
+            self.records[key] = record
+            self.current_attempts[admission.transfer_id] = admission.attempt_id
+            return record
+
+    async def get(self, transfer_id: str) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            return self._current(transfer_id)
+
+    async def mark_ready(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        expected_revision: int,
+        object: RuntimeTransferObject,
+    ) -> RuntimeTransferRecord | None:
+        return await self._move(
+            transfer_id,
+            attempt_id,
+            expected_revision,
+            RuntimeTransferPhase.PREPARING,
+            RuntimeTransferPhase.READY,
+            runtime_id=runtime_id,
+            generation=desired_generation,
+            object=object,
+        )
+
+    async def claim_stream(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        return await self._move(
+            transfer_id,
+            attempt_id,
+            expected_revision,
+            RuntimeTransferPhase.READY,
+            RuntimeTransferPhase.STREAMING,
+            runtime_id=runtime_id,
+            generation=desired_generation,
+            claim_id=claim_id,
+            accepted_runner_generation=accepted_runner_generation,
+        )
+
+    async def record_progress(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        bytes_transferred: int,
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+            )
+            if (
+                record is None
+                or bytes_transferred > record.admission.expected_size
+                or (
+                    record.progress
+                    and bytes_transferred < record.progress.bytes_transferred
+                )
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    progress=RuntimeTransferProgress(bytes_transferred, now),
+                )
+            )
+
+    async def request_cancellation(
+        self, transfer_id: str, *, attempt_id: str, expected_revision: int
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            record = self._exact(transfer_id, attempt_id)
+            if record is None or record.revision != expected_revision:
+                return None
+            if (
+                record.phase is RuntimeTransferPhase.TERMINAL
+                or record.cancellation_requested_at is not None
+            ):
+                return record
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    cancellation_requested_at=now,
+                )
+            )
+
+    async def begin_verification(
+        self, transfer_id: str, *, attempt_id: str, expected_revision: int
+    ) -> RuntimeTransferRecord | None:
+        return await self._move(
+            transfer_id,
+            attempt_id,
+            expected_revision,
+            RuntimeTransferPhase.STREAMING,
+            RuntimeTransferPhase.VERIFYING,
+        )
+
+    async def publish_available(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        return await self._complete_phase(
+            transfer_id,
+            attempt_id,
+            expected_revision,
+            RuntimeTransferPhase.AVAILABLE,
+            actual_size,
+            actual_sha256,
+        )
+
+    async def mark_committed(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        return await self._complete_phase(
+            transfer_id,
+            attempt_id,
+            expected_revision,
+            RuntimeTransferPhase.COMMITTED,
+            actual_size,
+            actual_sha256,
+        )
+
+    async def claim_consumer(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.AVAILABLE,
+                now,
+            )
+            if record is None or record.consumer_claim_id is not None:
+                return None
+            moved = dataclasses.replace(
+                record,
+                phase=RuntimeTransferPhase.CONSUMING,
+                revision=record.revision + 1,
+                updated_at=now,
+                consumer_claim_id=claim_id,
+                consumer_lease_expires_at=now + self.config.consumer_lease,
+            )
+            return self._put(moved)
+
+    async def acknowledge_consumer(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.CONSUMING,
+                now,
+            )
+            if record is None or record.consumer_claim_id != claim_id:
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.CONSUMED,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    consumer_acknowledged_at=now,
+                )
+            )
+
+    async def abandon_consumer(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.CONSUMING,
+                now,
+            )
+            if record is None or record.consumer_claim_id != claim_id:
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.AVAILABLE,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    consumer_claim_id=None,
+                    consumer_lease_expires_at=None,
+                )
+            )
+
+    async def settle(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        outcome: RuntimeTransferOutcome,
+        failure: RuntimeTransferFailure | None,
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            record = self._exact(transfer_id, attempt_id)
+            if record is None or record.revision != expected_revision:
+                return None
+            if record.phase is RuntimeTransferPhase.TERMINAL:
+                return (
+                    record
+                    if record.terminal_outcome is outcome and record.failure is failure
+                    else None
+                )
+            if (
+                record.cancellation_requested_at is not None
+                and outcome is RuntimeTransferOutcome.SUCCEEDED
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.TERMINAL,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    terminal_outcome=outcome,
+                    failure=failure,
+                    terminal_expires_at=now + self.config.terminal_ttl,
+                )
+            )
+
+    async def record_cleanup(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        status: RuntimeTransferCleanupStatus,
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            record = self._exact(transfer_id, attempt_id)
+            if record is None or record.revision != expected_revision:
+                return None
+            if record.cleanup_status is status:
+                return record
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    cleanup_status=status,
+                )
+            )
+
+    async def release_admission(
+        self, transfer_id: str, *, attempt_id: str, lease_id: str
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            record = self._exact(transfer_id, attempt_id)
+            if record is None or record.lease_id != lease_id:
+                return None
+            key = (transfer_id, attempt_id)
+            if key in self.released:
+                return record
+            self.released.add(key)
+            return record
+
+    async def list_stale(
+        self, *, cursor: str | None, limit: int
+    ) -> RuntimeTransferPage:
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            if limit <= 0 or limit > self.config.list_page_size:
+                raise ValueError("invalid page limit")
+            keys = sorted(
+                key
+                for key, record in self.records.items()
+                if record.phase is RuntimeTransferPhase.TERMINAL
+                or key in self.released
+                or record.cleanup_status
+                is not RuntimeTransferCleanupStatus.NOT_REQUIRED
+            )
+            start = int(cursor) if cursor is not None else 0
+            page = tuple(self.records[key] for key in keys[start : start + limit])
+            next_cursor = (
+                str(start + len(page)) if start + len(page) < len(keys) else None
+            )
+            return RuntimeTransferPage(page, next_cursor)
+
+    async def purge_terminal(self, *, limit: int) -> int:
+        now = self._now()
+        async with self.lock:
+            if limit <= 0:
+                raise ValueError("limit must be positive")
+            removed = 0
+            for key in sorted(self.records):
+                record = self.records[key]
+                if removed == limit:
+                    break
+                if (
+                    record.terminal_expires_at is not None
+                    and record.terminal_expires_at <= now
+                ):
+                    del self.records[key]
+                    self.released.discard(key)
+                    removed += 1
+                    if self.current_attempts.get(key[0]) == key[1]:
+                        self.current_attempts.pop(key[0])
+            return removed
+
+    def _now(self) -> datetime:
+        now = self.clock()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("clock must return timezone-aware datetime")
+        return now
+
+    def _current(self, transfer_id: str) -> RuntimeTransferRecord | None:
+        attempt = self.current_attempts.get(transfer_id)
+        return None if attempt is None else self.records.get((transfer_id, attempt))
+
+    def _exact(self, transfer_id: str, attempt_id: str) -> RuntimeTransferRecord | None:
+        return self.records.get((transfer_id, attempt_id))
+
+    def _active(
+        self,
+        transfer_id: str,
+        attempt_id: str,
+        revision: int,
+        phase: RuntimeTransferPhase,
+        now: datetime,
+    ) -> RuntimeTransferRecord | None:
+        self._expire(now)
+        record = self._exact(transfer_id, attempt_id)
+        if (
+            record is None
+            or self.current_attempts.get(transfer_id) != attempt_id
+            or record.revision != revision
+            or record.phase is not phase
+            or (transfer_id, attempt_id) in self.released
+            or record.lease_expires_at <= now
+            or record.logical_expires_at <= now
+        ):
+            return None
+        return record
+
+    async def _move(
+        self,
+        transfer_id: str,
+        attempt_id: str,
+        revision: int,
+        current: RuntimeTransferPhase,
+        target: RuntimeTransferPhase,
+        *,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        object: RuntimeTransferObject | None = None,
+        claim_id: str | None = None,
+        accepted_runner_generation: int | None = None,
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            record = self._active(transfer_id, attempt_id, revision, current, now)
+            if (
+                record is None
+                or (
+                    runtime_id is not None and record.admission.runtime_id != runtime_id
+                )
+                or (
+                    generation is not None
+                    and record.admission.desired_generation != generation
+                )
+                or not phase_transition_allowed(
+                    record.admission.direction, current, target
+                )
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    phase=target,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    object=object if object is not None else record.object,
+                    stream_claim_id=claim_id
+                    if claim_id is not None
+                    else record.stream_claim_id,
+                    accepted_runner_generation=accepted_runner_generation
+                    if accepted_runner_generation is not None
+                    else record.accepted_runner_generation,
+                )
+            )
+
+    async def _complete_phase(
+        self,
+        transfer_id: str,
+        attempt_id: str,
+        revision: int,
+        target: RuntimeTransferPhase,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id, attempt_id, revision, RuntimeTransferPhase.VERIFYING, now
+            )
+            if (
+                record is None
+                or record.cancellation_requested_at is not None
+                or not phase_transition_allowed(
+                    record.admission.direction, record.phase, target
+                )
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    phase=target,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    actual_size=actual_size,
+                    actual_sha256=actual_sha256,
+                )
+            )
+
+    def _has_capacity(self, admission: RuntimeTransferAdmission) -> bool:
+        active = [
+            record
+            for key, record in self.records.items()
+            if key not in self.released
+            and record.phase is not RuntimeTransferPhase.TERMINAL
+        ]
+        runtime = [
+            record
+            for record in active
+            if record.admission.runtime_id == admission.runtime_id
+        ]
+        return (
+            len(active) < self.config.deployment_attempts
+            and len(runtime) < self.config.per_runtime_attempts
+            and sum(item.admission.expected_size for item in active)
+            + admission.expected_size
+            <= self.config.deployment_bytes
+            and sum(item.admission.expected_size for item in runtime)
+            + admission.expected_size
+            <= self.config.per_runtime_bytes
+        )
+
+    def _expire(self, now: datetime) -> None:
+        for key, record in list(self.records.items()):
+            if (
+                record.phase is not RuntimeTransferPhase.TERMINAL
+                and record.logical_expires_at <= now
+            ):
+                self.records[key] = dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.TERMINAL,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    terminal_outcome=RuntimeTransferOutcome.EXPIRED,
+                    failure=RuntimeTransferFailure.EXPIRED,
+                    terminal_expires_at=now + self.config.terminal_ttl,
+                )
+                self.released.add(key)
+            elif (
+                record.consumer_lease_expires_at is not None
+                and record.consumer_lease_expires_at <= now
+            ):
+                self.records[key] = dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.AVAILABLE,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    consumer_claim_id=None,
+                    consumer_lease_expires_at=None,
+                )
+            elif record.lease_expires_at <= now:
+                self.released.add(key)
+
+    def _put(self, record: RuntimeTransferRecord) -> RuntimeTransferRecord:
+        self.records[(record.admission.transfer_id, record.admission.attempt_id)] = (
+            record
+        )
+        return record
