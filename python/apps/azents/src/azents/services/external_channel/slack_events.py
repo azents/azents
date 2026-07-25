@@ -3,10 +3,12 @@
 import datetime
 import hashlib
 import json
+import logging
 import re
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import parse_qs
 
 import httpx
 
@@ -39,6 +41,19 @@ _SLACK_USER_REFERENCE = re.compile(r"<@([A-Z0-9]+)(?:\|[^>]+)?>|@([UW][A-Z0-9]+)
 _SLACK_CHANNEL_REFERENCE = re.compile(
     r"<#([CG][A-Z0-9]+)(?:\|[^>]+)?>|#([CG][A-Z0-9]+)"
 )
+_SLACK_DIAGNOSTIC_ARGUMENT_NAMES = (
+    "alt_txt",
+    "channel_id",
+    "file_id",
+    "files",
+    "filename",
+    "initial_comment",
+    "length",
+    "thread_ts",
+    "title",
+)
+
+logger = logging.getLogger(__name__)
 
 
 class SlackEventNormalizationError(ValueError):
@@ -1152,10 +1167,22 @@ class SlackConversationClient:
                     params=params,
                 )
         except httpx.RequestError as error:
+            logger.warning(
+                "Slack API request failed before a response was received",
+                exc_info=True,
+                extra={
+                    "slack_api_path": path,
+                    "slack_api_method": method,
+                },
+            )
             raise SlackProviderTemporaryError(
                 "Slack request did not produce a response."
             ) from error
         if response.status_code == 429:
+            logger.warning(
+                "Slack API rate limited a request",
+                extra=_slack_response_log_extra(response),
+            )
             retry_after = response.headers.get("Retry-After", "1")
             try:
                 retry_after_seconds = int(retry_after)
@@ -1163,6 +1190,10 @@ class SlackConversationClient:
                 retry_after_seconds = 1
             raise SlackProviderRateLimited(retry_after_seconds)
         if response.status_code >= 500:
+            logger.warning(
+                "Slack API returned a server error",
+                extra=_slack_response_log_extra(response),
+            )
             raise SlackProviderTemporaryError("Slack is temporarily unavailable.")
         return response
 
@@ -1171,14 +1202,26 @@ class SlackConversationClient:
         try:
             payload: object = response.json()
         except ValueError as error:
+            logger.error(
+                "Slack API returned a non-JSON response",
+                extra=_slack_response_log_extra(response),
+            )
             raise SlackProviderTemporaryError(
                 "Slack response body is not valid JSON."
             ) from error
         if not isinstance(payload, dict):
+            logger.error(
+                "Slack API returned a malformed JSON response",
+                extra=_slack_response_log_extra(response),
+            )
             raise SlackProviderTemporaryError("Slack response body is malformed.")
         if response.status_code < 400 and payload.get("ok") is True:
             return payload
         error_code = payload.get("error")
+        logger.error(
+            "Slack API rejected a request",
+            extra=_slack_response_log_extra(response, payload),
+        )
         if error_code == "missing_scope":
             raise SlackProviderPermissionDenied("Slack App permissions are incomplete.")
         if error_code in {
@@ -1215,6 +1258,90 @@ class SlackConversationClient:
             else "unknown_error"
         )
         raise SlackProviderRequestRejected(normalized_error_code)
+
+
+def _slack_response_log_extra(
+    response: httpx.Response,
+    payload: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Return safe Slack API diagnostics without logging user or credential data."""
+    request = _response_request(response)
+    request_content_type = (
+        request.headers.get("content-type") if request is not None else None
+    )
+    request_field_names = _request_field_names(request, request_content_type)
+    response_metadata = payload.get("response_metadata") if payload else None
+    diagnostic_argument_names = _diagnostic_argument_names(response_metadata)
+    return {
+        "slack_api_path": request.url.path if request is not None else None,
+        "slack_api_method": request.method if request is not None else None,
+        "slack_http_status_code": response.status_code,
+        "slack_request_id": response.headers.get("x-slack-req-id"),
+        "slack_request_content_type": request_content_type,
+        "slack_request_field_names": request_field_names,
+        "slack_response_error_code": (
+            _normalized_slack_log_value(payload.get("error")) if payload else None
+        ),
+        "slack_response_warning_code": (
+            _normalized_slack_log_value(payload.get("warning")) if payload else None
+        ),
+        "slack_response_diagnostic_argument_names": diagnostic_argument_names,
+    }
+
+
+def _response_request(response: httpx.Response) -> httpx.Request | None:
+    try:
+        return response.request
+    except RuntimeError:
+        return None
+
+
+def _request_field_names(
+    request: httpx.Request | None,
+    content_type: str | None,
+) -> list[str]:
+    """Capture only request field names, never values such as text or tokens."""
+    if request is None:
+        return []
+    try:
+        body = request.content
+    except httpx.RequestNotRead:
+        return []
+    if content_type is None:
+        return []
+    if content_type.startswith("application/x-www-form-urlencoded"):
+        return sorted(parse_qs(body.decode("utf-8"), keep_blank_values=True))
+    if content_type.startswith("application/json"):
+        try:
+            payload = json.loads(body)
+        except UnicodeDecodeError, ValueError:
+            return []
+        if isinstance(payload, dict):
+            return sorted(key for key in payload if isinstance(key, str))
+    return []
+
+
+def _diagnostic_argument_names(response_metadata: object) -> list[str]:
+    """Extract known parameter names from Slack diagnostics without their values."""
+    if not isinstance(response_metadata, dict):
+        return []
+    messages = response_metadata.get("messages")
+    if not isinstance(messages, list):
+        return []
+    diagnostic_text = " ".join(
+        message for message in messages if isinstance(message, str)
+    )
+    return [
+        argument_name
+        for argument_name in _SLACK_DIAGNOSTIC_ARGUMENT_NAMES
+        if re.search(rf"\b{re.escape(argument_name)}\b", diagnostic_text)
+    ]
+
+
+def _normalized_slack_log_value(value: object) -> str | None:
+    if isinstance(value, str) and re.fullmatch(r"[a-z0-9_]{1,80}", value):
+        return value
+    return None
 
 
 def _required_string(payload: dict[str, object], key: str) -> str:

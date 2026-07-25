@@ -1404,3 +1404,86 @@ async def test_file_reply_completion_file_rejection_is_terminal_failed() -> None
 
     assert result.status == "failed"
     assert result.error_kind == "provider_rejected"
+
+
+@pytest.mark.asyncio
+async def test_file_reply_completion_rejection_logs_safe_diagnostics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Slack rejection logs request shape without file or message contents."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/files.getUploadURLExternal":
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "upload_url": "https://upload.slack.test/upload/1",
+                    "file_id": "F1",
+                },
+            )
+        if request.url.host == "upload.slack.test":
+            await request.aread()
+            return httpx.Response(200, text="OK")
+        return httpx.Response(
+            200,
+            headers={"x-slack-req-id": "REQ1"},
+            json={
+                "ok": False,
+                "error": "invalid_arguments",
+                "response_metadata": {
+                    "messages": [
+                        "invalid initial_comment: confidential outbound message",
+                    ],
+                },
+            },
+        )
+
+    async def content() -> AsyncIterator[bytes]:
+        yield b"private file content"
+
+    with caplog.at_level("ERROR"):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            result = await SlackConversationClient(http).post_file_message(
+                bot_token="xoxb-secret",
+                tenant_id="T1",
+                channel_id="C1",
+                thread_ts="1721600000.000100",
+                markdown_text="confidential outbound message",
+                files=[
+                    SlackOutboundFile(
+                        filename="private-report.txt",
+                        length=20,
+                        content=content,
+                    )
+                ],
+            )
+
+    assert result.status == "failed"
+    assert result.error_kind == "provider_rejected"
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "Slack API rejected a request"
+    )
+    record_extra = record.__dict__
+    assert record_extra["slack_api_path"] == "/api/files.completeUploadExternal"
+    assert record_extra["slack_api_method"] == "POST"
+    assert record_extra["slack_http_status_code"] == 200
+    assert record_extra["slack_request_id"] == "REQ1"
+    assert record_extra["slack_request_content_type"].startswith(
+        "application/x-www-form-urlencoded"
+    )
+    assert record_extra["slack_request_field_names"] == [
+        "channel_id",
+        "files",
+        "initial_comment",
+        "thread_ts",
+    ]
+    assert record_extra["slack_response_error_code"] == "invalid_arguments"
+    assert record_extra["slack_response_diagnostic_argument_names"] == [
+        "initial_comment"
+    ]
+    assert "confidential outbound message" not in caplog.text
+    assert "private file content" not in caplog.text
+    assert "private-report.txt" not in caplog.text
