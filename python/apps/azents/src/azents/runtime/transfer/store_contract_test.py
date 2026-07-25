@@ -56,6 +56,18 @@ class _RedisNamespaceCleaner(Protocol):
     async def delete(self, *keys: bytes) -> int: ...
 
 
+class _RedisRetentionInspector(Protocol):
+    """Redis commands used only for physical retention assertions."""
+
+    async def delete(self, *names: str) -> int: ...
+
+    async def get(self, name: str) -> object: ...
+
+    async def pttl(self, name: str) -> int: ...
+
+    async def zscore(self, name: str, value: str) -> float | None: ...
+
+
 @dataclass(frozen=True)
 class _StoreHarness:
     """Backend-neutral store and deterministic time dependencies."""
@@ -920,6 +932,116 @@ async def test_stale_pagination_remains_stable_when_prior_page_mutates(
 
 
 @pytest.mark.asyncio
+async def test_stale_pagination_continues_after_prior_member_expires(
+    store_harness: _StoreHarness,
+) -> None:
+    """Removing a prior page member cannot skip its successor."""
+    terminals = []
+    for transfer_id in ("expiry-page-a", "expiry-page-b", "expiry-page-c"):
+        admitted = await store_harness.store.admit(
+            replace(_admission(), transfer_id=transfer_id),
+            lease_id=f"{transfer_id}-lease",
+        )
+        assert admitted is not None
+        terminal = await store_harness.store.settle(
+            transfer_id,
+            attempt_id="attempt",
+            expected_revision=admitted.revision,
+            outcome=RuntimeTransferOutcome.FAILED,
+            failure=RuntimeTransferFailure.STREAM,
+        )
+        assert terminal is not None
+        terminals.append(terminal)
+        store_harness.clock.now += timedelta(minutes=1)
+
+    first_page = await store_harness.store.list_stale(cursor=None, limit=1)
+    assert len(first_page.records) == 1
+    assert first_page.cursor is not None
+    assert first_page.records[0].admission.transfer_id == "expiry-page-a"
+
+    first_expiry = terminals[0].terminal_expires_at
+    assert first_expiry is not None
+    store_harness.clock.now = first_expiry
+    second_page = await store_harness.store.list_stale(
+        cursor=first_page.cursor,
+        limit=1,
+    )
+
+    assert len(second_page.records) == 1
+    assert second_page.records[0].admission.transfer_id == "expiry-page-b"
+
+
+@pytest.mark.asyncio
+async def test_final_manifest_matches_ready_object_without_admission_sha(
+    store_harness: _StoreHarness,
+) -> None:
+    """Final integrity evidence must match READY even without an admission SHA."""
+    admission = replace(
+        _admission(),
+        transfer_id="object-manifest",
+        direction=RuntimeTransferDirection.DOWNLOAD,
+        expected_sha256=None,
+    )
+    admitted = await store_harness.store.admit(admission, lease_id="lease")
+    assert admitted is not None
+    ready = await store_harness.store.mark_ready(
+        "object-manifest",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("object", 1, "a" * 64),
+    )
+    assert ready is not None
+    stream = await store_harness.store.claim_stream(
+        "object-manifest",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        claim_id="stream",
+    )
+    assert stream is not None
+    verifying = await store_harness.store.begin_verification(
+        "object-manifest",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="stream",
+        expected_revision=stream.revision,
+    )
+    assert verifying is not None
+    assert (
+        await store_harness.store.mark_committed(
+            "object-manifest",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            accepted_runner_generation=2,
+            claim_id="stream",
+            expected_revision=verifying.revision,
+            actual_size=1,
+            actual_sha256="b" * 64,
+        )
+        is None
+    )
+    committed = await store_harness.store.mark_committed(
+        "object-manifest",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="stream",
+        expected_revision=verifying.revision,
+        actual_size=1,
+        actual_sha256="a" * 64,
+    )
+    assert committed is not None
+
+
+@pytest.mark.asyncio
 async def test_success_requires_direction_final_phase(
     store_harness: _StoreHarness,
 ) -> None:
@@ -939,6 +1061,211 @@ async def test_success_requires_direction_final_phase(
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_redis_terminal_keys_expire_together(
+    redis_url: str,
+) -> None:
+    """Valkey physically expires terminal record, pointer, and index bucket."""
+    client = create_redis_client(redis_url)
+    namespace = f"azents:runtime:transfer:ttl-test:{uuid4().hex}"
+    clock = _Clock(datetime(2035, 1, 1, tzinfo=timezone.utc))
+    config = RuntimeTransferConfig(
+        per_runtime_attempts=1,
+        per_runtime_bytes=10,
+        deployment_attempts=1,
+        deployment_bytes=10,
+        admission_lease=timedelta(minutes=1),
+        consumer_lease=timedelta(minutes=1),
+        terminal_ttl=timedelta(seconds=2),
+        list_page_size=1,
+    )
+    store = RedisRuntimeTransferStateStore(
+        redis=client,
+        config=config,
+        clock=clock,
+        namespace=namespace,
+    )
+    inspector = cast(_RedisRetentionInspector, client)
+    try:
+        admission = replace(
+            _admission(),
+            transfer_id="physical-terminal-expiry",
+            deadline_at=clock.now + timedelta(minutes=1),
+        )
+        admitted = await store.admit(admission, lease_id="lease")
+        assert admitted is not None
+        terminal = await store.settle(
+            "physical-terminal-expiry",
+            attempt_id="attempt",
+            expected_revision=admitted.revision,
+            outcome=RuntimeTransferOutcome.FAILED,
+            failure=RuntimeTransferFailure.STREAM,
+        )
+        assert terminal is not None
+        assert terminal.terminal_expires_at is not None
+        record_key = store.keys.record("physical-terminal-expiry", "attempt")
+        pointer_key = store.keys.current("physical-terminal-expiry")
+        bucket_key = store.keys.terminal_bucket(terminal.terminal_expires_at)
+
+        record_ttl = await inspector.pttl(record_key)
+        pointer_ttl = await inspector.pttl(pointer_key)
+        bucket_ttl = await inspector.pttl(bucket_key)
+        assert 0 < record_ttl <= 2_000
+        assert 0 < pointer_ttl <= 2_000
+        assert 0 < bucket_ttl <= 2_000
+        assert await inspector.zscore(bucket_key, record_key) == 0.0
+        assert await inspector.zscore(store.keys.stale_index(), record_key) is None
+
+        await asyncio.sleep(1.1)
+
+        assert await store.get("physical-terminal-expiry") == terminal
+        refreshed_record_ttl = await inspector.pttl(record_key)
+        refreshed_pointer_ttl = await inspector.pttl(pointer_key)
+        refreshed_bucket_ttl = await inspector.pttl(bucket_key)
+        assert 0 < refreshed_record_ttl <= 1_200
+        assert 0 < refreshed_pointer_ttl <= 1_200
+        assert 0 < refreshed_bucket_ttl <= 1_200
+
+        await asyncio.sleep(1.1)
+
+        assert await inspector.get(record_key) is None
+        assert await inspector.get(pointer_key) is None
+        assert await inspector.get(bucket_key) is None
+    finally:
+        await _delete_transfer_namespace(
+            cast(_RedisNamespaceCleaner, client),
+            namespace,
+        )
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redis_new_current_pointer_outlives_old_terminal_ttl(
+    redis_url: str,
+) -> None:
+    """A retry clears the prior terminal pointer TTL before old metadata expires."""
+    client = create_redis_client(redis_url)
+    namespace = f"azents:runtime:transfer:pointer-test:{uuid4().hex}"
+    clock = _Clock(datetime(2035, 1, 1, tzinfo=timezone.utc))
+    config = RuntimeTransferConfig(
+        per_runtime_attempts=1,
+        per_runtime_bytes=10,
+        deployment_attempts=1,
+        deployment_bytes=10,
+        admission_lease=timedelta(minutes=1),
+        consumer_lease=timedelta(minutes=1),
+        terminal_ttl=timedelta(seconds=2),
+        list_page_size=1,
+    )
+    store = RedisRuntimeTransferStateStore(
+        redis=client,
+        config=config,
+        clock=clock,
+        namespace=namespace,
+    )
+    inspector = cast(_RedisRetentionInspector, client)
+    try:
+        admission = replace(
+            _admission(),
+            transfer_id="retry-pointer",
+            deadline_at=clock.now + timedelta(minutes=1),
+        )
+        admitted = await store.admit(admission, lease_id="old-lease")
+        assert admitted is not None
+        terminal = await store.settle(
+            "retry-pointer",
+            attempt_id="attempt",
+            expected_revision=admitted.revision,
+            outcome=RuntimeTransferOutcome.FAILED,
+            failure=RuntimeTransferFailure.STREAM,
+        )
+        assert terminal is not None
+        retry = await store.admit(
+            replace(admission, attempt_id="retry"),
+            lease_id="retry-lease",
+        )
+        assert retry is not None
+        pointer_key = store.keys.current("retry-pointer")
+        retry_key = store.keys.record("retry-pointer", "retry")
+
+        assert await inspector.pttl(pointer_key) == -1
+        assert await inspector.get(pointer_key) in {retry_key, retry_key.encode()}
+
+        await asyncio.sleep(2.1)
+
+        assert await inspector.get(pointer_key) in {retry_key, retry_key.encode()}
+        assert await store.get("retry-pointer") == retry
+    finally:
+        await _delete_transfer_namespace(
+            cast(_RedisNamespaceCleaner, client),
+            namespace,
+        )
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redis_stale_pagination_continues_after_dangling_members(
+    redis_url: str,
+) -> None:
+    """Dangling index members yield a cursor instead of hiding later work."""
+    client = create_redis_client(redis_url)
+    namespace = f"azents:runtime:transfer:stale-page-test:{uuid4().hex}"
+    clock = _Clock(datetime(2035, 1, 1, tzinfo=timezone.utc))
+    config = RuntimeTransferConfig(
+        per_runtime_attempts=3,
+        per_runtime_bytes=10,
+        deployment_attempts=3,
+        deployment_bytes=10,
+        admission_lease=timedelta(minutes=1),
+        consumer_lease=timedelta(minutes=1),
+        terminal_ttl=timedelta(minutes=1),
+        list_page_size=1,
+    )
+    store = RedisRuntimeTransferStateStore(
+        redis=client,
+        config=config,
+        clock=clock,
+        namespace=namespace,
+    )
+    inspector = cast(_RedisRetentionInspector, client)
+    try:
+        transfer_ids_by_key: dict[str, str] = {}
+        for transfer_id in ("dangling-a", "dangling-b", "dangling-c"):
+            admitted = await store.admit(
+                replace(_admission(), transfer_id=transfer_id),
+                lease_id=f"{transfer_id}-lease",
+            )
+            assert admitted is not None
+            released = await store.release_admission(
+                transfer_id,
+                attempt_id="attempt",
+                lease_id=f"{transfer_id}-lease",
+            )
+            assert released is not None
+            transfer_ids_by_key[store.keys.record(transfer_id, "attempt")] = transfer_id
+
+        ordered_keys = sorted(transfer_ids_by_key)
+        assert await inspector.delete(*ordered_keys[:2]) == 2
+
+        first_page = await store.list_stale(cursor=None, limit=1)
+        assert first_page.records == ()
+        assert first_page.cursor is not None
+
+        second_page = await store.list_stale(
+            cursor=first_page.cursor,
+            limit=1,
+        )
+        assert tuple(
+            record.admission.transfer_id for record in second_page.records
+        ) == (transfer_ids_by_key[ordered_keys[2]],)
+    finally:
+        await _delete_transfer_namespace(
+            cast(_RedisNamespaceCleaner, client),
+            namespace,
+        )
+        await client.aclose()
 
 
 @pytest.mark.asyncio
@@ -963,6 +1290,23 @@ async def test_terminal_metadata_expires_on_access(
 
     store_harness.clock.now = terminal.terminal_expires_at
 
+    assert (
+        await store_harness.store.request_cancellation(
+            "terminal-expiry",
+            attempt_id="attempt",
+            expected_revision=terminal.revision,
+        )
+        is None
+    )
+    assert (
+        await store_harness.store.record_cleanup(
+            "terminal-expiry",
+            attempt_id="attempt",
+            expected_revision=terminal.revision,
+            status=RuntimeTransferCleanupStatus.PENDING,
+        )
+        is None
+    )
     assert await store_harness.store.get("terminal-expiry") is None
 
 

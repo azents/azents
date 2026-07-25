@@ -116,7 +116,10 @@ def test_keys_are_namespaced_deterministic_and_identifier_safe() -> None:
     assert exact != keys.record("transfer:one", "two")
     assert keys.current(transfer_id).startswith("azents:runtime:transfer:test:current:")
     assert keys.stale_index() == "azents:runtime:transfer:test:index:stale"
-    assert keys.terminal_index() == "azents:runtime:transfer:test:index:terminal"
+    assert keys.terminal_bucket(_NOW + timedelta(minutes=7)) == (
+        "azents:runtime:transfer:test:index:terminal:"
+        f"{int((_NOW + timedelta(minutes=7)).timestamp())}"
+    )
     assert (
         keys.deployment_attempts_counter()
         == "azents:runtime:transfer:test:counter:deployment:attempts"

@@ -10,7 +10,6 @@ from botocore.exceptions import ClientError
 
 from azcommon.infra.s3.service import (
     S3CompletedPart,
-    S3MultipartUpload,
     S3ObjectIdentity,
     S3Service,
     S3TransferObjectMetadata,
@@ -106,10 +105,13 @@ class _FakeS3Client:
         self.complete_started = asyncio.Event()
         self.complete_release = asyncio.Event()
         self.fail_upload_part_number: int | None = None
+        self.missing_upload_part_etag = False
         self.head_error_code: str | None = None
         self.mutate_source_before_copy: bytes | None = None
         self.mutate_source_before_part_copy: bytes | None = None
         self.failed_delete_keys: set[str] = set()
+        self.replace_before_delete: _StoredObject | None = None
+        self.replace_destination_before_part_copy: _StoredObject | None = None
         self.next_upload_id = 1
 
     async def head_object(self, **arguments: object) -> dict[str, object]:
@@ -205,6 +207,8 @@ class _FakeS3Client:
             raise RuntimeError("part failed")
         body = _bytes_argument(arguments, "Body")
         parts[part_number] = body
+        if self.missing_upload_part_etag:
+            return {}
         return {"ETag": f"etag-{part_number}"}
 
     async def upload_part_copy(self, **arguments: object) -> dict[str, object]:
@@ -215,6 +219,13 @@ class _FakeS3Client:
             _string_argument(copy_source, "Bucket"),
             _string_argument(copy_source, "Key"),
         )
+        destination = (
+            _string_argument(arguments, "Bucket"),
+            _string_argument(arguments, "Key"),
+        )
+        if self.replace_destination_before_part_copy is not None:
+            self.objects[destination] = self.replace_destination_before_part_copy
+            self.replace_destination_before_part_copy = None
         if self.mutate_source_before_part_copy is not None:
             original = self.objects[source]
             self.objects[source] = _StoredObject(
@@ -227,6 +238,9 @@ class _FakeS3Client:
         source_object = self.objects[source]
         if arguments.get("CopySourceIfMatch") != f'"{_sha256(source_object.body)}"':
             raise _client_error("PreconditionFailed")
+        if self.block_copy:
+            self.copy_started.set()
+            await self.copy_release.wait()
         byte_range = _string_argument(arguments, "CopySourceRange")
         start_text, end_text = byte_range.removeprefix("bytes=").split("-", 1)
         part_number = _integer_argument(arguments, "PartNumber")
@@ -282,9 +296,21 @@ class _FakeS3Client:
 
     async def delete_object(self, **arguments: object) -> dict[str, object]:
         """Delete one fake object."""
+        bucket = _string_argument(arguments, "Bucket")
         key = _string_argument(arguments, "Key")
+        identity = (bucket, key)
+        if self.replace_before_delete is not None:
+            self.objects[identity] = self.replace_before_delete
+            self.replace_before_delete = None
+        stored = self.objects.get(identity)
+        if (
+            stored is not None
+            and arguments.get("IfMatch") is not None
+            and arguments["IfMatch"] != f'"{_sha256(stored.body)}"'
+        ):
+            raise _client_error("PreconditionFailed")
         self.delete_calls.append(key)
-        self.objects.pop((_string_argument(arguments, "Bucket"), key), None)
+        self.objects.pop(identity, None)
         return {}
 
     async def list_objects_v2(self, **arguments: object) -> dict[str, object]:
@@ -555,7 +581,6 @@ async def test_immutable_copy_replaces_untrusted_metadata_and_verifies_size() ->
     assert client.objects[("bucket", "transfer")].metadata == {
         "azents-transfer-sha256": digest
     }
-    assert client.copy_requests[0]["MetadataDirective"] == "REPLACE"
 
 
 @pytest.mark.asyncio
@@ -595,7 +620,7 @@ async def test_immutable_copy_fails_closed_when_source_changes_after_head() -> N
 
     normal_client = _FakeS3Client()
     normal_client.objects[("bucket", "source")] = _StoredObject(original, {}, None)
-    normal_client.mutate_source_before_copy = mutated
+    normal_client.mutate_source_before_part_copy = mutated
     with pytest.raises(ClientError):
         await _service(normal_client).copy_immutable(
             source=source,
@@ -627,6 +652,41 @@ async def test_immutable_copy_fails_closed_when_source_changes_after_head() -> N
         )
     assert ("bucket", "multipart") not in multipart_client.objects
     assert multipart_client.abort_calls == ["upload-1"]
+
+
+@pytest.mark.asyncio
+async def test_copy_part_failure_preserves_racing_destination() -> None:
+    """Pre-completion failure cannot delete an object created by another owner."""
+    original = b"abcdefgh"
+    source = S3ObjectIdentity(bucket="bucket", key="source")
+    destination = S3ObjectIdentity(bucket="bucket", key="transfer")
+    digest = _sha256(original)
+    winner = _StoredObject(
+        original,
+        {"azents-transfer-sha256": digest},
+        None,
+    )
+    client = _FakeS3Client()
+    client.objects[("bucket", "source")] = _StoredObject(original, {}, None)
+    client.replace_destination_before_part_copy = winner
+    client.mutate_source_before_part_copy = b"abcdWXYZ"
+
+    with pytest.raises(ClientError):
+        await _service(client).copy_immutable(
+            source=source,
+            destination=destination,
+            expected_size=len(original),
+            transfer_metadata=S3TransferObjectMetadata(
+                sha256=digest,
+                content_type=None,
+            ),
+            multipart_copy_threshold=100,
+            multipart_part_size=4,
+        )
+
+    assert client.objects[("bucket", "transfer")] == winner
+    assert client.abort_calls == ["upload-1"]
+    assert client.delete_calls == []
 
 
 @pytest.mark.asyncio
@@ -709,6 +769,27 @@ async def test_multipart_part_failure_aborts_upload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_missing_part_etag_aborts_upload() -> None:
+    """A malformed successful part response cannot retain multipart work."""
+    client = _FakeS3Client()
+    service = _service(client)
+    upload = await service.create_multipart_upload(
+        destination=S3ObjectIdentity(bucket="bucket", key="transfer"),
+        transfer_metadata=S3TransferObjectMetadata(
+            sha256=_sha256(b"part"),
+            content_type=None,
+        ),
+    )
+    client.missing_upload_part_etag = True
+
+    with pytest.raises(RuntimeError, match="part ETag"):
+        await service.upload_part(upload=upload, part_number=1, body=b"part")
+
+    assert client.abort_calls == [upload.upload_id]
+    assert upload.upload_id not in client.uploads
+
+
+@pytest.mark.asyncio
 async def test_failed_multipart_completion_aborts_and_removes_destination() -> None:
     """Failed multipart completion leaves no verified destination object."""
     client = _FakeS3Client()
@@ -760,6 +841,34 @@ async def test_ambiguous_multipart_completion_removes_owned_destination() -> Non
 
     assert ("bucket", "transfer") not in client.objects
     assert client.delete_calls == ["transfer"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_condition_preserves_replacement_after_owned_head() -> None:
+    """Conditional delete cannot remove a replacement installed after HEAD."""
+    client = _FakeS3Client()
+    service = _service(client)
+    upload = await service.create_multipart_upload(
+        destination=S3ObjectIdentity(bucket="bucket", key="transfer"),
+        transfer_metadata=S3TransferObjectMetadata(
+            sha256=_sha256(b"part"),
+            content_type=None,
+        ),
+    )
+    part = await service.upload_part(upload=upload, part_number=1, body=b"part")
+    client.complete_then_raise = True
+    winner = _StoredObject(b"winner", {"owner": "other"}, None)
+    client.replace_before_delete = winner
+
+    with pytest.raises(ClientError):
+        await service.complete_multipart_upload(
+            upload=upload,
+            completed_parts=(part,),
+            expected_size=4,
+            expected_sha256=_sha256(b"part"),
+        )
+
+    assert client.objects[("bucket", "transfer")] == winner
 
 
 @pytest.mark.asyncio
@@ -962,15 +1071,20 @@ async def test_abort_is_idempotent() -> None:
 
 @pytest.mark.asyncio
 async def test_multipart_manifest_rejects_gaps() -> None:
-    """Multipart completion refuses non-consecutive part evidence."""
+    """Multipart completion aborts non-consecutive part evidence."""
     client = _FakeS3Client()
     service = _service(client)
+    upload = await service.create_multipart_upload(
+        destination=S3ObjectIdentity(bucket="bucket", key="transfer"),
+        transfer_metadata=S3TransferObjectMetadata(
+            sha256=_sha256(b"ok"),
+            content_type=None,
+        ),
+    )
+
     with pytest.raises(ValueError, match="ordered consecutive"):
         await service.complete_multipart_upload(
-            upload=S3MultipartUpload(
-                identity=S3ObjectIdentity(bucket="bucket", key="transfer"),
-                upload_id="upload-1",
-            ),
+            upload=upload,
             completed_parts=(
                 S3CompletedPart(part_number=1, etag="one"),
                 S3CompletedPart(part_number=3, etag="three"),
@@ -978,3 +1092,6 @@ async def test_multipart_manifest_rejects_gaps() -> None:
             expected_size=2,
             expected_sha256=_sha256(b"ok"),
         )
+
+    assert client.abort_calls == [upload.upload_id]
+    assert upload.upload_id not in client.uploads

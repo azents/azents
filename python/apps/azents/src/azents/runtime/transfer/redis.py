@@ -8,7 +8,7 @@ import secrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import AsyncContextManager, Protocol, cast
 
 from redis.asyncio import Redis
@@ -27,6 +27,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferProgress,
     RuntimeTransferRecord,
     logical_expiry,
+    terminal_expiry,
     validate_admission_time,
 )
 from azents.runtime.transfer.policy import phase_transition_allowed
@@ -63,9 +64,15 @@ class _RedisTransferPipeline(Protocol):
 
     def multi(self) -> None: ...
 
-    def set(self, name: str, value: str | bytes) -> object: ...
+    def set(
+        self,
+        name: str,
+        value: str | bytes,
+        *,
+        keepttl: bool = False,
+    ) -> object: ...
 
-    def pexpireat(self, name: str, when: int) -> object: ...
+    def pexpire(self, name: str, time: int, *, lt: bool) -> object: ...
 
     def delete(self, *names: str) -> object: ...
 
@@ -94,13 +101,11 @@ class _RedisTransferClient(Protocol):
 
     async def zrange(self, name: str, start: int, end: int) -> list[object]: ...
 
-    async def zrank(self, name: str, value: str) -> int | None: ...
-
-    async def zrangebyscore(
+    async def zrangebylex(
         self,
         name: str,
         minimum: str,
-        maximum: float,
+        maximum: str,
         *,
         start: int,
         num: int,
@@ -197,9 +202,9 @@ class _RedisTransferKeys:
         """Return the shared stale-attempt index key."""
         return f"{self.namespace}:index:stale"
 
-    def terminal_index(self) -> str:
-        """Return the shared terminal-attempt index key."""
-        return f"{self.namespace}:index:terminal"
+    def terminal_bucket(self, expires_at: datetime) -> str:
+        """Return one TTL-bound terminal-attempt index bucket."""
+        return f"{self.namespace}:index:terminal:{int(expires_at.timestamp())}"
 
     def deployment_attempts_counter(self) -> str:
         """Return the deployment-wide active-attempt counter key."""
@@ -250,6 +255,15 @@ class _RedisTransferRecordEnvelope:
 
     record: RuntimeTransferRecord
     admission_released: bool
+
+
+@dataclass(frozen=True)
+class _RedisStaleCursor:
+    """Opaque stale-list continuation state."""
+
+    kind: str
+    member: str
+    bucket_epoch: int | None
 
 
 def _key_component(value: str) -> str:
@@ -624,12 +638,12 @@ class RedisRuntimeTransferStateStore:
             record_key = self.keys.record(admission.transfer_id, admission.attempt_id)
             existing = await self._load_entry(entries, record_key, now)
             if existing is not None:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return existing.record
             try:
                 validate_admission_time(admission, now)
             except ValueError:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             current = await self._load_current_entry(
                 entries,
@@ -640,13 +654,13 @@ class RedisRuntimeTransferStateStore:
                 current is not None
                 and current[1].record.phase is not RuntimeTransferPhase.TERMINAL
             ):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             if admission.expected_size > min(
                 admission.product_maximum_size,
                 admission.provider_maximum_size,
             ) or not self._has_capacity(entries, admission):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             record = RuntimeTransferRecord(
                 admission=admission,
@@ -679,6 +693,7 @@ class RedisRuntimeTransferStateStore:
             await self._commit(
                 token,
                 entries,
+                now,
                 pointer_sets={self.keys.current(admission.transfer_id): record_key},
             )
             return record
@@ -690,18 +705,28 @@ class RedisRuntimeTransferStateStore:
             entries = await self._load_reclaimed_entries(now)
             current_key = await self._current_key(transfer_id)
             if current_key is None:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
+            stored = await self._load_record(current_key)
+            expired_bucket_removals: dict[str, set[str]] = {}
+            if stored is not None and _terminal_expired(stored.record, now):
+                terminal_expiry_at = stored.record.terminal_expires_at
+                assert terminal_expiry_at is not None
+                expired_bucket_removals[
+                    self.keys.terminal_bucket(terminal_expiry_at)
+                ] = {current_key}
             envelope = await self._load_entry(entries, current_key, now)
             if envelope is None:
                 await self._commit(
                     token,
                     entries,
+                    now,
                     pointer_deletes={self.keys.current(transfer_id)},
                     record_deletes={current_key},
+                    terminal_bucket_removals=expired_bucket_removals,
                 )
                 return None
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return envelope.record
 
     async def mark_ready(
@@ -797,7 +822,7 @@ class RedisRuntimeTransferStateStore:
                     )
                 )
             ):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             assert key is not None and envelope is not None
             record = dataclasses.replace(
@@ -807,7 +832,7 @@ class RedisRuntimeTransferStateStore:
                 progress=RuntimeTransferProgress(bytes_transferred, now),
             )
             entries[key] = dataclasses.replace(envelope, record=record)
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return record
 
     async def request_cancellation(
@@ -824,13 +849,13 @@ class RedisRuntimeTransferStateStore:
                 now,
             )
             if envelope is None or envelope.record.revision != expected_revision:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             if (
                 envelope.record.phase is RuntimeTransferPhase.TERMINAL
                 or envelope.record.cancellation_requested_at is not None
             ):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return envelope.record
             assert key is not None
             record = dataclasses.replace(
@@ -840,7 +865,7 @@ class RedisRuntimeTransferStateStore:
                 cancellation_requested_at=now,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return record
 
     async def begin_verification(
@@ -954,7 +979,7 @@ class RedisRuntimeTransferStateStore:
             ) or (
                 envelope is not None and envelope.record.consumer_claim_id is not None
             ):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             assert key is not None and envelope is not None
             record = dataclasses.replace(
@@ -966,7 +991,7 @@ class RedisRuntimeTransferStateStore:
                 consumer_lease_expires_at=now + self.config.consumer_lease,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return record
 
     async def acknowledge_consumer(
@@ -1025,11 +1050,11 @@ class RedisRuntimeTransferStateStore:
                 now,
             )
             if envelope is None or envelope.record.revision != expected_revision:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             record = envelope.record
             if record.phase is RuntimeTransferPhase.TERMINAL:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return (
                     record
                     if record.terminal_outcome is outcome and record.failure is failure
@@ -1039,7 +1064,7 @@ class RedisRuntimeTransferStateStore:
                 record.cancellation_requested_at is not None
                 and outcome is RuntimeTransferOutcome.SUCCEEDED
             ):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             if outcome is RuntimeTransferOutcome.SUCCEEDED and (
                 key is None
@@ -1056,7 +1081,7 @@ class RedisRuntimeTransferStateStore:
                     and record.phase is not RuntimeTransferPhase.CONSUMED
                 )
             ):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             assert key is not None
             settled = dataclasses.replace(
@@ -1066,10 +1091,10 @@ class RedisRuntimeTransferStateStore:
                 updated_at=now,
                 terminal_outcome=outcome,
                 failure=failure,
-                terminal_expires_at=now + self.config.terminal_ttl,
+                terminal_expires_at=terminal_expiry(now, self.config.terminal_ttl),
             )
             entries[key] = dataclasses.replace(envelope, record=settled)
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return settled
 
     async def record_cleanup(
@@ -1091,10 +1116,10 @@ class RedisRuntimeTransferStateStore:
                 now,
             )
             if envelope is None or envelope.record.revision != expected_revision:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             if envelope.record.cleanup_status is status:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return envelope.record
             assert key is not None
             record = dataclasses.replace(
@@ -1104,7 +1129,7 @@ class RedisRuntimeTransferStateStore:
                 cleanup_status=status,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return record
 
     async def release_admission(
@@ -1121,67 +1146,140 @@ class RedisRuntimeTransferStateStore:
                 now,
             )
             if envelope is None or envelope.record.lease_id != lease_id:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             if envelope.admission_released:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return envelope.record
             assert key is not None
             entries[key] = dataclasses.replace(envelope, admission_released=True)
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return envelope.record
 
     async def list_stale(
         self, *, cursor: str | None, limit: int
     ) -> RuntimeTransferPage:
-        """List one bounded stale-record page using its sorted-set index."""
+        """List one bounded stale page across live and TTL-bound indexes."""
         now = self._now()
         async with self._locked() as token:
             entries = await self._load_reclaimed_entries(now)
-            await self._commit(token, entries)
             if limit <= 0 or limit > self.config.list_page_size:
+                await self._commit(token, entries, now)
                 raise ValueError("invalid page limit")
-            start = 0
-            if cursor is not None:
-                cursor_member = _decode_stale_cursor(cursor)
-                rank = await self.redis.zrank(self.keys.stale_index(), cursor_member)
-                if rank is None:
-                    raise ValueError("stale page cursor is no longer available")
-                start = rank
-            members = _decode_redis_texts(
-                await self.redis.zrange(
-                    self.keys.stale_index(),
-                    start,
-                    start + limit,
-                )
-            )
-            page_members = members[:limit]
+            state = None if cursor is None else _decode_stale_cursor(cursor)
             records: list[RuntimeTransferRecord] = []
             deleted: set[str] = set()
             pointer_deletes: set[str] = set()
-            for member in page_members:
-                envelope = await self._load_record(member)
-                if envelope is None or _terminal_expired(envelope.record, now):
-                    deleted.add(member)
-                    transfer_id = self._record_transfer_id(member)
-                    if await self._current_key(transfer_id) == member:
-                        pointer_deletes.add(self.keys.current(transfer_id))
-                    continue
-                records.append(envelope.record)
+            bucket_removals: dict[str, set[str]] = {}
+            next_cursor: str | None = None
+
+            if state is None or state.kind == "stale":
+                minimum = "-" if state is None else f"({state.member}"
+                members = _decode_redis_texts(
+                    await self.redis.zrangebylex(
+                        self.keys.stale_index(),
+                        minimum,
+                        "+",
+                        start=0,
+                        num=limit + 1,
+                    )
+                )
+                last_member: str | None = None
+                for member in members:
+                    if len(records) == limit:
+                        break
+                    last_member = member
+                    envelope = await self._load_entry(entries, member, now)
+                    if envelope is None:
+                        deleted.add(member)
+                        continue
+                    if envelope.record.phase is RuntimeTransferPhase.TERMINAL:
+                        continue
+                    records.append(envelope.record)
+                if last_member is not None and (
+                    len(records) == limit or len(members) == limit + 1
+                ):
+                    next_cursor = _encode_stale_cursor(
+                        _RedisStaleCursor("stale", last_member, None)
+                    )
+
+            if (
+                next_cursor is None
+                and len(records) < limit
+                and (state is None or state.kind in {"stale", "terminal"})
+            ):
+                for bucket_epoch in _terminal_bucket_epochs(
+                    now,
+                    self.config.terminal_ttl,
+                    expired=False,
+                ):
+                    if (
+                        state is not None
+                        and state.kind == "terminal"
+                        and state.bucket_epoch is not None
+                        and bucket_epoch < state.bucket_epoch
+                    ):
+                        continue
+                    bucket = self.keys.terminal_bucket(
+                        datetime.fromtimestamp(bucket_epoch, tz=now.tzinfo)
+                    )
+                    minimum = (
+                        f"({state.member}"
+                        if (
+                            state is not None
+                            and state.kind == "terminal"
+                            and state.bucket_epoch == bucket_epoch
+                        )
+                        else "-"
+                    )
+                    remaining = limit - len(records)
+                    members = _decode_redis_texts(
+                        await self.redis.zrangebylex(
+                            bucket,
+                            minimum,
+                            "+",
+                            start=0,
+                            num=remaining + 1,
+                        )
+                    )
+                    last_member = None
+                    for member in members:
+                        if len(records) == limit:
+                            break
+                        last_member = member
+                        envelope = await self._load_entry(entries, member, now)
+                        if envelope is None:
+                            deleted.add(member)
+                            bucket_removals.setdefault(bucket, set()).add(member)
+                            transfer_id = self._record_transfer_id(member)
+                            if await self._current_key(transfer_id) == member:
+                                pointer_deletes.add(self.keys.current(transfer_id))
+                            continue
+                        if envelope.record.phase is not RuntimeTransferPhase.TERMINAL:
+                            bucket_removals.setdefault(bucket, set()).add(member)
+                            continue
+                        records.append(envelope.record)
+                    if last_member is not None and (
+                        len(records) == limit or len(members) == remaining + 1
+                    ):
+                        next_cursor = _encode_stale_cursor(
+                            _RedisStaleCursor(
+                                "terminal",
+                                last_member,
+                                bucket_epoch,
+                            )
+                        )
+                        break
+
             await self._commit(
                 token,
                 entries,
+                now,
                 pointer_deletes=pointer_deletes,
                 record_deletes=deleted,
+                terminal_bucket_removals=bucket_removals,
             )
-            return RuntimeTransferPage(
-                records=tuple(records),
-                cursor=(
-                    _encode_stale_cursor(members[limit])
-                    if len(members) > limit
-                    else None
-                ),
-            )
+            return RuntimeTransferPage(records=tuple(records), cursor=next_cursor)
 
     async def purge_terminal(self, *, limit: int) -> int:
         """Purge at most ``limit`` terminal records whose retention has elapsed."""
@@ -1189,43 +1287,59 @@ class RedisRuntimeTransferStateStore:
         async with self._locked() as token:
             entries = await self._load_reclaimed_entries(now)
             if limit <= 0:
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 raise ValueError("limit must be positive")
-            members = _decode_redis_texts(
-                await self.redis.zrangebyscore(
-                    self.keys.terminal_index(),
-                    "-inf",
-                    now.timestamp(),
-                    start=0,
-                    num=limit,
-                )
-            )
             deleted: set[str] = set()
             pointer_deletes: set[str] = set()
-            for member in members:
-                envelope = await self._load_record(member)
-                if envelope is None:
-                    deleted.add(member)
-                    continue
-                if (
-                    envelope.record.terminal_expires_at is None
-                    or envelope.record.terminal_expires_at > now
-                ):
-                    continue
-                current_key = await self._current_key(
-                    envelope.record.admission.transfer_id
+            bucket_removals: dict[str, set[str]] = {}
+            bucket_deletes: set[str] = set()
+            for bucket_epoch in _terminal_bucket_epochs(
+                now,
+                self.config.terminal_ttl,
+                expired=True,
+            ):
+                remaining = limit - len(deleted)
+                if remaining <= 0:
+                    break
+                bucket = self.keys.terminal_bucket(
+                    datetime.fromtimestamp(bucket_epoch, tz=now.tzinfo)
                 )
-                if current_key == member:
-                    pointer_deletes.add(
-                        self.keys.current(envelope.record.admission.transfer_id)
+                members = _decode_redis_texts(
+                    await self.redis.zrangebylex(
+                        bucket,
+                        "-",
+                        "+",
+                        start=0,
+                        num=remaining,
                     )
-                entries.pop(member, None)
-                deleted.add(member)
+                )
+                for member in members:
+                    envelope = await self._load_record(member)
+                    bucket_removals.setdefault(bucket, set()).add(member)
+                    if envelope is not None and not _terminal_expired(
+                        envelope.record,
+                        now,
+                    ):
+                        continue
+                    transfer_id = (
+                        self._record_transfer_id(member)
+                        if envelope is None
+                        else envelope.record.admission.transfer_id
+                    )
+                    if await self._current_key(transfer_id) == member:
+                        pointer_deletes.add(self.keys.current(transfer_id))
+                    entries.pop(member, None)
+                    deleted.add(member)
+                if len(members) < remaining:
+                    bucket_deletes.add(bucket)
             await self._commit(
                 token,
                 entries,
+                now,
                 pointer_deletes=pointer_deletes,
                 record_deletes=deleted,
+                terminal_bucket_removals=bucket_removals,
+                terminal_bucket_deletes=bucket_deletes,
             )
             return len(deleted)
 
@@ -1307,7 +1421,7 @@ class RedisRuntimeTransferStateStore:
                     )
                 )
             ):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             assert key is not None and envelope is not None
             record = dataclasses.replace(
@@ -1324,7 +1438,7 @@ class RedisRuntimeTransferStateStore:
                 else envelope.record.accepted_runner_generation,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return record
 
     async def _complete_phase(
@@ -1366,6 +1480,9 @@ class RedisRuntimeTransferStateStore:
                 envelope is not None
                 and (
                     actual_size != envelope.record.admission.expected_size
+                    or envelope.record.object is None
+                    or actual_size != envelope.record.object.size
+                    or actual_sha256 != envelope.record.object.sha256
                     or (
                         envelope.record.admission.expected_sha256 is not None
                         and actual_sha256 != envelope.record.admission.expected_sha256
@@ -1377,7 +1494,7 @@ class RedisRuntimeTransferStateStore:
                     )
                 )
             ):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             assert key is not None and envelope is not None
             record = dataclasses.replace(
@@ -1389,7 +1506,7 @@ class RedisRuntimeTransferStateStore:
                 actual_sha256=actual_sha256,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return record
 
     async def _resolve_consumer(
@@ -1422,7 +1539,7 @@ class RedisRuntimeTransferStateStore:
             ) or (
                 envelope is not None and envelope.record.consumer_claim_id != claim_id
             ):
-                await self._commit(token, entries)
+                await self._commit(token, entries, now)
                 return None
             assert key is not None and envelope is not None
             record = dataclasses.replace(
@@ -1437,7 +1554,7 @@ class RedisRuntimeTransferStateStore:
                 consumer_acknowledged_at=now if acknowledged else None,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
-            await self._commit(token, entries)
+            await self._commit(token, entries, now)
             return record
 
     def _now(self) -> datetime:
@@ -1606,7 +1723,7 @@ class RedisRuntimeTransferStateStore:
                 updated_at=now,
                 terminal_outcome=RuntimeTransferOutcome.EXPIRED,
                 failure=RuntimeTransferFailure.EXPIRED,
-                terminal_expires_at=now + self.config.terminal_ttl,
+                terminal_expires_at=terminal_expiry(now, self.config.terminal_ttl),
             )
             admission_released = True
         if (
@@ -1703,10 +1820,13 @@ class RedisRuntimeTransferStateStore:
         self,
         token: str,
         entries: dict[str, _RedisTransferRecordEnvelope],
+        now: datetime,
         *,
         pointer_sets: dict[str, str] | None = None,
         pointer_deletes: set[str] | None = None,
         record_deletes: set[str] | None = None,
+        terminal_bucket_removals: dict[str, set[str]] | None = None,
+        terminal_bucket_deletes: set[str] | None = None,
     ) -> None:
         """Persist bounded records, indexes, and counters under lock ownership."""
         active = {
@@ -1725,17 +1845,36 @@ class RedisRuntimeTransferStateStore:
                 envelope.record.admission.runtime_id,
                 [],
             ).append(envelope.record)
+        pending_pointer_sets = pointer_sets or {}
+        pointer_expiries: dict[str, int] = {}
+        for key, envelope in entries.items():
+            record = envelope.record
+            pointer = self.keys.current(record.admission.transfer_id)
+            if (
+                record.phase is RuntimeTransferPhase.TERMINAL
+                and record.terminal_expires_at is not None
+                and pointer not in pending_pointer_sets
+                and await self._current_key(record.admission.transfer_id) == key
+            ):
+                pointer_expiries[pointer] = _terminal_retention_milliseconds(
+                    record,
+                    now,
+                )
         await self._owned_transaction(
             token,
             lambda pipeline: self._queue_commit(
                 pipeline,
                 entries,
+                now,
                 active,
                 runtime_ids,
                 runtime_records,
-                pointer_sets or {},
+                pending_pointer_sets,
                 pointer_deletes or set(),
                 record_deletes or set(),
+                pointer_expiries,
+                terminal_bucket_removals or {},
+                terminal_bucket_deletes or set(),
             ),
         )
 
@@ -1763,29 +1902,38 @@ class RedisRuntimeTransferStateStore:
         self,
         pipeline: _RedisTransferPipeline,
         entries: dict[str, _RedisTransferRecordEnvelope],
+        now: datetime,
         active: dict[str, _RedisTransferRecordEnvelope],
         runtime_ids: set[str],
         runtime_records: dict[str, list[RuntimeTransferRecord]],
         pointer_sets: dict[str, str],
         pointer_deletes: set[str],
         record_deletes: set[str],
+        pointer_expiries: dict[str, int],
+        terminal_bucket_removals: dict[str, set[str]],
+        terminal_bucket_deletes: set[str],
     ) -> None:
         """Queue one owner-fenced bounded state rewrite."""
         for key, envelope in entries.items():
-            pipeline.set(key, _encode_record_envelope(envelope))
+            pipeline.set(key, _encode_record_envelope(envelope), keepttl=True)
             if envelope.record.terminal_expires_at is not None:
-                pipeline.pexpireat(
+                pipeline.pexpire(
                     key,
-                    int(envelope.record.terminal_expires_at.timestamp() * 1000),
+                    _terminal_retention_milliseconds(envelope.record, now),
+                    lt=True,
                 )
-            self._queue_indexes(pipeline, key, envelope, key in active)
+            self._queue_indexes(pipeline, key, envelope, key in active, now)
         for key in record_deletes:
             pipeline.delete(key)
             pipeline.zrem(self.keys.active_index(), key)
             pipeline.zrem(self.keys.stale_index(), key)
-            pipeline.zrem(self.keys.terminal_index(), key)
             pipeline.zrem(self.keys.admission_lease_index(), key)
             pipeline.zrem(self.keys.consumer_lease_index(), key)
+        for bucket, members in terminal_bucket_removals.items():
+            if members:
+                pipeline.zrem(bucket, *members)
+        for bucket in terminal_bucket_deletes:
+            pipeline.delete(bucket)
         pipeline.delete(
             self.keys.deployment_attempts_counter(),
             self.keys.deployment_bytes_counter(),
@@ -1812,6 +1960,8 @@ class RedisRuntimeTransferStateStore:
             )
         for pointer, record_key in pointer_sets.items():
             pipeline.set(pointer, record_key)
+        for pointer, retention_milliseconds in pointer_expiries.items():
+            pipeline.pexpire(pointer, retention_milliseconds, lt=True)
         for pointer in pointer_deletes:
             pipeline.delete(pointer)
 
@@ -1821,6 +1971,7 @@ class RedisRuntimeTransferStateStore:
         key: str,
         envelope: _RedisTransferRecordEnvelope,
         active: bool,
+        now: datetime,
     ) -> None:
         """Queue all exact index membership for one record envelope."""
         record = envelope.record
@@ -1837,22 +1988,25 @@ class RedisRuntimeTransferStateStore:
             pipeline.zrem(self.keys.admission_lease_index(), key)
         if (
             record.phase is RuntimeTransferPhase.TERMINAL
-            or envelope.admission_released
-            or record.cleanup_status is not RuntimeTransferCleanupStatus.NOT_REQUIRED
-        ):
-            pipeline.zadd(self.keys.stale_index(), {key: record.created_at.timestamp()})
-        else:
-            pipeline.zrem(self.keys.stale_index(), key)
-        if (
-            record.phase is RuntimeTransferPhase.TERMINAL
             and record.terminal_expires_at is not None
         ):
-            pipeline.zadd(
-                self.keys.terminal_index(),
-                {key: record.terminal_expires_at.timestamp()},
+            pipeline.zrem(self.keys.stale_index(), key)
+            terminal_bucket = self.keys.terminal_bucket(record.terminal_expires_at)
+            pipeline.zadd(terminal_bucket, {key: 0.0})
+            pipeline.pexpire(
+                terminal_bucket,
+                _terminal_retention_milliseconds(record, now),
+                lt=True,
             )
         else:
-            pipeline.zrem(self.keys.terminal_index(), key)
+            if (
+                envelope.admission_released
+                or record.cleanup_status
+                is not RuntimeTransferCleanupStatus.NOT_REQUIRED
+            ):
+                pipeline.zadd(self.keys.stale_index(), {key: 0.0})
+            else:
+                pipeline.zrem(self.keys.stale_index(), key)
         if (
             active
             and record.consumer_lease_expires_at is not None
@@ -1881,6 +2035,17 @@ def _terminal_expired(record: RuntimeTransferRecord, now: datetime) -> bool:
         and record.terminal_expires_at is not None
         and record.terminal_expires_at <= now
     )
+
+
+def _terminal_retention_milliseconds(
+    record: RuntimeTransferRecord,
+    now: datetime,
+) -> int:
+    """Return non-extending relative Redis retention for terminal metadata."""
+    if record.terminal_expires_at is None:
+        raise ValueError("terminal record requires terminal_expires_at")
+    remaining = record.terminal_expires_at - now
+    return max(1, int(remaining.total_seconds() * 1000))
 
 
 def _decode_redis_text(value: object) -> str:
@@ -1924,16 +2089,69 @@ def _redis_integer(value: object, name: str) -> int:
     return value
 
 
-def _encode_stale_cursor(member: str) -> str:
-    """Encode one opaque stable stale-page member cursor."""
-    return base64.urlsafe_b64encode(member.encode("utf-8")).decode("ascii")
+def _terminal_bucket_epochs(
+    now: datetime,
+    terminal_ttl: timedelta,
+    *,
+    expired: bool,
+) -> range:
+    """Return bounded terminal bucket epochs around the authoritative time."""
+    quantum = max(1, int(terminal_ttl.total_seconds()) // 60)
+    now_epoch = int(now.timestamp())
+    ttl_seconds = int(terminal_ttl.total_seconds())
+    if expired:
+        start = (now_epoch - ttl_seconds) // quantum * quantum
+        end = now_epoch // quantum * quantum
+    else:
+        start = (now_epoch // quantum + 1) * quantum
+        end = (now_epoch + ttl_seconds) // quantum * quantum
+    return range(start, end + quantum, quantum)
 
 
-def _decode_stale_cursor(cursor: str) -> str:
-    """Decode one opaque stable stale-page member cursor."""
+def _encode_stale_cursor(state: _RedisStaleCursor) -> str:
+    """Encode one opaque stable stale-page cursor."""
+    payload = json.dumps(
+        {
+            "bucket_epoch": state.bucket_epoch,
+            "kind": state.kind,
+            "member": state.member,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _decode_stale_cursor(cursor: str) -> _RedisStaleCursor:
+    """Decode one opaque stable stale-page cursor."""
     try:
-        return base64.b64decode(
-            cursor.encode("ascii"), altchars=b"-_", validate=True
-        ).decode("utf-8")
-    except (UnicodeDecodeError, ValueError) as exc:
+        value: object = json.loads(
+            base64.b64decode(
+                cursor.encode("ascii"),
+                altchars=b"-_",
+                validate=True,
+            ).decode("utf-8")
+        )
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("invalid stale page cursor") from exc
+    if not isinstance(value, dict) or set(value) != {
+        "bucket_epoch",
+        "kind",
+        "member",
+    }:
+        raise ValueError("invalid stale page cursor")
+    kind = value["kind"]
+    member = value["member"]
+    bucket_epoch = value["bucket_epoch"]
+    if (
+        kind not in {"stale", "terminal"}
+        or not isinstance(member, str)
+        or (
+            bucket_epoch is not None
+            and (not isinstance(bucket_epoch, int) or isinstance(bucket_epoch, bool))
+        )
+        or (kind == "stale" and bucket_epoch is not None)
+        or (kind == "terminal" and bucket_epoch is None)
+    ):
+        raise ValueError("invalid stale page cursor")
+    return _RedisStaleCursor(kind, member, bucket_epoch)

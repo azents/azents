@@ -1,7 +1,10 @@
 """Process-local metadata-only Runtime transfer state store."""
 
 import asyncio
+import base64
 import dataclasses
+import json
+from bisect import bisect_right
 from collections.abc import Callable
 from datetime import datetime
 
@@ -18,6 +21,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferProgress,
     RuntimeTransferRecord,
     logical_expiry,
+    terminal_expiry,
     validate_admission_time,
 )
 from azents.runtime.transfer.policy import phase_transition_allowed
@@ -191,6 +195,7 @@ class InMemoryRuntimeTransferStateStore:
     ) -> RuntimeTransferRecord | None:
         now = self._now()
         async with self.lock:
+            self._expire(now)
             record = self._exact(transfer_id, attempt_id)
             if record is None or record.revision != expected_revision:
                 return None
@@ -421,7 +426,7 @@ class InMemoryRuntimeTransferStateStore:
                     updated_at=now,
                     terminal_outcome=outcome,
                     failure=failure,
-                    terminal_expires_at=now + self.config.terminal_ttl,
+                    terminal_expires_at=terminal_expiry(now, self.config.terminal_ttl),
                 )
             )
 
@@ -435,6 +440,7 @@ class InMemoryRuntimeTransferStateStore:
     ) -> RuntimeTransferRecord | None:
         now = self._now()
         async with self.lock:
+            self._expire(now)
             record = self._exact(transfer_id, attempt_id)
             if record is None or record.revision != expected_revision:
                 return None
@@ -480,10 +486,17 @@ class InMemoryRuntimeTransferStateStore:
                 or record.cleanup_status
                 is not RuntimeTransferCleanupStatus.NOT_REQUIRED
             )
-            start = int(cursor) if cursor is not None else 0
-            page = tuple(self.records[key] for key in keys[start : start + limit])
+            start = (
+                0
+                if cursor is None
+                else bisect_right(keys, _decode_memory_stale_cursor(cursor))
+            )
+            page_keys = keys[start : start + limit]
+            page = tuple(self.records[key] for key in page_keys)
             next_cursor = (
-                str(start + len(page)) if start + len(page) < len(keys) else None
+                _encode_memory_stale_cursor(page_keys[-1])
+                if page_keys and start + len(page_keys) < len(keys)
+                else None
             )
             return RuntimeTransferPage(page, next_cursor)
 
@@ -651,6 +664,9 @@ class InMemoryRuntimeTransferStateStore:
             if (
                 record is None
                 or actual_size != record.admission.expected_size
+                or record.object is None
+                or actual_size != record.object.size
+                or actual_sha256 != record.object.sha256
                 or (
                     record.admission.expected_sha256 is not None
                     and actual_sha256 != record.admission.expected_sha256
@@ -718,7 +734,7 @@ class InMemoryRuntimeTransferStateStore:
                     updated_at=now,
                     terminal_outcome=RuntimeTransferOutcome.EXPIRED,
                     failure=RuntimeTransferFailure.EXPIRED,
-                    terminal_expires_at=now + self.config.terminal_ttl,
+                    terminal_expires_at=terminal_expiry(now, self.config.terminal_ttl),
                 )
                 self.records[key] = record
                 self.released.add(key)
@@ -744,3 +760,30 @@ class InMemoryRuntimeTransferStateStore:
             record
         )
         return record
+
+
+def _encode_memory_stale_cursor(key: tuple[str, str]) -> str:
+    """Encode one opaque immutable in-memory stale-record cursor."""
+    payload = json.dumps(key, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _decode_memory_stale_cursor(cursor: str) -> tuple[str, str]:
+    """Decode one opaque immutable in-memory stale-record cursor."""
+    try:
+        value: object = json.loads(
+            base64.b64decode(
+                cursor.encode("ascii"),
+                altchars=b"-_",
+                validate=True,
+            ).decode("utf-8")
+        )
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid stale page cursor") from exc
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or not all(isinstance(item, str) for item in value)
+    ):
+        raise ValueError("invalid stale page cursor")
+    return value[0], value[1]

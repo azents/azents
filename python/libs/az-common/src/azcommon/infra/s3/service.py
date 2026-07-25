@@ -3,7 +3,6 @@
 import base64
 import datetime
 import hashlib
-import secrets
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -14,7 +13,6 @@ from botocore.exceptions import ClientError as BotoClientError
 from types_aiobotocore_s3.client import S3Client
 
 _TRANSFER_SHA256_METADATA_KEY = "azents-transfer-sha256"
-_TRANSFER_RESERVATION_METADATA_KEY = "azents-transfer-reservation"
 
 
 @dataclass(frozen=True)
@@ -250,37 +248,16 @@ class S3Service:
                 destination=destination,
                 transfer_metadata=transfer_metadata,
             )
-        if expected_size <= multipart_copy_threshold:
-            reservation_token = await self._reserve_destination(destination)
-            try:
-                await self.s3_client.copy_object(
-                    Bucket=destination.bucket,
-                    Key=destination.key,
-                    CopySource={"Bucket": source.bucket, "Key": source.key},
-                    Metadata={_TRANSFER_SHA256_METADATA_KEY: transfer_metadata.sha256},
-                    MetadataDirective="REPLACE",
-                    CopySourceIfMatch=source_metadata.etag,
-                    **_content_type_args(transfer_metadata.content_type),
-                )
-                return await self.verify_transfer_object(
-                    identity=destination,
-                    expected_size=expected_size,
-                    expected_sha256=transfer_metadata.sha256,
-                )
-            except BaseException:
-                await self._delete_owned_destination(
-                    destination,
-                    reservation_token=reservation_token,
-                    expected_size=expected_size,
-                    expected_sha256=transfer_metadata.sha256,
-                )
-                raise
         return await self._multipart_copy(
             source=source,
             destination=destination,
             expected_size=expected_size,
             transfer_metadata=transfer_metadata,
-            multipart_part_size=multipart_part_size,
+            multipart_part_size=(
+                expected_size
+                if expected_size <= multipart_copy_threshold
+                else multipart_part_size
+            ),
             source_etag=source_metadata.etag,
         )
 
@@ -335,13 +312,13 @@ class S3Service:
                 PartNumber=part_number,
                 Body=body,
             )
+            etag = response.get("ETag")
+            if not isinstance(etag, str) or not etag:
+                raise RuntimeError("S3 did not return a multipart part ETag")
+            return S3CompletedPart(part_number=part_number, etag=etag)
         except BaseException:
             await self.abort_multipart_upload(upload=upload)
             raise
-        etag = response.get("ETag")
-        if not isinstance(etag, str) or not etag:
-            raise RuntimeError("S3 did not return a multipart part ETag")
-        return S3CompletedPart(part_number=part_number, etag=etag)
 
     async def complete_multipart_upload(
         self,
@@ -359,11 +336,13 @@ class S3Service:
         :param expected_sha256: Required transfer-owned SHA-256 value.
         :returns: Verified completed-object metadata.
         """
-        if expected_size <= 0:
-            raise ValueError("multipart completion requires a positive expected_size")
-        _validate_sha256(expected_sha256)
-        _validate_completed_parts(completed_parts)
         try:
+            if expected_size <= 0:
+                raise ValueError(
+                    "multipart completion requires a positive expected_size"
+                )
+            _validate_sha256(expected_sha256)
+            _validate_completed_parts(completed_parts)
             await self.s3_client.complete_multipart_upload(
                 Bucket=upload.identity.bucket,
                 Key=upload.identity.key,
@@ -387,7 +366,6 @@ class S3Service:
                 raise FileExistsError(upload.identity.key) from exc
             await self._delete_owned_destination(
                 upload.identity,
-                reservation_token=None,
                 expected_size=expected_size,
                 expected_sha256=expected_sha256,
             )
@@ -396,7 +374,6 @@ class S3Service:
             await self.abort_multipart_upload(upload=upload)
             await self._delete_owned_destination(
                 upload.identity,
-                reservation_token=None,
                 expected_size=expected_size,
                 expected_sha256=expected_sha256,
             )
@@ -452,7 +429,6 @@ class S3Service:
                 raise FileExistsError(destination.key) from exc
             await self._delete_owned_destination(
                 destination,
-                reservation_token=None,
                 expected_size=0,
                 expected_sha256=transfer_metadata.sha256,
             )
@@ -460,7 +436,6 @@ class S3Service:
         except BaseException:
             await self._delete_owned_destination(
                 destination,
-                reservation_token=None,
                 expected_size=0,
                 expected_sha256=transfer_metadata.sha256,
             )
@@ -734,25 +709,6 @@ class S3Service:
         if await self.head(destination) is not None:
             raise FileExistsError(destination.key)
 
-    async def _reserve_destination(self, destination: S3ObjectIdentity) -> str:
-        """Atomically reserve one small-copy destination for this operation."""
-        reservation_token = secrets.token_urlsafe(32)
-        try:
-            await self.s3_client.put_object(
-                Bucket=destination.bucket,
-                Key=destination.key,
-                Body=b"",
-                Metadata={
-                    _TRANSFER_RESERVATION_METADATA_KEY: reservation_token,
-                },
-                IfNoneMatch="*",
-            )
-        except BotoClientError as exc:
-            if _is_precondition_failed_error(exc):
-                raise FileExistsError(destination.key) from exc
-            raise
-        return reservation_token
-
     async def _multipart_copy(
         self,
         *,
@@ -795,12 +751,6 @@ class S3Service:
                 )
         except BaseException:
             await self.abort_multipart_upload(upload=upload)
-            await self._delete_owned_destination(
-                destination,
-                reservation_token=None,
-                expected_size=expected_size,
-                expected_sha256=transfer_metadata.sha256,
-            )
             raise
         return await self.complete_multipart_upload(
             upload=upload,
@@ -813,30 +763,29 @@ class S3Service:
         self,
         destination: S3ObjectIdentity,
         *,
-        reservation_token: str | None,
         expected_size: int,
         expected_sha256: str,
     ) -> None:
-        """Delete only reservation or completed-object evidence owned by this call."""
+        """Delete completed-object evidence only under its observed ETag."""
         metadata = await self.head(destination)
         if metadata is None:
             return
-        reserved = (
-            reservation_token is not None
-            and metadata.user_metadata.get(_TRANSFER_RESERVATION_METADATA_KEY)
-            == reservation_token
-        )
         completed = (
             metadata.content_length == expected_size
             and metadata.user_metadata.get(_TRANSFER_SHA256_METADATA_KEY)
             == expected_sha256
         )
-        if not reserved and not completed:
+        if not completed:
             return
+        if metadata.etag is None:
+            raise RuntimeError(
+                "owned destination cleanup requires stable ETag evidence"
+            )
         try:
             await self.s3_client.delete_object(
                 Bucket=destination.bucket,
                 Key=destination.key,
+                IfMatch=metadata.etag,
             )
         except BotoClientError as exc:
             if _is_not_found_error(exc):

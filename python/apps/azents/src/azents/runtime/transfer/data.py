@@ -88,6 +88,8 @@ class RuntimeTransferConfig:
             <= timedelta()
         ):
             raise ValueError("transfer durations must be positive")
+        if self.terminal_ttl < timedelta(seconds=1):
+            raise ValueError("terminal_ttl must be at least one second")
         if self.terminal_ttl > timedelta(hours=1):
             raise ValueError("terminal_ttl must not exceed one hour")
 
@@ -248,6 +250,16 @@ def validate_admission_time(admission: RuntimeTransferAdmission, now: datetime) 
     _aware(now, "now")
     if admission.source_expires_at is not None and admission.source_expires_at <= now:
         raise ValueError("source_expires_at must be in the future")
+
+
+def terminal_expiry(now: datetime, terminal_ttl: timedelta) -> datetime:
+    """Return one bucket-aligned terminal metadata expiry."""
+    _aware(now, "now")
+    raw_expiry = now + terminal_ttl
+    quantum_seconds = max(1, int(terminal_ttl.total_seconds()) // 60)
+    aligned_epoch = int(raw_expiry.timestamp()) // quantum_seconds * quantum_seconds
+    aligned = datetime.fromtimestamp(aligned_epoch, tz=now.tzinfo)
+    return aligned if aligned > now else raw_expiry
 
 
 def _required(value: str, name: str) -> None:
