@@ -6,7 +6,8 @@
 
 import asyncio
 import hashlib
-from collections.abc import AsyncIterator
+import inspect
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
@@ -25,13 +26,21 @@ from azents_runtime_control.proto import runtime_runner_transfer_pb2 as transfer
 from azents_runtime_control.proto import (
     runtime_runner_transfer_pb2_grpc as transfer_grpc,
 )
-from azents_runtime_control.transfer import MAX_TRANSFER_CHUNK_BYTES
+from azents_runtime_control.transfer import (
+    MAX_TRANSFER_CHUNK_BYTES,
+    MULTIPART_PART_BYTES,
+)
+from google.protobuf import timestamp_pb2
 
 from azents.core.runtime_runner_credential import (
     RuntimeRunnerCredential,
     RuntimeRunnerCredentialInvalid,
 )
-from azents.runtime.control_protocol.data import RuntimeRunnerRegistration
+from azents.runtime.control_protocol.data import (
+    RuntimeDispatchResult,
+    RuntimeRunnerOperation,
+    RuntimeRunnerRegistration,
+)
 from azents.runtime.control_protocol.grpc.runner_server import (
     RuntimeRunnerControlGrpcServicer,
 )
@@ -39,12 +48,15 @@ from azents.runtime.control_protocol.grpc.runner_transfer_server import (
     RuntimeRunnerTransferGrpcServicer,
 )
 from azents.runtime.control_protocol.service import RuntimeControlProtocolService
+from azents.runtime.coordination.data import RuntimeReplyRecord
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
     RuntimeTransferObject,
+    RuntimeTransferOutcome,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 
@@ -81,6 +93,13 @@ class _ObjectStore:
         self.download = download
         self.parts: list[bytes] = []
         self.uploads: dict[str, bytes] = {}
+        self.aborted_upload_ids: list[str] = []
+        self.block_download = False
+        self.download_blocked = asyncio.Event()
+        self.resume_download = asyncio.Event()
+        self.block_upload_part = False
+        self.upload_part_blocked = asyncio.Event()
+        self.resume_upload_part = asyncio.Event()
 
     async def verify_transfer_object(
         self,
@@ -107,6 +126,9 @@ class _ObjectStore:
         async def chunks() -> AsyncIterator[bytes]:
             for offset in range(0, len(self.download), _FRAME_BYTES):
                 yield self.download[offset : offset + _FRAME_BYTES]
+                if offset == 0 and self.block_download:
+                    self.download_blocked.set()
+                    await self.resume_download.wait()
 
         yield chunks()
 
@@ -127,6 +149,9 @@ class _ObjectStore:
         body: bytes,
     ) -> S3CompletedPart:
         del upload
+        if self.block_upload_part:
+            self.upload_part_blocked.set()
+            await self.resume_upload_part.wait()
         self.parts.append(body)
         return S3CompletedPart(part_number=part_number, etag=f"etag-{part_number}")
 
@@ -148,7 +173,7 @@ class _ObjectStore:
         return object()  # type: ignore[return-value]
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
-        del upload
+        self.aborted_upload_ids.append(upload.upload_id)
 
     async def create_empty_immutable(
         self,
@@ -321,6 +346,223 @@ async def test_default_limit_channels_keep_control_healthy_during_large_transfer
         await server.stop(None)
 
 
+@pytest.mark.asyncio
+async def test_backpressured_transfer_keeps_runner_operation_control_healthy() -> None:
+    """A paused transfer stream must not prevent Control operation completion."""
+    download = b"d" * (_FRAME_BYTES * 2)
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordination = InMemoryRuntimeCoordinationStore()
+    control = RuntimeControlProtocolService(coordination)
+    authenticator = _Authenticator()
+    object_store = _ObjectStore(download)
+    object_store.block_download = True
+    runner = _RecordingRunnerServicer(
+        control_protocol=control,
+        coordination_store=coordination,
+        state_sink=_StateSink(),
+        owner_replica_id="replica-1",
+        consumer_id="runner-consumer",
+        runner_authenticator=authenticator,
+        operation_block_ms=1,
+    )
+    transfer = _RecordingTransferServicer(
+        state_store=state,
+        coordination_store=coordination,
+        object_store=object_store,
+        bucket="bucket",
+        owner_replica_id="replica-1",
+        runner_authenticator=authenticator,
+        clock=lambda: _NOW,
+    )
+    server = grpc.aio.server()
+    control_grpc.add_RuntimeRunnerControlServicer_to_server(runner, server)
+    transfer_grpc.add_RuntimeRunnerTransferServicer_to_server(transfer, server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    await server.start()
+    local_subchannel_pool = (("grpc.use_local_subchannel_pool", 1),)
+    control_channel = grpc.aio.insecure_channel(
+        f"127.0.0.1:{port}",
+        options=local_subchannel_pool,
+    )
+    transfer_channel = grpc.aio.insecure_channel(
+        f"127.0.0.1:{port}",
+        options=local_subchannel_pool,
+    )
+    inbound: asyncio.Queue[control_pb.RunnerMessage | None] = asyncio.Queue()
+    stream = control_grpc.RuntimeRunnerControlStub(control_channel).ConnectRunner(
+        _runner_messages(inbound),
+        metadata=_metadata(),
+    )
+    try:
+        await inbound.put(_register())
+        accepted = await stream.read()
+        assert accepted.register_accepted.generation == 1
+
+        await _ready(
+            state, RuntimeTransferDirection.DOWNLOAD, "paused-download", download
+        )
+        download_stream = transfer_grpc.RuntimeRunnerTransferStub(
+            transfer_channel
+        ).DownloadTransfer(_download_request("paused-download"), metadata=_metadata())
+        first = await download_stream.read()
+        assert first.chunk.data == download[:_FRAME_BYTES]
+        await asyncio.wait_for(object_store.download_blocked.wait(), timeout=1)
+
+        dispatched = await control.dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id="runtime-1",
+                runner_generation=1,
+                operation_type="bash",
+                owner_session_id="session-1",
+                payload={"command": "echo control-remains-responsive"},
+                deadline_at=datetime.now(UTC) + timedelta(minutes=1),
+                body_stream_id=None,
+            ),
+            created_at=datetime.now(UTC),
+        )
+        assert isinstance(dispatched, RuntimeDispatchResult)
+        operation = await asyncio.wait_for(stream.read(), timeout=1)
+        assert operation.operation_request.operation_type == "bash"
+        assert (
+            operation.operation_request.bash.command
+            == "echo control-remains-responsive"
+        )
+
+        await inbound.put(
+            control_pb.RunnerMessage(
+                connection_id="connection-1",
+                request_id=f"start:{dispatched.request_id}",
+                generation=1,
+                operation_start=control_pb.RunnerOperationStart(
+                    runtime_id="runtime-1",
+                    operation_id=dispatched.operation_id,
+                ),
+            )
+        )
+        started = await asyncio.wait_for(stream.read(), timeout=1)
+        assert started.operation_start_ack.allowed
+        await inbound.put(
+            _final_bash_event(
+                request_id=dispatched.request_id,
+                operation_id=dispatched.operation_id,
+            )
+        )
+        replies = await _wait_for_replies(control, dispatched.reply_stream_id)
+        assert replies[-1].event.final
+        assert replies[-1].event.payload == {"exit_code": 0}
+
+        object_store.resume_download.set()
+        remainder = await _read_remaining_download_frames(download_stream)
+        assert (
+            b"".join(
+                [first.chunk.data, *(frame.chunk.data for frame in remainder[:-1])]
+            )
+            == download
+        )
+        assert remainder[-1].complete.actual_size == len(download)
+        assert runner.peers[0] != transfer.peers[0]
+    finally:
+        object_store.resume_download.set()
+        await inbound.put(None)
+        stream.cancel()
+        await control_channel.close()
+        await transfer_channel.close()
+        await server.stop(None)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy() -> (
+    None
+):
+    """Cancelling an active upload aborts multipart state without harming Control."""
+    upload = b"u" * MULTIPART_PART_BYTES
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordination = InMemoryRuntimeCoordinationStore()
+    control = RuntimeControlProtocolService(coordination)
+    authenticator = _Authenticator()
+    object_store = _ObjectStore(b"")
+    object_store.block_upload_part = True
+    runner = _RecordingRunnerServicer(
+        control_protocol=control,
+        coordination_store=coordination,
+        state_sink=_StateSink(),
+        owner_replica_id="replica-1",
+        consumer_id="runner-consumer",
+        runner_authenticator=authenticator,
+        operation_block_ms=1,
+    )
+    transfer = _RecordingTransferServicer(
+        state_store=state,
+        coordination_store=coordination,
+        object_store=object_store,
+        bucket="bucket",
+        owner_replica_id="replica-1",
+        runner_authenticator=authenticator,
+        clock=lambda: _NOW,
+    )
+    server = grpc.aio.server()
+    control_grpc.add_RuntimeRunnerControlServicer_to_server(runner, server)
+    transfer_grpc.add_RuntimeRunnerTransferServicer_to_server(transfer, server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    await server.start()
+    local_subchannel_pool = (("grpc.use_local_subchannel_pool", 1),)
+    control_channel = grpc.aio.insecure_channel(
+        f"127.0.0.1:{port}",
+        options=local_subchannel_pool,
+    )
+    transfer_channel = grpc.aio.insecure_channel(
+        f"127.0.0.1:{port}",
+        options=local_subchannel_pool,
+    )
+    inbound: asyncio.Queue[control_pb.RunnerMessage | None] = asyncio.Queue()
+    stream = control_grpc.RuntimeRunnerControlStub(control_channel).ConnectRunner(
+        _runner_messages(inbound),
+        metadata=_metadata(),
+    )
+    try:
+        await inbound.put(_register())
+        accepted = await stream.read()
+        assert accepted.register_accepted.generation == 1
+        await _ready(state, RuntimeTransferDirection.UPLOAD, "cancelled-upload", upload)
+
+        upload_call = transfer_grpc.RuntimeRunnerTransferStub(
+            transfer_channel
+        ).UploadTransfer(
+            _upload_frames("cancelled-upload", upload), metadata=_metadata()
+        )
+        await asyncio.wait_for(object_store.upload_part_blocked.wait(), timeout=2)
+        upload_call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await upload_call
+        await _wait_for(lambda: bool(object_store.aborted_upload_ids))
+
+        record = await state.get("cancelled-upload")
+        assert record is not None
+        assert record.terminal_outcome is RuntimeTransferOutcome.CANCELLED
+        assert record.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
+        assert record.multipart_cleanup_handle is None
+        assert object_store.aborted_upload_ids == ["upload-1"]
+
+        await inbound.put(
+            control_pb.RunnerMessage(
+                connection_id="connection-1",
+                request_id="heartbeat-after-cancellation",
+                generation=1,
+                heartbeat=control_pb.RunnerHeartbeat(monotonic_sequence=1),
+            )
+        )
+        heartbeat = await asyncio.wait_for(stream.read(), timeout=1)
+        assert heartbeat.heartbeat_ack.monotonic_sequence == 1
+        assert runner.peers[0] != transfer.peers[0]
+    finally:
+        object_store.resume_upload_part.set()
+        await inbound.put(None)
+        stream.cancel()
+        await control_channel.close()
+        await transfer_channel.close()
+        await server.stop(None)
+
+
 async def _runner_messages(
     inbound: asyncio.Queue[control_pb.RunnerMessage | None],
 ) -> AsyncIterator[control_pb.RunnerMessage]:
@@ -456,6 +698,77 @@ def _malformed_upload_frames() -> AsyncIterator[transfer_pb.UploadTransferFrame]
         )
 
     return frames()
+
+
+def _final_bash_event(
+    *,
+    request_id: str,
+    operation_id: str,
+) -> control_pb.RunnerMessage:
+    return control_pb.RunnerMessage(
+        connection_id="connection-1",
+        request_id=request_id,
+        generation=1,
+        operation_event=control_pb.RunnerOperationEvent(
+            runtime_id="runtime-1",
+            operation_id=operation_id,
+            generation=1,
+            event_type="final_success",
+            created_at=_timestamp(_NOW),
+            final=True,
+            final_success=control_pb.RunnerOperationFinalSuccessPayload(
+                bash=control_pb.BashFinalSuccess(exit_code=0)
+            ),
+        ),
+    )
+
+
+async def _wait_for_replies(
+    control: RuntimeControlProtocolService,
+    reply_stream_id: str,
+) -> list[RuntimeReplyRecord]:
+    replies: list[RuntimeReplyRecord] = []
+
+    async def read() -> bool:
+        nonlocal replies
+        replies = await control.read_replies(
+            reply_stream_id=reply_stream_id,
+            after_cursor=None,
+            limit=10,
+        )
+        return bool(replies)
+
+    await _wait_for(read)
+    return replies
+
+
+async def _read_remaining_download_frames(
+    stream: grpc.aio.UnaryStreamCall[
+        transfer_pb.DownloadTransferRequest,
+        transfer_pb.DownloadTransferFrame,
+    ],
+) -> list[transfer_pb.DownloadTransferFrame]:
+    frames: list[transfer_pb.DownloadTransferFrame] = []
+    while (frame := await stream.read()) is not grpc.aio.EOF:
+        frames.append(frame)
+    return frames
+
+
+async def _wait_for(predicate: Callable[[], bool | Awaitable[bool]]) -> None:
+    for _ in range(100):
+        result = predicate()
+        if inspect.isawaitable(result):
+            result = await result
+        if result:
+            return
+        await asyncio.sleep(0.01)
+    pytest.fail("Timed out waiting for asynchronous test condition")
+
+
+def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
+    timestamp = timestamp_pb2.Timestamp()
+    timestamp.FromDatetime(value)
+    return timestamp
 
 
 def _metadata() -> tuple[tuple[str, str], ...]:
