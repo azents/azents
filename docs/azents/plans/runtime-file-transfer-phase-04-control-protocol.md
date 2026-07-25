@@ -121,7 +121,7 @@ The exact added messages are:
 |  | `overwrite` | `optional bool`, required presence | explicit policy value |
 |  | `expected_size` | `optional uint64`, required presence | admitted size, including zero |
 |  | `expected_sha256` | optional string | 64 lowercase hexadecimal characters |
-|  | `deadline_at` | required timestamp | timezone-aware and before logical expiry |
+|  | `deadline_at` | required timestamp | effective deadline `min(admission deadline, logical expiry)`; may equal logical expiry |
 |  | `protocol_version` | required string | exactly `2026-07-25` |
 |  | `capability` | required string | exactly `file.transfer.v1` |
 |  | `dispatch_id` | required string | 1–128 UTF-8 bytes; stable idempotency key |
@@ -153,6 +153,21 @@ The added closed enums are exact:
   `DESTINATION_FAILED`.
 
 Each also has an `UNSPECIFIED = 0` sentinel that is rejected on input.
+
+`RunnerTransferResult` valid combinations are exact:
+
+| Direction/outcome | Size and SHA-256 | `destination_committed` | Failure |
+| --- | --- | --- | --- |
+| Download `SUCCEEDED` | both required and equal the admitted manifest | `true` | absent |
+| Upload `SUCCEEDED` | both required and equal the Control-authoritative result returned by `UploadTransfer` | `false` | absent |
+| Download or upload `FAILED` | either both absent or both present; one without the other is invalid | `false` | required and not `CANCELLED`; `DESTINATION_FAILED` is download-only |
+| Download or upload `CANCELLED` | either both absent or both present | `false` | exactly `CANCELLED` |
+
+`SUCCEEDED` with a failure, `FAILED`/`CANCELLED` without the required failure,
+unpaired size/hash, upload with `destination_committed=true`, or download success without
+commit evidence is a protocol violation. It cannot mark a transfer committed or settle
+success. Actual upload availability and manifest remain authoritative in Transfer State;
+the upload result only correlates the Runner task with the initiating operation.
 
 Routing reuses the existing Redis-backed Runtime Coordination request/reply and operation metadata boundary only for bounded intent and status:
 
@@ -216,7 +231,7 @@ Closed coordinator enums mirror the complete Phase 3 values:
   `STREAM`, `CONSUMER`;
 - cleanup: `NOT_REQUIRED`, `PENDING`, `COMPLETE`, `RETRYABLE_FAILURE`; and
 - cancellation reason: `CALLER`, `DEADLINE`, `SUPERSEDED`, `SHUTDOWN`; and
-- dispatch status: `NOT_BOUND`, `BOUND`, `ENQUEUED`.
+- dispatch status: `NOT_BOUND`, `BOUND`, `DELIVERABLE`, `ENQUEUED`.
 
 Every enum also has an `UNSPECIFIED = 0` sentinel rejected on requests.
 
@@ -267,7 +282,7 @@ Phase 4 extends the Phase 3 transfer record and both state-store adapters with b
 dispatch metadata:
 
 - optional `dispatch_id`;
-- `dispatch_status` with `NOT_BOUND`, `BOUND`, and `ENQUEUED`;
+- `dispatch_status` with `NOT_BOUND`, `BOUND`, `DELIVERABLE`, and `ENQUEUED`;
 - optional stable Runtime Coordination `dispatch_request_id`; and
 - `accepted_runner_generation`, which becomes dispatch-bound authority rather than a
   value first selected by `claim_stream()`.
@@ -279,12 +294,19 @@ The store adds two revision-fenced operations:
   Runner generation, and a deterministic `dispatch_request_id`. It atomically persists
   those values with `BOUND`. Replaying the identical original revision and values is
   idempotent; a different dispatch or generation is fenced.
+- `mark_dispatch_deliverable(...)` requires the bound dispatch identity and atomically
+  moves `BOUND` to `DELIVERABLE`. This is the authorization barrier: no intent is appended
+  before it succeeds.
 - `mark_dispatch_enqueued(...)` requires the bound dispatch identity and original
-  operation identity and moves `BOUND` to `ENQUEUED`. Identical replay is idempotent.
+  operation identity and moves `DELIVERABLE` to `ENQUEUED`. Identical replay is
+  idempotent.
+- `list_pending_dispatches(...)` returns a bounded page of live `BOUND` or `DELIVERABLE`
+  records for Runtime Control repair and never returns terminal or expired attempts.
 
-`claim_stream()` changes to require `ENQUEUED` and an exact match with the already bound
-accepted Runner generation. It no longer chooses or first persists that generation.
-Memory and Redis implementations must pass the same updated contract suite.
+`claim_stream()` changes to require `DELIVERABLE` or `ENQUEUED` and an exact match with
+the already bound accepted Runner generation. It no longer chooses or first persists that
+generation. `BOUND` is not claimable. Memory and Redis implementations must pass the same
+updated contract suite.
 
 Transfer State and Runtime Coordination remain separate authorities, so dispatch uses an
 explicit recoverable at-least-once saga rather than claiming cross-store exactly-once
@@ -297,16 +319,30 @@ delivery:
 4. idempotently ensure bounded operation metadata exists under the admission's stable
    `operation_id`, with operation type `file.transfer.v1`, bound Runtime/generation, and
    deadline, but no body stream;
-5. append the metadata-only intent using the stable request and dispatch IDs;
-6. call `mark_dispatch_enqueued()`; and
-7. return success only from `ENQUEUED`.
+5. call `mark_dispatch_deliverable()` before appending any intent;
+6. append the metadata-only intent using the stable request and dispatch IDs;
+7. call `mark_dispatch_enqueued()`; and
+8. return success only from `ENQUEUED`.
 
-A crash before append leaves `BOUND` and retry resumes at step 4. A crash after append but
-before `ENQUEUED` may append the same logical intent again. Control and Runner therefore
-deduplicate identical delivery by `dispatch_id`; they acknowledge duplicate stream entries
-without starting a second transfer task. A conflicting duplicate fails closed. Atomic
+Because `DELIVERABLE` is persisted before append, an immediately delivered intent can
+open its data RPC without racing a later authorization transition. A crash before
+`DELIVERABLE` leaves `BOUND`; retry resumes at step 4. A crash after `DELIVERABLE` but
+before append leaves a repairable outbox-ready record. A crash after append but before
+`ENQUEUED` may append the same logical intent again. Control and Runner deduplicate
+identical delivery by `dispatch_id`; they acknowledge duplicate stream entries without
+starting a second transfer task. A conflicting duplicate fails closed. Atomic
 `claim_stream()` remains the final byte-path fence even if duplicate transport entries are
 observed.
+
+`DispatchTransfer` client retry uses the same dispatch ID until the effective deadline.
+Runtime Control also runs one bounded dispatch repair loop that pages
+`list_pending_dispatches()`: it completes metadata setup for `BOUND`, moves it to
+`DELIVERABLE`, and appends or re-appends `DELIVERABLE` intents after rechecking the bound
+Runner generation against current Runtime Coordination. A generation mismatch settles
+the old attempt as superseded instead of delivering it. The repair loop marks
+`ENQUEUED` after append and uses bounded backoff; it neither scans arbitrary operations
+nor creates an unbounded queue. This is protocol delivery repair, not the Phase 9 object
+cleanup reconciler.
 
 Cancellation and terminal correlation use the same stable operation, request, and dispatch
 identities. Operation metadata creation, local terminal append, and final folding are
@@ -380,7 +416,7 @@ Every Runner transfer RPC performs this sequence before reading or sending one f
 4. load the current attempt from `RuntimeTransferStateStore`;
 5. reject missing or logically expired state;
 6. require exact transfer ID, attempt ID, Runtime ID, desired generation, direction, deadline, and admissible phase;
-7. require dispatch status `ENQUEUED` and the identity's accepted Runner generation to
+7. require dispatch status `DELIVERABLE` or `ENQUEUED` and the identity's accepted Runner generation to
    equal both the state-bound generation and current Runtime Coordination connection;
 8. acquire a direction-specific per-replica stream permit without an unbounded wait queue;
 9. atomically call `claim_stream()` with a fresh claim ID and expected revision; and
@@ -480,8 +516,8 @@ Integration order:
 1. add and generate the two new proto services plus Runner Control metadata-only messages;
 2. add shared constants, immutable values, schema guards, and coordinator client contract;
 3. implement and test coordinator credential signing/authentication independently;
-4. extend the shared state contract with dispatch binding and implement the recoverable
-   duplicate-safe intent saga;
+4. extend the shared state contract with dispatch binding/delivery states and implement
+   the recoverable duplicate-safe intent saga and bounded repair loop;
 5. implement Runner transfer per-RPC authorization and stream claim;
 6. implement bounded download and upload pipelines over Phase 3 S3 primitives;
 7. wire Transfer State and process-lifetime S3 into Runtime Control;
@@ -520,7 +556,10 @@ Integration order:
 - dispatch binds the current accepted Runner connection generation before stream claim,
   uses stable operation/request/dispatch IDs, and reaches one `ENQUEUED` logical intent
   through idempotent retry;
-- crash before append and crash after append-before-state-mark recover without changing
+- the normal interleaving persists `DELIVERABLE` before append, so immediate Runner
+  delivery can claim safely;
+- crash while `BOUND`, after `DELIVERABLE` but before append, and after append before
+  `ENQUEUED` recover through caller retry and the bounded repair loop without changing
   generation or operation identity; repeated transport entries are acknowledged and
   deduplicated by dispatch ID without starting another transfer task;
 - cancellation is persistent/idempotent, orders one bounded cancel message, and promptly correlates terminal operation state;
@@ -532,8 +571,8 @@ Integration order:
 
 - unauthorized, stale desired generation, stale accepted Runner generation, wrong Runtime, wrong direction, wrong attempt, wrong phase, cancelled, expired, and terminal requests fail before S3 read/create;
 - concurrent duplicate claims allow exactly one stream;
-- `claim_stream()` rejects `NOT_BOUND`/`BOUND` dispatch status and cannot first select the
-  accepted Runner generation;
+- `claim_stream()` rejects `NOT_BOUND`/`BOUND`, accepts only
+  `DELIVERABLE`/`ENQUEUED`, and cannot first select the accepted Runner generation;
 - a same-desired-generation reconnect cannot reopen an already claimed attempt;
 - download object missing/metadata mismatch/read failure/midstream cancellation/deadline produces no completion frame;
 - download chunks use exact offsets, remain at or below 256 KiB, hash correctly, close S3 body on every exit, and never call `download_bytes()`;
@@ -560,7 +599,9 @@ Run an actual `grpc.aio.server()` and real channels without message-size options
 
 - authenticate a synthetic Runner and maintain a registered `ConnectRunner` stream;
 - create distinct Control and Transfer `grpc.aio.Channel` objects and verify they use
-  independent underlying connections even when both endpoints are identical;
+  independent underlying connections even when both endpoints are identical; force
+  channel-local subchannel pools and assert distinct server-observed connection evidence
+  rather than relying on Python object identity alone;
 - transfer deterministic content larger than 4 MiB in each direction through the new RPC;
 - assert exact final size and SHA-256;
 - inspect every observed frame and assert serialized message size remains bounded independently from complete file size;
@@ -616,7 +657,8 @@ Run pre-commit on every changed file before commit. Docker-backed Redis/RustFS c
 - every Runner data RPC reauthenticates and rechecks durable generation before first byte;
 - transfer/attempt/direction/deadline/phase/accepted-generation fencing and atomic claim are complete;
 - dispatch generation binding and the cross-store at-least-once saga are revision-fenced,
-  stable-ID based, recoverable after each partial-failure boundary, and duplicate-safe;
+  stable-ID based, authorization-barrier ordered, repairable after each partial-failure
+  boundary, and duplicate-safe;
 - coordinator credentials are short-lived, audience/service/operation/scope bound, and non-interchangeable with Runner credentials;
 - coordinator calls fail before state access when unauthorized and never carry bodies;
 - upload/download memory and message bounds are calculable and independent from complete file size;
