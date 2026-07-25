@@ -104,6 +104,21 @@ class _TransferResultSink:
         del operation, request_id, error_code, failure
 
 
+class _TransferResultSink:
+    async def handle(self, result: object, *, request_id: str) -> None:
+        del result, request_id
+
+    async def handle_failure(
+        self,
+        operation: object,
+        *,
+        request_id: str,
+        error_code: str,
+        failure: object,
+    ) -> None:
+        del operation, request_id, error_code, failure
+
+
 class _ObjectStore:
     def __init__(self, download: bytes) -> None:
         self.download = download
