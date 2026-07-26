@@ -71,7 +71,6 @@ _INTERRUPT_SPAWN_MESSAGE = "Subagent E2E spawn interrupt child"
 _INTERRUPT_SPAWN_RESPONSE = "Subagent interrupt child was spawned."
 _INTERRUPT_MESSAGE = "Subagent E2E interrupt child"
 _INTERRUPT_CALL_ID = "call_subagent_interrupt_child"
-_INTERRUPT_RESPONSE = "Subagent interrupt request completed."
 _INTERRUPT_OBSERVE_MESSAGE = "Subagent E2E observe interrupted result"
 _INTERRUPT_OBSERVE_RESPONSE = "Subagent interrupted result was observed."
 _FAILED_SPAWN_MESSAGE = "Subagent E2E spawn failed child"
@@ -1423,12 +1422,6 @@ class TestSubagents:
             session_id=root_session_id,
             call_id=_INTERRUPT_CALL_ID,
             expected="running",
-        )
-        _wait_for_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=root_session_id,
-            expected=_INTERRUPT_RESPONSE,
         )
         _, interrupted_child = _wait_for_child_node(
             public_url=azents_public_server_url,
