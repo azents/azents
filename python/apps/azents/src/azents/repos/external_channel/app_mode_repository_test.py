@@ -1,16 +1,19 @@
 """Phase 1 External Channel App mode repository boundary tests."""
 
+import asyncio
 import datetime
 import json
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
@@ -49,6 +52,7 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .data import (
+    ExternalChannelAccessRequestCreate,
     ExternalChannelAgentRouteCreate,
     ExternalChannelBindingCreate,
     ExternalChannelChannelDefaultCreate,
@@ -61,12 +65,16 @@ from .data import (
     ExternalChannelResource,
     ExternalChannelResourceCreate,
 )
+from .lifecycle import ExternalChannelLifecycleRepository
+from .management import ExternalChannelManagementRepository
 from .repository import ExternalChannelRepository, validate_interaction_projection
 
 
 def _at(minute: int) -> datetime.datetime:
     """Return stable timezone-aware timestamps."""
-    return datetime.datetime(2026, 7, 25, 0, minute, tzinfo=datetime.UTC)
+    return datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC) + datetime.timedelta(
+        minutes=minute
+    )
 
 
 async def _workspace(session: AsyncSession, handle: str) -> str:
@@ -149,6 +157,7 @@ def _route_create(
     return ExternalChannelAgentRouteCreate(
         connection_id=connection_id,
         agent_id=agent_id,
+        agent_id_snapshot=agent_id,
         route_mode=ExternalChannelRouteMode.DEDICATED,
         connection_app_mode=mode,
         catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
@@ -264,6 +273,74 @@ def _admission_create(
         interaction_id=interaction_id,
         expires_at=_at(20),
     )
+
+
+async def _cleanup_committed_workspace(
+    engine: AsyncEngine,
+    *,
+    workspace_id: str,
+) -> None:
+    """Remove direct-engine concurrency fixtures in restrictive FK order."""
+    statements = (
+        """
+        DELETE FROM external_channel_bindings
+        WHERE route_id IN (
+            SELECT route.id
+            FROM external_channel_agent_routes AS route
+            JOIN external_channel_connections AS connection
+              ON connection.id = route.connection_id
+            WHERE connection.workspace_id = :workspace_id
+        )
+        """,
+        """
+        DELETE FROM external_channel_resources
+        WHERE connection_id IN (
+            SELECT id FROM external_channel_connections
+            WHERE workspace_id = :workspace_id
+        )
+        """,
+        """
+        DELETE FROM external_channel_agent_routes
+        WHERE connection_id IN (
+            SELECT id FROM external_channel_connections
+            WHERE workspace_id = :workspace_id
+        )
+        """,
+        """
+        DELETE FROM external_channel_connections
+        WHERE workspace_id = :workspace_id
+        """,
+        """
+        UPDATE session_agent_contexts
+        SET root_session_agent_id = NULL
+        WHERE workspace_id = :workspace_id
+        """,
+        """
+        DELETE FROM session_agents
+        WHERE agent_session_id IN (
+            SELECT id FROM agent_sessions
+            WHERE workspace_id = :workspace_id
+        )
+        """,
+        """
+        DELETE FROM session_agent_contexts
+        WHERE workspace_id = :workspace_id
+        """,
+        "DELETE FROM agent_sessions WHERE workspace_id = :workspace_id",
+        "DELETE FROM agents WHERE workspace_id = :workspace_id",
+        """
+        DELETE FROM llm_provider_integrations
+        WHERE workspace_id = :workspace_id
+        """,
+        "DELETE FROM workspaces WHERE id = :workspace_id",
+    )
+    async with AsyncSession(engine) as session:
+        for statement in statements:
+            await session.execute(
+                sa.text(statement),
+                {"workspace_id": workspace_id},
+            )
+        await session.commit()
 
 
 def test_interaction_projection_validation_exact_bounds_and_forbidden_keys() -> None:
@@ -804,25 +881,60 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
             disconnected_at=None,
             disconnect_reason=None,
         ),
+        expected_admission_id=None,
+        expected_access_request_id=None,
     )
-    same_resource = await repo.create_binding_idempotent(
+    with pytest.raises(ValueError, match="another route"):
+        await repo.create_binding_idempotent(
+            rdb_session,
+            ExternalChannelBindingCreate(
+                resource_id=resource.id,
+                route_id=second_route.id,
+                agent_session_id=second_session.id,
+                status=ExternalChannelBindingStatus.ACTIVE,
+                activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
+                activation_trigger_message_id=None,
+                activated_at=None,
+                projected_through_position=None,
+                truncated_message_count=0,
+                truncated_size=0,
+                disconnected_at=None,
+                disconnect_reason=None,
+            ),
+            expected_admission_id=None,
+            expected_access_request_id=None,
+        )
+    duplicate_first_session = await AgentSessionRepository().create(
         rdb_session,
-        ExternalChannelBindingCreate(
-            resource_id=resource.id,
-            route_id=second_route.id,
-            agent_session_id=second_session.id,
-            status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-            activation_trigger_message_id=None,
-            activated_at=None,
-            projected_through_position=None,
-            truncated_message_count=0,
-            truncated_size=0,
-            disconnected_at=None,
-            disconnect_reason=None,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=first_agent.id,
+            title=None,
         ),
     )
-    assert same_resource.id == binding.id
+    with pytest.raises(ValueError, match="another Agent Session"):
+        await repo.create_binding_idempotent(
+            rdb_session,
+            ExternalChannelBindingCreate(
+                resource_id=resource.id,
+                route_id=first_route.id,
+                agent_session_id=duplicate_first_session.id,
+                status=ExternalChannelBindingStatus.ACTIVE,
+                activation_status=(
+                    ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+                ),
+                activation_trigger_message_id=None,
+                activated_at=None,
+                projected_through_position=None,
+                truncated_message_count=0,
+                truncated_size=0,
+                disconnected_at=None,
+                disconnect_reason=None,
+            ),
+            expected_admission_id=None,
+            expected_access_request_id=None,
+        )
+    assert binding.route_id == first_route.id
 
 
 async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
@@ -895,6 +1007,7 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
         RDBExternalChannelAgentRoute(
             connection_id=multi.id,
             agent_id=foreign_agent.id,
+            agent_id_snapshot=foreign_agent.id,
             route_mode=ExternalChannelRouteMode.DEDICATED,
             connection_app_mode=ExternalChannelAppMode.MULTI,
             catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
@@ -927,6 +1040,7 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
                 RDBExternalChannelAgentRoute(
                     connection_id=multi.id,
                     agent_id=mode_mismatch_agent.id,
+                    agent_id_snapshot=mode_mismatch_agent.id,
                     route_mode=ExternalChannelRouteMode.DEDICATED,
                     connection_app_mode=ExternalChannelAppMode.SINGLE,
                     catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
@@ -969,6 +1083,193 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
                 update={"connection_id": multi.id, "route_id": multi_route.id}
             ),
         )
+
+
+async def test_binding_creation_serializes_on_resource_lock(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Concurrent binding retries converge on one resource-wide row."""
+    del latest_db_schema
+    suffix = uuid4().hex[:8]
+    workspace_id: str | None = None
+    second_task: asyncio.Task[object] | None = None
+    try:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
+            workspace_id = await _workspace(setup, f"binding-lock-{suffix}")
+            agent = await _agent(setup, workspace_id, f"binding-lock-{suffix}")
+            repo = ExternalChannelRepository()
+            connection = await repo.create_connection(
+                setup,
+                _connection_create(
+                    workspace_id,
+                    provider_app_id=f"AL{suffix}",
+                    provider_tenant_id=f"TL{suffix}",
+                ),
+            )
+            route = await repo.create_agent_route(
+                setup,
+                _route_create(
+                    connection.id,
+                    agent.id,
+                    mode=ExternalChannelAppMode.SINGLE,
+                ),
+            )
+            resource = await _resource(
+                setup,
+                repo,
+                connection_id=connection.id,
+                key=f"binding-lock-{suffix}",
+            )
+            agent_session = await AgentSessionRepository().create(
+                setup,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent.id,
+                    title=None,
+                ),
+            )
+            await setup.commit()
+
+        create = ExternalChannelBindingCreate(
+            resource_id=resource.id,
+            route_id=route.id,
+            agent_session_id=agent_session.id,
+            status=ExternalChannelBindingStatus.ACTIVE,
+            activation_status=(
+                ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+            ),
+            activation_trigger_message_id=None,
+            activated_at=None,
+            projected_through_position=None,
+            truncated_message_count=0,
+            truncated_size=0,
+            disconnected_at=None,
+            disconnect_reason=None,
+        )
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as first_session:
+            first = await repo.create_binding_idempotent(
+                first_session,
+                create,
+                expected_admission_id=None,
+                expected_access_request_id=None,
+            )
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as second_session:
+                second_task = asyncio.create_task(
+                    repo.create_binding_idempotent(
+                        second_session,
+                        create,
+                        expected_admission_id=None,
+                        expected_access_request_id=None,
+                    )
+                )
+                await asyncio.sleep(0.1)
+                assert not second_task.done()
+                await first_session.commit()
+                second = await asyncio.wait_for(second_task, timeout=5)
+                await second_session.commit()
+
+        assert second.id == first.id
+        async with AsyncSession(rdb_engine) as verification:
+            binding_count = await verification.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBExternalChannelBinding)
+                .where(RDBExternalChannelBinding.resource_id == resource.id)
+            )
+        assert binding_count == 1
+    finally:
+        if second_task is not None and not second_task.done():
+            second_task.cancel()
+            await asyncio.gather(second_task, return_exceptions=True)
+        if workspace_id is not None:
+            await _cleanup_committed_workspace(
+                rdb_engine,
+                workspace_id=workspace_id,
+            )
+
+
+async def test_route_selection_observes_concurrent_agent_decommission(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """A waiting route selector fails closed after the Agent fence commits."""
+    del latest_db_schema
+    suffix = uuid4().hex[:8]
+    workspace_id: str | None = None
+    selection_task: asyncio.Task[object] | None = None
+    try:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
+            workspace_id = await _workspace(setup, f"route-fence-{suffix}")
+            agent = await _agent(setup, workspace_id, f"route-fence-{suffix}")
+            repo = ExternalChannelRepository()
+            connection = await repo.create_connection(
+                setup,
+                _connection_create(
+                    workspace_id,
+                    provider_app_id=f"AF{suffix}",
+                    provider_tenant_id=f"TF{suffix}",
+                ),
+            )
+            route = await repo.create_agent_route(
+                setup,
+                _route_create(
+                    connection.id,
+                    agent.id,
+                    mode=ExternalChannelAppMode.SINGLE,
+                ),
+            )
+            await setup.commit()
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as decommission_session:
+            await decommission_session.execute(
+                sa.update(RDBAgent)
+                .where(RDBAgent.id == agent.id)
+                .values(lifecycle_status=AgentLifecycleStatus.DECOMMISSIONING)
+            )
+            await decommission_session.flush()
+
+            async def select_route() -> object:
+                async with AsyncSession(
+                    rdb_engine,
+                    expire_on_commit=False,
+                ) as routing_session:
+                    locked_connection = await repo.lock_connection_for_routing(
+                        routing_session,
+                        connection_id=connection.id,
+                    )
+                    assert locked_connection is not None
+                    selected = await repo.get_routable_route_by_id(
+                        routing_session,
+                        route_id=route.id,
+                    )
+                    await routing_session.commit()
+                    return selected
+
+            selection_task = asyncio.create_task(select_route())
+            await asyncio.sleep(0.1)
+            assert not selection_task.done()
+            await decommission_session.commit()
+            selected = await asyncio.wait_for(selection_task, timeout=5)
+
+        assert selected is None
+    finally:
+        if selection_task is not None and not selection_task.done():
+            selection_task.cancel()
+            await asyncio.gather(selection_task, return_exceptions=True)
+        if workspace_id is not None:
+            await _cleanup_committed_workspace(
+                rdb_engine,
+                workspace_id=workspace_id,
+            )
 
 
 async def test_resource_wide_binding_unique_index_rejects_second_route(
@@ -1069,5 +1370,489 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
             disconnected_at=None,
             disconnect_reason=None,
         ),
+        expected_admission_id=None,
+        expected_access_request_id=None,
     )
     assert terminal_then_active.route_id == second_route.id
+
+
+async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
+    rdb_session: AsyncSession,
+) -> None:
+    """Agent management exposes only its exact sole Single-App route."""
+    workspace_id = await _workspace(rdb_session, "management-route-boundary")
+    agent = await _agent(rdb_session, workspace_id, "management-route-boundary")
+    second_agent = await _agent(
+        rdb_session, workspace_id, "management-route-boundary-second"
+    )
+    repo = ExternalChannelRepository()
+    management = ExternalChannelManagementRepository()
+
+    multi = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id, provider_app_id="AM", provider_tenant_id="TM"
+        )
+        .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
+        .model_dump()
+    )
+    rdb_session.add(multi)
+    await rdb_session.flush()
+    await repo.create_agent_route(
+        rdb_session,
+        _route_create(multi.id, agent.id, mode=ExternalChannelAppMode.MULTI),
+    )
+
+    corrupt_single = await repo.create_connection(
+        rdb_session,
+        _connection_create(workspace_id, provider_app_id="AS", provider_tenant_id="TS"),
+    )
+    await repo.create_agent_route(
+        rdb_session,
+        _route_create(
+            corrupt_single.id,
+            agent.id,
+            mode=ExternalChannelAppMode.SINGLE,
+        ),
+    )
+    await rdb_session.execute(
+        sa.text("DROP INDEX uq_external_channel_agent_routes_single_connection")
+    )
+    rdb_session.add(
+        RDBExternalChannelAgentRoute(
+            connection_id=corrupt_single.id,
+            agent_id=second_agent.id,
+            agent_id_snapshot=second_agent.id,
+            route_mode=ExternalChannelRouteMode.DEDICATED,
+            connection_app_mode=ExternalChannelAppMode.SINGLE,
+            catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
+            catalog_removed_at=None,
+            catalog_removed_by_user_id=None,
+        )
+    )
+    await rdb_session.flush()
+
+    assert (
+        await management.list_connections(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+        )
+        == []
+    )
+    assert (
+        await management.get_connection(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            connection_id=multi.id,
+        )
+        is None
+    )
+    assert (
+        await management.get_connection(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            connection_id=corrupt_single.id,
+        )
+        is None
+    )
+
+
+async def test_disconnect_lookup_uses_detached_single_route_snapshot(
+    rdb_session: AsyncSession,
+) -> None:
+    """Only disconnect retries can resolve a detached disconnected Single App."""
+    workspace_id = await _workspace(rdb_session, "disconnect-snapshot-lookup")
+    agent = await _agent(rdb_session, workspace_id, "disconnect-snapshot-owner")
+    other_agent = await _agent(rdb_session, workspace_id, "disconnect-snapshot-other")
+    repository = ExternalChannelRepository()
+    management = ExternalChannelManagementRepository()
+    created_connection = await repository.create_connection(
+        rdb_session,
+        _connection_create(
+            workspace_id,
+            provider_app_id="AD-snapshot",
+            provider_tenant_id="TD-snapshot",
+        ),
+    )
+    created_route = await repository.create_agent_route(
+        rdb_session,
+        _route_create(
+            created_connection.id,
+            agent.id,
+            mode=ExternalChannelAppMode.SINGLE,
+        ),
+    )
+    connection = await rdb_session.get(
+        RDBExternalChannelConnection,
+        created_connection.id,
+    )
+    route = await rdb_session.get(
+        RDBExternalChannelAgentRoute,
+        created_route.id,
+    )
+    assert connection is not None
+    assert route is not None
+    connection.status = ExternalChannelConnectionStatus.DISCONNECTED
+    route.agent_id = None
+    route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
+    await rdb_session.flush()
+
+    assert (
+        await management.get_connection(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            connection_id=connection.id,
+        )
+        is None
+    )
+    disconnected = await management.get_connection(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        connection_id=connection.id,
+        include_disconnected=True,
+    )
+    assert disconnected is not None
+    assert disconnected[0].id == connection.id
+    assert disconnected[1].id == route.id
+    assert (
+        await management.get_connection(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=other_agent.id,
+            connection_id=connection.id,
+            include_disconnected=True,
+        )
+        is None
+    )
+
+
+async def test_multi_route_removal_preserves_route_identity_and_other_routes(
+    rdb_session: AsyncSession,
+) -> None:
+    """Removing one Multi route terminalizes only its live routing projection."""
+    workspace_id = await _workspace(rdb_session, "multi-route-removal")
+    user = await UserRepository().create(
+        rdb_session,
+        UserCreate(email="multi-route-removal@example.com"),
+    )
+    first_agent = await _agent(rdb_session, workspace_id, "remove-first")
+    second_agent = await _agent(rdb_session, workspace_id, "remove-second")
+    repo = ExternalChannelRepository()
+    connection = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id,
+            provider_app_id="AR",
+            provider_tenant_id="TR",
+        )
+        .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
+        .model_dump()
+    )
+    rdb_session.add(connection)
+    await rdb_session.flush()
+    first_route = await repo.create_agent_route(
+        rdb_session,
+        _route_create(connection.id, first_agent.id, mode=ExternalChannelAppMode.MULTI),
+    )
+    second_route = await repo.create_agent_route(
+        rdb_session,
+        _route_create(
+            connection.id,
+            second_agent.id,
+            mode=ExternalChannelAppMode.MULTI,
+        ),
+    )
+    await repo.create_channel_default(
+        rdb_session,
+        ExternalChannelChannelDefaultCreate(
+            connection_id=connection.id,
+            provider_channel_id="C-removal",
+            route_id=first_route.id,
+            status=ExternalChannelChannelDefaultStatus.ACTIVE,
+            configured_by_user_id=user.id,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
+    resource = await _resource(
+        rdb_session,
+        repo,
+        connection_id=connection.id,
+        key="removal-resource",
+    )
+    message = await _message(
+        rdb_session,
+        repo,
+        resource_id=resource.id,
+        key="removal-message",
+    )
+    admission = await repo.create_conversation_admission_idempotent(
+        rdb_session,
+        _admission_create(
+            connection_id=connection.id,
+            resource_id=resource.id,
+            source_message_id=message.id,
+            selected_route_id=first_route.id,
+            status=ExternalChannelConversationAdmissionStatus.SELECTED,
+        ),
+    )
+    principal = await repo.create_principal_idempotent(
+        rdb_session,
+        ExternalChannelPrincipalCreate(
+            provider=ExternalChannelProvider.SLACK,
+            provider_tenant_id="TR",
+            provider_user_id="U-removal",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            display_name=None,
+            avatar_url=None,
+            profile=None,
+        ),
+    )
+    request = await repo.create_access_request_idempotent(
+        rdb_session,
+        ExternalChannelAccessRequestCreate(
+            route_id=first_route.id,
+            resource_id=resource.id,
+            source_message_id=message.id,
+            principal_id=principal.id,
+            agent_session_id=None,
+            status=ExternalChannelAccessRequestStatus.PENDING,
+            decision_policy_snapshot={},
+            decided_by_user_id=None,
+            decision_summary=None,
+            expires_at=_at(50),
+            decided_at=None,
+        ),
+    )
+
+    result = await ExternalChannelLifecycleRepository().remove_multi_route(
+        rdb_session,
+        connection_id=connection.id,
+        route_id=first_route.id,
+        removed_by_user_id=user.id,
+        now=_at(30),
+    )
+
+    assert result is not None
+    assert result.impact.active_default_count == 1
+    assert result.impact.open_admission_count == 1
+    route = await rdb_session.get(RDBExternalChannelAgentRoute, first_route.id)
+    default = await rdb_session.scalar(
+        sa.select(RDBExternalChannelChannelDefault).where(
+            RDBExternalChannelChannelDefault.route_id == first_route.id
+        )
+    )
+    persisted_admission = await rdb_session.get(
+        RDBExternalChannelConversationAdmission,
+        admission.id,
+    )
+    persisted_request = await repo.get_access_request(
+        rdb_session,
+        access_request_id=request.id,
+    )
+    assert route is not None
+    assert route.id == first_route.id
+    assert route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED
+    assert route.agent_id is None
+    assert route.agent_id_snapshot == first_agent.id
+    assert default is not None
+    assert default.status is ExternalChannelChannelDefaultStatus.INVALIDATED
+    assert persisted_admission is not None
+    assert (
+        persisted_admission.status is ExternalChannelConversationAdmissionStatus.EXPIRED
+    )
+    assert persisted_request is not None
+    assert persisted_request.status is ExternalChannelAccessRequestStatus.EXPIRED
+    assert (
+        await rdb_session.get(RDBExternalChannelAgentRoute, second_route.id)
+    ) is not None
+    assert await ExternalChannelLifecycleRepository().reenable_multi_route(
+        rdb_session,
+        connection_id=connection.id,
+        route_id=first_route.id,
+    )
+    assert route.catalog_status is ExternalChannelRouteCatalogStatus.AVAILABLE
+    assert route.agent_id == first_agent.id
+    assert route.agent_id_snapshot == first_agent.id
+    assert default.status is ExternalChannelChannelDefaultStatus.INVALIDATED
+    assert (
+        persisted_admission.status is ExternalChannelConversationAdmissionStatus.EXPIRED
+    )
+
+
+async def test_multi_disconnect_terminalizes_zero_route_connection(
+    rdb_session: AsyncSession,
+) -> None:
+    """A zero-route Multi App disconnect remains idempotent and credential-free."""
+    workspace_id = await _workspace(rdb_session, "multi-zero-disconnect")
+    connection = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id,
+            provider_app_id="AZ",
+            provider_tenant_id="TZ",
+        )
+        .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
+        .model_dump()
+    )
+    rdb_session.add(connection)
+    await rdb_session.flush()
+    lifecycle = ExternalChannelLifecycleRepository()
+
+    first = await lifecycle.disconnect_multi_connection(
+        rdb_session,
+        connection_id=connection.id,
+        now=_at(40),
+        reason="manager_disconnected",
+    )
+    retry = await lifecycle.disconnect_multi_connection(
+        rdb_session,
+        connection_id=connection.id,
+        now=_at(41),
+        reason="manager_disconnected",
+    )
+
+    assert first is not None
+    assert first.disconnected_route_count == 0
+    assert retry is not None
+    assert connection.status is ExternalChannelConnectionStatus.DISCONNECTED
+    assert connection.encrypted_credentials is None
+
+
+async def test_agent_decommission_detaches_routes_before_agent_delete(
+    rdb_session: AsyncSession,
+) -> None:
+    """Agent cleanup preserves route provenance without blocking physical deletion."""
+    workspace_id = await _workspace(rdb_session, "route-agent-decommission")
+    agent = await _agent(rdb_session, workspace_id, "route-agent-decommission")
+    repo = ExternalChannelRepository()
+    lifecycle = ExternalChannelLifecycleRepository()
+    single = await repo.create_connection(
+        rdb_session,
+        _connection_create(
+            workspace_id,
+            provider_app_id="AD-single",
+            provider_tenant_id="TD-single",
+        ),
+    )
+    multi = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id,
+            provider_app_id="AD-multi",
+            provider_tenant_id="TD-multi",
+        )
+        .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
+        .model_dump()
+    )
+    rdb_session.add(multi)
+    await rdb_session.flush()
+    single_route = await repo.create_agent_route(
+        rdb_session,
+        _route_create(single.id, agent.id, mode=ExternalChannelAppMode.SINGLE),
+    )
+    multi_route = await repo.create_agent_route(
+        rdb_session,
+        _route_create(multi.id, agent.id, mode=ExternalChannelAppMode.MULTI),
+    )
+
+    cleanup = await lifecycle.cleanup_decommissioned_agent(
+        rdb_session,
+        agent_id=agent.id,
+        now=_at(60),
+    )
+
+    persisted_single_route = await rdb_session.get(
+        RDBExternalChannelAgentRoute,
+        single_route.id,
+    )
+    persisted_multi_route = await rdb_session.get(
+        RDBExternalChannelAgentRoute,
+        multi_route.id,
+    )
+    persisted_single_connection = await rdb_session.get(
+        RDBExternalChannelConnection,
+        single.id,
+    )
+    assert persisted_single_route is not None
+    assert persisted_multi_route is not None
+    assert persisted_single_connection is not None
+    for route in (persisted_single_route, persisted_multi_route):
+        assert route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED
+        assert route.agent_id is None
+        assert route.agent_id_snapshot == agent.id
+    assert (
+        persisted_single_connection.status
+        is ExternalChannelConnectionStatus.DISCONNECTED
+    )
+    assert persisted_single_connection.encrypted_credentials == "ciphertext"
+    assert multi.status is ExternalChannelConnectionStatus.ACTIVE
+    assert cleanup.provider_state_purge_connection_ids == (single.id,)
+
+    assert (
+        await lifecycle.purge_disconnected_connection_provider_state(
+            rdb_session,
+            connection_ids=cleanup.provider_state_purge_connection_ids,
+        )
+        == 1
+    )
+    assert persisted_single_connection.encrypted_credentials is None
+
+    await rdb_session.delete(agent)
+    await rdb_session.flush()
+
+    assert (
+        await rdb_session.get(RDBExternalChannelAgentRoute, single_route.id)
+    ) is persisted_single_route
+    assert (
+        await rdb_session.get(RDBExternalChannelAgentRoute, multi_route.id)
+    ) is persisted_multi_route
+
+
+async def test_agent_decommission_repairs_legacy_disconnected_single_route(
+    rdb_session: AsyncSession,
+) -> None:
+    """Agent cleanup detaches a route left active by a historical disconnect."""
+    workspace_id = await _workspace(rdb_session, "legacy-disconnected-single")
+    agent = await _agent(rdb_session, workspace_id, "legacy-disconnected-single")
+    repo = ExternalChannelRepository()
+    lifecycle = ExternalChannelLifecycleRepository()
+    connection = await repo.create_connection(
+        rdb_session,
+        _connection_create(
+            workspace_id,
+            provider_app_id="AD-legacy-single",
+            provider_tenant_id="TD-legacy-single",
+        ),
+    )
+    route = await repo.create_agent_route(
+        rdb_session,
+        _route_create(connection.id, agent.id, mode=ExternalChannelAppMode.SINGLE),
+    )
+    connection_rdb = await rdb_session.get(
+        RDBExternalChannelConnection,
+        connection.id,
+    )
+    assert connection_rdb is not None
+    connection_rdb.status = ExternalChannelConnectionStatus.DISCONNECTED
+    connection_rdb.encrypted_credentials = None
+    connection_rdb.provider_tenant_id = None
+    connection_rdb.disconnected_at = _at(50)
+    await rdb_session.flush()
+
+    cleanup = await lifecycle.cleanup_decommissioned_agent(
+        rdb_session,
+        agent_id=agent.id,
+        now=_at(60),
+    )
+
+    persisted_route = await rdb_session.get(RDBExternalChannelAgentRoute, route.id)
+    assert cleanup.deleted_route_count == 0
+    assert persisted_route is not None
+    assert persisted_route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED
+    assert persisted_route.agent_id is None
+    assert persisted_route.agent_id_snapshot == agent.id
+
+    await rdb_session.delete(agent)
+    await rdb_session.flush()

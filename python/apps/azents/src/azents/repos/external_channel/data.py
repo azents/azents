@@ -128,7 +128,8 @@ class ExternalChannelAgentRoute(_Record):
 
     id: str
     connection_id: str
-    agent_id: str
+    agent_id: str | None
+    agent_id_snapshot: str
     route_mode: ExternalChannelRouteMode
     connection_app_mode: ExternalChannelAppMode
     catalog_status: ExternalChannelRouteCatalogStatus
@@ -137,12 +138,21 @@ class ExternalChannelAgentRoute(_Record):
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
+    def require_active_agent_id(self) -> str:
+        """Return the active Agent association or reject historical use."""
+        if self.agent_id is None:
+            raise RuntimeError(
+                "External Channel route has no active Agent association."
+            )
+        return self.agent_id
+
 
 class ExternalChannelAgentRouteCreate(_Record):
     """Agent route creation payload."""
 
     connection_id: str
     agent_id: str
+    agent_id_snapshot: str
     route_mode: ExternalChannelRouteMode
     connection_app_mode: ExternalChannelAppMode
     catalog_status: ExternalChannelRouteCatalogStatus
@@ -851,8 +861,42 @@ class ExternalChannelPurgeVerification(_Record):
 class ExternalChannelAgentDecommissionCleanup(_Record):
     """Summary of direct Agent-owned External Channel state removal."""
 
+    progress_delete_intent_ids: tuple[str, ...]
+    provider_state_purge_connection_ids: tuple[str, ...]
     deleted_route_count: int
     deleted_access_request_count: int
     deleted_control_attempt_count: int
     deleted_agent_grant_count: int
     deleted_block_count: int
+
+
+class ExternalChannelMultiRouteImpact(_Record):
+    """Sanitized deterministic impact projection for one Multi App route."""
+
+    route_id: str
+    active_default_count: int
+    active_binding_count: int
+    bound_resource_count: int
+    open_admission_count: int
+    pending_access_request_count: int
+    pending_context_count: int
+
+
+class ExternalChannelMultiRouteRemoval(_Record):
+    """Committed Multi route removal result without provider execution."""
+
+    impact: ExternalChannelMultiRouteImpact
+    progress_delete_intent_ids: tuple[str, ...]
+
+
+class ExternalChannelMultiConnectionDisconnect(_Record):
+    """Committed whole-Multi-App disconnect result without provider execution."""
+
+    disconnected_route_count: int
+    invalidated_default_count: int
+    expired_admission_count: int
+    expired_access_request_count: int
+    unavailable_resource_count: int
+    disconnected_binding_count: int
+    deleted_pending_context_count: int
+    progress_delete_intent_ids: tuple[str, ...]

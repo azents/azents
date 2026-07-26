@@ -169,6 +169,7 @@ async def _setup_binding(session: AsyncSession) -> tuple[str, str]:
         ExternalChannelAgentRouteCreate(
             connection_id=connection.id,
             agent_id=agent.id,
+            agent_id_snapshot=agent.id,
             route_mode=ExternalChannelRouteMode.DEDICATED,
             connection_app_mode=ExternalChannelAppMode.SINGLE,
             catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
@@ -218,6 +219,8 @@ async def _setup_binding(session: AsyncSession) -> tuple[str, str]:
             disconnected_at=None,
             disconnect_reason=None,
         ),
+        expected_admission_id=None,
+        expected_access_request_id=None,
     )
     await session.flush()
     return agent.id, binding.id

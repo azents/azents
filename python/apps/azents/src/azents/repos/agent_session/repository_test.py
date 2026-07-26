@@ -1174,6 +1174,7 @@ class TestAgentSessionRepository:
         route = RDBExternalChannelAgentRoute(
             connection_id=connection.id,
             agent_id=agent_id,
+            agent_id_snapshot=agent_id,
             route_mode=ExternalChannelRouteMode.DEDICATED,
             connection_app_mode=ExternalChannelAppMode.SINGLE,
             catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,

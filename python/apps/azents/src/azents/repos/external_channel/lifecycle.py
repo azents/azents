@@ -9,13 +9,23 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     ExternalChannelAccessGrantScope,
+    ExternalChannelAccessRequestStatus,
+    ExternalChannelAppMode,
     ExternalChannelBindingStatus,
+    ExternalChannelChannelDefaultStatus,
+    ExternalChannelConnectionStatus,
+    ExternalChannelConversationAdmissionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
+    ExternalChannelResourceStatus,
+    ExternalChannelRouteCatalogStatus,
+    ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
@@ -24,15 +34,22 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelBlock,
+    RDBExternalChannelChannelDefault,
+    RDBExternalChannelConnection,
+    RDBExternalChannelConversationAdmission,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelInvocationBatch,
     RDBExternalChannelInvocationBatchItem,
     RDBExternalChannelPendingContext,
+    RDBExternalChannelResource,
     RDBExternalChannelWork,
 )
 from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
     ExternalChannelArchiveTermination,
+    ExternalChannelMultiConnectionDisconnect,
+    ExternalChannelMultiRouteImpact,
+    ExternalChannelMultiRouteRemoval,
     ExternalChannelPurgeCleanup,
     ExternalChannelPurgePreparation,
     ExternalChannelPurgeVerification,
@@ -97,6 +114,7 @@ class ExternalChannelLifecycleRepository:
         for work in works:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.finished_at = now
+            work.state_revision += 1
             work.desired_progress_payload = None
             work.desired_progress_revision += 1
             finished_work_count += 1
@@ -420,6 +438,433 @@ class ExternalChannelLifecycleRepository:
             )
         return verification
 
+    async def project_multi_route_impact(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        route_id: str,
+    ) -> ExternalChannelMultiRouteImpact | None:
+        """Project a sanitized deterministic Multi route removal impact."""
+        route = await self._lock_multi_route(
+            session,
+            connection_id=connection_id,
+            route_id=route_id,
+        )
+        if route is None:
+            return None
+        return await self._project_route_impact(session, route_id=route.id)
+
+    async def remove_multi_route(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        route_id: str,
+        removed_by_user_id: str | None,
+        now: datetime.datetime,
+    ) -> ExternalChannelMultiRouteRemoval | None:
+        """Remove one Multi association while preserving route history."""
+        route = await self._lock_multi_route(
+            session,
+            connection_id=connection_id,
+            route_id=route_id,
+        )
+        if route is None:
+            return None
+        impact = await self._project_route_impact(session, route_id=route.id)
+        already_removed = (
+            route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED
+        )
+        historically_bound_resource_ids = sa.select(
+            RDBExternalChannelBinding.resource_id
+        ).where(RDBExternalChannelBinding.route_id == route.id)
+        resources = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelResource)
+                    .where(
+                        RDBExternalChannelResource.id.in_(
+                            historically_bound_resource_ids
+                        )
+                    )
+                    .order_by(RDBExternalChannelResource.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        bindings = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelBinding)
+                    .where(
+                        RDBExternalChannelBinding.route_id == route.id,
+                        RDBExternalChannelBinding.status
+                        == ExternalChannelBindingStatus.ACTIVE,
+                    )
+                    .order_by(RDBExternalChannelBinding.resource_id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        admissions = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelConversationAdmission)
+                    .where(
+                        RDBExternalChannelConversationAdmission.selected_route_id
+                        == route.id,
+                        RDBExternalChannelConversationAdmission.status.in_(
+                            (
+                                ExternalChannelConversationAdmissionStatus.SELECTED,
+                                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                            )
+                        ),
+                    )
+                    .order_by(RDBExternalChannelConversationAdmission.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        access_requests = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelAccessRequest)
+                    .where(
+                        RDBExternalChannelAccessRequest.route_id == route.id,
+                        RDBExternalChannelAccessRequest.status
+                        == ExternalChannelAccessRequestStatus.PENDING,
+                    )
+                    .order_by(RDBExternalChannelAccessRequest.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        progress_delete_intent_ids = await self._terminalize_bindings(
+            session,
+            bindings=bindings,
+            resources=resources,
+            now=now,
+            reason="relationship_removed",
+        )
+        for resource in resources:
+            if resource.status is ExternalChannelResourceStatus.ACTIVE:
+                resource.status = ExternalChannelResourceStatus.UNAVAILABLE
+                resource.unavailable_at = now
+        await session.execute(
+            sa.update(RDBExternalChannelChannelDefault)
+            .where(
+                RDBExternalChannelChannelDefault.route_id == route.id,
+                RDBExternalChannelChannelDefault.status
+                == ExternalChannelChannelDefaultStatus.ACTIVE,
+            )
+            .values(
+                status=ExternalChannelChannelDefaultStatus.INVALIDATED,
+                invalidated_at=now,
+                invalidation_reason="relationship_removed",
+            )
+        )
+        for admission in admissions:
+            admission.status = ExternalChannelConversationAdmissionStatus.EXPIRED
+        for request in access_requests:
+            request.status = ExternalChannelAccessRequestStatus.EXPIRED
+            request.decision_summary = "The External Channel relationship was removed."
+            request.decided_at = now
+        await self._delete(
+            session,
+            RDBExternalChannelPendingContext,
+            RDBExternalChannelPendingContext.route_id == route.id,
+        )
+        if not already_removed:
+            route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
+            route.catalog_removed_at = now
+            route.catalog_removed_by_user_id = removed_by_user_id
+        route.agent_id = None
+        await session.flush()
+        return ExternalChannelMultiRouteRemoval(
+            impact=impact,
+            progress_delete_intent_ids=progress_delete_intent_ids,
+        )
+
+    async def reenable_multi_route(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        route_id: str,
+    ) -> bool:
+        """Re-enable a preserved Multi association without reviving old state."""
+        route = await self._lock_multi_route(
+            session,
+            connection_id=connection_id,
+            route_id=route_id,
+        )
+        if route is None:
+            return False
+        agent = await session.scalar(
+            sa.select(RDBAgent)
+            .where(
+                RDBAgent.id == route.agent_id_snapshot,
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        connection = await session.get(RDBExternalChannelConnection, connection_id)
+        if (
+            agent is None
+            or connection is None
+            or connection.status
+            in (
+                ExternalChannelConnectionStatus.DISCONNECTING,
+                ExternalChannelConnectionStatus.DISCONNECTED,
+            )
+            or agent.workspace_id != connection.workspace_id
+        ):
+            return False
+        if route.catalog_status is ExternalChannelRouteCatalogStatus.AVAILABLE:
+            return route.agent_id == route.agent_id_snapshot
+        route.agent_id = route.agent_id_snapshot
+        route.catalog_status = ExternalChannelRouteCatalogStatus.AVAILABLE
+        route.catalog_removed_at = None
+        route.catalog_removed_by_user_id = None
+        await session.flush()
+        return True
+
+    async def disconnect_multi_connection(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        now: datetime.datetime,
+        reason: str,
+    ) -> ExternalChannelMultiConnectionDisconnect | None:
+        """Terminalize all live Multi-App routing state and credentials."""
+        return await self._disconnect_connection(
+            session,
+            connection_id=connection_id,
+            expected_app_mode=ExternalChannelAppMode.MULTI,
+            now=now,
+            reason=reason,
+            defer_provider_state_purge=False,
+        )
+
+    async def disconnect_single_connection(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        now: datetime.datetime,
+        reason: str,
+        defer_provider_state_purge: bool = False,
+    ) -> ExternalChannelMultiConnectionDisconnect | None:
+        """Terminalize the whole Single App when its relationship is removed."""
+        return await self._disconnect_connection(
+            session,
+            connection_id=connection_id,
+            expected_app_mode=ExternalChannelAppMode.SINGLE,
+            now=now,
+            reason=reason,
+            defer_provider_state_purge=defer_provider_state_purge,
+        )
+
+    async def _disconnect_connection(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        expected_app_mode: ExternalChannelAppMode,
+        now: datetime.datetime,
+        reason: str,
+        defer_provider_state_purge: bool,
+    ) -> ExternalChannelMultiConnectionDisconnect | None:
+        """Terminalize every live routing root for one immutable App mode."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == connection_id)
+            .with_for_update()
+        )
+        if connection is None or connection.app_mode is not expected_app_mode:
+            return None
+        routes = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelAgentRoute)
+                    .where(RDBExternalChannelAgentRoute.connection_id == connection.id)
+                    .order_by(RDBExternalChannelAgentRoute.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        route_ids = [route.id for route in routes]
+        resources = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelResource)
+                    .where(RDBExternalChannelResource.connection_id == connection.id)
+                    .order_by(RDBExternalChannelResource.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        bindings = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelBinding)
+                    .where(
+                        RDBExternalChannelBinding.route_id.in_(route_ids),
+                        RDBExternalChannelBinding.status
+                        == ExternalChannelBindingStatus.ACTIVE,
+                    )
+                    .order_by(RDBExternalChannelBinding.resource_id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        admissions = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelConversationAdmission)
+                    .where(
+                        RDBExternalChannelConversationAdmission.connection_id
+                        == connection.id,
+                        RDBExternalChannelConversationAdmission.status.in_(
+                            (
+                                ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+                                ExternalChannelConversationAdmissionStatus.SELECTED,
+                                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                            )
+                        ),
+                    )
+                    .order_by(RDBExternalChannelConversationAdmission.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        access_requests = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelAccessRequest)
+                    .where(
+                        RDBExternalChannelAccessRequest.route_id.in_(route_ids),
+                        RDBExternalChannelAccessRequest.status
+                        == ExternalChannelAccessRequestStatus.PENDING,
+                    )
+                    .order_by(RDBExternalChannelAccessRequest.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        progress_delete_intent_ids = await self._terminalize_bindings(
+            session,
+            bindings=bindings,
+            resources=resources,
+            now=now,
+            reason=reason,
+        )
+        unavailable_resource_count = 0
+        for resource in resources:
+            if resource.status is ExternalChannelResourceStatus.ACTIVE:
+                resource.status = ExternalChannelResourceStatus.UNAVAILABLE
+                resource.unavailable_at = now
+                unavailable_resource_count += 1
+        invalidated_default_count = await self._update_count(
+            session,
+            sa.update(RDBExternalChannelChannelDefault)
+            .where(
+                RDBExternalChannelChannelDefault.connection_id == connection.id,
+                RDBExternalChannelChannelDefault.status
+                == ExternalChannelChannelDefaultStatus.ACTIVE,
+            )
+            .values(
+                status=ExternalChannelChannelDefaultStatus.INVALIDATED,
+                invalidated_at=now,
+                invalidation_reason=reason,
+            ),
+        )
+        for admission in admissions:
+            admission.status = ExternalChannelConversationAdmissionStatus.EXPIRED
+        for request in access_requests:
+            request.status = ExternalChannelAccessRequestStatus.EXPIRED
+            request.decision_summary = (
+                "The External Channel connection was disconnected."
+            )
+            request.decided_at = now
+        deleted_pending_context_count = await self._delete(
+            session,
+            RDBExternalChannelPendingContext,
+            RDBExternalChannelPendingContext.route_id.in_(route_ids),
+        )
+        disconnected_route_count = 0
+        for route in routes:
+            if (
+                route.catalog_status is not ExternalChannelRouteCatalogStatus.REMOVED
+                or route.agent_id is not None
+            ):
+                disconnected_route_count += 1
+            if route.catalog_status is not ExternalChannelRouteCatalogStatus.REMOVED:
+                route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
+                route.catalog_removed_at = now
+                route.catalog_removed_by_user_id = None
+            route.agent_id = None
+        connection.status = ExternalChannelConnectionStatus.DISCONNECTED
+        if not defer_provider_state_purge:
+            self._purge_connection_provider_state(connection)
+        connection.disconnected_at = now
+        connection.socket_lease_owner = None
+        connection.socket_lease_until = None
+        if connection.transport is ExternalChannelTransport.SOCKET:
+            connection.socket_heartbeat_at = now
+            connection.socket_gap_detected_at = now
+            connection.socket_gap_reason = reason
+        else:
+            connection.socket_heartbeat_at = None
+            connection.socket_gap_detected_at = None
+            connection.socket_gap_reason = None
+        await session.flush()
+        return ExternalChannelMultiConnectionDisconnect(
+            disconnected_route_count=disconnected_route_count,
+            invalidated_default_count=invalidated_default_count,
+            expired_admission_count=len(admissions),
+            expired_access_request_count=len(access_requests),
+            unavailable_resource_count=unavailable_resource_count,
+            disconnected_binding_count=len(bindings),
+            deleted_pending_context_count=deleted_pending_context_count,
+            progress_delete_intent_ids=progress_delete_intent_ids,
+        )
+
+    async def purge_disconnected_connection_provider_state(
+        self,
+        session: AsyncSession,
+        *,
+        connection_ids: Sequence[str],
+    ) -> int:
+        """Clear deferred provider state after delivery targets are captured."""
+        unique_ids = tuple(sorted(set(connection_ids)))
+        if not unique_ids:
+            return 0
+        connections = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelConnection)
+                    .where(
+                        RDBExternalChannelConnection.id.in_(unique_ids),
+                        RDBExternalChannelConnection.status
+                        == ExternalChannelConnectionStatus.DISCONNECTED,
+                    )
+                    .order_by(RDBExternalChannelConnection.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        if len(connections) != len(unique_ids):
+            raise RuntimeError(
+                "Disconnected External Channel provider state disappeared."
+            )
+        for connection in connections:
+            self._purge_connection_provider_state(connection)
+        await session.flush()
+        return len(connections)
+
     async def cleanup_decommissioned_agent(
         self,
         session: AsyncSession,
@@ -427,39 +872,54 @@ class ExternalChannelLifecycleRepository:
         agent_id: str,
         now: datetime.datetime,
     ) -> ExternalChannelAgentDecommissionCleanup:
-        """Remove direct Agent state while retaining Workspace provider canon."""
-        routes = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelAgentRoute)
-                    .where(RDBExternalChannelAgentRoute.agent_id == agent_id)
-                    .order_by(RDBExternalChannelAgentRoute.id)
-                    .with_for_update()
+        """Terminalize relationships without erasing shared App provenance."""
+        route_rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelAgentRoute.id,
+                    RDBExternalChannelAgentRoute.connection_id,
+                    RDBExternalChannelConnection.app_mode,
                 )
-            ).all()
-        )
-        route_ids = [route.id for route in routes]
-        access_request_ids = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelAccessRequest.id)
-                    .where(RDBExternalChannelAccessRequest.route_id.in_(route_ids))
-                    .order_by(RDBExternalChannelAccessRequest.id)
-                    .with_for_update()
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
                 )
-            ).all()
-        )
-        deleted_control_attempt_count = await self._delete(
-            session,
-            RDBExternalChannelDeliveryAttempt,
-            sa.and_(
-                RDBExternalChannelDeliveryAttempt.origin_type
-                == ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
-                RDBExternalChannelDeliveryAttempt.origin_id.in_(access_request_ids),
-                RDBExternalChannelDeliveryAttempt.operation
-                == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-            ),
-        )
+                .where(RDBExternalChannelAgentRoute.agent_id == agent_id)
+                .order_by(
+                    RDBExternalChannelAgentRoute.connection_id,
+                    RDBExternalChannelAgentRoute.id,
+                )
+            )
+        ).all()
+        progress_delete_intent_ids: list[str] = []
+        provider_state_purge_connection_ids: list[str] = []
+        for route_id, connection_id, app_mode in route_rows:
+            if app_mode is ExternalChannelAppMode.SINGLE:
+                disconnected = await self.disconnect_single_connection(
+                    session,
+                    connection_id=connection_id,
+                    now=now,
+                    reason="agent_decommissioned",
+                    defer_provider_state_purge=True,
+                )
+                if disconnected is not None:
+                    progress_delete_intent_ids.extend(
+                        disconnected.progress_delete_intent_ids
+                    )
+                    provider_state_purge_connection_ids.append(connection_id)
+            else:
+                removed = await self.remove_multi_route(
+                    session,
+                    connection_id=connection_id,
+                    route_id=route_id,
+                    removed_by_user_id=None,
+                    now=now,
+                )
+                if removed is not None:
+                    progress_delete_intent_ids.extend(
+                        removed.progress_delete_intent_ids
+                    )
         deleted_agent_grant_count = await self._delete(
             session,
             RDBExternalChannelAccessGrant,
@@ -470,24 +930,195 @@ class ExternalChannelLifecycleRepository:
             RDBExternalChannelBlock,
             RDBExternalChannelBlock.agent_id == agent_id,
         )
-        deleted_access_request_count = await self._delete(
-            session,
-            RDBExternalChannelAccessRequest,
-            RDBExternalChannelAccessRequest.id.in_(access_request_ids),
-        )
-        deleted_route_count = await self._delete(
-            session,
-            RDBExternalChannelAgentRoute,
-            RDBExternalChannelAgentRoute.id.in_(route_ids),
-        )
         await session.flush()
         return ExternalChannelAgentDecommissionCleanup(
-            deleted_route_count=deleted_route_count,
-            deleted_access_request_count=deleted_access_request_count,
-            deleted_control_attempt_count=deleted_control_attempt_count,
+            progress_delete_intent_ids=tuple(progress_delete_intent_ids),
+            provider_state_purge_connection_ids=tuple(
+                provider_state_purge_connection_ids
+            ),
+            deleted_route_count=0,
+            deleted_access_request_count=0,
+            deleted_control_attempt_count=0,
             deleted_agent_grant_count=deleted_agent_grant_count,
             deleted_block_count=deleted_block_count,
         )
+
+    @staticmethod
+    def _purge_connection_provider_state(
+        connection: RDBExternalChannelConnection,
+    ) -> None:
+        """Remove provider identity and credentials from a terminal connection."""
+        connection.encrypted_credentials = None
+        connection.provider_tenant_id = None
+        connection.provider_bot_user_id = None
+        connection.capabilities = None
+
+    async def _lock_multi_route(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        route_id: str,
+    ) -> RDBExternalChannelAgentRoute | None:
+        """Lock connection then route for one Multi relationship transition."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == connection_id)
+            .with_for_update()
+        )
+        if (
+            connection is None
+            or connection.app_mode is not ExternalChannelAppMode.MULTI
+        ):
+            return None
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == route_id,
+                RDBExternalChannelAgentRoute.connection_id == connection.id,
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.MULTI,
+            )
+            .with_for_update()
+        )
+        return route
+
+    async def _project_route_impact(
+        self,
+        session: AsyncSession,
+        *,
+        route_id: str,
+    ) -> ExternalChannelMultiRouteImpact:
+        """Return deterministic count-only route impact without provider content."""
+        active_binding_count = await self._count(
+            session,
+            RDBExternalChannelBinding,
+            sa.and_(
+                RDBExternalChannelBinding.route_id == route_id,
+                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
+            ),
+        )
+        bound_resource_count = int(
+            await session.scalar(
+                sa.select(
+                    sa.func.count(sa.distinct(RDBExternalChannelBinding.resource_id))
+                ).where(RDBExternalChannelBinding.route_id == route_id)
+            )
+            or 0
+        )
+        return ExternalChannelMultiRouteImpact(
+            route_id=route_id,
+            active_default_count=await self._count(
+                session,
+                RDBExternalChannelChannelDefault,
+                sa.and_(
+                    RDBExternalChannelChannelDefault.route_id == route_id,
+                    RDBExternalChannelChannelDefault.status
+                    == ExternalChannelChannelDefaultStatus.ACTIVE,
+                ),
+            ),
+            active_binding_count=active_binding_count,
+            bound_resource_count=bound_resource_count,
+            open_admission_count=await self._count(
+                session,
+                RDBExternalChannelConversationAdmission,
+                sa.and_(
+                    RDBExternalChannelConversationAdmission.selected_route_id
+                    == route_id,
+                    RDBExternalChannelConversationAdmission.status.in_(
+                        (
+                            ExternalChannelConversationAdmissionStatus.SELECTED,
+                            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                        )
+                    ),
+                ),
+            ),
+            pending_access_request_count=await self._count(
+                session,
+                RDBExternalChannelAccessRequest,
+                sa.and_(
+                    RDBExternalChannelAccessRequest.route_id == route_id,
+                    RDBExternalChannelAccessRequest.status
+                    == ExternalChannelAccessRequestStatus.PENDING,
+                ),
+            ),
+            pending_context_count=await self._count(
+                session,
+                RDBExternalChannelPendingContext,
+                RDBExternalChannelPendingContext.route_id == route_id,
+            ),
+        )
+
+    async def _terminalize_bindings(
+        self,
+        session: AsyncSession,
+        *,
+        bindings: Sequence[RDBExternalChannelBinding],
+        resources: Sequence[RDBExternalChannelResource],
+        now: datetime.datetime,
+        reason: str,
+    ) -> tuple[str, ...]:
+        """Disconnect bindings and finish work with one-attempt cleanup intents."""
+        if not bindings:
+            return ()
+        binding_ids = [binding.id for binding in bindings]
+        resource_labels = {resource.id: resource.labels for resource in resources}
+        binding_resource_ids = {binding.id: binding.resource_id for binding in bindings}
+        works = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelWork)
+                    .where(
+                        RDBExternalChannelWork.binding_id.in_(binding_ids),
+                        RDBExternalChannelWork.status
+                        == ExternalChannelWorkStatus.ACTIVE,
+                    )
+                    .order_by(RDBExternalChannelWork.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        for binding in bindings:
+            binding.status = ExternalChannelBindingStatus.DISCONNECTED
+            binding.disconnected_at = now
+            binding.disconnect_reason = reason
+        progress_delete_intent_ids: list[str] = []
+        for work in works:
+            work.status = ExternalChannelWorkStatus.FINISHED
+            work.finished_at = now
+            work.state_revision += 1
+            work.desired_progress_payload = None
+            work.desired_progress_revision += 1
+            if work.progress_provider_message_key is None:
+                continue
+            result = await session.execute(
+                pg_insert(RDBExternalChannelDeliveryAttempt)
+                .values(
+                    id=uuid7().hex,
+                    origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                    origin_id=work.binding_id,
+                    channel_action_id=None,
+                    binding_id=work.binding_id,
+                    operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                    request_payload=_provider_payload(
+                        resource_labels.get(binding_resource_ids[work.binding_id]),
+                        work.progress_provider_message_key,
+                    ),
+                    status=ExternalChannelDeliveryStatus.PENDING,
+                    provider_message_key=work.progress_provider_message_key,
+                    error_kind=None,
+                    error_summary=None,
+                    attempted_at=None,
+                    completed_at=None,
+                )
+                .on_conflict_do_nothing()
+                .returning(RDBExternalChannelDeliveryAttempt.id)
+            )
+            created_id = result.scalar_one_or_none()
+            if created_id is not None:
+                progress_delete_intent_ids.append(created_id)
+        await session.flush()
+        return tuple(progress_delete_intent_ids)
 
     async def _locked_bindings(
         self,
@@ -605,3 +1236,29 @@ class ExternalChannelLifecycleRepository:
             sa.select(sa.func.count()).select_from(model).where(predicate)
         )
         return count or 0
+
+    async def _update_count(
+        self,
+        session: AsyncSession,
+        statement: sa.Update,
+    ) -> int:
+        """Apply one terminal transition and return its affected row count."""
+        result = await session.execute(statement.returning(sa.literal(1)))
+        return len(result.scalars().all())
+
+
+def _provider_payload(
+    labels: dict[str, object] | None,
+    provider_message_key: str,
+) -> dict[str, object]:
+    """Build the provider target retained for one progress deletion."""
+    labels = labels or {}
+    channel_id = labels.get("channel_id")
+    thread_ts = labels.get("thread_ts")
+    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        raise ValueError("External Channel resource has no provider target.")
+    return {
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "provider_message_key": provider_message_key,
+    }

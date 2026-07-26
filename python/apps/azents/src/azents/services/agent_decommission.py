@@ -353,15 +353,27 @@ class AgentDecommissionService:
         lease_owner: str,
     ) -> None:
         """Clean direct Agent-owned blobs and request terminal Runtime deletion."""
+        external_cleanup_targets = ()
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, job.agent_id)
             if agent is None:
                 raise RuntimeError("Decommissioning Agent is missing")
             now = datetime.datetime.now(datetime.UTC)
-            await self.external_channel_lifecycle_service.cleanup_decommissioned_agent(
+            cleanup_service = self.external_channel_lifecycle_service
+            external_cleanup = await cleanup_service.cleanup_decommissioned_agent(
                 session,
                 agent_id=job.agent_id,
                 now=now,
+            )
+            external_cleanup_targets = (
+                await self.external_channel_lifecycle_service.prepare_progress_cleanup(
+                    session,
+                    external_cleanup.progress_delete_intent_ids,
+                )
+            )
+            await cleanup_service.purge_decommissioned_provider_state(
+                session,
+                external_cleanup.provider_state_purge_connection_ids,
             )
             await self.exchange_file_repository.expire_unbound_by_agent_id(
                 session,
@@ -392,6 +404,9 @@ class AgentDecommissionService:
                 raise RuntimeError("Agent decommission lease was lost")
             await session.commit()
 
+        await self.external_channel_lifecycle_service.consume_prepared_progress_cleanup(
+            external_cleanup_targets
+        )
         for file in files:
             if file.blob_deleted_at is not None:
                 continue

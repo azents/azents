@@ -394,7 +394,7 @@ class RDBExternalChannelAgentRoute(RDBModel):
     )
     UQ_CONNECTION_AGENT = sa.UniqueConstraint(
         "connection_id",
-        "agent_id",
+        "agent_id_snapshot",
         name="uq_external_channel_agent_routes_connection_agent",
     )
     UQ_CONNECTION_ID_ID = sa.UniqueConstraint(
@@ -414,6 +414,14 @@ class RDBExternalChannelAgentRoute(RDBModel):
         name="fk_external_channel_agent_routes_connection_app_mode",
         ondelete="RESTRICT",
     )
+    CK_AVAILABLE_AGENT = sa.CheckConstraint(
+        "catalog_status = 'removed' OR agent_id IS NOT NULL",
+        name="ck_external_channel_agent_routes_available_agent",
+    )
+    CK_AGENT_SNAPSHOT = sa.CheckConstraint(
+        "agent_id IS NULL OR agent_id = agent_id_snapshot",
+        name="ck_external_channel_agent_routes_agent_snapshot",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -422,11 +430,16 @@ class RDBExternalChannelAgentRoute(RDBModel):
         default_factory=lambda: uuid7().hex,
     )
     connection_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
-    agent_id: Mapped[str] = mapped_column(
+    agent_id: Mapped[str | None] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
-        nullable=False,
+        sa.ForeignKey(
+            "agents.id",
+            name="external_channel_agent_routes_agent_id_fkey",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
     )
+    agent_id_snapshot: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     route_mode: Mapped[ExternalChannelRouteMode] = mapped_column(
         external_channel_route_mode_enum,
         nullable=False,
@@ -478,6 +491,8 @@ class RDBExternalChannelAgentRoute(RDBModel):
         UQ_CONNECTION_ID_ID,
         UQ_SINGLE_CONNECTION,
         FK_CONNECTION_APP_MODE,
+        CK_AVAILABLE_AGENT,
+        CK_AGENT_SNAPSHOT,
     )
 
 

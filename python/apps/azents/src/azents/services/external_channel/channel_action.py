@@ -229,6 +229,20 @@ class ExternalChannelActionService:
                 return None
             return target
 
+    async def prepare_delivery_in_session(
+        self,
+        session: AsyncSession,
+        delivery_attempt_id: str,
+    ) -> ChannelDeliveryTarget | None:
+        """Capture a pending target before the caller purges connection secrets."""
+        target = await self.repository.get_delivery_target(
+            session,
+            delivery_attempt_id=delivery_attempt_id,
+        )
+        if target is None or target.status is not ExternalChannelDeliveryStatus.PENDING:
+            return None
+        return target
+
     async def attempt_delivery(
         self,
         delivery_attempt_id: str,

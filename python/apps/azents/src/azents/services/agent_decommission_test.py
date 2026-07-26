@@ -334,10 +334,45 @@ class _ExternalChannelDecommissionCleanupDouble:
         *,
         agent_id: str,
         now: datetime.datetime,
-    ) -> None:
+    ) -> SimpleNamespace:
         """Record cleanup before unrelated Agent file expiration."""
         del session, agent_id, now
         self.events.append("external-channel-cleanup")
+        return SimpleNamespace(
+            progress_delete_intent_ids=("delivery-1",),
+            provider_state_purge_connection_ids=("connection-1",),
+        )
+
+    async def prepare_progress_cleanup(
+        self,
+        session: AsyncSession,
+        delivery_ids: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """Capture provider cleanup targets before the transaction commits."""
+        del session
+        assert delivery_ids == ("delivery-1",)
+        self.events.append("prepare-progress-cleanup")
+        return ("target-1",)
+
+    async def purge_decommissioned_provider_state(
+        self,
+        session: AsyncSession,
+        connection_ids: tuple[str, ...],
+    ) -> int:
+        """Purge credentials only after provider targets were captured."""
+        del session
+        assert connection_ids == ("connection-1",)
+        self.events.append("purge-provider-state")
+        return 1
+
+    async def consume_prepared_progress_cleanup(
+        self,
+        targets: tuple[str, ...],
+    ) -> int:
+        """Record one post-commit provider cleanup attempt."""
+        assert targets == ("target-1",)
+        self.events.append("consume-progress-cleanup")
+        return 1
 
 
 class _ExchangeFileRepositoryDouble:
@@ -409,4 +444,10 @@ async def test_decommission_cleanup_removes_external_agent_roots_first() -> None
         lease_owner="scheduler-1",
     )
 
-    assert events == ["external-channel-cleanup", "expire-unbound-files"]
+    assert events == [
+        "external-channel-cleanup",
+        "prepare-progress-cleanup",
+        "purge-provider-state",
+        "expire-unbound-files",
+        "consume-progress-cleanup",
+    ]

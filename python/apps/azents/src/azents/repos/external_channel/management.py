@@ -9,6 +9,7 @@ from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
     ExternalChannelAccessGrantScope,
+    ExternalChannelAppMode,
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
@@ -52,6 +53,21 @@ from azents.repos.external_channel.management_data import (
 class ExternalChannelManagementRepository:
     """Own safe management projections and explicit disconnect transitions."""
 
+    @staticmethod
+    def _has_sole_route() -> sa.ColumnElement[bool]:
+        """Require one exact route before Agent-scoped Single management."""
+        return (
+            sa.select(sa.func.count())
+            .select_from(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.connection_id
+                == RDBExternalChannelConnection.id
+            )
+            .correlate(RDBExternalChannelConnection)
+            .scalar_subquery()
+            == 1
+        )
+
     async def list_connections(
         self,
         session: AsyncSession,
@@ -70,6 +86,11 @@ class ExternalChannelManagementRepository:
                 .where(
                     RDBExternalChannelConnection.workspace_id == workspace_id,
                     RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.SINGLE,
+                    RDBExternalChannelAgentRoute.connection_app_mode
+                    == ExternalChannelAppMode.SINGLE,
+                    self._has_sole_route(),
                     RDBExternalChannelConnection.status
                     != ExternalChannelConnectionStatus.DISCONNECTED,
                 )
@@ -86,7 +107,26 @@ class ExternalChannelManagementRepository:
         agent_id: str,
         connection_id: str,
         lock: bool = False,
+        include_disconnected: bool = False,
     ) -> tuple[RDBExternalChannelConnection, RDBExternalChannelAgentRoute] | None:
+        route_owner = RDBExternalChannelAgentRoute.agent_id == agent_id
+        if include_disconnected:
+            route_owner = sa.or_(
+                route_owner,
+                sa.and_(
+                    RDBExternalChannelConnection.status
+                    == ExternalChannelConnectionStatus.DISCONNECTED,
+                    RDBExternalChannelAgentRoute.agent_id_snapshot == agent_id,
+                ),
+            )
+        status_predicates = (
+            ()
+            if include_disconnected
+            else (
+                RDBExternalChannelConnection.status
+                != ExternalChannelConnectionStatus.DISCONNECTED,
+            )
+        )
         statement = (
             sa.select(RDBExternalChannelConnection, RDBExternalChannelAgentRoute)
             .join(
@@ -97,13 +137,55 @@ class ExternalChannelManagementRepository:
             .where(
                 RDBExternalChannelConnection.id == connection_id,
                 RDBExternalChannelConnection.workspace_id == workspace_id,
-                RDBExternalChannelAgentRoute.agent_id == agent_id,
+                route_owner,
+                RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.SINGLE,
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.SINGLE,
+                self._has_sole_route(),
+                *status_predicates,
             )
         )
-        if lock:
-            statement = statement.with_for_update()
         row = (await session.execute(statement)).one_or_none()
-        return None if row is None else (row[0], row[1])
+        if row is None:
+            return None
+        if not lock:
+            return row[0], row[1]
+        connection_snapshot, route_snapshot = row
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_snapshot.id,
+                RDBExternalChannelConnection.workspace_id == workspace_id,
+                RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.SINGLE,
+                self._has_sole_route(),
+                *status_predicates,
+            )
+            .with_for_update()
+        )
+        if connection is None:
+            return None
+        locked_route_owner = RDBExternalChannelAgentRoute.agent_id == agent_id
+        if (
+            include_disconnected
+            and connection.status is ExternalChannelConnectionStatus.DISCONNECTED
+        ):
+            locked_route_owner = (
+                RDBExternalChannelAgentRoute.agent_id_snapshot == agent_id
+            )
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == route_snapshot.id,
+                RDBExternalChannelAgentRoute.connection_id == connection.id,
+                locked_route_owner,
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.SINGLE,
+            )
+            .with_for_update()
+        )
+        if route is None:
+            return None
+        return connection, route
 
     async def replace_slack_configuration(
         self,
@@ -144,6 +226,7 @@ class ExternalChannelManagementRepository:
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
         await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)
 
     async def list_bindings(
@@ -301,11 +384,12 @@ class ExternalChannelManagementRepository:
         now: datetime.datetime,
         reason: str,
     ) -> tuple[str, ...] | None:
-        row = (
+        snapshot = (
             await session.execute(
                 sa.select(
-                    RDBExternalChannelBinding,
-                    RDBExternalChannelResource,
+                    RDBExternalChannelBinding.route_id,
+                    RDBExternalChannelBinding.resource_id,
+                    RDBExternalChannelAgentRoute.connection_id,
                 )
                 .join(
                     RDBExternalChannelAgentRoute,
@@ -332,12 +416,53 @@ class ExternalChannelManagementRepository:
                     RDBAgentSession.workspace_id == workspace_id,
                     RDBAgentSession.agent_id == agent_id,
                 )
-                .with_for_update()
             )
         ).one_or_none()
-        if row is None:
+        if snapshot is None:
             return None
-        binding, resource = row
+        route_id, resource_id, connection_id = snapshot
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.workspace_id == workspace_id,
+            )
+            .with_for_update()
+        )
+        if connection is None:
+            return None
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == route_id,
+                RDBExternalChannelAgentRoute.connection_id == connection.id,
+            )
+            .with_for_update()
+        )
+        if route is None:
+            return None
+        resource = await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(
+                RDBExternalChannelResource.id == resource_id,
+                RDBExternalChannelResource.connection_id == connection.id,
+            )
+            .with_for_update()
+        )
+        if resource is None:
+            return None
+        binding = await session.scalar(
+            sa.select(RDBExternalChannelBinding)
+            .where(
+                RDBExternalChannelBinding.id == binding_id,
+                RDBExternalChannelBinding.route_id == route.id,
+                RDBExternalChannelBinding.resource_id == resource.id,
+                RDBExternalChannelBinding.agent_session_id == agent_session_id,
+            )
+            .with_for_update()
+        )
+        if binding is None:
+            return None
         return await self._terminate_binding(
             session,
             binding=binding,
@@ -361,31 +486,39 @@ class ExternalChannelManagementRepository:
             agent_id=agent_id,
             connection_id=connection_id,
             lock=True,
+            include_disconnected=True,
         )
         if row is None:
             return None
         connection, route = row
         connection.status = ExternalChannelConnectionStatus.DISCONNECTING
-        bindings = list(
+        resource_ids = sa.select(RDBExternalChannelBinding.resource_id).where(
+            RDBExternalChannelBinding.route_id == route.id,
+        )
+        resources = list(
             (
                 await session.scalars(
-                    sa.select(RDBExternalChannelBinding)
-                    .where(
-                        RDBExternalChannelBinding.route_id == route.id,
-                        RDBExternalChannelBinding.status
-                        == ExternalChannelBindingStatus.ACTIVE,
-                    )
-                    .order_by(RDBExternalChannelBinding.id)
+                    sa.select(RDBExternalChannelResource)
+                    .where(RDBExternalChannelResource.id.in_(resource_ids))
+                    .order_by(RDBExternalChannelResource.id)
                     .with_for_update()
                 )
             ).all()
         )
+        bindings = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelBinding)
+                    .where(RDBExternalChannelBinding.route_id == route.id)
+                    .order_by(RDBExternalChannelBinding.resource_id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        resources_by_id = {resource.id: resource for resource in resources}
         cleanup_ids: list[str] = []
         for binding in bindings:
-            resource = await session.get(
-                RDBExternalChannelResource,
-                binding.resource_id,
-            )
+            resource = resources_by_id.get(binding.resource_id)
             if resource is None:
                 continue
             cleanup_ids.extend(
@@ -409,26 +542,36 @@ class ExternalChannelManagementRepository:
         connection_id: str,
         now: datetime.datetime,
     ) -> ManagedConnection | None:
-        row = await self.get_connection(
-            session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            connection_id=connection_id,
-            lock=True,
-        )
+        del now
+        row = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelAgentRoute,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.connection_id
+                    == RDBExternalChannelConnection.id,
+                )
+                .where(
+                    RDBExternalChannelConnection.id == connection_id,
+                    RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.SINGLE,
+                    RDBExternalChannelConnection.status
+                    == ExternalChannelConnectionStatus.DISCONNECTED,
+                    RDBExternalChannelAgentRoute.connection_app_mode
+                    == ExternalChannelAppMode.SINGLE,
+                    RDBExternalChannelAgentRoute.agent_id_snapshot == agent_id,
+                    self._has_sole_route(),
+                )
+            )
+        ).one_or_none()
         if row is None:
             return None
         connection, route = row
-        connection.encrypted_credentials = None
-        connection.status = ExternalChannelConnectionStatus.DISCONNECTED
-        connection.provider_tenant_id = None
-        connection.provider_bot_user_id = None
-        connection.capabilities = None
-        connection.disconnected_at = now
-        connection.socket_lease_owner = None
-        connection.socket_lease_until = None
-        await session.flush()
-        return _connection(connection, route)
+        return _connection(connection, route, agent_id=agent_id)
 
     async def list_grants(
         self,
@@ -579,6 +722,8 @@ class ExternalChannelManagementRepository:
         if row is None:
             return None
         request, route, connection, resource, principal, message, current, agent = row
+        if route.agent_id is None:
+            return None
         return ManagedApprovalRequest(
             id=request.id,
             agent_id=route.agent_id,
@@ -607,7 +752,10 @@ class ExternalChannelManagementRepository:
         reason: str,
     ) -> tuple[str, ...]:
         if binding.status is ExternalChannelBindingStatus.DISCONNECTED:
-            return ()
+            return await self._pending_progress_delete_intent_ids(
+                session,
+                binding_id=binding.id,
+            )
         binding.status = ExternalChannelBindingStatus.DISCONNECTED
         binding.disconnected_at = now
         binding.disconnect_reason = reason
@@ -624,7 +772,6 @@ class ExternalChannelManagementRepository:
                 )
             ).all()
         )
-        cleanup_ids: list[str] = []
         for work in works:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.finished_at = now
@@ -664,7 +811,6 @@ class ExternalChannelManagementRepository:
             )
             session.add(attempt)
             await session.flush()
-            cleanup_ids.append(attempt.id)
         await session.execute(
             sa.delete(RDBExternalChannelPendingContext).where(
                 RDBExternalChannelPendingContext.route_id == binding.route_id,
@@ -672,17 +818,50 @@ class ExternalChannelManagementRepository:
             )
         )
         await session.flush()
-        return tuple(cleanup_ids)
+        return await self._pending_progress_delete_intent_ids(
+            session,
+            binding_id=binding.id,
+        )
+
+    @staticmethod
+    async def _pending_progress_delete_intent_ids(
+        session: AsyncSession,
+        *,
+        binding_id: str,
+    ) -> tuple[str, ...]:
+        """Return retryable cleanup intents before connection credentials purge."""
+        ids = await session.scalars(
+            sa.select(RDBExternalChannelDeliveryAttempt.id)
+            .where(
+                RDBExternalChannelDeliveryAttempt.origin_type
+                == ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                RDBExternalChannelDeliveryAttempt.origin_id == binding_id,
+                RDBExternalChannelDeliveryAttempt.binding_id == binding_id,
+                RDBExternalChannelDeliveryAttempt.operation
+                == ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                RDBExternalChannelDeliveryAttempt.status
+                == ExternalChannelDeliveryStatus.PENDING,
+            )
+            .order_by(RDBExternalChannelDeliveryAttempt.id)
+        )
+        return tuple(ids)
 
 
 def _connection(
     connection: RDBExternalChannelConnection,
     route: RDBExternalChannelAgentRoute,
+    *,
+    agent_id: str | None = None,
 ) -> ManagedConnection:
+    active_agent_id = route.agent_id if agent_id is None else agent_id
+    if active_agent_id is None:
+        raise RuntimeError(
+            "Managed External Channel connection has no active Agent association."
+        )
     return ManagedConnection(
         id=connection.id,
         route_id=route.id,
-        agent_id=route.agent_id,
+        agent_id=active_agent_id,
         provider=connection.provider,
         transport=connection.transport,
         status=connection.status,

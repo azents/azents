@@ -19,9 +19,12 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionStartReason,
     ExternalChannelAccessRequestStatus,
+    ExternalChannelAppMode,
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationAdmissionOrigin,
+    ExternalChannelConversationAdmissionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -54,6 +57,8 @@ from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelBindingCreate,
     ExternalChannelConnectionConfiguration,
+    ExternalChannelConversationAdmission,
+    ExternalChannelConversationAdmissionCreate,
     ExternalChannelDeliveryAttemptCreate,
     ExternalChannelEvent,
     ExternalChannelEventBoundary,
@@ -72,7 +77,11 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.work_data import ChannelDeliveryTarget
 from azents.repos.workspace import WorkspaceRepository
+from azents.services.external_channel.channel_action import (
+    ExternalChannelActionService,
+)
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
     get_slack_validation_http_client,
@@ -203,6 +212,10 @@ class ExternalChannelEventProcessorService:
         ExternalChannelWorkRepository,
         Depends(ExternalChannelWorkRepository),
     ]
+    action_service: Annotated[
+        ExternalChannelActionService,
+        Depends(ExternalChannelActionService),
+    ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
         Depends(get_external_channel_credentials_codec),
@@ -289,11 +302,36 @@ class ExternalChannelEventProcessorService:
         """Create the initial invocation batch when every activation fence passes."""
         now = _now()
         async with self.session_manager() as session:
-            route = await self.repository.get_routable_route_by_binding_id(
+            binding_snapshot = await self.repository.get_binding(
                 session,
                 binding_id=binding_id,
             )
-            if route is None:
+            if binding_snapshot is None:
+                return False
+            route_snapshot = await self.repository.get_agent_route(
+                session,
+                route_id=binding_snapshot.route_id,
+            )
+            if route_snapshot is None:
+                return False
+            connection = await self.repository.lock_connection_for_routing(
+                session,
+                connection_id=route_snapshot.connection_id,
+            )
+            if connection is None:
+                return False
+            route = await self.repository.get_routable_route_by_id(
+                session,
+                route_id=binding_snapshot.route_id,
+            )
+            if route is None or route.connection_id != connection.id:
+                return False
+            active_agent_id = route.require_active_agent_id()
+            resource = await self.repository.lock_resource(
+                session,
+                resource_id=binding_snapshot.resource_id,
+            )
+            if resource is None:
                 return False
             binding = await self.repository.lock_binding(
                 session,
@@ -305,13 +343,11 @@ class ExternalChannelEventProcessorService:
                 or binding.activation_status
                 is not ExternalChannelBindingActivationStatus.WAITING_HYDRATION
                 or binding.activation_trigger_message_id is None
+                or binding.route_id != route.id
+                or binding.resource_id != resource.id
             ):
                 return False
-            resource = await self.repository.get_resource(
-                session,
-                resource_id=binding.resource_id,
-            )
-            if resource is None or not _hydration_terminal(resource.hydration_status):
+            if not _hydration_terminal(resource.hydration_status):
                 return False
             boundary = _resource_boundary(resource)
             if boundary is None:
@@ -336,7 +372,7 @@ class ExternalChannelEventProcessorService:
             if (
                 await self.repository.get_active_block(
                     session,
-                    agent_id=route.agent_id,
+                    agent_id=active_agent_id,
                     principal_id=trigger.principal_id,
                 )
                 is not None
@@ -344,7 +380,7 @@ class ExternalChannelEventProcessorService:
                 return False
             grant = await self.repository.get_active_access_grant(
                 session,
-                agent_id=route.agent_id,
+                agent_id=active_agent_id,
                 principal_id=trigger.principal_id,
                 agent_session_id=binding.agent_session_id,
             )
@@ -363,11 +399,17 @@ class ExternalChannelEventProcessorService:
                 now=now,
                 initial_activation=True,
                 workspace_id=configuration.workspace_id,
-                agent_id=route.agent_id,
+                agent_id=active_agent_id,
             )
             if released is None:
                 return False
             await session.commit()
+            await self.session_lifecycle.mark_session_running_for_input_wakeup(
+                binding.agent_session_id
+            )
+            await self.session_lifecycle.send_session_wake_up(
+                SessionWakeUp(session_id=binding.agent_session_id)
+            )
             credentials = None
             if (
                 released.session_link_delivery_attempt_id is not None
@@ -396,10 +438,11 @@ class ExternalChannelEventProcessorService:
                     delivery_attempt_id=released.activity_delivery_attempt_id,
                     bot_token=credentials.bot_token,
                 )
-            await self.session_lifecycle.send_session_wake_up(
-                SessionWakeUp(session_id=binding.agent_session_id)
+            return await self._activate_binding_after_wake(
+                binding_id=binding.id,
+                now=now,
+                projected_through_position=released.batch.last_provider_position,
             )
-            return True
 
     async def _process_claimed_event_safely(
         self,
@@ -539,6 +582,9 @@ class ExternalChannelEventProcessorService:
                 bot_token=credentials.bot_token,
             )
         if persisted.wake_up is not None:
+            await self.session_lifecycle.mark_session_running_for_input_wakeup(
+                persisted.wake_up.session_id
+            )
             await self.session_lifecycle.send_session_wake_up(persisted.wake_up)
         if persisted.hydration_required:
             try:
@@ -730,19 +776,12 @@ class ExternalChannelEventProcessorService:
     ) -> ExternalChannelPersistedMessage:
         now = _now()
         async with self.session_manager() as session:
-            route = await self.repository.get_routable_route_by_connection_id(
+            connection = await self.repository.lock_connection_for_routing(
                 session,
                 connection_id=event.connection_id,
             )
-            if route is None:
-                raise SlackEventExcluded("No active Agent owns the Slack connection.")
-            agent = await self.agent_repository.get_by_id(session, route.agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            ):
-                raise SlackEventExcluded("The routed Agent is not active.")
-
+            if connection is None:
+                raise SlackEventExcluded("The Slack connection is unavailable.")
             resource = await self.repository.get_resource_by_provider_key(
                 session,
                 connection_id=event.connection_id,
@@ -795,11 +834,44 @@ class ExternalChannelEventProcessorService:
                 )
             if resource.status is not ExternalChannelResourceStatus.ACTIVE:
                 raise SlackEventExcluded("The external conversation is unavailable.")
-            binding = await self.repository.lock_active_binding_by_route_resource(
+            binding_snapshot = await self.repository.get_active_binding_by_resource(
                 session,
-                route_id=route.id,
                 resource_id=resource.id,
             )
+            admission_snapshot = (
+                None
+                if binding_snapshot is not None
+                else await self.repository.get_open_conversation_admission(
+                    session,
+                    resource_id=resource.id,
+                )
+            )
+            route: ExternalChannelAgentRoute | None = None
+            if binding_snapshot is not None:
+                route = await self.repository.get_routable_route_by_id(
+                    session,
+                    route_id=binding_snapshot.route_id,
+                )
+            elif (
+                admission_snapshot is not None
+                and admission_snapshot.selected_route_id is not None
+            ):
+                route = await self.repository.get_routable_route_by_id(
+                    session,
+                    route_id=admission_snapshot.selected_route_id,
+                )
+            elif admission_snapshot is None:
+                if connection.app_mode is ExternalChannelAppMode.SINGLE:
+                    route = await self.repository.lock_routable_single_route(
+                        session,
+                        connection_id=connection.id,
+                    )
+                else:
+                    route = await self.repository.lock_routable_channel_default(
+                        session,
+                        connection_id=connection.id,
+                        provider_channel_id=message.channel_id,
+                    )
             locked_resource = await self.repository.lock_resource(
                 session,
                 resource_id=resource.id,
@@ -809,6 +881,53 @@ class ExternalChannelEventProcessorService:
             resource = locked_resource
             if resource.status is not ExternalChannelResourceStatus.ACTIVE:
                 raise SlackEventExcluded("The external conversation is unavailable.")
+            binding = await self.repository.lock_active_binding_by_resource(
+                session,
+                resource_id=resource.id,
+            )
+            admission = (
+                None
+                if binding is not None
+                else await self.repository.lock_open_conversation_admission(
+                    session,
+                    resource_id=resource.id,
+                )
+            )
+            if binding is not None and (route is None or binding.route_id != route.id):
+                raise _DeferredEvent(
+                    retry_at=now + datetime.timedelta(seconds=1),
+                    error_kind="routing_state_changed",
+                    error_summary="External Channel routing changed during admission.",
+                )
+            if binding is None and binding_snapshot is not None:
+                raise _DeferredEvent(
+                    retry_at=now + datetime.timedelta(seconds=1),
+                    error_kind="routing_state_changed",
+                    error_summary="External Channel binding changed during admission.",
+                )
+            if binding is None and (
+                (admission_snapshot is None) != (admission is None)
+                or (
+                    admission_snapshot is not None
+                    and admission is not None
+                    and (
+                        admission_snapshot.id != admission.id
+                        or admission_snapshot.status is not admission.status
+                        or admission_snapshot.selected_route_id
+                        != admission.selected_route_id
+                    )
+                )
+                or (
+                    admission is not None
+                    and admission.selected_route_id is not None
+                    and (route is None or route.id != admission.selected_route_id)
+                )
+            ):
+                raise _DeferredEvent(
+                    retry_at=now + datetime.timedelta(seconds=1),
+                    error_kind="routing_state_changed",
+                    error_summary="External Channel admission changed during routing.",
+                )
             recovery_attempt_id = None
             if (
                 binding is not None
@@ -841,7 +960,6 @@ class ExternalChannelEventProcessorService:
 
             persisted_revision = await self._persist_normalized_message(
                 session,
-                route=route,
                 resource=resource,
                 message=message,
                 source_event_id=event.id,
@@ -853,7 +971,40 @@ class ExternalChannelEventProcessorService:
                 ),
             )
             canonical_message = persisted_revision.message
-            trim = persisted_revision.trim
+            route, admission = await self._resolve_route_for_resource(
+                session,
+                connection_id=connection.id,
+                app_mode=connection.app_mode,
+                resource=resource,
+                binding=binding,
+                route=route,
+                admission=admission,
+                canonical_message=canonical_message,
+                message=message,
+                now=now,
+            )
+            if route is None:
+                await session.commit()
+                return ExternalChannelPersistedMessage(
+                    resource_id=resource.id,
+                    hydration_required=(
+                        message.invocation
+                        and not _hydration_terminal(resource.hydration_status)
+                    ),
+                    control_delivery_attempt_id=None,
+                    activity_delivery_attempt_id=None,
+                    wake_up=None,
+                )
+            active_agent_id = route.require_active_agent_id()
+            trim = await self._project_current_revision(
+                session,
+                route=route,
+                resource=resource,
+                message=canonical_message,
+                provider_position=message.provider_position,
+                now=now,
+                applied=persisted_revision.applied,
+            )
             binding = await self._record_trim(
                 session,
                 route=route,
@@ -870,7 +1021,7 @@ class ExternalChannelEventProcessorService:
                 blocked = (
                     await self.repository.get_active_block(
                         session,
-                        agent_id=route.agent_id,
+                        agent_id=active_agent_id,
                         principal_id=principal_id,
                     )
                     is not None
@@ -879,7 +1030,7 @@ class ExternalChannelEventProcessorService:
                 if not blocked:
                     grant = await self.repository.get_active_access_grant(
                         session,
-                        agent_id=route.agent_id,
+                        agent_id=active_agent_id,
                         principal_id=principal_id,
                         agent_session_id=(
                             binding.agent_session_id if binding is not None else None
@@ -901,7 +1052,7 @@ class ExternalChannelEventProcessorService:
                         now=now,
                         initial_activation=False,
                         workspace_id=configuration.workspace_id,
-                        agent_id=route.agent_id,
+                        agent_id=active_agent_id,
                     )
                     if released is not None:
                         wake_session_id = binding.agent_session_id
@@ -915,6 +1066,9 @@ class ExternalChannelEventProcessorService:
                             route=route,
                             resource=resource,
                             trigger_message=canonical_message,
+                            expected_admission_id=(
+                                None if admission is None else admission.id
+                            ),
                         )
                         binding = await self._record_trim(
                             session,
@@ -923,6 +1077,13 @@ class ExternalChannelEventProcessorService:
                             binding=binding,
                             trim=trim,
                         )
+                        if admission is not None:
+                            await self.repository.transition_conversation_admission(
+                                session,
+                                admission_id=admission.id,
+                                status=ExternalChannelConversationAdmissionStatus.BOUND,
+                                selected_route_id=route.id,
+                            )
                     elif grant is None:
                         participant_provider_user_id = message.provider_user_id
                         if participant_provider_user_id is None:
@@ -951,6 +1112,15 @@ class ExternalChannelEventProcessorService:
                                 now=now,
                             )
                         )
+                        if admission is not None:
+                            await self.repository.transition_conversation_admission(
+                                session,
+                                admission_id=admission.id,
+                                status=(
+                                    ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS
+                                ),
+                                selected_route_id=route.id,
+                            )
             await session.commit()
             return ExternalChannelPersistedMessage(
                 resource_id=resource.id,
@@ -971,7 +1141,6 @@ class ExternalChannelEventProcessorService:
         self,
         session: AsyncSession,
         *,
-        route: ExternalChannelAgentRoute,
         resource: ExternalChannelResource,
         message: SlackNormalizedMessage,
         source_event_id: str | None,
@@ -1052,30 +1221,249 @@ class ExternalChannelEventProcessorService:
                 ),
                 applied=False,
             )
-        provider_time = message.provider_created_at or now
+        return ExternalChannelPersistedRevision(
+            message=current,
+            trim=ExternalChannelPendingContextTrim(
+                deleted_message_count=0,
+                deleted_size=0,
+                retained_message_count=0,
+                retained_size=0,
+            ),
+            applied=True,
+        )
+
+    async def _resolve_route_for_resource(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        app_mode: ExternalChannelAppMode,
+        resource: ExternalChannelResource,
+        binding: ExternalChannelBinding | None,
+        route: ExternalChannelAgentRoute | None,
+        admission: ExternalChannelConversationAdmission | None,
+        canonical_message: ExternalChannelMessage,
+        message: SlackNormalizedMessage,
+        now: datetime.datetime,
+    ) -> tuple[
+        ExternalChannelAgentRoute | None,
+        ExternalChannelConversationAdmission | None,
+    ]:
+        """Resolve one route from durable binding, admission, or App mode state."""
+        if binding is not None:
+            if route is None or route.connection_id != connection_id:
+                self.log_route_resolution(
+                    connection_id=connection_id,
+                    resource_id=resource.id,
+                    app_mode=app_mode,
+                    source="binding",
+                    route_id=binding.route_id,
+                    reason="bound_route_unavailable",
+                )
+                raise SlackEventExcluded("The bound Slack route is unavailable.")
+            self.log_route_resolution(
+                connection_id=connection_id,
+                resource_id=resource.id,
+                app_mode=app_mode,
+                source="binding",
+                route_id=route.id,
+                reason=None,
+            )
+            return route, None
+
+        if admission is not None:
+            if admission.expires_at <= now:
+                await self.repository.transition_conversation_admission(
+                    session,
+                    admission_id=admission.id,
+                    status=ExternalChannelConversationAdmissionStatus.EXPIRED,
+                    selected_route_id=admission.selected_route_id,
+                )
+                self.log_route_resolution(
+                    connection_id=connection_id,
+                    resource_id=resource.id,
+                    app_mode=app_mode,
+                    source="selected_admission",
+                    route_id=admission.selected_route_id,
+                    reason="admission_expired",
+                )
+                return None, admission
+            if admission.selected_route_id is None:
+                self.log_route_resolution(
+                    connection_id=connection_id,
+                    resource_id=resource.id,
+                    app_mode=app_mode,
+                    source="pending_selection",
+                    route_id=None,
+                    reason="selection_required",
+                )
+                return None, admission
+            if route is None or route.connection_id != connection_id:
+                self.log_route_resolution(
+                    connection_id=connection_id,
+                    resource_id=resource.id,
+                    app_mode=app_mode,
+                    source="selected_admission",
+                    route_id=admission.selected_route_id,
+                    reason="selected_route_unavailable",
+                )
+                raise SlackEventExcluded("The selected Slack route is unavailable.")
+            self.log_route_resolution(
+                connection_id=connection_id,
+                resource_id=resource.id,
+                app_mode=app_mode,
+                source="selected_admission",
+                route_id=route.id,
+                reason=None,
+            )
+            return route, admission
+
+        if app_mode is ExternalChannelAppMode.SINGLE:
+            origin = ExternalChannelConversationAdmissionOrigin.SINGLE_ROUTE
+            if route is None:
+                self.log_route_resolution(
+                    connection_id=connection_id,
+                    resource_id=resource.id,
+                    app_mode=app_mode,
+                    source="single_sole_route",
+                    route_id=None,
+                    reason="sole_route_unavailable",
+                )
+                raise SlackEventExcluded("The Single Slack App route is unavailable.")
+        else:
+            origin = ExternalChannelConversationAdmissionOrigin.CHANNEL_DEFAULT
+            if route is None:
+                create = ExternalChannelConversationAdmissionCreate(
+                    connection_id=connection_id,
+                    resource_id=resource.id,
+                    source_message_id=canonical_message.id,
+                    initiating_principal_id=canonical_message.principal_id,
+                    origin=ExternalChannelConversationAdmissionOrigin.MENTION_SELECTOR,
+                    status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+                    selected_route_id=None,
+                    interaction_id=None,
+                    expires_at=now + _ACCESS_REQUEST_AGE,
+                )
+                admission = (
+                    await self.repository.create_conversation_admission_idempotent(
+                        session,
+                        create,
+                    )
+                )
+                self.log_route_resolution(
+                    connection_id=connection_id,
+                    resource_id=resource.id,
+                    app_mode=app_mode,
+                    source="channel_default",
+                    route_id=None,
+                    reason="selection_required",
+                )
+                return None, admission
+
+        admission = await self.repository.create_conversation_admission_idempotent(
+            session,
+            ExternalChannelConversationAdmissionCreate(
+                connection_id=connection_id,
+                resource_id=resource.id,
+                source_message_id=canonical_message.id,
+                initiating_principal_id=canonical_message.principal_id,
+                origin=origin,
+                status=ExternalChannelConversationAdmissionStatus.SELECTED,
+                selected_route_id=route.id,
+                interaction_id=None,
+                expires_at=now + _ACCESS_REQUEST_AGE,
+            ),
+        )
+        if admission.selected_route_id != route.id:
+            self.log_route_resolution(
+                connection_id=connection_id,
+                resource_id=resource.id,
+                app_mode=app_mode,
+                source=(
+                    "single_sole_route"
+                    if app_mode is ExternalChannelAppMode.SINGLE
+                    else "channel_default"
+                ),
+                route_id=route.id,
+                reason="selected_route_conflict",
+            )
+            raise SlackEventExcluded(
+                "The Slack conversation already selected another route."
+            )
+        self.log_route_resolution(
+            connection_id=connection_id,
+            resource_id=resource.id,
+            app_mode=app_mode,
+            source=(
+                "single_sole_route"
+                if app_mode is ExternalChannelAppMode.SINGLE
+                else "channel_default"
+            ),
+            route_id=route.id,
+            reason=None,
+        )
+        return route, admission
+
+    @staticmethod
+    def log_route_resolution(
+        *,
+        connection_id: str,
+        resource_id: str,
+        app_mode: ExternalChannelAppMode,
+        source: str,
+        route_id: str | None,
+        reason: str | None,
+    ) -> None:
+        """Emit a safe categorical routing decision without provider content."""
+        logger.info(
+            "External Channel route resolution",
+            extra={
+                "external_channel_connection_id": connection_id,
+                "external_channel_resource_id": resource_id,
+                "external_channel_route_id": route_id,
+                "external_channel_app_mode": app_mode.value,
+                "route_resolution_source": source,
+                "route_resolution_reason": reason,
+            },
+        )
+
+    async def _project_current_revision(
+        self,
+        session: AsyncSession,
+        *,
+        route: ExternalChannelAgentRoute,
+        resource: ExternalChannelResource,
+        message: ExternalChannelMessage,
+        provider_position: str,
+        now: datetime.datetime,
+        applied: bool,
+    ) -> ExternalChannelPendingContextTrim:
+        """Materialize route-scoped pending context after route selection."""
+        if not applied or message.current_revision_id is None:
+            return ExternalChannelPendingContextTrim(
+                deleted_message_count=0,
+                deleted_size=0,
+                retained_message_count=0,
+                retained_size=0,
+            )
         await self.repository.create_pending_context_idempotent(
             session,
             ExternalChannelPendingContextCreate(
                 route_id=route.id,
                 resource_id=resource.id,
-                message_revision_id=revision.id,
-                provider_position=message.provider_position,
-                normalized_size=message.normalized_size,
-                expires_at=provider_time + _PENDING_CONTEXT_AGE,
+                message_revision_id=message.current_revision_id,
+                provider_position=provider_position,
+                normalized_size=message.pending_size,
+                expires_at=(message.provider_created_at or now) + _PENDING_CONTEXT_AGE,
             ),
         )
-        trim = await self.repository.trim_pending_context(
+        return await self.repository.trim_pending_context(
             session,
             route_id=route.id,
             resource_id=resource.id,
             now=now,
             max_message_count=_PENDING_CONTEXT_MAX_MESSAGES,
             max_size=_PENDING_CONTEXT_MAX_SIZE,
-        )
-        return ExternalChannelPersistedRevision(
-            message=current,
-            trim=trim,
-            applied=True,
         )
 
     async def _record_trim(
@@ -1112,6 +1500,7 @@ class ExternalChannelEventProcessorService:
         route: ExternalChannelAgentRoute,
         resource: ExternalChannelResource,
         trigger_message: ExternalChannelMessage,
+        expected_admission_id: str | None,
     ) -> ExternalChannelBinding:
         locked_resource = await self.repository.lock_resource(
             session,
@@ -1119,14 +1508,18 @@ class ExternalChannelEventProcessorService:
         )
         if locked_resource is None:
             raise RuntimeError("External Channel resource disappeared.")
-        existing = await self.repository.get_active_binding_by_route_resource(
+        existing = await self.repository.get_active_binding_by_resource(
             session,
-            route_id=route.id,
             resource_id=resource.id,
         )
         if existing is not None:
+            if existing.route_id != route.id:
+                raise SlackEventExcluded(
+                    "The external conversation is already bound to another route."
+                )
             return existing
-        agent = await self.agent_repository.get_by_id(session, route.agent_id)
+        active_agent_id = route.require_active_agent_id()
+        agent = await self.agent_repository.get_by_id(session, active_agent_id)
         if agent is None or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
             raise SlackEventExcluded("The routed Agent is not active.")
         root_session = (
@@ -1159,6 +1552,8 @@ class ExternalChannelEventProcessorService:
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
+            expected_admission_id=expected_admission_id,
+            expected_access_request_id=None,
         )
 
     async def _create_access_request_and_control_intent(
@@ -1176,6 +1571,7 @@ class ExternalChannelEventProcessorService:
         trim: ExternalChannelPendingContextTrim,
         now: datetime.datetime,
     ) -> str | None:
+        active_agent_id = route.require_active_agent_id()
         request = await self.repository.create_access_request_idempotent(
             session,
             ExternalChannelAccessRequestCreate(
@@ -1190,7 +1586,7 @@ class ExternalChannelEventProcessorService:
                 decision_policy_snapshot={
                     "version": 1,
                     "provider": "slack",
-                    "agent_id": route.agent_id,
+                    "agent_id": active_agent_id,
                     "pending_truncation_message_count": (
                         trim.deleted_message_count if binding is None else 0
                     ),
@@ -1656,40 +2052,26 @@ class ExternalChannelEventProcessorService:
         bot_token: str,
     ) -> None:
         now = _now()
-        routing_unavailable = False
         resource: ExternalChannelResource | None = None
         async with self.session_manager() as session:
-            route = await self.repository.get_routable_route_by_connection_id(
+            connection = await self.repository.lock_connection_for_routing(
                 session,
                 connection_id=configuration.id,
             )
-            if route is None:
-                routing_unavailable = True
-            else:
-                await self.repository.lock_active_binding_by_route_resource(
-                    session,
-                    route_id=route.id,
-                    resource_id=resource_id,
-                )
-                resource = await self.repository.mark_resource_hydration_running(
-                    session,
-                    resource_id=resource_id,
-                    started_at=now,
-                )
-                if resource is None:
-                    raise RuntimeError("External Channel resource disappeared.")
-                await session.commit()
-        if routing_unavailable:
-            await self._complete_hydration(
-                configuration=configuration,
+            if connection is None:
+                raise _HydrationRoutingUnavailable
+            resource = await self.repository.mark_resource_hydration_running(
+                session,
                 resource_id=resource_id,
-                status=ExternalChannelHydrationStatus.INCOMPLETE,
-                error_kind="routing_unavailable",
-                error_summary="External Channel routing became unavailable.",
+                started_at=now,
             )
-            return
-        if resource is None:
-            raise RuntimeError("External Channel resource disappeared.")
+            if resource is None:
+                raise RuntimeError("External Channel resource disappeared.")
+            await self.repository.lock_active_binding_by_resource(
+                session,
+                resource_id=resource_id,
+            )
+            await session.commit()
         if _hydration_terminal(resource.hydration_status):
             return
         labels = resource.labels or {}
@@ -1723,25 +2105,45 @@ class ExternalChannelEventProcessorService:
                 )
                 latest_activity = None
                 async with self.session_manager() as session:
-                    route = await self.repository.get_routable_route_by_connection_id(
+                    connection = await self.repository.lock_connection_for_routing(
                         session,
                         connection_id=configuration.id,
                     )
-                    if route is None:
+                    if connection is None:
                         raise _HydrationRoutingUnavailable
-                    binding = (
-                        await self.repository.lock_active_binding_by_route_resource(
+                    binding_snapshot = (
+                        await self.repository.get_active_binding_by_resource(
                             session,
-                            route_id=route.id,
                             resource_id=resource_id,
                         )
                     )
+                    route = None
+                    if binding_snapshot is not None:
+                        route = await self.repository.get_routable_route_by_id(
+                            session,
+                            route_id=binding_snapshot.route_id,
+                        )
+                        if route is None or route.connection_id != connection.id:
+                            raise _HydrationRoutingUnavailable
                     current_resource = await self.repository.lock_resource(
                         session,
                         resource_id=resource_id,
                     )
                     if current_resource is None:
                         raise RuntimeError("External Channel resource disappeared.")
+                    binding = await self.repository.lock_active_binding_by_resource(
+                        session,
+                        resource_id=resource_id,
+                    )
+                    if (binding_snapshot is None) != (binding is None) or (
+                        binding_snapshot is not None
+                        and binding is not None
+                        and (
+                            binding_snapshot.id != binding.id
+                            or binding_snapshot.route_id != binding.route_id
+                        )
+                    ):
+                        raise _HydrationRoutingUnavailable
                     for history_message in page.messages:
                         if connection_authored(configuration, history_message):
                             continue
@@ -1753,7 +2155,6 @@ class ExternalChannelEventProcessorService:
                         )
                         persisted_revision = await self._persist_normalized_message(
                             session,
-                            route=route,
                             resource=current_resource,
                             message=history_message,
                             source_event_id=None,
@@ -1764,14 +2165,32 @@ class ExternalChannelEventProcessorService:
                                 current_resource.labels,
                             ),
                         )
-                        trim = persisted_revision.trim
-                        binding = await self._record_trim(
-                            session,
-                            route=route,
-                            resource=current_resource,
-                            binding=binding,
-                            trim=trim,
+                        trim = (
+                            ExternalChannelPendingContextTrim(
+                                deleted_message_count=0,
+                                deleted_size=0,
+                                retained_message_count=0,
+                                retained_size=0,
+                            )
+                            if route is None
+                            else await self._project_current_revision(
+                                session,
+                                route=route,
+                                resource=current_resource,
+                                message=persisted_revision.message,
+                                provider_position=history_message.provider_position,
+                                now=_now(),
+                                applied=persisted_revision.applied,
+                            )
                         )
+                        if route is not None:
+                            binding = await self._record_trim(
+                                session,
+                                route=route,
+                                resource=current_resource,
+                                binding=binding,
+                                trim=trim,
+                            )
                         if trim.deleted_message_count or trim.deleted_size:
                             bounded = True
                         if (
@@ -1907,13 +2326,23 @@ class ExternalChannelEventProcessorService:
             through_provider_position=trigger.provider_position,
         )
         if not pending:
+            session_link_delivery_attempt_id = None
+            activity_delivery_attempt_id = None
+            if existing is not None and initial_activation:
+                (
+                    session_link_delivery_attempt_id,
+                    activity_delivery_attempt_id,
+                ) = await self.repository.get_pending_initial_delivery_attempt_ids(
+                    session,
+                    binding_id=binding.id,
+                )
             return (
                 None
                 if existing is None
                 else ExternalChannelReleasedInvocation(
                     batch=existing,
-                    session_link_delivery_attempt_id=None,
-                    activity_delivery_attempt_id=None,
+                    session_link_delivery_attempt_id=(session_link_delivery_attempt_id),
+                    activity_delivery_attempt_id=activity_delivery_attempt_id,
                 )
             )
         batch = await self.repository.create_invocation_batch_idempotent(
@@ -2029,14 +2458,7 @@ class ExternalChannelEventProcessorService:
             session,
             pending_context_ids=[item.id for item in pending],
         )
-        if initial_activation:
-            await self.repository.mark_binding_activated(
-                session,
-                binding_id=binding.id,
-                now=now,
-                projected_through_position=pending[-1].provider_position,
-            )
-        else:
+        if not initial_activation:
             await self.repository.advance_binding_projection(
                 session,
                 binding_id=binding.id,
@@ -2051,6 +2473,24 @@ class ExternalChannelEventProcessorService:
                 else None
             ),
         )
+
+    async def _activate_binding_after_wake(
+        self,
+        *,
+        binding_id: str,
+        now: datetime.datetime,
+        projected_through_position: str,
+    ) -> bool:
+        """Complete activation only after the durable input has been woken."""
+        async with self.session_manager() as session:
+            binding = await self.repository.mark_binding_activated(
+                session,
+                binding_id=binding_id,
+                now=now,
+                projected_through_position=projected_through_position,
+            )
+            await session.commit()
+        return binding is not None
 
     async def _ensure_invocation_input_buffer(
         self,
@@ -2093,10 +2533,6 @@ class ExternalChannelEventProcessorService:
         )
         if linked is None:
             raise RuntimeError("External Channel invocation batch disappeared.")
-        await self.agent_session_repository.mark_running_for_input_wakeup(
-            session,
-            binding.agent_session_id,
-        )
         return linked, enqueue.created
 
     async def _apply_connection_revocation(
@@ -2105,16 +2541,37 @@ class ExternalChannelEventProcessorService:
         event: ExternalChannelEvent,
         revocation: SlackConnectionRevocation,
     ) -> None:
+        cleanup_targets: list[ChannelDeliveryTarget] = []
         async with self.session_manager() as session:
             if revocation.kind == "app_uninstalled":
-                await self.repository.terminate_connection_for_provider_event(
-                    session,
-                    connection_id=event.connection_id,
-                    status=ExternalChannelConnectionStatus.DISCONNECTED,
-                    reason=revocation.kind,
-                    now=_now(),
-                    required_socket_lease_owner=None,
+                cleanup_ids = (
+                    await self.repository.terminate_connection_for_provider_event(
+                        session,
+                        connection_id=event.connection_id,
+                        status=ExternalChannelConnectionStatus.DISCONNECTED,
+                        reason=revocation.kind,
+                        now=_now(),
+                        required_socket_lease_owner=None,
+                        defer_provider_state_purge=True,
+                    )
                 )
+                for delivery_id in cleanup_ids or ():
+                    target = await self.action_service.prepare_delivery_in_session(
+                        session,
+                        delivery_id,
+                    )
+                    if target is not None:
+                        cleanup_targets.append(target)
+                purged = (
+                    await self.repository.purge_disconnected_connection_provider_state(
+                        session,
+                        connection_id=event.connection_id,
+                    )
+                )
+                if cleanup_ids is not None and not purged:
+                    raise RuntimeError(
+                        "Disconnected External Channel provider state disappeared."
+                    )
             else:
                 await self.repository.mark_connection_reconnect_required(
                     session,
@@ -2124,6 +2581,8 @@ class ExternalChannelEventProcessorService:
                     required_socket_lease_owner=None,
                 )
             await session.commit()
+        for target in cleanup_targets:
+            await self.action_service.attempt_prepared_delivery(target)
         raise _ConnectionUnavailable(revocation.kind)
 
     async def _mark_connection_reconnect_required(
