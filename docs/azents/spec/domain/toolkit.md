@@ -52,8 +52,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-24
-spec_version: 74
+last_verified_at: 2026-07-26
+spec_version: 75
 ---
 
 # Toolkit
@@ -460,11 +460,11 @@ The static toolkit prompt selects the Codex Multi-Agent V2 root or child usage h
 configured concurrency slot count as `max_subagents + 1`, and the explicit-request-only delegation
 policy. Azents changes only provider/runtime terminology, mailbox coordination wording, and the
 tool-availability claim: mailbox envelopes are described as model input, `exec_command` replaces
-Codex `functions.exec` namespaces, `wait_agent` observes current-agent mailbox activity and descendant
+Codex `functions.exec` namespaces, `wait` observes current-agent mailbox activity and descendant
 idleness, and child execution is described as lacking Azents root/user-facing capabilities. Maximum
 depth remains a runtime spawn constraint and is not included in the prompt. When parent history is
 forked, the boundary reminder identifies the child by name and full path, distinguishes inherited
-parent actions from the child's own actions, and explains that `wait_agent` observes only that child's
+parent actions from the child's own actions, and explains that `wait` observes only that child's
 descendants and current mailbox rather than the child itself.
 
 The toolkit stores inter-agent delivery as target-session `agent_message` input buffers through the
@@ -479,17 +479,17 @@ root-tree lock before locking and finalizing the terminal Run, so archive, resto
 mailbox wake, and result delivery cannot cross the tree lifecycle boundary concurrently.
 `interrupt_agent` likewise locks the root tree and target `AgentSession` before recording stop intent.
 
-`wait_agent` has no `agent_name` field. Its only input is optional `timeout_seconds`, defaulting to 30
-and bounded from 0 through 600; unknown fields are rejected. Each observation first repairs eligible
-terminal results from direct children, then checks any pending `agent_message` in the current agent's
-mailbox and activity across the full current descendant subtree. Mailbox activity has priority and
-returns `Mailbox updated.` without payload content. An empty tree returns `No descendant agents to wait
-for.`, an entirely idle subtree returns `All descendant agents are idle.`, and deadline expiry while
-any descendant remains active returns `Wait timed out; active descendants: ...` with
-`timed_out = true`. Active means a running Session, a pending/running Run, or pending `wake_session`
-input; queue-only input alone does not make a descendant active. `timeout_seconds = 0` performs one
-immediate observation. Waiting never consumes mailbox rows and never advances observation cursors;
-the next model boundary performs FIFO promotion.
+`wait` has only optional `timeout_seconds`, defaulting to 30 and bounded from 0 through 900; unknown
+fields are rejected. It observes any mailbox activity and active descendant paths in the current
+SessionAgent subtree without consuming mailbox input. A mailbox update returns
+`{"outcome":"activity","reason":"new user input, agent or subagent message, scheduled continuation,
+external-channel request, or action"}`. An empty tree returns `{"outcome":"not_waitable",
+"reason":"no_descendants"}`, an entirely idle subtree returns `{"outcome":"not_waitable",
+"reason":"all_descendants_idle"}`, and deadline expiry returns `{"outcome":"timed_out"}`. Active
+means a running Session, a pending/running Run, or pending `wake_session` input; queue-only input
+alone does not make a descendant active. `timeout_seconds = 0` performs one immediate observation.
+Waiting never repairs terminal delivery, consumes mailbox rows, or advances observation cursors; the
+next model boundary performs FIFO promotion.
 
 `interrupt_agent` records stop intent only for the named target session and returns its previous
 projected status; it does not close, delete, or recursively stop descendants. The toolkit emits
@@ -710,6 +710,8 @@ and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 75) — Replaced the legacy `wait_agent` description with the independent
+  `wait` Toolkit contract and raised its inclusive timeout maximum to 900 seconds.
 - **2026-07-24** (spec_version 74) — Made Team Session Toolkit execution Userless, stabilized
   Session-managed Toolkit identity across senders and recovery, and retained requester identity only
   at management boundaries.

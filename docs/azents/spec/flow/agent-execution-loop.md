@@ -76,7 +76,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-26
-spec_version: 133
+spec_version: 134
 ---
 
 # Agent Execution Loop
@@ -638,8 +638,8 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   explicitly select no context or a bounded number of recent turns through `fork_turns`. The
   boundary reminder is inserted immediately after copied parent history for `fork_turns=all` or a
   positive integer selection. It identifies the child by name and full path, marks preceding messages
-  as inherited parent context, and states that targetless `wait_agent` observes the child's current
-  mailbox plus descendants rather than another selected agent.
+  as inherited parent context, and states that `wait` observes the child's current mailbox plus
+  descendants rather than another selected agent.
 - Agent references follow Codex v2 visibility and targeting semantics within the current root tree.
   `list_agents` includes the root and the known agent tree, including ancestors of the caller.
 - `send_message` writes an `agent_message` to any resolved agent, including the root, without waking it.
@@ -647,10 +647,10 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   but rejects the root as a target. It holds the root-tree lock while evaluating active capacity.
   Assigning more work to an already-active target is allowed at capacity; activating an idle target
   is rejected when the root tree already has `subagent_settings.max_subagents` active children.
-- `wait_agent` accepts only optional `timeout_seconds` and observes any pending mailbox message for
-  the current SessionAgent plus activity across its entire descendant subtree. It repairs direct-child
-  terminal delivery before each observation, prioritizes mailbox activity over no-descendant/all-idle/
-  timeout outcomes, and never consumes buffers or acknowledges terminal results itself.
+- `wait` accepts only optional `timeout_seconds` from 0 through 900 seconds and observes any mailbox
+  activity for the current SessionAgent plus activity across its entire descendant subtree. It
+  prioritizes mailbox activity over no-descendant/all-idle/timeout outcomes and never consumes
+  mailbox items, repairs terminal delivery, or acknowledges terminal results itself.
 - `interrupt_agent` rejects the root and the caller itself, then records stop intent only for the
   resolved target's current run while holding the root-tree and target-session locks.
 
@@ -1172,6 +1172,8 @@ with a channel/message icon rather than presenting it as Goal continuation.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 134) — Replaced the legacy `wait_agent` loop contract with the
+  independent `wait` Toolkit and raised its inclusive timeout maximum to 900 seconds.
 - **2026-07-26** (spec_version 133) — Added the parameterless manual orphan Git-worktree
   cleanup TurnAction, bounded structured candidate results, active-root protection, cancellation
   reconciliation, and no-replay terminalization.

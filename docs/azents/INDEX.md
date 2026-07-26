@@ -23,7 +23,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-23 | 3 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-23 | 4 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-24 | 74 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-26 | 75 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-26 | 49 |
 
@@ -31,7 +31,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-26 | 133 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-26 | 134 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-26 | 30 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-26 | 5 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
@@ -381,6 +381,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Suppress Unread Indicators While Sessions Run Historical Requirements Reconstruction](requirements/unread-260721-unread-indicators-while-sessions.md) | unread-260721 | 2026-07-21 | - |
 | [Usage-based Auto Compaction and Removal of Tool Output Omit Historical Requirements Reconstruction](requirements/usage-260612-usage-auto-compaction.md) | usage-260612 | 2026-06-12 | - |
 | [Persist the Session Last-Used Inference Profile Historical Requirements Reconstruction](requirements/used-260710-used-inference-profile.md) | used-260710 | 2026-07-10 | - |
+| [Fifteen-Minute Wait Timeout Requirements](requirements/wait-260726-fifteen-minute-timeout.md) | wait-260726 | 2026-07-26 | 2026-07-26 |
 | [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI Historical Requirements Reconstruction](requirements/web-260416-web-viewer.md) | web-260416 | 2026-04-16 | 2026-04-16 |
 | [Provider-Native Channel Work Progress Requirements](requirements/work-260723-provider-native-progress.md) | work-260723 | 2026-07-23 | - |
 | [Session Worktree Archive and Purge Integrity Requirements](requirements/worktree-260722-archive-purge-integrity.md) | worktree-260722 | 2026-07-22 | 2026-07-22 |
@@ -716,6 +717,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Suppress Unread Indicators While Sessions Run](adr/unread-260721-unread-indicators-while-sessions.md)
 - [Usage-based Auto Compaction and Removal of Tool Output Omit](adr/usage-260612-usage-auto-compaction.md)
 - [Persist the Session Last-Used Inference Profile](adr/used-260710-used-inference-profile.md)
+- [Fifteen-Minute Wait Timeout](adr/wait-260726-fifteen-minute-timeout.md)
 - [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI](adr/web-260416-web-viewer.md)
 - [Provider-Native Channel Work Progress](adr/work-260723-provider-native-progress.md)
 - [Session Worktree Archive and Purge Integrity](adr/worktree-260722-archive-purge-integrity.md)

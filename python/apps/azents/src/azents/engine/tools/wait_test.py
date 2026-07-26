@@ -89,6 +89,24 @@ async def test_wait_tool_reports_not_waitable_outcomes(
 
 
 @pytest.mark.asyncio
+async def test_wait_tool_accepts_fifteen_minute_timeout() -> None:
+    observer = MailboxActivityObserver()
+    toolkit = WaitToolkit(
+        wait_service=cast(
+            AgentWaitService,
+            _WaitService([WaitObservation(False, 0, ())]),
+        )
+    )
+    state = await toolkit.update_context(_context(observer))
+
+    result = await state.tools[0].handler(json.dumps({"timeout_seconds": 900}))
+    assert json.loads(cast(str, result)) == {
+        "outcome": "not_waitable",
+        "reason": "no_descendants",
+    }
+
+
+@pytest.mark.asyncio
 async def test_wait_tool_reconciles_after_activity_signal_loss() -> None:
     observer = MailboxActivityObserver()
     service = _WaitService(
