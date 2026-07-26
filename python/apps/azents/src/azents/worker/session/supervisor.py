@@ -18,6 +18,7 @@ from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.contracts import PrepareToolkits
 from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshot
 from azents.worker.session.lifecycle import SessionLifecycleService
+from azents.worker.session.mailbox_activity import MailboxActivityObserver
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,7 @@ class RunTaskSupervisor:
         prepare_toolkits: PrepareToolkits,
         drain_stop_signals: Callable[[], None],
         model_transport_state: ModelTransportState,
+        mailbox_activity_observer: MailboxActivityObserver,
     ) -> RunExecutionResult:
         """Create engine execution task and apply stop/shutdown policy."""
         engine_task: asyncio.Task[RunExecutionResult] = asyncio.create_task(
@@ -147,6 +149,7 @@ class RunTaskSupervisor:
                 owner_generation=snapshot.owner_generation,
                 tool_admission_barrier=self.stop_controller.tool_admission_barrier,
                 model_transport_state=model_transport_state,
+                mailbox_activity_observer=mailbox_activity_observer,
             )
         )
         self.stop_controller.register_active_task(engine_task)

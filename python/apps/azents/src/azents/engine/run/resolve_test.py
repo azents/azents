@@ -898,7 +898,6 @@ class TestResolveAgentTools:
             "spawn_agent",
             "send_message",
             "followup_task",
-            "wait_agent",
             "interrupt_agent",
             "list_agents",
         }

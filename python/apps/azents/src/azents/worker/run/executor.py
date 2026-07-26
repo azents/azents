@@ -126,6 +126,7 @@ from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
+from azents.engine.tools.wait import WaitToolkit
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution.data import (
@@ -133,7 +134,7 @@ from azents.repos.action_execution.data import (
     ActionExecutionProjection,
 )
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
@@ -143,6 +144,7 @@ from azents.repos.llm_provider_integration.deps import (
 )
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
+from azents.services.agent_wait import AgentWaitService
 from azents.services.chat.data import (
     ChatLiveRunOperation,
     ChatLiveRunRetryAttempt,
@@ -204,6 +206,7 @@ from azents.worker.session.execution_snapshot import (
     CanonicalExecutionWorkDriftError,
 )
 from azents.worker.session.lifecycle import SessionLifecycleService
+from azents.worker.session.mailbox_activity import MailboxActivityObserver
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 logger = logging.getLogger(__name__)
@@ -572,6 +575,7 @@ class RunExecutor:
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
         model_transport_state: ModelTransportState,
+        mailbox_activity_observer: MailboxActivityObserver | None = None,
     ) -> RunExecutionResult:
         """Execute one Session processing boundary with cancellation cleanup."""
         if owner_generation != snapshot.owner_generation:
@@ -588,6 +592,9 @@ class RunExecutor:
                 dispatch_event=dispatch_event,
                 tool_admission_barrier=tool_admission_barrier,
                 model_transport_state=model_transport_state,
+                mailbox_activity_observer=(
+                    mailbox_activity_observer or MailboxActivityObserver()
+                ),
             )
         except asyncio.CancelledError as exc:
             await asyncio.shield(
@@ -609,6 +616,7 @@ class RunExecutor:
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
         tool_admission_barrier: ToolAdmissionBarrier,
         model_transport_state: ModelTransportState,
+        mailbox_activity_observer: MailboxActivityObserver | None = None,
     ) -> RunExecutionResult:
         """Handle one Session execution boundary.
 
@@ -1086,6 +1094,7 @@ class RunExecutor:
                 run_index=agent_run.run_index,
                 owner_generation=owner_generation,
             ),
+            mailbox_activity_observer=mailbox_activity_observer,
         )
         context = ToolkitContext(
             session_id=snapshot.session_id,
@@ -1145,6 +1154,24 @@ class RunExecutor:
             subagent_toolkit_provider=self.subagent_toolkit_provider,
             memory_enabled=agent_memory_enabled,
             runtime_tools_enabled=runtime_tools_enabled,
+        )
+        toolkits.append(
+            ToolkitBinding(
+                WaitToolkit(
+                    wait_service=AgentWaitService(
+                        session_manager=self.session_manager,
+                        agent_session_repository=self.agent_session_repository,
+                        agent_run_repository=getattr(
+                            self.session_lifecycle,
+                            "agent_run_repository",
+                            AgentRunRepository(),
+                        ),
+                        mailbox_item_service=self.mailbox_item_service,
+                    )
+                ),
+                "wait",
+                False,
+            )
         )
 
         now = loop.time()

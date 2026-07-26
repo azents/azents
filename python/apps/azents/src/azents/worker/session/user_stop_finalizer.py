@@ -95,11 +95,17 @@ class UserStopFinalizer:
             removed_call_ids={call.call_id for call in effective_tool_calls},
         )
         if effective_run_id is None:
-            await self.session_lifecycle.mark_session_agent_runs_terminal(
-                session_id,
-                owner_generation=owner_generation,
-                status=AgentRunStatus.STOPPED,
+            transitioned_run_ids = (
+                await self.session_lifecycle.mark_session_agent_runs_terminal(
+                    session_id,
+                    owner_generation=owner_generation,
+                    status=AgentRunStatus.STOPPED,
+                )
             )
+            for transitioned_run_id in transitioned_run_ids:
+                await self.session_lifecycle.notify_parent_result_activity(
+                    transitioned_run_id
+                )
         else:
             await self._mark_agent_run_terminal_if_running(
                 session_id,
@@ -107,6 +113,7 @@ class UserStopFinalizer:
                 run_id=effective_run_id,
                 status=AgentRunStatus.STOPPED,
             )
+            await self.session_lifecycle.notify_parent_result_activity(effective_run_id)
             durable_events = await self._append_user_stop_events(
                 session_id,
                 owner_generation=owner_generation,

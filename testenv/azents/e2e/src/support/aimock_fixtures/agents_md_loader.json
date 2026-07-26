@@ -896,7 +896,7 @@
         "toolCalls": [
           {
             "id": "call_subagent_wait_child",
-            "name": "wait_agent",
+            "name": "wait",
             "arguments": {
               "timeout_seconds": 0
             }
@@ -963,7 +963,7 @@
         "toolCalls": [
           {
             "id": "call_subagent_mailbox_wait",
-            "name": "wait_agent",
+            "name": "wait",
             "arguments": {
               "timeout_seconds": 10
             }
@@ -1062,7 +1062,7 @@
         "toolCalls": [
           {
             "id": "call_subagent_wait_no_descendants",
-            "name": "wait_agent",
+            "name": "wait",
             "arguments": {
               "timeout_seconds": 0
             }
@@ -1118,7 +1118,7 @@
         "toolCalls": [
           {
             "id": "call_subagent_timeout_wait",
-            "name": "wait_agent",
+            "name": "wait",
             "arguments": {
               "timeout_seconds": 0
             }

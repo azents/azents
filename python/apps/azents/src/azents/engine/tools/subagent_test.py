@@ -2,7 +2,6 @@
 
 # ruff: noqa: E501
 
-import asyncio
 import datetime
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -636,10 +635,15 @@ class _Broker:
     def __init__(self) -> None:
         """Initialize fake state."""
         self.messages: list[BrokerMessage] = []
+        self.activities: list[str] = []
 
     async def send_message(self, message: BrokerMessage) -> None:
         """Record broker messages."""
         self.messages.append(message)
+
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        """Record queue-only mailbox activity."""
+        self.activities.append(session_id)
 
 
 async def _make_toolkit() -> tuple[
@@ -711,7 +715,7 @@ All agents in the team, including the agents that you can assign tasks to, are e
 You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.
 Child agents can also spawn their own sub-agents.
 You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.
-Use `wait_agent` to pause until your mailbox changes or all descendants become idle.
+Use `wait` to pause until your mailbox changes or all descendants become idle.
 
 You will receive messages in the model input in the form:
 ```
@@ -742,7 +746,7 @@ Payload:
 ```
 You may also see them addressed as to=/root/..., which indicates your identity is /root/..."""
 
-_EXPECTED_SHARED_USAGE_HINT = """Note that collaboration tools cannot be called from inside `exec_command`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, since they are intentionally absent from `exec_command`.
+_EXPECTED_SHARED_USAGE_HINT = """Note that collaboration tools cannot be called from inside `exec_command`. Call `spawn_agent`, `send_message`, `followup_task`, `wait`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, since they are intentionally absent from `exec_command`.
 
 All agents share the same directory. In detail:
 - All agents have access to the same container and filesystem as you.
@@ -1207,221 +1211,6 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
     assert [agent["agent_path"] for agent in agents] == ["/root", "/root/child"]
 
 
-async def test_wait_agent_schema_is_targetless() -> None:
-    """wait_agent exposes no target selector and rejects legacy arguments."""
-    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
-    state = await toolkit.update_context(
-        TurnContext(
-            workspace_id="workspace-1",
-            model="gpt-5.1",
-            run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
-            session_id="root-session",
-        )
-    )
-    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
-
-    assert "agent_name" not in json.dumps(tool.spec.input_schema)
-    with pytest.raises(FunctionToolError, match="Extra inputs are not permitted"):
-        await tool.handler(json.dumps({"agent_name": "child"}))
-
-
-async def test_wait_agent_returns_for_current_mailbox_activity() -> None:
-    """Current mailbox activity completes a targetless wait immediately."""
-    toolkit, repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
-    input_service.pending_agent_message_session_ids.add("root-session")
-    state = await toolkit.update_context(
-        TurnContext(
-            workspace_id="workspace-1",
-            model="gpt-5.1",
-            run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
-            session_id="root-session",
-        )
-    )
-    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
-
-    result = await tool.handler(json.dumps({"timeout_seconds": 120}))
-
-    assert json.loads(cast(str, result)) == {
-        "message": "Mailbox updated.",
-        "timed_out": False,
-    }
-    assert repo.observation_updates == []
-
-
-async def test_concurrent_waits_do_not_consume_mailbox_activity() -> None:
-    """Concurrent waits observe the same durable mailbox state."""
-    toolkit, repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
-    input_service.pending_agent_message_session_ids.add("root-session")
-    state = await toolkit.update_context(
-        TurnContext(
-            workspace_id="workspace-1",
-            model="gpt-5.1",
-            run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
-            session_id="root-session",
-        )
-    )
-    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
-
-    results = await asyncio.gather(tool.handler("{}"), tool.handler("{}"))
-
-    assert [json.loads(cast(str, result)) for result in results] == [
-        {"message": "Mailbox updated.", "timed_out": False},
-        {"message": "Mailbox updated.", "timed_out": False},
-    ]
-    assert input_service.pending_agent_message_session_ids == {"root-session"}
-    assert repo.observation_updates == []
-
-
-async def test_wait_agent_waits_until_current_mailbox_changes() -> None:
-    """Active descendants keep waiting until the current mailbox changes."""
-    toolkit, repo, input_service, _broker, run_repo, _events = await _make_toolkit()
-    run_repo.latest_by_session_id["child-session"] = run_repo.latest_by_session_id[
-        "child-session"
-    ].model_copy(update={"status": AgentRunStatus.RUNNING, "ended_at": None})
-    repo.sessions["child-session"] = _agent_session(
-        id="child-session",
-        run_state=AgentSessionRunState.RUNNING,
-    )
-    state = await toolkit.update_context(
-        TurnContext(
-            workspace_id="workspace-1",
-            model="gpt-5.1",
-            run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
-            session_id="root-session",
-        )
-    )
-    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
-
-    async def publish_mailbox_activity() -> None:
-        await asyncio.sleep(0.01)
-        input_service.pending_agent_message_session_ids.add("root-session")
-
-    publisher = asyncio.create_task(publish_mailbox_activity())
-    try:
-        result = await tool.handler(json.dumps({"timeout_seconds": 1}))
-    finally:
-        await publisher
-
-    assert json.loads(cast(str, result)) == {
-        "message": "Mailbox updated.",
-        "timed_out": False,
-    }
-
-
-async def test_wait_agent_rechecks_mailbox_before_idle_return(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A mailbox commit wins the final all-idle race check."""
-    toolkit, repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
-    observations = iter([False, True])
-
-    async def has_pending_agent_messages(session_id: str) -> bool:
-        assert session_id == "root-session"
-        return next(observations)
-
-    monkeypatch.setattr(
-        input_service,
-        "has_pending_agent_messages",
-        has_pending_agent_messages,
-    )
-    state = await toolkit.update_context(
-        TurnContext(
-            workspace_id="workspace-1",
-            model="gpt-5.1",
-            run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
-            session_id="root-session",
-        )
-    )
-    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
-
-    result = await tool.handler("{}")
-
-    assert json.loads(cast(str, result)) == {
-        "message": "Mailbox updated.",
-        "timed_out": False,
-    }
-    assert repo.observation_updates == []
-
-
-async def test_wait_agent_returns_when_all_descendants_are_idle() -> None:
-    """An idle descendant tree completes without mailbox activity."""
-    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
-    state = await toolkit.update_context(
-        TurnContext(
-            workspace_id="workspace-1",
-            model="gpt-5.1",
-            run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
-            session_id="root-session",
-        )
-    )
-    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
-
-    result = await tool.handler("{}")
-
-    assert json.loads(cast(str, result)) == {
-        "message": "All descendant agents are idle.",
-        "timed_out": False,
-    }
-
-
-async def test_wait_agent_timeout_reports_active_descendants() -> None:
-    """A zero-duration wait reports the descendants that remain active."""
-    toolkit, repo, _input_service, _broker, run_repo, _events = await _make_toolkit()
-    run_repo.latest_by_session_id["child-session"] = run_repo.latest_by_session_id[
-        "child-session"
-    ].model_copy(update={"status": AgentRunStatus.RUNNING, "ended_at": None})
-    repo.sessions["child-session"] = _agent_session(
-        id="child-session",
-        run_state=AgentSessionRunState.RUNNING,
-    )
-    state = await toolkit.update_context(
-        TurnContext(
-            workspace_id="workspace-1",
-            model="gpt-5.1",
-            run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
-            session_id="root-session",
-        )
-    )
-    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
-
-    result = await tool.handler(json.dumps({"timeout_seconds": 0}))
-
-    assert json.loads(cast(str, result)) == {
-        "message": "Wait timed out; active descendants: /root/child",
-        "timed_out": True,
-    }
-
-
-async def test_wait_agent_reports_when_no_descendants_exist() -> None:
-    """wait_agent distinguishes an empty descendant tree."""
-    toolkit, repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
-    repo.tree = [repo.current]
-    state = await toolkit.update_context(
-        TurnContext(
-            workspace_id="workspace-1",
-            model="gpt-5.1",
-            run_id="run-1",
-            publish_event=cast(Any, _noop_publish),
-            session_id="root-session",
-        )
-    )
-    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
-
-    result = await tool.handler(json.dumps({"timeout_seconds": 120}))
-
-    assert json.loads(cast(str, result)) == {
-        "message": "No descendant agents to wait for.",
-        "timed_out": False,
-    }
-
-
 async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     """Inherited spawning remains available when its parent target is disabled."""
     (
@@ -1818,7 +1607,7 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
     assert 'You are the subagent named "reviewer".' in reminder_text
     assert 'Your full agent path is "/root/reviewer".' in reminder_text
     assert "The next message is your current direct assignment." in reminder_text
-    assert "Never call wait_agent on yourself." in reminder_text
+    assert "Never call wait on yourself." in reminder_text
     assert "for observing your descendants" in reminder_text
     assert input_service.enqueued[0].content == "Review only"
 

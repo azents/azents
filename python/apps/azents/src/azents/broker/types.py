@@ -31,7 +31,16 @@ class SessionStopSignal:
     type: Literal["session_stop_signal"] = "session_stop_signal"
 
 
+@dataclasses.dataclass(frozen=True)
+class SessionMailboxActivity:
+    """Transient queue-only mailbox activity for a live Session owner."""
+
+    session_id: str
+    type: Literal["mailbox_activity"] = "mailbox_activity"
+
+
 BrokerMessage = SessionWakeUp | SessionStopSignal
+WorkerSignal = BrokerMessage | SessionMailboxActivity
 
 
 class SessionBroker(Protocol):
@@ -43,12 +52,16 @@ class SessionBroker(Protocol):
         ...
 
     # Engine side
-    async def receive_messages(self) -> list[BrokerMessage]:
+    async def receive_messages(self) -> list[WorkerSignal]:
         """Receive messages, blocking.
 
         After receiving a signal, drain all messages in that session queue and
         return them.
         """
+        ...
+
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        """Notify an existing live owner without waking an idle Session."""
         ...
 
     async def publish_event(self, session_id: str, event: PublishedEvent) -> None:

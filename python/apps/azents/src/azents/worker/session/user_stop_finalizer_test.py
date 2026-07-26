@@ -223,6 +223,7 @@ class _SessionLifecycle:
     ) -> None:
         self.run_repository = run_repository
         self.owner_generation = owner_generation
+        self.parent_result_activity_run_ids: list[str] = []
 
     def _assert_owner_generation(self, owner_generation: int) -> None:
         """Reject a stale Worker generation."""
@@ -252,6 +253,10 @@ class _SessionLifecycle:
         """Validate the owner generation for a mutation transaction."""
         del session, session_id
         self._assert_owner_generation(owner_generation)
+
+    async def notify_parent_result_activity(self, run_id: str) -> None:
+        """Record one queue-only parent-result activity notification."""
+        self.parent_result_activity_run_ids.append(run_id)
 
     async def mark_agent_run_terminal_if_running(
         self,
@@ -570,6 +575,12 @@ async def test_record_interrupted_run_publishes_durable_history_before_stop() ->
         run_id="22222222222222222222222222222222",
     )
 
+    assert (
+        cast(
+            _SessionLifecycle, finalizer.session_lifecycle
+        ).parent_result_activity_run_ids
+        == []
+    )
     assert [event.external_id for event in transcripts.appended] == [
         "interrupted:22222222222222222222222222222222:user_requested",
         "run-marker:22222222222222222222222222222222:interrupted",

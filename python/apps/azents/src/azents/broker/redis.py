@@ -24,7 +24,9 @@ from .types import (
     BrokerMessage,
     PublishedEvent,
     SessionActivity,
+    SessionMailboxActivity,
     SessionWakeUp,
+    WorkerSignal,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,6 +101,9 @@ return 0
 """
 
 _session_wake_up_adapter = TypeAdapter[SessionWakeUp](SessionWakeUp)
+_session_mailbox_activity_adapter = TypeAdapter[SessionMailboxActivity](
+    SessionMailboxActivity
+)
 
 
 def encode_session_wake_up(message: SessionWakeUp) -> bytes:
@@ -110,6 +115,17 @@ def decode_session_wake_up(raw: bytes) -> SessionWakeUp:
     """Deserialize JSON bytes to SessionWakeUp."""
     _validate_routing_only_payload(raw, expected_type="session_wake_up")
     return _session_wake_up_adapter.validate_json(raw, strict=True)
+
+
+def encode_session_mailbox_activity(message: SessionMailboxActivity) -> bytes:
+    """Serialize transient mailbox activity."""
+    return _session_mailbox_activity_adapter.dump_json(message)
+
+
+def decode_session_mailbox_activity(raw: bytes) -> SessionMailboxActivity:
+    """Deserialize transient mailbox activity."""
+    _validate_routing_only_payload(raw, expected_type="mailbox_activity")
+    return _session_mailbox_activity_adapter.validate_json(raw, strict=True)
 
 
 _broker_message_adapter = TypeAdapter[BrokerMessage](BrokerMessage)
@@ -158,6 +174,7 @@ class _WakeUp(NamedTuple):
     stream_name: bytes | str
     entry_id: bytes | str
     session_id: str
+    signal: WorkerSignal
 
 
 class _Ownership(NamedTuple):
@@ -233,6 +250,26 @@ class RedisBroker:
             )
             raise
 
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        """Publish activity only to a live owner, dropping when idle."""
+        assert self._worker_id is not None, "worker_id is required"
+        redis_any = cast(Any, self._redis)
+        owner = await redis_any.eval(
+            _ROUTE_WAKE_SCRIPT,
+            2,
+            _session_lock_key(self._SESSION_PREFIX, session_id),
+            _session_owner_heartbeat_key(self._SESSION_PREFIX, session_id),
+        )
+        if not owner:
+            return
+        owner_id = owner.decode() if isinstance(owner, bytes) else owner
+        await self._redis.xadd(
+            _worker_stream_key(owner_id),
+            {"session_id": session_id, "type": "mailbox_activity"},
+            minid=_stream_min_id(self._INCOMING_RETENTION),
+            approximate=False,
+        )
+
     async def _publish_wake_up(self, session_id: str) -> None:
         """Wake the owner stream when there is a live owner."""
         redis_any = cast(Any, self._redis)
@@ -256,7 +293,7 @@ class RedisBroker:
 
     # ----- Engine side -----
 
-    async def receive_messages(self) -> list[BrokerMessage]:
+    async def receive_messages(self) -> list[WorkerSignal]:
         """Receive notification, verify session ownership, and drain queued messages.
 
         1. Receive notification with session_id from the global stream by XREADGROUP
@@ -274,6 +311,9 @@ class RedisBroker:
                 self._GROUP_NAME,
                 wake_up.entry_id,
             )
+
+            if isinstance(wake_up.signal, SessionMailboxActivity):
+                return [wake_up.signal]
 
             session_id = wake_up.session_id
             ownership = await self._acquire_or_find_owner(session_id)
@@ -297,7 +337,7 @@ class RedisBroker:
 
             # Drain per-session LIST until the queue is empty
             msg_key = f"{self._SESSION_PREFIX}{session_id}:messages"
-            messages: list[BrokerMessage] = []
+            messages: list[WorkerSignal] = []
             while True:
                 raw = await self._redis.lpop(msg_key)
                 if raw is None:
@@ -359,10 +399,22 @@ class RedisBroker:
             if isinstance(session_id_raw, bytes)
             else str(session_id_raw)
         )
+        message_type_raw = fields.get(b"type", fields.get("type"))
+        message_type = (
+            message_type_raw.decode()
+            if isinstance(message_type_raw, bytes)
+            else str(message_type_raw or "session_wake_up")
+        )
+        signal: WorkerSignal = (
+            SessionMailboxActivity(session_id=session_id)
+            if message_type == "mailbox_activity"
+            else SessionWakeUp(session_id=session_id)
+        )
         return _WakeUp(
             stream_name=stream_name,
             entry_id=entry_id,
             session_id=session_id,
+            signal=signal,
         )
 
     async def _acquire_or_find_owner(self, session_id: str) -> _Ownership:

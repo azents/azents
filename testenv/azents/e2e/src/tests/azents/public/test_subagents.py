@@ -514,6 +514,50 @@ def _wait_for_tool_result_content(
     )
 
 
+def _wait_for_tool_result_outcome(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    call_id: str,
+    outcome: str,
+    reason: str | None = None,
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Wait until a WaitToolkit result contains the expected JSON outcome."""
+    expected = {"outcome": outcome}
+    if reason is not None:
+        expected["reason"] = reason
+    deadline = time.monotonic() + timeout
+    last_outputs: list[str] = []
+    while time.monotonic() < deadline:
+        last_outputs = []
+        for event in _history(
+            public_url=public_url, token=token, session_id=session_id
+        ):
+            payload = _event_payload(event)
+            if payload.get("call_id") != call_id:
+                continue
+            output = _tool_result_output_text(event)
+            if output is None:
+                continue
+            last_outputs.append(output)
+            try:
+                parsed = json.loads(output)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                parsed_dict = cast(dict[str, object], parsed)
+                if all(
+                    parsed_dict.get(key) == value for key, value in expected.items()
+                ):
+                    return event
+        time.sleep(0.5)
+    raise TimeoutError(
+        f"tool result outcome not observed: {call_id}, {expected}, {last_outputs!r}"
+    )
+
+
 def _run_marker_completed(event: dict[str, object]) -> bool:
     """Return whether a history event is a completed run marker."""
     if event.get("kind") != "run_marker":
@@ -751,7 +795,7 @@ class TestSubagents:
         azents_public_server_url: str,
         azents_engine_worker_container: object,
     ) -> None:
-        """Spawn a child, open child detail history, and observe it via wait_agent."""
+        """Spawn a child, open child detail history, and observe it via wait."""
         del azents_engine_worker_container
         workspace = _setup_workspace(
             public_api_client,
@@ -845,12 +889,13 @@ class TestSubagents:
             session_id=root_session_id,
             expected=_CHILD_RESPONSE,
         )
-        _wait_for_tool_result_content(
+        _wait_for_tool_result_outcome(
             public_url=azents_public_server_url,
             token=workspace.token,
             session_id=root_session_id,
             call_id=_WAIT_CALL_ID,
-            expected="All descendant agents are idle.",
+            outcome="not_waitable",
+            reason="all_descendants_idle",
         )
         _, observed_child = _wait_for_child_node(
             public_url=azents_public_server_url,
@@ -1015,12 +1060,13 @@ class TestSubagents:
             release_file_path,
             expected_count=2,
         )
-        wait_event = _wait_for_tool_result_content(
+        wait_event = _wait_for_tool_result_outcome(
             public_url=azents_public_server_url,
             token=workspace.token,
             session_id=root_session_id,
             call_id=_MAILBOX_WAIT_CALL_ID,
-            expected="Mailbox updated.",
+            outcome="activity",
+            reason="mailbox",
         )
         _wait_for_content(
             public_url=azents_public_server_url,
@@ -1158,12 +1204,13 @@ class TestSubagents:
             session_id=root_session_id,
             message=_NO_DESCENDANTS_MESSAGE,
         )
-        _wait_for_tool_result_content(
+        _wait_for_tool_result_outcome(
             public_url=azents_public_server_url,
             token=workspace.token,
             session_id=root_session_id,
             call_id=_NO_DESCENDANTS_CALL_ID,
-            expected="No descendant agents to wait for.",
+            outcome="not_waitable",
+            reason="no_descendants",
         )
         _wait_for_content(
             public_url=azents_public_server_url,
@@ -1198,7 +1245,7 @@ class TestSubagents:
         azents_public_server_url: str,
         azents_engine_worker_container: DockerContainer,
     ) -> None:
-        """Report an active descendant when a zero-duration wait expires."""
+        """Report a timeout when a zero-duration wait expires."""
         release_file_path = f"/tmp/azents-subagent-timeout-{unique()}"
         _set_release_file(
             azents_engine_worker_container,
@@ -1263,12 +1310,12 @@ class TestSubagents:
             session_id=root_session_id,
             message=_ACTIVE_TIMEOUT_WAIT_MESSAGE,
         )
-        wait_event = _wait_for_tool_result_content(
+        wait_event = _wait_for_tool_result_outcome(
             public_url=azents_public_server_url,
             token=workspace.token,
             session_id=root_session_id,
             call_id=_ACTIVE_TIMEOUT_CALL_ID,
-            expected="Wait timed out; active descendants: /root/timeout_child",
+            outcome="timed_out",
         )
         _wait_for_content(
             public_url=azents_public_server_url,
