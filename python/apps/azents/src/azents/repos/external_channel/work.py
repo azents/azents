@@ -1391,6 +1391,8 @@ def _render_progress(
                 work_id=work_id,
                 desired_progress_revision=desired_progress_revision,
             )
+        case ExternalChannelProvider.DISCORD:
+            raise RuntimeError("Discord Channel Work projection is not enabled.")
         case _ as unreachable:
             assert_never(unreachable)
 
@@ -1410,6 +1412,8 @@ def _render_persisted_progress(
                 work_id=work_id,
                 desired_progress_revision=desired_progress_revision,
             )
+        case ExternalChannelProvider.DISCORD:
+            raise RuntimeError("Discord Channel Work projection is not enabled.")
         case _ as unreachable:
             assert_never(unreachable)
 
@@ -1424,6 +1428,8 @@ def _validate_message_length(
     match provider:
         case ExternalChannelProvider.SLACK:
             maximum = SLACK_MARKDOWN_TEXT_MAX_LENGTH
+        case ExternalChannelProvider.DISCORD:
+            raise RuntimeError("Discord delivery is not enabled.")
         case _ as unreachable:
             assert_never(unreachable)
     if len(message) > maximum:

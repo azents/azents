@@ -381,6 +381,8 @@ class ExternalChannelActionService:
                     agent_id=agent_id,
                     authority=authority,
                 )
+            case ExternalChannelProvider.DISCORD:
+                raise RuntimeError("Discord delivery is not enabled.")
             case _ as unreachable:
                 assert_never(unreachable)
 

@@ -179,6 +179,10 @@ class ExternalChannelFileTransferService:
                     agent_id=agent_id,
                     file_storage=file_storage,
                 )
+            case ExternalChannelProvider.DISCORD:
+                raise ExternalChannelFileTransferError(
+                    "Discord file download is not enabled."
+                )
             case _ as unreachable:
                 assert_never(unreachable)
 

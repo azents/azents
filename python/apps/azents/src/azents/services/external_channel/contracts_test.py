@@ -9,11 +9,13 @@ from pydantic import ValidationError
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     ExternalChannelConnectionStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import (
+    DiscordConnectionCredentials,
     ExternalChannelCapabilitySnapshot,
     ExternalChannelConnectionCredentialPayload,
     ExternalChannelConnectionStatusSnapshot,
@@ -21,6 +23,7 @@ from azents.services.external_channel.data import (
     SlackConnectionCredentials,
 )
 from azents.services.external_channel.provider import (
+    DiscordExternalChannelProviderContract,
     SlackExternalChannelProviderContract,
 )
 
@@ -39,6 +42,7 @@ def test_socket_mode_credentials_require_an_app_token() -> None:
         ExternalChannelConnectionCredentialPayload(
             provider=ExternalChannelProvider.SLACK,
             transport=ExternalChannelTransport.SOCKET,
+            ingress_profile=ExternalChannelIngressProfile.SLACK_SOCKET,
             credentials=_credentials(app_token=None),
         )
 
@@ -113,6 +117,7 @@ def test_slack_contract_accepts_only_slack_credentials() -> None:
     payload = ExternalChannelConnectionCredentialPayload(
         provider=ExternalChannelProvider.SLACK,
         transport=ExternalChannelTransport.HTTP,
+        ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
         credentials=_credentials(app_token=None),
     )
 
@@ -121,3 +126,47 @@ def test_slack_contract_accepts_only_slack_credentials() -> None:
     )
 
     assert result == payload.credentials
+
+
+def test_discord_contract_requires_gateway_http_ingress_profile() -> None:
+    credentials = DiscordConnectionCredentials(bot_token="discord-bot-token")
+
+    with pytest.raises(ValidationError, match="requires the Gateway and HTTP"):
+        ExternalChannelConnectionCredentialPayload(
+            provider=ExternalChannelProvider.DISCORD,
+            transport=ExternalChannelTransport.HTTP,
+            ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
+            credentials=credentials,
+        )
+
+    payload = ExternalChannelConnectionCredentialPayload(
+        provider=ExternalChannelProvider.DISCORD,
+        transport=ExternalChannelTransport.HTTP,
+        ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+        credentials=credentials,
+    )
+
+    result = DiscordExternalChannelProviderContract().validate_connection_credentials(
+        payload
+    )
+
+    assert result == credentials
+
+
+def test_discord_credentials_are_encrypted_and_redacted() -> None:
+    credentials = DiscordConnectionCredentials(bot_token="discord-bot-token")
+    codec = ExternalChannelCredentialsCodec(
+        cipher=CredentialCipher(Fernet.generate_key().decode())
+    )
+
+    encrypted = codec.encrypt(credentials)
+    decrypted = codec.decrypt(encrypted)
+    snapshot = codec.snapshot(credentials)
+
+    assert encrypted != credentials.bot_token
+    assert decrypted == credentials
+    assert snapshot.model_dump() == {
+        "provider": ExternalChannelProvider.DISCORD,
+        "configured_fields": ("bot_token",),
+    }
+    assert credentials.bot_token not in snapshot.model_dump_json()

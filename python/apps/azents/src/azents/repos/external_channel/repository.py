@@ -3451,6 +3451,7 @@ class ExternalChannelRepository:
             RDBExternalChannelDeliveryAttempt.origin_type == create.origin_type,
             RDBExternalChannelDeliveryAttempt.origin_id == create.origin_id,
             RDBExternalChannelDeliveryAttempt.operation == create.operation,
+            RDBExternalChannelDeliveryAttempt.part_ordinal == create.part_ordinal,
         ]
         if create.binding_id is None:
             predicate.append(RDBExternalChannelDeliveryAttempt.binding_id.is_(None))

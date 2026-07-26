@@ -15453,7 +15453,8 @@
       "ExternalChannelProvider": {
         "type": "string",
         "enum": [
-          "slack"
+          "slack",
+          "discord"
         ],
         "title": "ExternalChannelProvider",
         "description": "External collaboration provider."

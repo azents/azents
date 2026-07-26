@@ -6,12 +6,13 @@ provider identity and redacted operational state from encrypted credentials.
 
 import datetime
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from azents.core.enums import (
     ExternalChannelConnectionStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
@@ -61,7 +62,44 @@ class SlackConnectionCredentials(BaseModel):
         return value
 
 
-type ExternalChannelConnectionCredentials = SlackConnectionCredentials
+class DiscordConnectionCredentials(BaseModel):
+    """Validated secret payload for one Discord App connection."""
+
+    model_config = ConfigDict(frozen=True)
+
+    provider: Literal[ExternalChannelProvider.DISCORD] = Field(
+        default=ExternalChannelProvider.DISCORD
+    )
+    bot_token: str = Field(description="Discord bot token")
+
+    @field_validator("bot_token")
+    @classmethod
+    def _validate_secret(cls, value: str) -> str:
+        """Reject blank configured secrets."""
+        return _require_non_blank(value)
+
+
+class DiscordConnectionConfiguration(BaseModel):
+    """Validated non-secret configuration for one Discord App connection."""
+
+    model_config = ConfigDict(frozen=True)
+
+    provider: Literal[ExternalChannelProvider.DISCORD] = Field(
+        default=ExternalChannelProvider.DISCORD
+    )
+    target_guild_id: str = Field(description="Target Discord Guild snowflake")
+
+    @field_validator("target_guild_id")
+    @classmethod
+    def _validate_target_guild_id(cls, value: str) -> str:
+        """Reject blank configured Guild identities."""
+        return _require_non_blank(value)
+
+
+type ExternalChannelConnectionCredentials = Annotated[
+    SlackConnectionCredentials | DiscordConnectionCredentials,
+    Field(discriminator="provider"),
+]
 
 
 class ExternalChannelConnectionCredentialPayload(BaseModel):
@@ -72,6 +110,9 @@ class ExternalChannelConnectionCredentialPayload(BaseModel):
     provider: ExternalChannelProvider = Field(description="Provider credential owner")
     transport: ExternalChannelTransport = Field(
         description="Connection inbound transport"
+    )
+    ingress_profile: ExternalChannelIngressProfile = Field(
+        description="Provider-defined connection ingress topology"
     )
     credentials: ExternalChannelConnectionCredentials = Field(
         description="Provider-specific credential payload"
@@ -84,11 +125,36 @@ class ExternalChannelConnectionCredentialPayload(BaseModel):
         """Validate the credential shape required by the provider and transport."""
         if self.provider is not self.credentials.provider:
             raise ValueError("Credential provider does not match connection provider.")
-        if (
-            self.transport is ExternalChannelTransport.SOCKET
-            and self.credentials.app_token is None
-        ):
-            raise ValueError("Slack Socket Mode requires an app token.")
+        match self.credentials:
+            case SlackConnectionCredentials(app_token=app_token):
+                expected_profile = (
+                    ExternalChannelIngressProfile.SLACK_SOCKET
+                    if self.transport is ExternalChannelTransport.SOCKET
+                    else ExternalChannelIngressProfile.SLACK_HTTP
+                )
+                if self.ingress_profile is not expected_profile:
+                    raise ValueError(
+                        "Slack ingress profile does not match connection transport."
+                    )
+                if (
+                    self.transport is ExternalChannelTransport.SOCKET
+                    and app_token is None
+                ):
+                    raise ValueError("Slack Socket Mode requires an app token.")
+            case DiscordConnectionCredentials():
+                if self.transport is not ExternalChannelTransport.HTTP:
+                    raise ValueError(
+                        "Discord uses the fixed Gateway and HTTP ingress profile."
+                    )
+                if (
+                    self.ingress_profile
+                    is not ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+                ):
+                    raise ValueError(
+                        "Discord requires the Gateway and HTTP ingress profile."
+                    )
+            case _ as unreachable:
+                assert_never(unreachable)
         return self
 
 

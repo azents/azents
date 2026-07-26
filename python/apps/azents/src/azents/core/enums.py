@@ -745,6 +745,7 @@ class ExternalChannelProvider(enum.StrEnum):
     """External collaboration provider."""
 
     SLACK = "slack"
+    DISCORD = "discord"
 
 
 class ExternalChannelTransport(enum.StrEnum):
@@ -752,6 +753,14 @@ class ExternalChannelTransport(enum.StrEnum):
 
     HTTP = "http"
     SOCKET = "socket"
+
+
+class ExternalChannelIngressProfile(enum.StrEnum):
+    """Provider-defined ingress topology for one external connection."""
+
+    SLACK_HTTP = "slack_http"
+    SLACK_SOCKET = "slack_socket"
+    DISCORD_GATEWAY_HTTP = "discord_gateway_http"
 
 
 class ExternalChannelConnectionStatus(enum.StrEnum):
@@ -985,3 +994,29 @@ class ExternalChannelDeliveryStatus(enum.StrEnum):
     FAILED = "failed"
     UNKNOWN = "unknown"
     NOT_ATTEMPTED = "not_attempted"
+
+
+class ExternalChannelResourceProvisioningOperation(enum.StrEnum):
+    """Provider mutation required to make a canonical resource usable."""
+
+    THREAD_CREATE = "thread_create"
+
+
+class ExternalChannelResourceProvisioningStatus(enum.StrEnum):
+    """Durable outcome state for one resource provisioning operation."""
+
+    PENDING = "pending"
+    ATTEMPTING = "attempting"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+class ExternalChannelWorkProjectionStatus(enum.StrEnum):
+    """Current provider projection state for one Channel Work part."""
+
+    PENDING = "pending"
+    PRESENT = "present"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+    DELETED = "deleted"
