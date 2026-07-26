@@ -18,6 +18,7 @@ from azents_runtime_control.grpc_provider_client import (
 )
 from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.provider import (
+    JsonValue,
     ProviderConnectionRejected,
     ProviderRegistration,
     ProviderRunLoop,
@@ -52,6 +53,32 @@ _CREDENTIAL_POLL_INTERVAL_SECONDS = 1.0
 _LEADERSHIP_WAIT_LOG_INTERVAL_SECONDS = 60.0
 _MIN_LEADERSHIP_POLL_SECONDS = 1.0
 _LOGGER = logging.getLogger(__name__)
+
+_CAPABILITY_CONTRACT: dict[str, JsonValue] = {
+    "schema_version": 1,
+    "implementation_key": "kubernetes",
+    "implementation_version": "0.1.0",
+    "protocol_version": _PROTOCOL_VERSION,
+    "core_lifecycle_operations": [
+        "start",
+        "stop",
+        "restart",
+        "reset",
+        "observe",
+        "terminal_delete",
+    ],
+    "optional_capabilities": [
+        "execution_policy_v1",
+        "runtime_network_policy",
+        "engine_storage_ephemeral",
+    ],
+    "persistence": {
+        "kind": "persistent",
+        "reset_destroys_workspace": True,
+        "terminal_delete_destroys_workspace": True,
+    },
+    "configuration_fields": [],
+}
 
 
 async def _main() -> None:
@@ -142,6 +169,7 @@ async def _run_control_loop(
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={"workspace_path": settings.workspace_path},
+        capability_contract=_CAPABILITY_CONTRACT,
     )
     while not stop.is_set():
         _set_readiness(settings.readiness_file, ready=False)

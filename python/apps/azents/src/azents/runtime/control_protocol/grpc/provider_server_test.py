@@ -140,6 +140,14 @@ class FakeRuntimeRunnerCredentialIssuer:
         )
 
 
+class FakeRuntimeProviderContractProposer:
+    """Accept test Provider contract proposals."""
+
+    async def propose_contract(self, **_: object) -> object:
+        """Accept one test proposal."""
+        return object()
+
+
 class QueueIterator:
     """Async iterator backed by a queue."""
 
@@ -528,6 +536,7 @@ def _servicer(
         consumer_id="provider-consumer-a",
         credential_authenticator=bridge,
         connection_tracker=bridge,
+        contract_proposer=FakeRuntimeProviderContractProposer(),
         runner_credential_issuer=FakeRuntimeRunnerCredentialIssuer(),
         command_block_ms=1,
     )
@@ -547,6 +556,7 @@ def _register_message(
             capabilities=("lifecycle", "observe"),
             config_schema_version="v1",
             auth_credential_id="credential-1",
+            capability_contract={"schema_version": 1},
         ),
     )
 

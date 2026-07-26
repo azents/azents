@@ -17,8 +17,8 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
-last_verified_at: 2026-07-26
-spec_version: 6
+last_verified_at: 2026-07-27
+spec_version: 7
 ---
 
 # Agent Runtime Persistence
@@ -41,6 +41,14 @@ revision IDs, and an immutable policy snapshot are stored before lifecycle comma
 A later availability, default, contract, or configuration change does not reassign an existing logical
 Runtime. If no Provider can satisfy the request, the lifecycle API returns an explicit unavailable
 conflict and no partial Runtime is persisted.
+
+Runtime rows created before durable Provider contracts may contain only the historical logical
+Provider ID. On the next Runtime access or lifecycle request, selection resolves that same logical
+Provider, requires its accepted contract, stores the internal Provider resource ID with `migration`
+origin, and attaches the initial policy snapshot transactionally. This upgrade does not replace the
+logical Runtime, advance its desired generation, delete its workspace, or invoke a Provider
+lifecycle command. A later explicit start or restart uses the normal generation-fenced policy and
+preserves the existing host directory or PVC.
 
 Runtime execution policy stores Agent intent separately from the applied Runtime target. Platform
 and Workspace restrictions can only narrow policy. An Agent Profile/override change is pending until
@@ -165,6 +173,7 @@ Required checks:
 
 ## Changelog
 
+- **2026-07-27 (spec_version=7)** — Added lazy exact-Provider binding and initial policy snapshot attachment for pre-contract Runtime rows without workspace replacement.
 - **2026-07-26 (spec_version=6)** — Added durable execution-policy target/applied snapshots, reset-free restrictive convergence, fixed Kubernetes topology isolation, and separate unqualified nested-engine storage.
 - **2026-07-26 (spec_version=5)** — Added storage-preserving periodic convergence for desired-running Runtime workload image and configuration drift.
 - **2026-07-03 (spec_version=3)** — Reflected Project-first Workspace browser ownership and registry-scoped Project root action boundary.

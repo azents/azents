@@ -313,6 +313,7 @@ def _loop(
             capabilities=("lifecycle", "observe"),
             config_schema_version="v1",
             metadata={"workspace_path_source": "provider"},
+            capability_contract={"schema_version": 1},
         ),
         connection_id="connection-1",
         consumer_id="consumer-1",

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from azents.api.admin import mount as mount_admin
 from azents.api.admin.runtime_provider.v1 import (
+    accept_contract,
     get_auth_binding,
     mount,
     rotate_auth_binding,
@@ -17,19 +18,27 @@ from azents.api.admin.runtime_provider.v1 import (
 from azents.api.admin.runtime_provider.v1.data import (
     RuntimeProviderAuthenticationBindingResponse,
     RuntimeProviderAuthenticationBindingRotateRequest,
+    RuntimeProviderContractAcceptRequest,
 )
 from azents.core.auth.deps import SystemAdmin, get_system_admin
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
     RuntimeProviderBindingOwner,
     RuntimeProviderBindingState,
+    RuntimeProviderContractStatus,
 )
 from azents.repos.runtime_provider_binding.data import RuntimeProviderAuthBinding
+from azents.repos.runtime_provider_policy.data import (
+    RuntimeProviderContractRevision,
+)
 from azents.services.runtime_provider_binding_admin.service import (
     RuntimeProviderBindingAdminProjection,
     RuntimeProviderBindingAdminService,
     RuntimeProviderBindingAdminUnavailable,
     RuntimeProviderBindingRotation,
+)
+from azents.services.runtime_provider_contract.service import (
+    RuntimeProviderContractService,
 )
 from azents.utils.fastapi.route import as_route_mounter
 
@@ -80,6 +89,11 @@ def test_mounts_runtime_provider_inventory_and_authentication_routes() -> None:
     assert "/runtime-provider/v1/providers/{provider_id}" in paths
     assert "/runtime-provider/v1/providers/{provider_id}/policy" in paths
     assert "/runtime-provider/v1/providers/{provider_id}/availability" in paths
+    assert "/runtime-provider/v1/providers/{provider_id}/contracts" in paths
+    assert (
+        "/runtime-provider/v1/providers/{provider_id}/contracts/{revision_id}/accept"
+        in paths
+    )
     assert (
         "/runtime-provider/v1/providers/{provider_id}/authentication-bindings" in paths
     )
@@ -155,6 +169,48 @@ def test_rotate_rejects_timezone_naive_expiry() -> None:
             expected_admin_version=1,
             expires_at=datetime.datetime(2026, 7, 23, 12),
         )
+
+
+@pytest.mark.asyncio
+async def test_accept_contract_uses_admin_identity_and_expected_version() -> None:
+    """Contract acceptance carries explicit Admin authority and concurrency."""
+    now = datetime.datetime(2026, 7, 27, tzinfo=datetime.UTC)
+    service = create_autospec(RuntimeProviderContractService, instance=True)
+    service.accept_contract = AsyncMock(
+        return_value=RuntimeProviderContractRevision(
+            id="contract-1",
+            provider_id="provider-row-1",
+            digest="a" * 64,
+            implementation_version="0.1.0",
+            protocol_version="provider-v1",
+            contract={"schema_version": 1},
+            compatibility={"compatible": True},
+            status=RuntimeProviderContractStatus.ACCEPTED,
+            validation_code=None,
+            validation_message=None,
+            accepted_by_user_id="admin-1",
+            accepted_at=now,
+            rejected_by_user_id=None,
+            rejected_at=None,
+            created_at=now,
+        )
+    )
+
+    response = await accept_contract(
+        system_admin=_system_admin(),
+        service=service,
+        request_body=RuntimeProviderContractAcceptRequest(expected_admin_version=0),
+        provider_id="system-kubernetes",
+        revision_id="contract-1",
+    )
+
+    assert response.status is RuntimeProviderContractStatus.ACCEPTED
+    service.accept_contract.assert_awaited_once_with(
+        "system-kubernetes",
+        "contract-1",
+        expected_admin_version=0,
+        actor_user_id="admin-1",
+    )
 
 
 @pytest.mark.parametrize(

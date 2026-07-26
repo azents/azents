@@ -354,6 +354,7 @@ def _provider_registration() -> RuntimeProviderRegistration:
         capabilities=RuntimeProtocolCapabilities(("lifecycle",)),
         config_schema_version="v1",
         metadata={},
+        capability_contract={"schema_version": 1},
         auth_credential_id="provider:provider-1",
         connection_id="provider-connection-1",
         owner_replica_id="control-a",

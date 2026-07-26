@@ -88,6 +88,23 @@ class RuntimeProviderPolicyRepository:
         rdb = result.scalar_one_or_none()
         return self._build_contract(rdb) if rdb is not None else None
 
+    async def list_contracts(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+    ) -> list[RuntimeProviderContractRevision]:
+        """List Provider contract revisions from newest to oldest."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProviderContractRevision)
+            .where(RDBRuntimeProviderContractRevision.provider_id == provider_id)
+            .order_by(
+                RDBRuntimeProviderContractRevision.created_at.desc(),
+                RDBRuntimeProviderContractRevision.id.desc(),
+            )
+        )
+        return [self._build_contract(rdb) for rdb in result.scalars()]
+
     async def create_contract(
         self,
         session: AsyncSession,
@@ -164,6 +181,7 @@ class RuntimeProviderPolicyRepository:
             .values(
                 accepted_contract_revision_id=contract_revision_id,
                 admin_version=RDBRuntimeProvider.admin_version + 1,
+                capabilities=accepted.contract,
             )
         )
         await session.flush()

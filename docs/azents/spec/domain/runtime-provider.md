@@ -18,6 +18,7 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_provider_binding_admin/**
   - python/apps/azents/src/azents/services/runtime_provider_bootstrap/**
   - python/apps/azents/src/azents/services/runtime_provider_control/**
+  - python/apps/azents/src/azents/services/runtime_provider_contract/**
   - python/apps/azents/src/azents/services/runtime_provider_public/**
   - python/apps/azents/src/azents/services/runtime_provider_selection/**
   - python/apps/azents/src/azents/services/runtime_execution_policy/**
@@ -28,6 +29,9 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents-runtime-provider-kubernetes/src/azents_runtime_provider_kubernetes/main.py
+  - python/apps/azents-runtime-provider-docker/src/azents_runtime_provider_docker/main.py
+  - python/libs/azents-runtime-control/src/azents_runtime_control/**
+  - proto/azents/runtime_control/v1/runtime_provider_control.proto
   - infra/charts/azents/templates/runtime-provider-kubernetes/**
   - infra/charts/azents/templates/server/rbac.yaml.tpl
   - infra/charts/azents/templates/server/runtime-control-deployment.yaml.tpl
@@ -37,8 +41,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/app/runtime-providers/**
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
-last_verified_at: 2026-07-26
-spec_version: 4
+last_verified_at: 2026-07-27
+spec_version: 5
 ---
 
 # Runtime Provider
@@ -55,6 +59,14 @@ Providers are optional. A Provider must be enabled, active, connected, Workspace
 
 The aggregate stores lifecycle state, enablement, scope, Workspace availability mode, declared capabilities, accepted contract revision, active configuration revision, and an incrementing Admin policy version. Contract revisions are immutable and move through candidate, accepted, rejected, and superseded states. Configuration revisions are immutable candidates that require Provider validation and explicit activation; active configuration is tied to the accepted contract and is never returned with secret plaintext.
 
+After workload authentication and identity matching, Provider registration submits the complete
+restricted capability contract. Runtime Control validates its implementation and protocol identity,
+canonicalizes the payload, and creates or finds the Provider-local digest revision before accepting
+the connection. A first or changed valid digest remains a candidate: the Provider may stay connected
+for observation, but it is not provisioning-ready until a System Admin explicitly accepts that exact
+revision. Admin routes expose contract history and expected-`admin_version` acceptance, and the Admin
+Provider detail presents pending revisions with an explicit acceptance action.
+
 Admin routes expose inventory and mutable policy/availability operations under `/runtime-provider/v1/providers`. Public discovery exposes only safe option metadata under `/runtime-provider/v1/workspaces/{handle}/providers`; credentials, authentication evidence, encrypted secrets, audit state, and mutable Runtime bindings are excluded.
 
 ## Runtime binding
@@ -62,6 +74,12 @@ Admin routes expose inventory and mutable policy/availability operations under `
 New logical Runtime creation uses one exact Provider candidate. Agent preference is evaluated before the Platform Runtime System Setting default, and no fallback occurs after an explicit candidate is ineligible. The resolver checks lifecycle, enablement, Platform scope, Workspace allow-list, connection readiness, accepted contract ownership/status, configuration validity, and requested capabilities.
 
 The selected Provider resource ID, opaque logical ID, binding origin, contract/configuration revision identifiers, and policy digest are persisted on the logical Runtime. An immutable effective policy snapshot is attached before lifecycle dispatch. Later default, availability, contract, or configuration changes never move an existing logical Runtime.
+
+A pre-contract Runtime with only its historical logical Provider ID is upgraded lazily at the same
+selection boundary. The service resolves that exact logical ID, validates the accepted contract,
+stores a `migration` resource binding, and attaches the initial immutable policy snapshot in one
+transaction. This compatibility path preserves the logical Runtime, desired generation, and
+Provider-owned workspace storage; it neither invokes reset nor selects a different Provider.
 
 When no eligible Provider exists, Public Agent Runtime lifecycle endpoints return a stable `409` unavailable outcome instead of creating a partial Runtime or selecting a deployment/environment default.
 
@@ -131,6 +149,7 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **5 (2026-07-27):** Connected authenticated Provider contract proposal, immutable candidate persistence, explicit Admin acceptance, and storage-preserving legacy Runtime policy binding.
 - **4 (2026-07-26):** Added restrictive Runtime Execution Profile compatibility, explicit Apply versus automatic tightening convergence, safe policy projections, and the current fail-closed privileged-engine boundary.
 - **3 (2026-07-23):** Promoted durable authentication bindings, explicit issued-token and Kubernetes ServiceAccount methods, Admin binding lifecycle, TokenReview workload identity, secret-free Helm deployment, and Runtime storage preservation behavior.
 - **2 (2026-07-23):** Added Provider policy, selection, and credential-bootstrap deployment behavior.

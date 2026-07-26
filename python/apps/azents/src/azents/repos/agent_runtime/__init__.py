@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimeProviderBindingOrigin,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
@@ -134,6 +135,43 @@ class AgentRuntimeRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def attach_provider_binding(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_logical_id: str,
+        provider_resource_id: str,
+        binding_origin: RuntimeProviderBindingOrigin,
+        binding_evidence: dict[str, object],
+    ) -> AgentRuntime | None:
+        """Attach or confirm one exact durable Provider binding."""
+        result = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                sa.or_(
+                    RDBAgentRuntime.runtime_provider_id.is_(None),
+                    RDBAgentRuntime.runtime_provider_id == provider_logical_id,
+                ),
+                sa.or_(
+                    RDBAgentRuntime.runtime_provider_resource_id.is_(None),
+                    RDBAgentRuntime.runtime_provider_resource_id
+                    == provider_resource_id,
+                ),
+            )
+            .values(
+                runtime_provider_id=provider_logical_id,
+                runtime_provider_resource_id=provider_resource_id,
+                provider_binding_origin=binding_origin,
+                provider_binding_evidence=binding_evidence,
+            )
+            .returning(RDBAgentRuntime)
+        )
+        rdb = result.scalar_one_or_none()
+        await session.flush()
+        return self._build(rdb) if rdb is not None else None
 
     async def provider_report_matches_binding(
         self,

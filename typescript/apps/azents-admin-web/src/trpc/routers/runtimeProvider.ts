@@ -1,8 +1,10 @@
 import {
+  runtimeProviderV1AcceptContract,
   runtimeProviderV1CreateAuthBinding,
   runtimeProviderV1GetRuntimeProvider,
   runtimeProviderV1ListAuthBindingAuditEvents,
   runtimeProviderV1ListAuthBindings,
+  runtimeProviderV1ListContracts,
   runtimeProviderV1ListRuntimeProviders,
   runtimeProviderV1ReplaceRuntimeProviderAvailability,
   runtimeProviderV1RevokeAuthBinding,
@@ -22,6 +24,50 @@ const lifecycleStateSchema = z.enum([
 const availabilityModeSchema = z.enum(["platform_wide", "selected_workspaces"]);
 
 export const runtimeProviderRouter = router({
+  listContracts: protectedProcedure
+    .input(z.object({ providerId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await runtimeProviderV1ListContracts({
+          client: ctx.adminApiClient,
+          path: { provider_id: input.providerId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, { 404: "NOT_FOUND" });
+      }
+    }),
+
+  acceptContract: protectedProcedure
+    .input(
+      z.object({
+        providerId: z.string().min(1),
+        revisionId: z.string().min(1),
+        expectedAdminVersion: z.number().int().nonnegative(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await runtimeProviderV1AcceptContract({
+          client: ctx.adminApiClient,
+          path: {
+            provider_id: input.providerId,
+            revision_id: input.revisionId,
+          },
+          body: { expected_admin_version: input.expectedAdminVersion },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
   listAuthBindings: protectedProcedure
     .input(z.object({ providerId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {

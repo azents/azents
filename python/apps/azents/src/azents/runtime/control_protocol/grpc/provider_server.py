@@ -47,6 +47,9 @@ from azents.runtime.coordination.data import (
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
 )
+from azents.services.runtime_provider_contract.service import (
+    RuntimeProviderContractUnavailable,
+)
 from azents.services.runtime_provider_control.data import (
     RuntimeProviderCredentialAuthentication,
     RuntimeProviderCredentialUnavailable,
@@ -140,6 +143,21 @@ class RuntimeRunnerCredentialIssuer(Protocol):
         ...
 
 
+class RuntimeProviderContractProposer(Protocol):
+    """Persist capability contracts from authenticated Provider registrations."""
+
+    async def propose_contract(
+        self,
+        *,
+        provider_resource_id: str,
+        provider_type: str,
+        protocol_version: str,
+        contract_payload: dict[str, JsonValue],
+    ) -> object:
+        """Validate and persist one immutable Provider contract proposal."""
+        ...
+
+
 class RuntimeProviderControlGrpcServicer(
     runtime_provider_control_pb2_grpc.RuntimeProviderControlServicer
 ):
@@ -154,6 +172,7 @@ class RuntimeProviderControlGrpcServicer(
         consumer_id: str,
         credential_authenticator: RuntimeProviderCredentialAuthenticator,
         connection_tracker: RuntimeProviderConnectionTracker,
+        contract_proposer: RuntimeProviderContractProposer,
         runner_credential_issuer: RuntimeRunnerCredentialIssuer,
         command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
     ) -> None:
@@ -164,6 +183,7 @@ class RuntimeProviderControlGrpcServicer(
         self._consumer_id = consumer_id
         self._auth = RuntimeProviderCredentialGrpcAuth(credential_authenticator)
         self._connection_tracker = connection_tracker
+        self._contract_proposer = contract_proposer
         self._runner_credential_issuer = runner_credential_issuer
         self._command_block_ms = command_block_ms
 
@@ -186,6 +206,21 @@ class RuntimeProviderControlGrpcServicer(
         if identity_error is not None:
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, identity_error)
             raise AssertionError("unreachable")
+        try:
+            await self._contract_proposer.propose_contract(
+                provider_resource_id=authentication.provider_resource_id,
+                provider_type=registration.provider_type,
+                protocol_version=registration.protocol_version,
+                contract_payload=registration.capability_contract,
+            )
+        except RuntimeProviderContractUnavailable as error:
+            status_code = (
+                grpc.StatusCode.PERMISSION_DENIED
+                if error.code in {"provider_not_found", "contract_identity_mismatch"}
+                else grpc.StatusCode.INVALID_ARGUMENT
+            )
+            await context.abort(status_code, error.message)
+            raise AssertionError("unreachable") from None
         bound_registration = dataclasses.replace(
             registration,
             provider_id=authentication.provider_id,
@@ -590,6 +625,7 @@ def add_runtime_provider_control_servicer(
     consumer_id: str,
     credential_authenticator: RuntimeProviderCredentialAuthenticator,
     connection_tracker: RuntimeProviderConnectionTracker,
+    contract_proposer: RuntimeProviderContractProposer,
     runner_credential_issuer: RuntimeRunnerCredentialIssuer,
     command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
 ) -> None:
@@ -602,6 +638,7 @@ def add_runtime_provider_control_servicer(
             consumer_id=consumer_id,
             credential_authenticator=credential_authenticator,
             connection_tracker=connection_tracker,
+            contract_proposer=contract_proposer,
             runner_credential_issuer=runner_credential_issuer,
             command_block_ms=command_block_ms,
         ),
@@ -710,6 +747,7 @@ def _registration(
         capabilities=RuntimeProtocolCapabilities(tuple(register.capabilities)),
         config_schema_version=register.config_schema_version,
         metadata=json_value_from_struct(register.metadata),
+        capability_contract=json_value_from_struct(register.capability_contract),
         auth_credential_id=register.auth_credential_id,
         connection_id=message.connection_id,
         owner_replica_id=owner_replica_id,

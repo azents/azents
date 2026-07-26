@@ -15,6 +15,7 @@ from azents_runtime_control.grpc_provider_client import (
 )
 from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.provider import (
+    JsonValue,
     ProviderConnectionRejected,
     ProviderRegistration,
     ProviderRunLoop,
@@ -33,6 +34,28 @@ _CONFIG_SCHEMA_VERSION = "agent-runtime-provider-docker-v1"
 _DEFAULT_COMMAND_BLOCK_MS = 5_000
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _LOGGER = logging.getLogger(__name__)
+
+_CAPABILITY_CONTRACT: dict[str, JsonValue] = {
+    "schema_version": 1,
+    "implementation_key": "docker",
+    "implementation_version": "0.1.0",
+    "protocol_version": _PROTOCOL_VERSION,
+    "core_lifecycle_operations": [
+        "start",
+        "stop",
+        "restart",
+        "reset",
+        "observe",
+        "terminal_delete",
+    ],
+    "optional_capabilities": [],
+    "persistence": {
+        "kind": "persistent",
+        "reset_destroys_workspace": True,
+        "terminal_delete_destroys_workspace": True,
+    },
+    "configuration_fields": [],
+}
 
 
 def main() -> None:
@@ -102,6 +125,7 @@ async def _run_control_loop(
             "workspace_path": settings.workspace_path,
             "tmp_path": settings.tmp_path,
         },
+        capability_contract=_CAPABILITY_CONTRACT,
     )
     while not stop.is_set():
         control_client = create_provider_control_client(settings)

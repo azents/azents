@@ -63,6 +63,9 @@ from azents.runtime.coordination.redis import (
 from azents.services.runtime_execution_policy.application_service import (
     RuntimeExecutionPolicyApplicationService,
 )
+from azents.services.runtime_provider_contract.service import (
+    RuntimeProviderContractService,
+)
 from azents.services.runtime_provider_control.provider_auth import (
     KubernetesApiTokenReviewer,
 )
@@ -168,6 +171,11 @@ async def runtime_control_server_lifespan(
         kubernetes_token_reviewer=kubernetes_token_reviewer,
         auth_registry=None,
     )
+    contract_service = RuntimeProviderContractService(
+        session_manager=session_manager,
+        provider_repository=RuntimeProviderRepository(),
+        policy_repository=policy_repository,
+    )
     provider_sink = RuntimeProviderReportRepositorySink(
         runtime_repository=runtime_repository,
         policy_repository=policy_repository,
@@ -225,6 +233,7 @@ async def runtime_control_server_lifespan(
         consumer_id=f"{settings.runtime_control_instance_id}:provider",
         credential_authenticator=enrollment_service,
         connection_tracker=enrollment_service,
+        contract_proposer=contract_service,
         runner_credential_issuer=runner_credential_verifier,
     )
     add_runtime_runner_control_servicer(
