@@ -1,11 +1,17 @@
 """Kubernetes implementation of the Agent Runtime Provider lifecycle."""
 
 import dataclasses
+import json
 import logging
 import re
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
+
+from azents_runtime_control.execution_policy import (
+    RuntimeExecutionPolicyEvidence,
+    validate_standard_execution_policy_envelope,
+)
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ContainerResources,
@@ -50,6 +56,10 @@ _LABEL_WORKSPACE_ID = "azents/workspace-id"
 _LABEL_DESIRED_GENERATION = "azents/desired-generation"
 _LABEL_PROVIDER_GENERATION = "azents/provider-generation"
 _ANNOTATION_WORKSPACE_PATH = "azents/workspace-path"
+_ANNOTATION_POLICY_SNAPSHOT_ID = "azents/execution-policy-snapshot-id"
+_ANNOTATION_POLICY_DIGEST = "azents/execution-policy-digest"
+_ANNOTATION_POLICY_MODULE_VERSIONS = "azents/execution-policy-module-versions"
+_ANNOTATION_POLICY_SOURCE_VERSIONS = "azents/execution-policy-source-versions"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
@@ -64,6 +74,11 @@ _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
 _ENV_RUNNER_AUTH_TOKEN = "AZ_RUNTIME_RUNNER_AUTH_TOKEN"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
 _ENV_WORKSPACE_PATH = "AZ_AGENT_WORKSPACE_PATH"
+_ENV_POLICY_SNAPSHOT_ID = "AZ_RUNTIME_EXECUTION_POLICY_SNAPSHOT_ID"
+_ENV_POLICY_DIGEST = "AZ_RUNTIME_EXECUTION_POLICY_DIGEST"
+_ENV_POLICY_DESIRED_GENERATION = "AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION"
+_ENV_POLICY_MODULE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS"
+_ENV_POLICY_SOURCE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS"
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -133,6 +148,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Start or create a Runtime Pod while preserving PVC data."""
+        self._validate_command(command)
         _LOGGER.info(
             "Kubernetes Runtime start requested",
             extra=_log_context(command, self._config),
@@ -149,6 +165,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Delete the Runtime Pod while preserving its PVC."""
+        self._validate_command(command)
         _LOGGER.info(
             "Kubernetes Runtime stop requested",
             extra=_log_context(command, self._config),
@@ -167,6 +184,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Recreate the Runtime Pod while preserving its PVC."""
+        self._validate_command(command)
         _LOGGER.info(
             "Kubernetes Runtime restart requested",
             extra=_log_context(command, self._config),
@@ -183,6 +201,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Delete Pod and PVC, then converge to the reset final desired state."""
+        self._validate_command(command)
         _LOGGER.info(
             "Kubernetes Runtime reset requested",
             extra={
@@ -225,6 +244,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Delete the Runtime Pod and PVC without recreating either resource."""
+        self._validate_command(command)
         _LOGGER.info(
             "Kubernetes Runtime terminal deletion requested",
             extra=_log_context(command, self._config),
@@ -256,6 +276,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeProviderReport:
         """Observe one Runtime Pod/PVC resource set."""
+        self._validate_command(command)
         pod = await self._api.get_pod(
             _pod_name(command.identity.runtime_id),
             self._config.namespace,
@@ -294,13 +315,37 @@ class KubernetesRuntimeProvider:
             runtime_id = pod.metadata.labels.get(_LABEL_RUNTIME_ID)
             if runtime_id is None:
                 continue
+            try:
+                report = self._report_from_pod(pod)
+            except ValueError:
+                _LOGGER.warning(
+                    "Kubernetes Runtime Pod observation skipped without trusted "
+                    "policy evidence",
+                    extra={
+                        "runtime_id": runtime_id,
+                        "provider_id": self._config.provider_id,
+                        "pod_name": pod.metadata.name,
+                    },
+                )
+                continue
             seen_runtime_ids.add(runtime_id)
-            reports.append(self._report_from_pod(pod))
+            reports.append(report)
         for pvc in await self._api.list_pvcs(labels, self._config.namespace):
             runtime_id = pvc.metadata.labels.get(_LABEL_RUNTIME_ID)
             if runtime_id is None or runtime_id in seen_runtime_ids:
                 continue
-            reports.append(self._report_from_pvc(pvc))
+            try:
+                reports.append(self._report_from_pvc(pvc))
+            except ValueError:
+                _LOGGER.warning(
+                    "Kubernetes Runtime PVC observation skipped without trusted "
+                    "policy evidence",
+                    extra={
+                        "runtime_id": runtime_id,
+                        "provider_id": self._config.provider_id,
+                        "pvc_name": pvc.metadata.name,
+                    },
+                )
         return tuple(reports)
 
     async def watch_known_runtimes(self) -> AsyncIterator[RuntimeProviderReport]:
@@ -310,7 +355,21 @@ class KubernetesRuntimeProvider:
             _LABEL_PROVIDER_ID: self._config.provider_id,
         }
         async for event in self._api.watch_pods(labels, self._config.namespace):
-            report = self._report_from_pod_event(event)
+            try:
+                report = self._report_from_pod_event(event)
+            except ValueError:
+                runtime_id = event.pod.metadata.labels.get(_LABEL_RUNTIME_ID)
+                _LOGGER.warning(
+                    "Kubernetes Runtime watch event skipped without trusted policy "
+                    "evidence",
+                    extra={
+                        "runtime_id": runtime_id,
+                        "provider_id": self._config.provider_id,
+                        "pod_name": event.pod.metadata.name,
+                        "event_type": event.event_type,
+                    },
+                )
+                continue
             if report is not None:
                 yield report
 
@@ -330,6 +389,7 @@ class KubernetesRuntimeProvider:
         *,
         replace: bool,
     ) -> None:
+        self._validate_command(command)
         pod_name = _pod_name(command.identity.runtime_id)
         pod = await self._api.get_pod(pod_name, self._config.namespace)
         if pod is not None and (replace or not self._pod_reusable(pod, command)):
@@ -378,7 +438,7 @@ class KubernetesRuntimeProvider:
         if labels.get(_LABEL_IMAGE_GENERATION) != _IMAGE_GENERATION:
             return False
         annotations = dict(pod.metadata.annotations)
-        for key, value in self._pod_annotations().items():
+        for key, value in self._pod_annotations(command).items():
             if annotations.get(key) != value:
                 return False
         if len(pod.spec.containers) != 1:
@@ -405,6 +465,9 @@ class KubernetesRuntimeProvider:
         for key, value in self._runner_auth_env(command).items():
             if env.get(key) != value:
                 return False
+        for key, value in self._policy_env(command).items():
+            if env.get(key) != value:
+                return False
         managed_runner_env = {
             key: value for key, value in env.items() if key in RUNNER_LIMIT_ENV_NAMES
         }
@@ -422,7 +485,10 @@ class KubernetesRuntimeProvider:
                 name=_pvc_name(command.identity.runtime_id),
                 namespace=self._config.namespace,
                 labels=self._labels(command),
-                annotations=self._base_annotations(),
+                annotations={
+                    **self._base_annotations(),
+                    **self._policy_annotations(command),
+                },
             ),
             spec=PersistentVolumeClaimSpec(
                 storage_class_name=self._config.storage_class_name,
@@ -437,7 +503,7 @@ class KubernetesRuntimeProvider:
                 name=_pod_name(command.identity.runtime_id),
                 namespace=self._config.namespace,
                 labels=self._labels(command),
-                annotations=self._pod_annotations(),
+                annotations=self._pod_annotations(command),
             ),
             spec=PodSpec(
                 service_account_name=None,
@@ -502,10 +568,11 @@ class KubernetesRuntimeProvider:
     def _base_annotations(self) -> dict[str, str]:
         return {_ANNOTATION_WORKSPACE_PATH: self._workspace_mount_path}
 
-    def _pod_annotations(self) -> dict[str, str]:
+    def _pod_annotations(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
         return {
             **self._config.pod_annotations,
             **self._base_annotations(),
+            **self._policy_annotations(command),
         }
 
     def _env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
@@ -513,6 +580,7 @@ class KubernetesRuntimeProvider:
             **self._stable_env(command),
             **self._runner_env,
             **self._runner_auth_env(command),
+            **self._policy_env(command),
             _ENV_PROVIDER_GENERATION: str(command.provider_generation),
         }
 
@@ -540,6 +608,32 @@ class KubernetesRuntimeProvider:
         ).lower()
         return env
 
+    def _policy_annotations(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> dict[str, str]:
+        evidence = command.execution_policy.evidence
+        return {
+            _ANNOTATION_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
+            _ANNOTATION_POLICY_DIGEST: evidence.digest,
+            _ANNOTATION_POLICY_MODULE_VERSIONS: _canonical_mapping(
+                evidence.module_versions
+            ),
+            _ANNOTATION_POLICY_SOURCE_VERSIONS: _canonical_mapping(
+                evidence.source_versions
+            ),
+        }
+
+    def _policy_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
+        evidence = command.execution_policy.evidence
+        return {
+            _ENV_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
+            _ENV_POLICY_DIGEST: evidence.digest,
+            _ENV_POLICY_DESIRED_GENERATION: str(evidence.desired_generation),
+            _ENV_POLICY_MODULE_VERSIONS: _canonical_mapping(evidence.module_versions),
+            _ENV_POLICY_SOURCE_VERSIONS: _canonical_mapping(evidence.source_versions),
+        }
+
     def _report(
         self,
         command: RuntimeLifecycleCommand,
@@ -560,6 +654,7 @@ class KubernetesRuntimeProvider:
             diagnostic={},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
+            execution_policy=command.execution_policy.evidence,
         )
 
     def _report_from_pod(self, pod: PodResource) -> RuntimeProviderReport:
@@ -584,6 +679,13 @@ class KubernetesRuntimeProvider:
             diagnostic={"source": "pod"},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
+            execution_policy=_policy_evidence_from_metadata(
+                pod.metadata.annotations,
+                desired_generation=_int_label(
+                    pod.metadata.labels,
+                    _LABEL_DESIRED_GENERATION,
+                ),
+            ),
         )
 
     def _report_from_pod_event(
@@ -614,6 +716,13 @@ class KubernetesRuntimeProvider:
                 diagnostic={"source": "pod_watch", "event_type": event.event_type},
                 reported_at=datetime.now(UTC),
                 terminal_delete_acknowledged=False,
+                execution_policy=_policy_evidence_from_metadata(
+                    event.pod.metadata.annotations,
+                    desired_generation=_int_label(
+                        event.pod.metadata.labels,
+                        _LABEL_DESIRED_GENERATION,
+                    ),
+                ),
             )
         report = self._report_from_pod(event.pod)
         return dataclasses.replace(
@@ -644,6 +753,19 @@ class KubernetesRuntimeProvider:
             diagnostic={"source": "pvc"},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
+            execution_policy=_policy_evidence_from_metadata(
+                pvc.metadata.annotations,
+                desired_generation=_int_label(
+                    pvc.metadata.labels,
+                    _LABEL_DESIRED_GENERATION,
+                ),
+            ),
+        )
+
+    def _validate_command(self, command: RuntimeLifecycleCommand) -> None:
+        validate_standard_execution_policy_envelope(
+            command.execution_policy,
+            desired_generation=command.desired_generation,
         )
 
 
@@ -727,3 +849,43 @@ def _int_label(labels: Mapping[str, str], key: str) -> int:
         return int(value)
     except ValueError:
         return 0
+
+
+def _canonical_mapping(values: Mapping[str, int]) -> str:
+    return json.dumps(dict(values), sort_keys=True, separators=(",", ":"))
+
+
+def _policy_evidence_from_metadata(
+    values: Mapping[str, str],
+    *,
+    desired_generation: int,
+) -> RuntimeExecutionPolicyEvidence:
+    snapshot_id = values.get(_ANNOTATION_POLICY_SNAPSHOT_ID)
+    digest = values.get(_ANNOTATION_POLICY_DIGEST)
+    module_versions = values.get(_ANNOTATION_POLICY_MODULE_VERSIONS)
+    source_versions = values.get(_ANNOTATION_POLICY_SOURCE_VERSIONS)
+    if (
+        snapshot_id is None
+        or digest is None
+        or module_versions is None
+        or source_versions is None
+    ):
+        raise ValueError("Runtime execution-policy metadata is incomplete.")
+    try:
+        parsed_modules = json.loads(module_versions)
+        parsed_sources = json.loads(source_versions)
+        if not isinstance(parsed_modules, dict) or not isinstance(parsed_sources, dict):
+            raise ValueError("Runtime execution-policy metadata is invalid.")
+        return RuntimeExecutionPolicyEvidence(
+            snapshot_id=str(snapshot_id),
+            digest=str(digest),
+            desired_generation=desired_generation,
+            module_versions={
+                str(key): int(value) for key, value in parsed_modules.items()
+            },
+            source_versions={
+                str(key): int(value) for key, value in parsed_sources.items()
+            },
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("Runtime execution-policy metadata is invalid.") from error

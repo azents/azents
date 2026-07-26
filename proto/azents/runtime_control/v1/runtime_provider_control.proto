@@ -75,6 +75,7 @@ message ProviderCommand {
   string runner_auth_token = 10;
   google.protobuf.Struct payload = 11;
   google.protobuf.Timestamp deadline_at = 12;
+  RuntimeExecutionPolicyEnvelope execution_policy = 13;
 }
 
 message RuntimeProviderReport {
@@ -89,6 +90,20 @@ message RuntimeProviderReport {
   map<string, string> diagnostic = 9;
   google.protobuf.Timestamp reported_at = 10;
   bool terminal_delete_acknowledged = 11;
+  RuntimeExecutionPolicyEvidence execution_policy = 12;
+}
+
+message RuntimeExecutionPolicyEvidence {
+  string snapshot_id = 1;
+  string digest = 2;
+  uint64 desired_generation = 3;
+  map<string, uint32> module_versions = 4;
+  map<string, uint64> source_versions = 5;
+}
+
+message RuntimeExecutionPolicyEnvelope {
+  RuntimeExecutionPolicyEvidence evidence = 1;
+  google.protobuf.Struct effective_policy = 2;
 }
 
 message ProviderCommandCompletion {

@@ -13,6 +13,8 @@ from azents.core.enums import (
     AgentDecommissionStatus,
     AgentSessionRunState,
     AgentSessionStatus,
+    RuntimeDesiredState,
+    RuntimeLifecycleCommandType,
 )
 from azents.core.session_lifecycle import SessionLifecycleTransitionContext
 from azents.repos.agent_decommission.data import AgentDecommissionJob
@@ -425,6 +427,47 @@ class _RuntimeRepositoryDouble:
         return None
 
 
+class _BoundRuntimeRepositoryDouble:
+    """Expose one Runtime through its immutable Provider resource binding."""
+
+    runtime = SimpleNamespace(
+        id="runtime-1",
+        runtime_provider_id=None,
+        runtime_provider_resource_id="provider-resource-1",
+    )
+
+    async def get_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> SimpleNamespace:
+        """Return the bound Runtime for both cleanup checks."""
+        del session, agent_id
+        return self.runtime
+
+    async def get_terminal_delete_acknowledged(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+    ) -> SimpleNamespace:
+        """Return the acknowledged Runtime for the current generation."""
+        del session
+        assert runtime_id == "runtime-1"
+        return self.runtime
+
+
+class _ExecutionPolicyApplicationDouble:
+    """Capture terminal deletion targeting through the policy application path."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def target_lifecycle_command(self, **kwargs: object) -> SimpleNamespace:
+        """Record the exact terminal lifecycle target."""
+        self.calls.append(kwargs)
+        return SimpleNamespace(desired_generation=3)
+
+
 @pytest.mark.asyncio
 async def test_decommission_cleanup_removes_external_agent_roots_first() -> None:
     """Direct External Channel roots are cleaned before finalizer eligibility."""
@@ -450,4 +493,36 @@ async def test_decommission_cleanup_removes_external_agent_roots_first() -> None
         "purge-provider-state",
         "expire-unbound-files",
         "consume-progress-cleanup",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_decommission_targets_terminal_delete_from_resource_binding() -> None:
+    """Terminal deletion uses the immutable Provider resource binding."""
+    events: list[str] = []
+    application = _ExecutionPolicyApplicationDouble()
+    service = object.__new__(AgentDecommissionService)
+    service.session_manager = _transaction_manager
+    service.agent_repository = _AgentRepositoryDouble()  # type: ignore[assignment]
+    service.external_channel_lifecycle_service = (
+        _ExternalChannelDecommissionCleanupDouble(events)  # type: ignore[assignment]
+    )
+    service.exchange_file_repository = _ExchangeFileRepositoryDouble(events)  # type: ignore[assignment]
+    service.runtime_repository = _BoundRuntimeRepositoryDouble()  # type: ignore[assignment]
+    service.execution_policy_application_service = application  # type: ignore[assignment]
+    service.decommission_repository = _DecommissionStatusRepositoryDouble()  # type: ignore[assignment]
+
+    await service._cleanup_agent_external_roots(  # pyright: ignore[reportPrivateUsage]  # Pin terminal deletion fencing.
+        job=_job(job_id="decommission"),
+        lease_owner="scheduler-1",
+    )
+
+    assert application.calls == [
+        {
+            "agent_id": "agent-decommission",
+            "command_type": RuntimeLifecycleCommandType.STOP,
+            "desired_state": RuntimeDesiredState.STOPPED,
+            "reset_final_desired_state": None,
+            "terminal_delete_requested": True,
+        }
     ]

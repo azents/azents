@@ -46,6 +46,7 @@ azentspublicclient/docs/AgentResponse.md
 azentspublicclient/docs/AgentRunPhase.md
 azentspublicclient/docs/AgentRunStatus.md
 azentspublicclient/docs/AgentRuntimeActionsResponse.md
+azentspublicclient/docs/AgentRuntimeExecutionPolicyApplyResponse.md
 azentspublicclient/docs/AgentRuntimeExecutionPolicyReplaceRequest.md
 azentspublicclient/docs/AgentRuntimeExecutionPolicyResponse.md
 azentspublicclient/docs/AgentRuntimeFailureResponse.md
@@ -471,6 +472,7 @@ azentspublicclient/models/agent_response.py
 azentspublicclient/models/agent_run_phase.py
 azentspublicclient/models/agent_run_status.py
 azentspublicclient/models/agent_runtime_actions_response.py
+azentspublicclient/models/agent_runtime_execution_policy_apply_response.py
 azentspublicclient/models/agent_runtime_execution_policy_replace_request.py
 azentspublicclient/models/agent_runtime_execution_policy_response.py
 azentspublicclient/models/agent_runtime_failure_response.py
@@ -874,6 +876,7 @@ azentspublicclient/test/test_agent_response.py
 azentspublicclient/test/test_agent_run_phase.py
 azentspublicclient/test/test_agent_run_status.py
 azentspublicclient/test/test_agent_runtime_actions_response.py
+azentspublicclient/test/test_agent_runtime_execution_policy_apply_response.py
 azentspublicclient/test/test_agent_runtime_execution_policy_replace_request.py
 azentspublicclient/test/test_agent_runtime_execution_policy_response.py
 azentspublicclient/test/test_agent_runtime_failure_response.py

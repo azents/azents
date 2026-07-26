@@ -5,6 +5,11 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from azents_runtime_control.execution_policy import (
+    RuntimeExecutionPolicyEnvelope,
+    RuntimeExecutionPolicyEvidence,
+    validate_standard_execution_policy_envelope,
+)
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
 )
@@ -18,6 +23,10 @@ from azents.core.enums import (
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
+from azents.repos.runtime_provider_policy.data import RuntimePolicySnapshot
+from azents.repos.runtime_provider_policy.repository import (
+    RuntimeProviderPolicyRepository,
+)
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
@@ -73,6 +82,7 @@ class RuntimeLifecycleReconciler:
         self,
         *,
         runtime_repository: AgentRuntimeRepository,
+        policy_repository: RuntimeProviderPolicyRepository,
         session_manager: SessionManager[AsyncSession],
         coordination_store: RuntimeCoordinationStore,
         control_protocol: RuntimeControlProtocolService,
@@ -80,6 +90,7 @@ class RuntimeLifecycleReconciler:
     ) -> None:
         """Initialize the reconciler."""
         self._runtime_repository = runtime_repository
+        self._policy_repository = policy_repository
         self._session_manager = session_manager
         self._coordination_store = coordination_store
         self._control_protocol = control_protocol
@@ -228,6 +239,15 @@ class RuntimeLifecycleReconciler:
             runtime_id=runtime.id,
             desired_generation=runtime.desired_generation,
         )
+        try:
+            execution_policy = await self._execution_policy(runtime)
+        except ValueError as error:
+            await self._record_failure(
+                runtime,
+                code="RUNTIME_EXECUTION_POLICY_INVALID",
+                message=str(error),
+            )
+            return False
         result = await self._control_protocol.dispatch_provider_command(
             RuntimeProviderCommand(
                 provider_id=provider_id,
@@ -253,6 +273,7 @@ class RuntimeLifecycleReconciler:
                     },
                 },
                 deadline_at=created_at + self._config.provider_command_deadline,
+                execution_policy=execution_policy,
             ),
             created_at=created_at,
         )
@@ -309,6 +330,42 @@ class RuntimeLifecycleReconciler:
             return False
         raise AssertionError(f"unexpected dispatch result: {result!r}")
 
+    async def _execution_policy(
+        self,
+        runtime: AgentRuntime,
+    ) -> RuntimeExecutionPolicyEnvelope:
+        snapshot_id = runtime.runtime_policy_snapshot_id
+        if snapshot_id is None:
+            raise ValueError("Runtime execution-policy target snapshot is missing.")
+        async with self._session_manager() as session:
+            snapshot = await self._policy_repository.get_snapshot(
+                session,
+                snapshot_id=snapshot_id,
+                for_update=False,
+            )
+        if snapshot is None:
+            raise ValueError("Runtime execution-policy target snapshot is missing.")
+        if snapshot.runtime_id != runtime.id:
+            raise ValueError("Runtime execution-policy snapshot ownership is invalid.")
+        if (
+            runtime.runtime_provider_resource_id is None
+            or snapshot.provider_id != runtime.runtime_provider_resource_id
+        ):
+            raise ValueError("Runtime execution-policy Provider binding is invalid.")
+        if snapshot.target_desired_generation != runtime.desired_generation:
+            raise ValueError("Runtime execution-policy target generation is stale.")
+        if snapshot.resolved_execution_policy is None:
+            raise ValueError("Runtime execution-policy target document is missing.")
+        envelope = RuntimeExecutionPolicyEnvelope(
+            evidence=_snapshot_policy_evidence(snapshot),
+            effective_policy=snapshot.resolved_execution_policy,
+        )
+        validate_standard_execution_policy_envelope(
+            envelope,
+            desired_generation=runtime.desired_generation,
+        )
+        return envelope
+
     async def _record_failure(
         self,
         runtime: AgentRuntime,
@@ -348,3 +405,39 @@ def _provider_command_type(
     if runtime.last_lifecycle_command is None:
         return None
     return RuntimeProviderCommandType(runtime.last_lifecycle_command.value)
+
+
+def _snapshot_policy_evidence(
+    snapshot: RuntimePolicySnapshot,
+) -> RuntimeExecutionPolicyEvidence:
+    source_versions = {
+        "platform": snapshot.execution_platform_version,
+        "profile": snapshot.execution_profile_version,
+        "workspace": snapshot.execution_workspace_version,
+        "agent": snapshot.execution_agent_version,
+    }
+    if (
+        snapshot.execution_target_digest is None
+        or snapshot.resolved_execution_policy is None
+        or any(version is None for version in source_versions.values())
+    ):
+        raise ValueError("Runtime execution-policy snapshot evidence is incomplete.")
+    module_versions: dict[str, int] = {}
+    for value in snapshot.resolved_execution_policy.values():
+        if not isinstance(value, dict):
+            continue
+        module_id = value.get("module_id")
+        version = value.get("version")
+        if isinstance(module_id, str) and isinstance(version, int):
+            module_versions[module_id] = version
+    return RuntimeExecutionPolicyEvidence(
+        snapshot_id=snapshot.id,
+        digest=snapshot.execution_target_digest,
+        desired_generation=snapshot.target_desired_generation,
+        module_versions=module_versions,
+        source_versions={
+            key: version
+            for key, version in source_versions.items()
+            if version is not None
+        },
+    )

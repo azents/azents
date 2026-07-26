@@ -1,10 +1,13 @@
 """Durable Agent Runtime gRPC state sink tests."""
 
 from datetime import UTC, datetime
+from typing import cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
+from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.provider import (
     RuntimeProviderObservedState as SharedProviderState,
 )
@@ -17,7 +20,12 @@ from azents.core.enums import (
     LLMProvider,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimeProviderAvailabilityMode,
+    RuntimeProviderKind,
+    RuntimeProviderLifecycleState,
     RuntimeProviderObservedState,
+    RuntimeProviderRegistrationMethod,
+    RuntimeProviderScope,
     RuntimeRunnerState,
 )
 from azents.rdb.models.agent import RDBAgent
@@ -26,6 +34,11 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntimeFailurePatch
+from azents.repos.runtime_provider.data import RuntimeProviderCreate
+from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_policy.repository import (
+    RuntimeProviderPolicyRepository,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.runtime.control_protocol.grpc.state_sinks import (
@@ -42,7 +55,11 @@ async def test_runner_state_sink_rejects_missing_provider_workspace_path(
     repo = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
         runtime_id = await _create_runtime(session, "runner-sink-missing")
-    sink = RuntimeRunnerStateRepositorySink(repo, rdb_session_manager)
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        _policy_repository(),
+        rdb_session_manager,
+    )
 
     await sink.record_runner_state(_report(runtime_id, "/workspace/agent"))
 
@@ -77,7 +94,11 @@ async def test_provider_running_report_clears_start_timeout_failure(
                 message="Runtime start timed out",
             ),
         )
-    sink = RuntimeProviderReportRepositorySink(repo, rdb_session_manager)
+    sink = RuntimeProviderReportRepositorySink(
+        repo,
+        _policy_repository(),
+        rdb_session_manager,
+    )
 
     await sink.record_provider_report(
         RuntimeProviderReport(
@@ -92,6 +113,7 @@ async def test_provider_running_report_clears_start_timeout_failure(
             diagnostic={},
             reported_at=datetime(2026, 5, 25, tzinfo=UTC),
             terminal_delete_acknowledged=False,
+            execution_policy=_execution_policy_evidence(command.desired_generation),
         )
     )
 
@@ -116,7 +138,11 @@ async def test_provider_report_rejects_bound_runtime_provider_mismatch(
             .where(RDBAgentRuntime.id == runtime_id)
             .values(runtime_provider_id="provider-bound")
         )
-    sink = RuntimeProviderReportRepositorySink(repo, rdb_session_manager)
+    sink = RuntimeProviderReportRepositorySink(
+        repo,
+        _policy_repository(),
+        rdb_session_manager,
+    )
 
     with pytest.raises(ValueError, match="immutable Runtime Provider binding"):
         await sink.record_provider_report(
@@ -132,6 +158,7 @@ async def test_provider_report_rejects_bound_runtime_provider_mismatch(
                 diagnostic={},
                 reported_at=datetime.now(UTC),
                 terminal_delete_acknowledged=False,
+                execution_policy=_execution_policy_evidence(),
             )
         )
 
@@ -145,7 +172,11 @@ async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
         runtime_id = await _create_runtime(session, "provider-sink-terminal-delete")
         requested = await repo.request_terminal_delete(session, runtime_id)
         assert requested is not None
-    sink = RuntimeProviderReportRepositorySink(repo, rdb_session_manager)
+    sink = RuntimeProviderReportRepositorySink(
+        repo,
+        _policy_repository(),
+        rdb_session_manager,
+    )
 
     await sink.record_provider_report(
         RuntimeProviderReport(
@@ -160,6 +191,7 @@ async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
             diagnostic={},
             reported_at=datetime(2026, 7, 21, tzinfo=UTC),
             terminal_delete_acknowledged=True,
+            execution_policy=_execution_policy_evidence(),
         )
     )
 
@@ -188,7 +220,11 @@ async def test_runner_state_sink_rejects_workspace_mismatch(
             3,
             workspace_path="/workspace/provider",
         )
-    sink = RuntimeRunnerStateRepositorySink(repo, rdb_session_manager)
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        _policy_repository(),
+        rdb_session_manager,
+    )
 
     await sink.record_runner_state(_report(runtime_id, "/workspace/runner"))
 
@@ -215,7 +251,11 @@ async def test_runner_state_sink_preserves_provider_workspace_path(
             3,
             workspace_path="/workspace/provider",
         )
-    sink = RuntimeRunnerStateRepositorySink(repo, rdb_session_manager)
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        _policy_repository(),
+        rdb_session_manager,
+    )
 
     await sink.record_runner_state(_report(runtime_id, "/workspace/provider"))
 
@@ -242,7 +282,11 @@ async def test_runner_state_sink_treats_busy_runner_as_ready(
             3,
             workspace_path="/workspace/provider",
         )
-    sink = RuntimeRunnerStateRepositorySink(repo, rdb_session_manager)
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        _policy_repository(),
+        rdb_session_manager,
+    )
 
     await sink.record_runner_state(
         _report(runtime_id, "/workspace/provider", state=SharedRunnerState.BUSY)
@@ -270,7 +314,11 @@ async def test_runner_state_sink_records_runner_stream_closed_as_disconnected(
             3,
             workspace_path="/workspace/provider",
         )
-    sink = RuntimeRunnerStateRepositorySink(repo, rdb_session_manager)
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        _policy_repository(),
+        rdb_session_manager,
+    )
 
     await sink.record_runner_state(
         _report(
@@ -309,7 +357,11 @@ async def test_runner_state_sink_ignores_stale_report_with_lower_generation(
             RuntimeRunnerState.READY,
             2,
         )
-    sink = RuntimeRunnerStateRepositorySink(repo, rdb_session_manager)
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        _policy_repository(),
+        rdb_session_manager,
+    )
 
     await sink.record_runner_state(
         _report(
@@ -365,7 +417,29 @@ async def _create_runtime(session: AsyncSession, slug: str) -> str:
     session.add(agent)
     await session.flush()
 
+    provider = await RuntimeProviderRepository().create(
+        session,
+        RuntimeProviderCreate(
+            provider_id="system-kubernetes",
+            scope=RuntimeProviderScope.SYSTEM,
+            workspace_id=None,
+            kind=RuntimeProviderKind.KUBERNETES,
+            display_name="State Sink Test Provider",
+            registration_method=RuntimeProviderRegistrationMethod.ADMIN,
+            enabled=True,
+            lifecycle_state=RuntimeProviderLifecycleState.ACTIVE,
+            availability_mode=RuntimeProviderAvailabilityMode.PLATFORM_WIDE,
+            capabilities={},
+            config_schema=None,
+            metadata=None,
+        ),
+    )
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent.id)
+    await session.execute(
+        sa.update(RDBAgentRuntime)
+        .where(RDBAgentRuntime.id == runtime.id)
+        .values(runtime_provider_resource_id=provider.id)
+    )
     return runtime.id
 
 
@@ -388,4 +462,27 @@ def _report(
         diagnostic=diagnostic or {},
         workspace_path=workspace_path,
         reported_at=datetime(2026, 5, 25, tzinfo=UTC),
+        execution_policy=_execution_policy_evidence(),
+    )
+
+
+def _policy_repository() -> RuntimeProviderPolicyRepository:
+    repository = Mock(spec=RuntimeProviderPolicyRepository)
+    repository.record_provider_execution_policy_evidence = AsyncMock(
+        return_value=Mock()
+    )
+    repository.record_runner_execution_policy_evidence = AsyncMock(return_value=Mock())
+    repository.execution_policy_evidence_matches_current = AsyncMock(return_value=True)
+    return cast(RuntimeProviderPolicyRepository, repository)
+
+
+def _execution_policy_evidence(
+    desired_generation: int = 0,
+) -> RuntimeExecutionPolicyEvidence:
+    return RuntimeExecutionPolicyEvidence(
+        snapshot_id="snapshot-1",
+        digest="d" * 64,
+        desired_generation=desired_generation,
+        module_versions={"container.run": 1},
+        source_versions={"platform": 1, "profile": 1, "workspace": 1, "agent": 1},
     )

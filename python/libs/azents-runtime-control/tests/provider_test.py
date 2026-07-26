@@ -6,6 +6,10 @@ from datetime import UTC, datetime
 
 import pytest
 
+from azents_runtime_control.execution_policy import (
+    RuntimeExecutionPolicyEnvelope,
+    RuntimeExecutionPolicyEvidence,
+)
 from azents_runtime_control.provider import (
     ProviderCommandCompletion,
     ProviderCommandEnvelope,
@@ -336,6 +340,7 @@ def _command(command_type: RuntimeLifecycleCommandType) -> RuntimeLifecycleComma
             allow_insecure_control=True,
         ),
         reset_final_desired_state=RuntimeDesiredState.RUNNING,
+        execution_policy=_execution_policy(),
     )
 
 
@@ -355,4 +360,23 @@ def _report(command: RuntimeLifecycleCommand) -> RuntimeProviderReport:
         terminal_delete_acknowledged=(
             command.command_type is RuntimeLifecycleCommandType.TERMINAL_DELETE
         ),
+        execution_policy=command.execution_policy.evidence,
+    )
+
+
+def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
+    return RuntimeExecutionPolicyEnvelope(
+        evidence=RuntimeExecutionPolicyEvidence(
+            snapshot_id="snapshot-1",
+            digest="d" * 64,
+            desired_generation=3,
+            module_versions={"container.run": 1},
+            source_versions={
+                "platform": 1,
+                "profile": 1,
+                "workspace": 1,
+                "agent": 1,
+            },
+        ),
+        effective_policy={},
     )

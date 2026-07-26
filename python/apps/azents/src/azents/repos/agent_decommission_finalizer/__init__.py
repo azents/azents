@@ -34,6 +34,15 @@ from azents.rdb.models.toolkit import RDBAgentToolkit
 from azents.rdb.models.toolkit_state import RDBToolkitState
 
 
+def _terminal_delete_pending(runtime: RDBAgentRuntime) -> bool:
+    """Return whether a bound Runtime still requires terminal acknowledgement."""
+    return runtime.runtime_provider_resource_id is not None and not (
+        runtime.terminal_delete_requested_generation == runtime.desired_generation
+        and runtime.terminal_delete_acknowledged_generation
+        == runtime.desired_generation
+    )
+
+
 class AgentDecommissionFinalizerRepository:
     """Finalize Agent resources only after lifecycle roots are absent."""
 
@@ -79,13 +88,7 @@ class AgentDecommissionFinalizerRepository:
             .with_for_update()
         )
         if runtime is not None:
-            acknowledged = (
-                runtime.terminal_delete_requested_generation
-                == runtime.desired_generation
-                and runtime.terminal_delete_acknowledged_generation
-                == runtime.desired_generation
-            )
-            if runtime.runtime_provider_id is not None and not acknowledged:
+            if _terminal_delete_pending(runtime):
                 raise RuntimeError("AgentRuntime terminal deletion is not acknowledged")
             await session.delete(runtime)
 

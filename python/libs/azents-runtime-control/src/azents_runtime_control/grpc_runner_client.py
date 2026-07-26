@@ -12,6 +12,7 @@ from typing import Protocol
 import grpc
 from google.protobuf import timestamp_pb2
 
+from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.grpc_tls import (
     GrpcClientTlsConfig,
     create_grpc_aio_channel,
@@ -343,7 +344,7 @@ def _register_message(
     connection_id: str,
     request_id: str,
 ) -> runtime_runner_control_pb2.RunnerMessage:
-    return runtime_runner_control_pb2.RunnerMessage(
+    message = runtime_runner_control_pb2.RunnerMessage(
         connection_id=connection_id,
         request_id=request_id,
         register=runtime_runner_control_pb2.RunnerRegister(
@@ -357,6 +358,10 @@ def _register_message(
             workspace_path=registration.workspace_path,
         ),
     )
+    message.register.execution_policy.CopyFrom(
+        _execution_policy_evidence_message(registration.execution_policy)
+    )
+    return message
 
 
 def _accepted(
@@ -374,7 +379,7 @@ def _accepted(
 def _state_report_message(
     report: RunnerStateReport,
 ) -> runtime_runner_control_pb2.RunnerStateReport:
-    return runtime_runner_control_pb2.RunnerStateReport(
+    message = runtime_runner_control_pb2.RunnerStateReport(
         runtime_id=report.runtime_id,
         runner_id=report.runner_id,
         runner_generation=report.runner_generation,
@@ -386,6 +391,10 @@ def _state_report_message(
         workspace_path=report.workspace_path,
         reported_at=_timestamp(report.reported_at),
     )
+    message.execution_policy.CopyFrom(
+        _execution_policy_evidence_message(report.execution_policy)
+    )
+    return message
 
 
 def _operation(
@@ -435,6 +444,8 @@ def _event_message(
 def runner_state_report_from_message(
     message: runtime_runner_control_pb2.RunnerStateReport,
 ) -> RunnerStateReport:
+    if not message.HasField("execution_policy"):
+        raise ValueError("Runtime Runner execution-policy evidence is required.")
     return RunnerStateReport(
         runtime_id=message.runtime_id,
         runner_id=message.runner_id,
@@ -446,6 +457,38 @@ def runner_state_report_from_message(
         diagnostic=dict(message.diagnostic),
         workspace_path=message.workspace_path,
         reported_at=_datetime(message.reported_at),
+        execution_policy=_execution_policy_evidence(message.execution_policy),
+    )
+
+
+def _execution_policy_evidence(
+    message: runtime_runner_control_pb2.RunnerExecutionPolicyEvidence,
+) -> RuntimeExecutionPolicyEvidence:
+    return RuntimeExecutionPolicyEvidence(
+        snapshot_id=message.snapshot_id,
+        digest=message.digest,
+        desired_generation=message.desired_generation,
+        module_versions=dict(message.module_versions),
+        source_versions=dict(message.source_versions),
+    )
+
+
+def runner_execution_policy_evidence_from_message(
+    message: runtime_runner_control_pb2.RunnerExecutionPolicyEvidence,
+) -> RuntimeExecutionPolicyEvidence:
+    """Deserialize required Runner execution-policy evidence."""
+    return _execution_policy_evidence(message)
+
+
+def _execution_policy_evidence_message(
+    evidence: RuntimeExecutionPolicyEvidence,
+) -> runtime_runner_control_pb2.RunnerExecutionPolicyEvidence:
+    return runtime_runner_control_pb2.RunnerExecutionPolicyEvidence(
+        snapshot_id=evidence.snapshot_id,
+        digest=evidence.digest,
+        desired_generation=evidence.desired_generation,
+        module_versions=dict(evidence.module_versions),
+        source_versions=dict(evidence.source_versions),
     )
 
 
@@ -1364,6 +1407,7 @@ __all__ = [
     "GrpcRunnerControlClient",
     "RunnerControlStream",
     "RuntimeRunnerControlStreamClosed",
+    "runner_execution_policy_evidence_from_message",
     "runner_event_from_message",
     "runner_state_report_from_message",
 ]

@@ -26,6 +26,13 @@ class TestRuntimeExecutionV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_runtime_execution_v1_apply_agent_policy(self) -> None:
+        """Test case for runtime_execution_v1_apply_agent_policy
+
+        Apply Agent Policy
+        """
+        pass
+
     def test_runtime_execution_v1_get_agent_policy(self) -> None:
         """Test case for runtime_execution_v1_get_agent_policy
 

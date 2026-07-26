@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 import pytest
 from google.protobuf import timestamp_pb2
 
+from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
     RuntimeRunnerControlStreamClosed,
@@ -730,6 +731,17 @@ def _registration() -> RunnerRegistration:
         workspace_path="/workspace/agent",
         metadata={"workspace_path_source": "provider"},
         auth_credential_id="credential-1",
+        execution_policy=_execution_policy_evidence(),
+    )
+
+
+def _execution_policy_evidence() -> RuntimeExecutionPolicyEvidence:
+    return RuntimeExecutionPolicyEvidence(
+        snapshot_id="snapshot-1",
+        digest="d" * 64,
+        desired_generation=5,
+        module_versions={"container.run": 1},
+        source_versions={"platform": 1, "profile": 1, "workspace": 1, "agent": 1},
     )
 
 

@@ -18,6 +18,9 @@ from azents.core.runtime_execution_policy import (
 from azents.repos.runtime_execution_policy.data import (
     RuntimeExecutionPolicyAuditEvent,
 )
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionPolicyApplicationResult,
+)
 from azents.services.runtime_execution_policy.service import (
     AgentRuntimeExecutionPolicyView,
     RuntimeExecutionProfileAvailability,
@@ -133,6 +136,31 @@ class AgentRuntimeExecutionPolicyReplaceRequest(BaseModel):
     expected_version: int = Field(ge=1)
     profile_id: str = Field(min_length=1, max_length=32)
     restriction: RuntimeExecutionPolicyRestriction
+
+
+class AgentRuntimeExecutionPolicyApplyResponse(BaseModel):
+    """Exact immutable Runtime target created or reused by Agent Apply."""
+
+    snapshot_id: str
+    desired_generation: int
+    target_digest: str
+    created: bool
+
+    @classmethod
+    def convert_from(
+        cls,
+        data: RuntimeExecutionPolicyApplicationResult,
+    ) -> Self:
+        """Convert one authorized Agent Apply result."""
+        target_digest = data.snapshot.execution_target_digest
+        if target_digest is None:
+            raise ValueError("Applied Runtime policy snapshot digest is missing.")
+        return cls(
+            snapshot_id=data.snapshot.id,
+            desired_generation=data.snapshot.target_desired_generation,
+            target_digest=target_digest,
+            created=data.created,
+        )
 
 
 class RuntimeExecutionPolicyAuditEventResponse(BaseModel):

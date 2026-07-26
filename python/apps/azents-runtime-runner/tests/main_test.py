@@ -1,5 +1,7 @@
 """Runtime Runner entrypoint configuration tests."""
 
+# pyright: reportPrivateUsage=false
+
 import json
 import logging
 
@@ -9,6 +11,7 @@ from pytest import MonkeyPatch
 from azents_runtime_runner.main import (
     RunnerLimitConfig,
     StructuredLogFormatter,
+    _execution_policy_evidence_from_env,
     run_runtime_runner,
     runner_limit_config_from_env,
 )
@@ -43,6 +46,29 @@ async def test_runner_requires_auth_token(
 
     with pytest.raises(SystemExit, match="AZ_RUNTIME_RUNNER_AUTH_TOKEN"):
         await run_runtime_runner()
+
+
+def test_runner_reads_provider_injected_policy_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZ_RUNTIME_EXECUTION_POLICY_SNAPSHOT_ID", "snapshot-1")
+    monkeypatch.setenv("AZ_RUNTIME_EXECUTION_POLICY_DIGEST", "a" * 64)
+    monkeypatch.setenv("AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION", "3")
+    monkeypatch.setenv(
+        "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS",
+        json.dumps({"container.run": 1}),
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS",
+        json.dumps({"platform": 1, "profile": 2, "workspace": 3, "agent": 4}),
+    )
+
+    evidence = _execution_policy_evidence_from_env()
+
+    assert evidence is not None
+    assert evidence.snapshot_id == "snapshot-1"
+    assert evidence.desired_generation == 3
+    assert evidence.source_versions["agent"] == 4
 
 
 _LIMIT_ENV_NAMES = (

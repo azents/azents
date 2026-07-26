@@ -19,6 +19,8 @@ from azents.core.enums import (
     AgentDecommissionStatus,
     AgentSessionRunState,
     AgentSessionStatus,
+    RuntimeDesiredState,
+    RuntimeLifecycleCommandType,
 )
 from azents.core.s3.deps import get_s3_service
 from azents.core.session_lifecycle import (
@@ -39,6 +41,9 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionPolicyApplicationService,
+)
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
 )
@@ -92,6 +97,10 @@ class AgentDecommissionService:
     ]
     runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
+    ]
+    execution_policy_application_service: Annotated[
+        RuntimeExecutionPolicyApplicationService,
+        Depends(),
     ]
     exchange_file_repository: Annotated[
         ExchangeFileRepository, Depends(ExchangeFileRepository)
@@ -355,6 +364,19 @@ class AgentDecommissionService:
         """Clean direct Agent-owned blobs and request terminal Runtime deletion."""
         external_cleanup_targets = ()
         async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_agent_id(
+                session,
+                job.agent_id,
+            )
+        if runtime is not None and runtime.runtime_provider_resource_id is not None:
+            await self.execution_policy_application_service.target_lifecycle_command(
+                agent_id=job.agent_id,
+                command_type=RuntimeLifecycleCommandType.STOP,
+                desired_state=RuntimeDesiredState.STOPPED,
+                reset_final_desired_state=None,
+                terminal_delete_requested=True,
+            )
+        async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, job.agent_id)
             if agent is None:
                 raise RuntimeError("Decommissioning Agent is missing")
@@ -384,15 +406,6 @@ class AgentDecommissionService:
                 session,
                 agent_id=job.agent_id,
             )
-            runtime = await self.runtime_repository.get_by_agent_id(
-                session,
-                job.agent_id,
-            )
-            if runtime is not None and runtime.runtime_provider_id is not None:
-                await self.runtime_repository.request_terminal_delete(
-                    session,
-                    runtime.id,
-                )
             owned = await self.decommission_repository.set_status(
                 session,
                 job_id=job.id,
@@ -437,7 +450,7 @@ class AgentDecommissionService:
                 session,
                 job.agent_id,
             )
-            if runtime is not None and runtime.runtime_provider_id is not None:
+            if runtime is not None and runtime.runtime_provider_resource_id is not None:
                 acknowledged = (
                     await self.runtime_repository.get_terminal_delete_acknowledged(
                         session,

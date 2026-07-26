@@ -1,9 +1,16 @@
 """Agent decommission finalizer lifecycle-root tests."""
 
+# pyright: reportPrivateUsage=false
+
+from types import SimpleNamespace
+from typing import cast
+
 import pytest
 
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.repos.agent_decommission_finalizer import (
     AgentDecommissionFinalizerRepository,
+    _terminal_delete_pending,
 )
 
 
@@ -29,7 +36,8 @@ async def test_finalizer_rejects_remaining_external_channel_route() -> None:
         RuntimeError,
         match="ExternalChannelAgentRoute lifecycle root remains",
     ):
-        await AgentDecommissionFinalizerRepository()._require_absent_lifecycle_roots(  # pyright: ignore[reportPrivateUsage]  # Pin finalizer root fence.
+        repository = AgentDecommissionFinalizerRepository()
+        await repository._require_absent_lifecycle_roots(
             session,  # type: ignore[arg-type]
             agent_id="agent-1",
         )
@@ -40,10 +48,38 @@ async def test_finalizer_does_not_treat_workspace_connection_as_agent_root() -> 
     """Workspace-owned External Channel connections remain outside Agent cleanup."""
     session = _ExistsSessionDouble([False] * 15)
 
-    await AgentDecommissionFinalizerRepository()._require_absent_lifecycle_roots(  # pyright: ignore[reportPrivateUsage]  # Pin Workspace ownership boundary.
+    repository = AgentDecommissionFinalizerRepository()
+    await repository._require_absent_lifecycle_roots(
         session,  # type: ignore[arg-type]
         agent_id="agent-1",
     )
 
     checked_sql = "\n".join(session.statements)
     assert "external_channel_connections" not in checked_sql
+
+
+def test_resource_binding_requires_generation_fenced_terminal_acknowledgement() -> None:
+    """A resource-bound Runtime cannot bypass acknowledgement via logical ID."""
+    acknowledged = cast(
+        RDBAgentRuntime,
+        SimpleNamespace(
+            runtime_provider_id=None,
+            runtime_provider_resource_id="provider-resource-1",
+            desired_generation=4,
+            terminal_delete_requested_generation=4,
+            terminal_delete_acknowledged_generation=4,
+        ),
+    )
+    stale = cast(
+        RDBAgentRuntime,
+        SimpleNamespace(
+            runtime_provider_id=None,
+            runtime_provider_resource_id="provider-resource-1",
+            desired_generation=4,
+            terminal_delete_requested_generation=4,
+            terminal_delete_acknowledged_generation=3,
+        ),
+    )
+
+    assert not _terminal_delete_pending(acknowledged)
+    assert _terminal_delete_pending(stale)

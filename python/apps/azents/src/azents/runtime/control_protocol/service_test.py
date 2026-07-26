@@ -4,6 +4,10 @@ import dataclasses
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from azents_runtime_control.execution_policy import (
+    RuntimeExecutionPolicyEnvelope,
+    RuntimeExecutionPolicyEvidence,
+)
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
 )
@@ -128,6 +132,7 @@ async def test_dispatch_provider_command_uses_provider_generation_fence() -> Non
             reset_final_desired_state=None,
             payload={"reason": "user"},
             deadline_at=now + timedelta(seconds=30),
+            execution_policy=_execution_policy(),
         ),
         created_at=now,
     )
@@ -235,6 +240,7 @@ async def test_provider_reconnect_skips_previous_generation_requests() -> None:
             reset_final_desired_state=None,
             payload={"reason": "user"},
             deadline_at=now + timedelta(seconds=30),
+            execution_policy=_execution_policy(),
         ),
         created_at=now,
     )
@@ -630,8 +636,27 @@ def _runner_registration() -> RuntimeRunnerRegistration:
         workspace_path="/workspace/agent",
         metadata={"image": "runner:v1"},
         auth_credential_id="credential-1",
+        execution_policy=_execution_policy().evidence,
         connection_id="runner-connection-1",
         owner_replica_id="control-a",
+    )
+
+
+def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
+    return RuntimeExecutionPolicyEnvelope(
+        evidence=RuntimeExecutionPolicyEvidence(
+            snapshot_id="snapshot-1",
+            digest="d" * 64,
+            desired_generation=3,
+            module_versions={"container.run": 1},
+            source_versions={
+                "platform": 1,
+                "profile": 1,
+                "workspace": 1,
+                "agent": 1,
+            },
+        ),
+        effective_policy={},
     )
 
 
