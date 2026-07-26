@@ -11,7 +11,10 @@ allowBuilds:
   unrs-resolver: true
 overrides:
   "@types/node": "24.12.4"
-  postcss: "8.5.16"
+  postcss: "8.5.18"
+  sharp: "0.35.0"
+  "brace-expansion@^1.1.7": "1.1.16"
+  "brace-expansion@^5.0.5": "5.0.8"
   esbuild: "0.28.1"
   "@babel/core": "7.29.7"
   "@opentelemetry/core": "2.9.0"
