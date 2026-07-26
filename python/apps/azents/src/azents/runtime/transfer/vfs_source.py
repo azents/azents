@@ -17,13 +17,11 @@ from azcommon.infra.s3.service import (
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
-from azents_runtime_control.grpc_transfer_coordinator_client import (
-    CoordinatorOpaqueObjectHandle,
-)
 
 from azents.core.vfs import VFS_FILE_MAX_BYTES, VfsFileEntry
 from azents.runtime.transfer.server_to_runtime import (
     PreparedServerToRuntimeObject,
+    ServerToRuntimePreparation,
     ServerToRuntimeSourceMetadata,
 )
 
@@ -81,7 +79,7 @@ class VfsServerToRuntimeSource:
         )
 
     async def prepare(
-        self, *, admitted_object_handle: CoordinatorOpaqueObjectHandle
+        self, *, preparation: ServerToRuntimePreparation
     ) -> PreparedServerToRuntimeObject:
         """Decode, hash, stage, and verify the exact VFS entry incrementally."""
         if self.entry.size_bytes == 0:
@@ -92,7 +90,7 @@ class VfsServerToRuntimeSource:
                 key="/".join(
                     (
                         self.transfer_object_prefix.strip("/"),
-                        admitted_object_handle.value,
+                        preparation.admitted_object_handle.value,
                     )
                 ),
             ),
@@ -143,7 +141,7 @@ class VfsServerToRuntimeSource:
             ):
                 raise ValueError("VFS staging verification failed")
             return PreparedServerToRuntimeObject(
-                admitted_object_handle, decoded_size, actual_sha256
+                preparation.admitted_object_handle, decoded_size, actual_sha256
             )
         except asyncio.CancelledError:
             await self.s3_service.abort_multipart_upload(upload=upload)

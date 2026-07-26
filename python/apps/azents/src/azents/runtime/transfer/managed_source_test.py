@@ -10,11 +10,19 @@ from azcommon.infra.s3.service import (
     S3VerifiedObject,
 )
 from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorClearPreparationCleanupRequest,
     CoordinatorOpaqueObjectHandle,
+    CoordinatorPromotePreparationCleanupRequest,
+    CoordinatorRegisterPreparationCleanupRequest,
+    CoordinatorTransferStatus,
 )
+from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 from azents.runtime.transfer.managed_source import ManagedServerToRuntimeSource
-from azents.runtime.transfer.server_to_runtime import ServerToRuntimeSourceMetadata
+from azents.runtime.transfer.server_to_runtime import (
+    ServerToRuntimePreparation,
+    ServerToRuntimeSourceMetadata,
+)
 
 
 class S3CopySpy:
@@ -80,9 +88,7 @@ async def test_managed_source_copies_large_object_without_eager_download(
         multipart_part_size=1024,
     )
 
-    prepared = await source.prepare(
-        admitted_object_handle=CoordinatorOpaqueObjectHandle("admitted")
-    )
+    prepared = await source.prepare(preparation=_preparation())
 
     assert prepared.size == 4 * 1024 * 1024 + 1
     assert prepared.sha256 == "a" * 64
@@ -121,3 +127,41 @@ async def test_managed_source_revalidation_rejects_expired_source() -> None:
 
 async def _true() -> bool:
     return True
+
+
+def _preparation() -> ServerToRuntimePreparation:
+    return ServerToRuntimePreparation(
+        identity=CoordinatorTransferIdentity(
+            transfer_id="transfer",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            direction="download",
+            operation_id="operation",
+            session_id="session",
+            agent_id="agent",
+        ),
+        admitted_object_handle=CoordinatorOpaqueObjectHandle("admitted"),
+        coordinator=_UnusedCleanupCoordinator(),
+        revision=1,
+    )
+
+
+class _UnusedCleanupCoordinator:
+    async def register_preparation_cleanup(
+        self,
+        request: CoordinatorRegisterPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        raise AssertionError(f"Unexpected cleanup registration: {request}")
+
+    async def promote_preparation_cleanup(
+        self,
+        request: CoordinatorPromotePreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        raise AssertionError(f"Unexpected cleanup promotion: {request}")
+
+    async def clear_preparation_cleanup(
+        self,
+        request: CoordinatorClearPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        raise AssertionError(f"Unexpected cleanup clear: {request}")

@@ -14,12 +14,15 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorAdmitTransferResult,
     CoordinatorCancellationReason,
     CoordinatorCancelTransferRequest,
+    CoordinatorClearPreparationCleanupRequest,
     CoordinatorDispatchTransferRequest,
     CoordinatorExpectedManifest,
     CoordinatorGetTransferStatusRequest,
     CoordinatorMarkTransferReadyRequest,
     CoordinatorObjectManifest,
     CoordinatorOpaqueObjectHandle,
+    CoordinatorPromotePreparationCleanupRequest,
+    CoordinatorRegisterPreparationCleanupRequest,
     CoordinatorTransferDirection,
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
@@ -71,6 +74,77 @@ class PreparedServerToRuntimeObject:
     sha256: str
 
 
+class ServerToRuntimePreparationCleanupCoordinator(Protocol):
+    """Revision-fenced preparation cleanup calls available to source adapters."""
+
+    async def register_preparation_cleanup(
+        self,
+        request: CoordinatorRegisterPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus: ...
+
+    async def promote_preparation_cleanup(
+        self,
+        request: CoordinatorPromotePreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus: ...
+
+    async def clear_preparation_cleanup(
+        self,
+        request: CoordinatorClearPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus: ...
+
+
+@dataclass
+class ServerToRuntimePreparation:
+    """One admitted source-preparation attempt with its current fenced revision."""
+
+    identity: CoordinatorTransferIdentity
+    admitted_object_handle: CoordinatorOpaqueObjectHandle
+    coordinator: ServerToRuntimePreparationCleanupCoordinator
+    revision: int
+
+    async def register_cleanup(
+        self,
+        *,
+        preparation_object_handle: CoordinatorOpaqueObjectHandle,
+        multipart_cleanup_handle: CoordinatorOpaqueObjectHandle,
+    ) -> None:
+        """Durably retain abort authority before provider body streaming."""
+        status = await self.coordinator.register_preparation_cleanup(
+            CoordinatorRegisterPreparationCleanupRequest(
+                identity=self.identity,
+                expected_revision=self.revision,
+                preparation_object_handle=preparation_object_handle,
+                multipart_cleanup_handle=multipart_cleanup_handle,
+            )
+        )
+        self.revision = status.revision
+
+    async def promote_cleanup(
+        self,
+        *,
+        preparation_object_handle: CoordinatorOpaqueObjectHandle,
+    ) -> None:
+        """Retain completed preparation-object deletion authority."""
+        status = await self.coordinator.promote_preparation_cleanup(
+            CoordinatorPromotePreparationCleanupRequest(
+                identity=self.identity,
+                expected_revision=self.revision,
+                preparation_object_handle=preparation_object_handle,
+            )
+        )
+        self.revision = status.revision
+
+    async def clear_cleanup(self) -> None:
+        """Clear preparation cleanup evidence after exact owned cleanup."""
+        status = await self.coordinator.clear_preparation_cleanup(
+            CoordinatorClearPreparationCleanupRequest(
+                identity=self.identity,
+                expected_revision=self.revision,
+            )
+        )
+        self.revision = status.revision
+
+
 class ServerToRuntimeSource(Protocol):
     """Closed authorized source/staging boundary for trusted backend code."""
 
@@ -82,7 +156,7 @@ class ServerToRuntimeSource(Protocol):
     async def prepare(
         self,
         *,
-        admitted_object_handle: CoordinatorOpaqueObjectHandle,
+        preparation: ServerToRuntimePreparation,
     ) -> PreparedServerToRuntimeObject:
         """Prepare and verify an immutable snapshot after coordinator admission."""
         ...
@@ -113,6 +187,21 @@ class ServerToRuntimeCoordinator(Protocol):
 
     async def cancel_transfer(
         self, request: CoordinatorCancelTransferRequest
+    ) -> CoordinatorTransferStatus: ...
+
+    async def register_preparation_cleanup(
+        self,
+        request: CoordinatorRegisterPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus: ...
+
+    async def promote_preparation_cleanup(
+        self,
+        request: CoordinatorPromotePreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus: ...
+
+    async def clear_preparation_cleanup(
+        self,
+        request: CoordinatorClearPreparationCleanupRequest,
     ) -> CoordinatorTransferStatus: ...
 
 
@@ -170,7 +259,7 @@ class ServerToRuntimeTransferService:
             session_id=request.session_id,
             agent_id=request.agent_id,
         )
-        status: CoordinatorTransferStatus | None = None
+        expected_revision: int | None = None
         try:
             admitted = await self.coordinator.admit_transfer(
                 CoordinatorAdmitTransferRequest(
@@ -189,11 +278,20 @@ class ServerToRuntimeTransferService:
                     resource_class=metadata.source_kind,
                 )
             )
-            status = admitted.status
-            prepared = await request.source.prepare(
-                admitted_object_handle=admitted.admitted_object_handle
+            expected_revision = admitted.status.revision
+            preparation = ServerToRuntimePreparation(
+                identity=identity,
+                admitted_object_handle=admitted.admitted_object_handle,
+                coordinator=self.coordinator,
+                revision=expected_revision,
             )
-            self._validate_prepared(metadata, admitted.admitted_object_handle, prepared)
+            prepared = await request.source.prepare(preparation=preparation)
+            expected_revision = preparation.revision
+            self._validate_prepared(
+                metadata,
+                admitted.admitted_object_handle,
+                prepared,
+            )
             if not await request.source.revalidate():
                 raise ServerToRuntimeTransferError(
                     "Transfer source authority changed before dispatch"
@@ -201,7 +299,7 @@ class ServerToRuntimeTransferService:
             status = await self.coordinator.mark_transfer_ready(
                 CoordinatorMarkTransferReadyRequest(
                     identity=identity,
-                    expected_revision=status.revision,
+                    expected_revision=expected_revision,
                     object_handle=prepared.object_handle,
                     object_manifest=CoordinatorObjectManifest(
                         size=prepared.size,
@@ -209,19 +307,21 @@ class ServerToRuntimeTransferService:
                     ),
                 )
             )
+            expected_revision = status.revision
             status = await self.coordinator.dispatch_transfer(
                 CoordinatorDispatchTransferRequest(
                     identity=identity,
-                    expected_revision=status.revision,
+                    expected_revision=expected_revision,
                     dispatch_id=uuid7().hex,
                 )
             )
+            expected_revision = status.revision
             await self._wait_for_terminal_success(identity, request.deadline_at)
         except asyncio.CancelledError:
-            await self._cancel(identity, status)
+            await self._cancel(identity, expected_revision)
             raise
         except Exception:
-            await self._cancel(identity, status)
+            await self._cancel(identity, expected_revision)
             raise
 
     async def _wait_for_terminal_success(
@@ -254,15 +354,15 @@ class ServerToRuntimeTransferService:
     async def _cancel(
         self,
         identity: CoordinatorTransferIdentity,
-        status: CoordinatorTransferStatus | None,
+        expected_revision: int | None,
     ) -> None:
-        if status is None:
+        if expected_revision is None:
             return
         try:
             await self.coordinator.cancel_transfer(
                 CoordinatorCancelTransferRequest(
                     identity=identity,
-                    expected_revision=status.revision,
+                    expected_revision=expected_revision,
                     reason=CoordinatorCancellationReason.CALLER,
                 )
             )

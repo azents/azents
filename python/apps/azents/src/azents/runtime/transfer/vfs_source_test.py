@@ -13,10 +13,16 @@ from azcommon.infra.s3.service import (
     S3VerifiedObject,
 )
 from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorClearPreparationCleanupRequest,
     CoordinatorOpaqueObjectHandle,
+    CoordinatorPromotePreparationCleanupRequest,
+    CoordinatorRegisterPreparationCleanupRequest,
+    CoordinatorTransferStatus,
 )
+from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 from azents.core.vfs import VFS_FILE_MAX_BYTES, VfsFileEntry
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimePreparation
 from azents.runtime.transfer.vfs_source import VfsServerToRuntimeSource
 
 
@@ -93,9 +99,7 @@ async def test_vfs_stages_accepted_two_mebibyte_boundary_without_decode_body(
     source = VfsServerToRuntimeSource(
         entry, _true, store, "bucket", "transfer", 16 * 1024
     )
-    prepared = await source.prepare(
-        admitted_object_handle=CoordinatorOpaqueObjectHandle("admitted")
-    )
+    prepared = await source.prepare(preparation=_preparation())
     assert prepared.size == VFS_FILE_MAX_BYTES
     assert hashlib.sha256(b"".join(store.parts)).hexdigest() == entry.content_hash
 
@@ -108,11 +112,47 @@ async def test_vfs_invalid_base64_aborts_without_ready_object() -> None:
         entry, _true, store, "bucket", "transfer", 16 * 1024
     )
     with pytest.raises(ValueError, match="Base64"):
-        await source.prepare(
-            admitted_object_handle=CoordinatorOpaqueObjectHandle("admitted")
-        )
+        await source.prepare(preparation=_preparation())
     assert store.aborted
 
 
 async def _true() -> bool:
     return True
+
+
+def _preparation() -> ServerToRuntimePreparation:
+    return ServerToRuntimePreparation(
+        identity=CoordinatorTransferIdentity(
+            transfer_id="transfer",
+            attempt_id="attempt",
+            runtime_id="runtime",
+            desired_generation=1,
+            direction="download",
+            operation_id="operation",
+            session_id="session",
+            agent_id="agent",
+        ),
+        admitted_object_handle=CoordinatorOpaqueObjectHandle("admitted"),
+        coordinator=_UnusedCleanupCoordinator(),
+        revision=1,
+    )
+
+
+class _UnusedCleanupCoordinator:
+    async def register_preparation_cleanup(
+        self,
+        request: CoordinatorRegisterPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        raise AssertionError(f"Unexpected cleanup registration: {request}")
+
+    async def promote_preparation_cleanup(
+        self,
+        request: CoordinatorPromotePreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        raise AssertionError(f"Unexpected cleanup promotion: {request}")
+
+    async def clear_preparation_cleanup(
+        self,
+        request: CoordinatorClearPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        raise AssertionError(f"Unexpected cleanup clear: {request}")

@@ -195,7 +195,11 @@ class _FakeS3Client:
         self.uploads[upload_id] = {
             "bucket": _string_argument(arguments, "Bucket"),
             "key": _string_argument(arguments, "Key"),
-            "metadata": _string_mapping_argument(arguments, "Metadata"),
+            "metadata": (
+                _string_mapping_argument(arguments, "Metadata")
+                if "Metadata" in arguments
+                else {}
+            ),
             "content_type": _optional_string_argument(arguments, "ContentType"),
             "parts": {},
         }
@@ -750,6 +754,30 @@ async def test_multipart_completion_returns_verified_object() -> None:
 
     assert verified.sha256 == digest
     assert client.objects[("bucket", "transfer")].body == body
+
+
+@pytest.mark.asyncio
+async def test_preparation_multipart_completion_checks_size() -> None:
+    """Temporary provider staging objects cannot claim a transfer SHA-256."""
+    body = b"provider-bytes"
+    client = _FakeS3Client()
+    service = _service(client)
+    upload = await service.create_preparation_multipart_upload(
+        destination=S3ObjectIdentity(bucket="bucket", key="preparation"),
+        content_type="application/octet-stream",
+    )
+    first = await service.upload_part(upload=upload, part_number=1, body=b"provider")
+    second = await service.upload_part(upload=upload, part_number=2, body=b"-bytes")
+
+    metadata = await service.complete_preparation_multipart_upload(
+        upload=upload,
+        completed_parts=(first, second),
+        expected_size=len(body),
+    )
+
+    assert metadata.content_length == len(body)
+    assert client.objects[("bucket", "preparation")].metadata == {}
+    assert client.objects[("bucket", "preparation")].body == body
 
 
 @pytest.mark.asyncio

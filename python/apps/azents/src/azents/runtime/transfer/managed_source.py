@@ -13,12 +13,10 @@ from azcommon.infra.s3.service import (
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
-from azents_runtime_control.grpc_transfer_coordinator_client import (
-    CoordinatorOpaqueObjectHandle,
-)
 
 from azents.runtime.transfer.server_to_runtime import (
     PreparedServerToRuntimeObject,
+    ServerToRuntimePreparation,
     ServerToRuntimeSourceMetadata,
 )
 from azents.services.artifact import ArtifactTransferSource
@@ -58,7 +56,7 @@ class ManagedServerToRuntimeSource:
     async def prepare(
         self,
         *,
-        admitted_object_handle: CoordinatorOpaqueObjectHandle,
+        preparation: ServerToRuntimePreparation,
     ) -> PreparedServerToRuntimeObject:
         """Copy and verify the authorized source without reading its body."""
         sha256 = self.metadata.sha256
@@ -71,7 +69,7 @@ class ManagedServerToRuntimeSource:
                 key="/".join(
                     (
                         self.transfer_object_prefix.strip("/"),
-                        admitted_object_handle.value,
+                        preparation.admitted_object_handle.value,
                     )
                 ),
             ),
@@ -89,7 +87,7 @@ class ManagedServerToRuntimeSource:
         ):
             raise ValueError("Managed transfer copy verification failed")
         return PreparedServerToRuntimeObject(
-            object_handle=admitted_object_handle,
+            object_handle=preparation.admitted_object_handle,
             size=verified.metadata.content_length,
             sha256=verified.sha256,
         )

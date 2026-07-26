@@ -11,6 +11,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorAdmitTransferResult,
     CoordinatorCancelTransferRequest,
     CoordinatorCleanupStatus,
+    CoordinatorClearPreparationCleanupRequest,
     CoordinatorDispatchStatus,
     CoordinatorDispatchTransferRequest,
     CoordinatorExpectedManifest,
@@ -19,6 +20,8 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorObjectManifest,
     CoordinatorOpaqueObjectHandle,
     CoordinatorPreparationCleanupState,
+    CoordinatorPromotePreparationCleanupRequest,
+    CoordinatorRegisterPreparationCleanupRequest,
     CoordinatorTransferDirection,
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
@@ -28,6 +31,7 @@ from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 from azents.runtime.transfer.server_to_runtime import (
     PreparedServerToRuntimeObject,
+    ServerToRuntimePreparation,
     ServerToRuntimeSourceMetadata,
     ServerToRuntimeTarget,
     ServerToRuntimeTransferError,
@@ -45,12 +49,15 @@ class Source:
     prepared: PreparedServerToRuntimeObject
     revalidated: bool = True
     prepare_calls: int = 0
+    preparation_revision: int | None = None
 
     async def prepare(
-        self, *, admitted_object_handle: CoordinatorOpaqueObjectHandle
+        self, *, preparation: ServerToRuntimePreparation
     ) -> PreparedServerToRuntimeObject:
         self.prepare_calls += 1
-        assert admitted_object_handle == _HANDLE
+        assert preparation.admitted_object_handle == _HANDLE
+        if self.preparation_revision is not None:
+            preparation.revision = self.preparation_revision
         return self.prepared
 
     async def revalidate(self) -> bool:
@@ -103,6 +110,27 @@ class Coordinator:
             phase=CoordinatorTransferPhase.TERMINAL,
             outcome=CoordinatorTransferOutcome.CANCELLED,
         )
+
+    async def register_preparation_cleanup(
+        self,
+        request: CoordinatorRegisterPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        self.calls.append(("register_cleanup", request))
+        return _status(request.expected_revision + 1)
+
+    async def promote_preparation_cleanup(
+        self,
+        request: CoordinatorPromotePreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        self.calls.append(("promote_cleanup", request))
+        return _status(request.expected_revision + 1)
+
+    async def clear_preparation_cleanup(
+        self,
+        request: CoordinatorClearPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        self.calls.append(("clear_cleanup", request))
+        return _status(request.expected_revision + 1)
 
 
 def _status(
@@ -221,6 +249,37 @@ async def test_transfer_failure_is_not_success_and_cancels_exact_attempt() -> No
         await service.transfer(_request(source))
 
     assert coordinator.calls[-1][0] == "cancel"
+
+
+@pytest.mark.asyncio
+async def test_transfer_uses_source_preparation_cleanup_revision_for_ready() -> None:
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "provider://safe", "provider", "file", "text/plain", 3, None, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+        preparation_revision=4,
+    )
+    coordinator = Coordinator(
+        [
+            _status(
+                4,
+                phase=CoordinatorTransferPhase.TERMINAL,
+                outcome=CoordinatorTransferOutcome.SUCCEEDED,
+            )
+        ]
+    )
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    await service.transfer(_request(source))
+
+    ready = next(request for name, request in coordinator.calls if name == "ready")
+    assert isinstance(ready, CoordinatorMarkTransferReadyRequest)
+    assert ready.expected_revision == 4
 
 
 @pytest.mark.asyncio
