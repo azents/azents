@@ -8823,6 +8823,63 @@
         }
       }
     },
+    "/runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/apply": {
+      "post": {
+        "tags": [
+          "Runtime Execution v1"
+        ],
+        "summary": "Apply Agent Policy",
+        "description": "Apply current valid Agent execution intent to its Runtime.",
+        "operationId": "runtime_execution_v1_apply_agent_policy",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRuntimeExecutionPolicyApplyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/audit-events": {
       "get": {
         "tags": [
@@ -12175,6 +12232,35 @@
         ],
         "title": "AgentRuntimeActionsResponse",
         "description": "Agent Runtime action availability response."
+      },
+      "AgentRuntimeExecutionPolicyApplyResponse": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "desired_generation": {
+            "type": "integer",
+            "title": "Desired Generation"
+          },
+          "target_digest": {
+            "type": "string",
+            "title": "Target Digest"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "desired_generation",
+          "target_digest",
+          "created"
+        ],
+        "title": "AgentRuntimeExecutionPolicyApplyResponse",
+        "description": "Exact immutable Runtime target created or reused by Agent Apply."
       },
       "AgentRuntimeExecutionPolicyReplaceRequest": {
         "properties": {

@@ -114,6 +114,7 @@ def _command(command: ControlRuntimeLifecycleCommand) -> RuntimeLifecycleCommand
             allow_insecure_control=command.auth.allow_insecure_control,
         ),
         reset_final_desired_state=_desired_state(command.reset_final_desired_state),
+        execution_policy=command.execution_policy,
     )
 
 
@@ -145,4 +146,5 @@ def _report(report: RuntimeProviderReport) -> ControlRuntimeProviderReport:
         diagnostic=dict(report.diagnostic),
         reported_at=report.reported_at,
         terminal_delete_acknowledged=report.terminal_delete_acknowledged,
+        execution_policy=report.execution_policy,
     )

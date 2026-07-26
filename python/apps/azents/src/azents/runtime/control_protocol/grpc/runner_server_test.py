@@ -24,6 +24,7 @@ from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
     RuntimeRunnerOperation,
+    RuntimeRunnerRegistration,
 )
 from azents.runtime.control_protocol.grpc.runner_server import (
     RuntimeRunnerControlGrpcServicer,
@@ -50,10 +51,22 @@ class FakeStateSink:
     """Collect Runner state reports delivered by the gRPC bridge."""
 
     reports: list[RunnerStateReport] = dataclasses.field(default_factory=list)
+    registrations: list[RuntimeRunnerRegistration] = dataclasses.field(
+        default_factory=list
+    )
+    registration_valid: bool = True
 
     async def record_runner_state(self, report: RunnerStateReport) -> None:
         """Record one Runner state report."""
         self.reports.append(report)
+
+    async def validate_runner_registration(
+        self,
+        registration: RuntimeRunnerRegistration,
+    ) -> bool:
+        """Record and validate Runner execution-policy evidence."""
+        self.registrations.append(registration)
+        return self.registration_valid
 
 
 class QueueIterator:
@@ -189,6 +202,24 @@ async def test_runner_grpc_registers_and_acks_heartbeat() -> None:
     assert heartbeat_ack.heartbeat_ack.monotonic_sequence == 7
     assert sink.reports[-1].runner_state is SharedRunnerState.UNKNOWN
     assert sink.reports[-1].diagnostic["reason"] == "runner_stream_closed"
+    assert sink.registrations[0].execution_policy.snapshot_id == "snapshot-1"
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_rejects_registration_policy_mismatch() -> None:
+    """A Runner stream is rejected before registration when evidence is stale."""
+    store = InMemoryRuntimeCoordinationStore()
+    sink = FakeStateSink(registration_valid=False)
+    servicer = _servicer(RuntimeControlProtocolService(store), store, sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+
+    with pytest.raises(RuntimeError, match="FAILED_PRECONDITION"):
+        await anext(stream)
+    assert sink.registrations[0].execution_policy.snapshot_id == "snapshot-1"
+    assert sink.reports == []
 
 
 @pytest.mark.asyncio
@@ -1389,6 +1420,7 @@ def _register_message(
             health="ok",
             workspace_path="/workspace/agent",
             auth_credential_id="credential-1",
+            execution_policy=_execution_policy_evidence_message(),
         ),
     )
 
@@ -1403,6 +1435,31 @@ def _state_report_message() -> runtime_runner_control_pb2.RunnerStateReport:
         health="ok",
         workspace_path="/workspace/agent",
         reported_at=_timestamp(_now()),
+        execution_policy=_execution_policy_evidence_message(),
+    )
+
+
+def _execution_policy_evidence_message() -> (
+    runtime_runner_control_pb2.RunnerExecutionPolicyEvidence
+):
+    return runtime_runner_control_pb2.RunnerExecutionPolicyEvidence(
+        snapshot_id="snapshot-1",
+        digest="d" * 64,
+        desired_generation=1,
+        module_versions={
+            "container.compose": 1,
+            "container.image_build": 1,
+            "container.resources": 1,
+            "container.run": 1,
+            "engine.storage": 1,
+            "network.egress": 1,
+        },
+        source_versions={
+            "platform": 1,
+            "profile": 1,
+            "workspace": 1,
+            "agent": 1,
+        },
     )
 
 

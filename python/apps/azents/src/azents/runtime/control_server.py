@@ -25,13 +25,20 @@ from azents.core.redis import create_redis_client
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifier
 from azents.rdb.session import SessionManager
+from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.runtime_execution_policy.repository import (
+    RuntimeExecutionPolicyRepository,
+)
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
 )
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
+)
+from azents.repos.runtime_provider_policy.repository import (
+    RuntimeProviderPolicyRepository,
 )
 from azents.runtime.control_protocol.grpc.provider_server import (
     add_runtime_provider_control_servicer,
@@ -52,6 +59,9 @@ from azents.runtime.control_protocol.service import (
 )
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
+)
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionPolicyApplicationService,
 )
 from azents.services.runtime_provider_control.provider_auth import (
     KubernetesApiTokenReviewer,
@@ -132,6 +142,15 @@ async def runtime_control_server_lifespan(
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
     runtime_repository = AgentRuntimeRepository()
+    policy_repository = RuntimeProviderPolicyRepository()
+    execution_policy_repository = RuntimeExecutionPolicyRepository()
+    execution_policy_application = RuntimeExecutionPolicyApplicationService(
+        session_manager=session_manager,
+        policy_repository=execution_policy_repository,
+        snapshot_repository=policy_repository,
+        runtime_repository=runtime_repository,
+        agent_admin_repository=AgentAdminRepository(),
+    )
     kubernetes_api_client: ApiClient | None = None
     kubernetes_token_reviewer = None
     if settings.runtime_control_kubernetes_token_review_enabled:
@@ -151,10 +170,12 @@ async def runtime_control_server_lifespan(
     )
     provider_sink = RuntimeProviderReportRepositorySink(
         runtime_repository=runtime_repository,
+        policy_repository=policy_repository,
         session_manager=session_manager,
     )
     runner_sink = RuntimeRunnerStateRepositorySink(
         runtime_repository=runtime_repository,
+        policy_repository=policy_repository,
         session_manager=session_manager,
     )
     runner_credential_verifier = RuntimeRunnerCredentialVerifier(
@@ -167,6 +188,7 @@ async def runtime_control_server_lifespan(
     )
     reconciler = RuntimeLifecycleReconciler(
         runtime_repository=runtime_repository,
+        policy_repository=policy_repository,
         session_manager=session_manager,
         coordination_store=coordination_store,
         control_protocol=control_protocol,
@@ -188,6 +210,7 @@ async def runtime_control_server_lifespan(
     reconciler_task = asyncio.create_task(
         _run_reconciler(
             reconciler,
+            execution_policy_application,
             stop=stop_reconciler,
             interval_seconds=settings.runtime_control_reconcile_interval_seconds,
         ),
@@ -253,12 +276,24 @@ async def runtime_control_server_lifespan(
 
 async def _run_reconciler(
     reconciler: RuntimeLifecycleReconciler,
+    execution_policy_application: RuntimeExecutionPolicyApplicationService,
     *,
     stop: asyncio.Event,
     interval_seconds: float,
 ) -> None:
     while not stop.is_set():
         try:
+            convergence = await execution_policy_application.converge_once()
+            if convergence.targeted or convergence.stopped:
+                _LOGGER.info(
+                    "Runtime execution-policy convergence updated Runtimes",
+                    extra={
+                        "scanned": convergence.scanned,
+                        "targeted": convergence.targeted,
+                        "stopped": convergence.stopped,
+                        "pending_expansion": convergence.pending_expansion,
+                    },
+                )
             dispatched = await reconciler.reconcile_once()
             if dispatched:
                 _LOGGER.info(

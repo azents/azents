@@ -4,8 +4,15 @@ import dataclasses
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 import pytest
+from azents_runtime_control.execution_policy import (
+    JsonValue,
+    RuntimeExecutionPolicyEnvelope,
+    RuntimeExecutionPolicyEvidence,
+    digest_effective_policy,
+)
 from azents_runtime_control.provider import (
     RuntimeContainerAuth as ControlRuntimeContainerAuth,
 )
@@ -146,6 +153,7 @@ def _command(
     runner_image: str = "runner:latest",
     runner_auth_token: str = "runner-token-1",
     runner_auth_credential_id: str = "runner-credential-1",
+    execution_policy: RuntimeExecutionPolicyEnvelope | None = None,
 ) -> RuntimeLifecycleCommand:
     return RuntimeLifecycleCommand(
         command_type=command_type,
@@ -165,6 +173,8 @@ def _command(
             allow_insecure_control=True,
         ),
         reset_final_desired_state=final_desired_state,
+        execution_policy=execution_policy
+        or _execution_policy(desired_generation=desired_generation),
     )
 
 
@@ -188,6 +198,8 @@ def _control_command(
             control_tls_ca_pem=None,
             allow_insecure_control=True,
         ),
+        reset_final_desired_state=None,
+        execution_policy=_execution_policy(),
     )
 
 
@@ -479,7 +491,7 @@ async def test_terminal_delete_removes_container_and_workspace_idempotently(
 
 
 @pytest.mark.asyncio
-async def test_observe_known_runtimes_reports_container_and_directory(
+async def test_observe_known_runtimes_ignores_unproven_directory(
     tmp_path: Path,
 ) -> None:
     docker = FakeDockerApi()
@@ -493,10 +505,35 @@ async def test_observe_known_runtimes_reports_container_and_directory(
     assert (
         by_runtime["runtime-1"].observed_state is RuntimeProviderObservedState.RUNNING
     )
-    assert (
-        by_runtime["runtime-2"].observed_state is RuntimeProviderObservedState.STOPPED
-    )
-    assert by_runtime["runtime-2"].reason == "workspace_directory_without_container"
+    assert "runtime-2" not in by_runtime
+
+
+@pytest.mark.asyncio
+async def test_legacy_container_is_skipped_until_command_replaces_it(
+    tmp_path: Path,
+) -> None:
+    """Legacy resources stay untrusted without terminating Provider recovery."""
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    container = docker.containers["azents-runtime-runtime-1"]
+    labels = cast(dict[str, str], container.spec.labels)
+    for key in (
+        "azents/execution-policy-snapshot-id",
+        "azents/execution-policy-digest",
+        "azents/execution-policy-module-versions",
+        "azents/execution-policy-source-versions",
+    ):
+        labels.pop(key)
+
+    assert await provider.observe_known_runtimes() == ()
+
+    result = await provider.start(command)
+
+    assert result.report.execution_policy == command.execution_policy.evidence
+    replaced = docker.containers["azents-runtime-runtime-1"]
+    assert replaced.spec.labels["azents/execution-policy-snapshot-id"] == "snapshot-1"
 
 
 def test_invalid_workspace_path_is_rejected(tmp_path: Path) -> None:
@@ -522,3 +559,105 @@ async def test_reset_requires_explicit_final_desired_state(tmp_path: Path) -> No
 
     with pytest.raises(InvalidResetFinalDesiredState):
         await provider.reset(_command(RuntimeLifecycleCommandType.RESET))
+
+
+@pytest.mark.asyncio
+async def test_standard_policy_evidence_is_persisted_and_reported(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+    policy = _execution_policy()
+
+    result = await provider.start(
+        _command(RuntimeLifecycleCommandType.START, execution_policy=policy)
+    )
+
+    container = docker.containers["azents-runtime-runtime-1"]
+    assert container.spec.env["AZ_RUNTIME_EXECUTION_POLICY_SNAPSHOT_ID"] == "snapshot-1"
+    assert result.report.execution_policy == policy.evidence
+
+
+@pytest.mark.asyncio
+async def test_authority_bearing_policy_is_rejected(tmp_path: Path) -> None:
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+
+    with pytest.raises(ValueError, match="unsupported authority"):
+        await provider.start(
+            _command(
+                RuntimeLifecycleCommandType.START,
+                execution_policy=_execution_policy(image_build=True),
+            )
+        )
+
+    assert docker.containers == {}
+
+
+def _execution_policy(
+    *,
+    image_build: bool = False,
+    desired_generation: int = 1,
+) -> RuntimeExecutionPolicyEnvelope:
+    policy: dict[str, JsonValue] = {
+        "schema_version": 1,
+        "image_build": {
+            "module_id": "container.image_build",
+            "version": 1,
+            "enabled": image_build,
+        },
+        "container_run": {
+            "module_id": "container.run",
+            "version": 1,
+            "enabled": False,
+        },
+        "compose": {
+            "module_id": "container.compose",
+            "version": 1,
+            "enabled": False,
+        },
+        "resources": {
+            "module_id": "container.resources",
+            "version": 1,
+            "cpu_millicores": None,
+            "memory_bytes": None,
+            "pids": None,
+            "container_count": None,
+            "ephemeral_storage_bytes": None,
+        },
+        "engine_storage": {
+            "module_id": "engine.storage",
+            "version": 1,
+            "mode": "none",
+            "capacity_bytes": None,
+        },
+        "network_egress": {
+            "module_id": "network.egress",
+            "version": 1,
+            "mode": "none",
+            "allowed_destinations": [],
+            "denied_destinations": [],
+        },
+    }
+    return RuntimeExecutionPolicyEnvelope(
+        evidence=RuntimeExecutionPolicyEvidence(
+            snapshot_id="snapshot-1",
+            digest=digest_effective_policy(policy),
+            desired_generation=desired_generation,
+            module_versions={
+                "container.image_build": 1,
+                "container.run": 1,
+                "container.compose": 1,
+                "container.resources": 1,
+                "engine.storage": 1,
+                "network.egress": 1,
+            },
+            source_versions={
+                "platform": 1,
+                "profile": 1,
+                "workspace": 1,
+                "agent": 1,
+            },
+        ),
+        effective_policy=policy,
+    )

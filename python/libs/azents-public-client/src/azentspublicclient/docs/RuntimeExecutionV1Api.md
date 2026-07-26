@@ -4,6 +4,7 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
+[**runtime_execution_v1_apply_agent_policy**](RuntimeExecutionV1Api.md#runtime_execution_v1_apply_agent_policy) | **POST** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/apply | Apply Agent Policy
 [**runtime_execution_v1_get_agent_policy**](RuntimeExecutionV1Api.md#runtime_execution_v1_get_agent_policy) | **GET** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/settings | Get Agent Policy
 [**runtime_execution_v1_get_workspace_policy**](RuntimeExecutionV1Api.md#runtime_execution_v1_get_workspace_policy) | **GET** /runtime-execution/v1/workspaces/{handle}/policy | Get Workspace Policy
 [**runtime_execution_v1_list_agent_audit_events**](RuntimeExecutionV1Api.md#runtime_execution_v1_list_agent_audit_events) | **GET** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/audit-events | List Agent Audit Events
@@ -12,6 +13,87 @@ Method | HTTP request | Description
 [**runtime_execution_v1_replace_agent_policy**](RuntimeExecutionV1Api.md#runtime_execution_v1_replace_agent_policy) | **PUT** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/settings | Replace Agent Policy
 [**runtime_execution_v1_replace_workspace_policy**](RuntimeExecutionV1Api.md#runtime_execution_v1_replace_workspace_policy) | **PUT** /runtime-execution/v1/workspaces/{handle}/policy | Replace Workspace Policy
 
+
+# **runtime_execution_v1_apply_agent_policy**
+> AgentRuntimeExecutionPolicyApplyResponse runtime_execution_v1_apply_agent_policy(agent_id, handle)
+
+Apply Agent Policy
+
+Apply current valid Agent execution intent to its Runtime.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_runtime_execution_policy_apply_response import AgentRuntimeExecutionPolicyApplyResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.RuntimeExecutionV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+
+    try:
+        # Apply Agent Policy
+        api_response = api_instance.runtime_execution_v1_apply_agent_policy(agent_id, handle)
+        print("The response of RuntimeExecutionV1Api->runtime_execution_v1_apply_agent_policy:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeExecutionV1Api->runtime_execution_v1_apply_agent_policy: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+
+### Return type
+
+[**AgentRuntimeExecutionPolicyApplyResponse**](AgentRuntimeExecutionPolicyApplyResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **runtime_execution_v1_get_agent_policy**
 > AgentRuntimeExecutionPolicyResponse runtime_execution_v1_get_agent_policy(agent_id, handle)

@@ -60,6 +60,9 @@ from azents.services.chat.live_events import RedisLiveEventStore
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionPolicyApplicationService,
+)
 from azents.services.vfs import VfsProjectionService
 from azents.utils.appctx import AppContext
 
@@ -158,6 +161,10 @@ def get_builtin_toolkit_provider(
         VfsProjectionService,
         Depends(get_vfs_projection_service),
     ],
+    execution_policy_application_service: Annotated[
+        RuntimeExecutionPolicyApplicationService,
+        Depends(),
+    ],
 ) -> BuiltinToolkitProvider:
     """BuiltinToolkitProvider dependency for Worker."""
     return BuiltinToolkitProvider(
@@ -171,6 +178,7 @@ def get_builtin_toolkit_provider(
         session_manager=session_manager,
         memory_repo=MemoryRepository(),
         agent_runtime_repo=AgentRuntimeRepository(),
+        execution_policy_application_service=execution_policy_application_service,
         runner_operations=runner_operations,
         project_repo=SessionWorkspaceProjectRepository(),
     )

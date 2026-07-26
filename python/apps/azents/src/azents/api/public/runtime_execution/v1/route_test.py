@@ -1,5 +1,7 @@
 """Runtime Execution v1 Public API tests."""
 
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
@@ -12,6 +14,12 @@ from azents.core.runtime_execution_policy import (
     SYSTEM_STANDARD_PROFILE_ID,
     digest_runtime_execution_policy,
     empty_runtime_execution_restriction,
+)
+from azents.repos.runtime_provider_policy.data import RuntimePolicySnapshot
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionPolicyApplicationResult,
+    RuntimeExecutionPolicyApplicationService,
+    RuntimeExecutionPolicyApplicationUnavailable,
 )
 from azents.services.runtime_execution_policy.service import (
     RuntimeExecutionPolicyService,
@@ -36,9 +44,14 @@ def _client(
     service: AsyncMock,
     *,
     role: WorkspaceUserRole,
+    application_service: AsyncMock | None = None,
 ) -> TestClient:
     app = create_dummy_public_app()
     app.dependency_overrides[RuntimeExecutionPolicyService] = lambda: service
+    if application_service is not None:
+        app.dependency_overrides[RuntimeExecutionPolicyApplicationService] = lambda: (
+            application_service
+        )
     app.dependency_overrides[get_workspace_member] = lambda: WorkspaceMember(
         user_id="user-1",
         workspace_id="workspace-1",
@@ -112,6 +125,62 @@ def test_agent_policy_maps_service_authorization_denial() -> None:
     response = _client(service, role=WorkspaceUserRole.MANAGER).get(
         "/runtime-execution/v1/workspaces/example/agents/agent-1/settings"
     )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == {"code": "agent_access_denied"}
+
+
+def test_agent_apply_returns_exact_target_snapshot() -> None:
+    """Agent Apply exposes only immutable target evidence metadata."""
+    service = AsyncMock(spec=RuntimeExecutionPolicyService)
+    application_service = AsyncMock(spec=RuntimeExecutionPolicyApplicationService)
+    snapshot = cast(
+        RuntimePolicySnapshot,
+        SimpleNamespace(
+            id="snapshot-2",
+            target_desired_generation=3,
+            execution_target_digest="d" * 64,
+        ),
+    )
+    application_service.apply_agent_for_manager.return_value = (
+        RuntimeExecutionPolicyApplicationResult(
+            snapshot=snapshot,
+            created=True,
+        )
+    )
+
+    response = _client(
+        service,
+        role=WorkspaceUserRole.MANAGER,
+        application_service=application_service,
+    ).post("/runtime-execution/v1/workspaces/example/agents/agent-1/apply")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "snapshot_id": "snapshot-2",
+        "desired_generation": 3,
+        "target_digest": "d" * 64,
+        "created": True,
+    }
+    application_service.apply_agent_for_manager.assert_awaited_once()
+
+
+def test_agent_apply_maps_agent_management_denial() -> None:
+    """Agent Apply preserves the existing Agent owner/admin authorization boundary."""
+    service = AsyncMock(spec=RuntimeExecutionPolicyService)
+    application_service = AsyncMock(spec=RuntimeExecutionPolicyApplicationService)
+    application_service.apply_agent_for_manager.side_effect = (
+        RuntimeExecutionPolicyApplicationUnavailable(
+            "agent_access_denied",
+            "agent-1",
+        )
+    )
+
+    response = _client(
+        service,
+        role=WorkspaceUserRole.MANAGER,
+        application_service=application_service,
+    ).post("/runtime-execution/v1/workspaces/example/agents/agent-1/apply")
 
     assert response.status_code == 403
     assert response.json()["detail"] == {"code": "agent_access_denied"}

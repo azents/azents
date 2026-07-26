@@ -70,6 +70,7 @@ __all__ = [
     "AgentRunPhase",
     "AgentRunStatus",
     "AgentRuntimeActionsResponse",
+    "AgentRuntimeExecutionPolicyApplyResponse",
     "AgentRuntimeExecutionPolicyReplaceRequest",
     "AgentRuntimeExecutionPolicyResponse",
     "AgentRuntimeFailureResponse",
@@ -509,6 +510,7 @@ from azentspublicclient.models.agent_response import AgentResponse as AgentRespo
 from azentspublicclient.models.agent_run_phase import AgentRunPhase as AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus as AgentRunStatus
 from azentspublicclient.models.agent_runtime_actions_response import AgentRuntimeActionsResponse as AgentRuntimeActionsResponse
+from azentspublicclient.models.agent_runtime_execution_policy_apply_response import AgentRuntimeExecutionPolicyApplyResponse as AgentRuntimeExecutionPolicyApplyResponse
 from azentspublicclient.models.agent_runtime_execution_policy_replace_request import AgentRuntimeExecutionPolicyReplaceRequest as AgentRuntimeExecutionPolicyReplaceRequest
 from azentspublicclient.models.agent_runtime_execution_policy_response import AgentRuntimeExecutionPolicyResponse as AgentRuntimeExecutionPolicyResponse
 from azentspublicclient.models.agent_runtime_failure_response import AgentRuntimeFailureResponse as AgentRuntimeFailureResponse

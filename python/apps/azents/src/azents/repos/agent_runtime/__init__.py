@@ -69,6 +69,42 @@ class AgentRuntimeRepository:
             return None
         return self._build(rdb)
 
+    async def get_by_id_for_update(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+    ) -> AgentRuntime | None:
+        """Fetch and lock one Agent Runtime."""
+        result = await session.execute(
+            sa.select(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime_id)
+            .with_for_update()
+        )
+        rdb = result.scalar_one_or_none()
+        return self._build(rdb) if rdb is not None else None
+
+    async def list_policy_convergence_candidates(
+        self,
+        session: AsyncSession,
+        *,
+        after_runtime_id: str | None,
+        limit: int,
+    ) -> list[AgentRuntime]:
+        """List bound Runtimes for one bounded policy convergence page."""
+        statement = (
+            sa.select(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.runtime_provider_resource_id.is_not(None),
+                RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
+            )
+            .order_by(RDBAgentRuntime.id)
+            .limit(limit)
+        )
+        if after_runtime_id is not None:
+            statement = statement.where(RDBAgentRuntime.id > after_runtime_id)
+        result = await session.execute(statement)
+        return [self._build(rdb) for rdb in result.scalars().all()]
+
     async def get_by_agent_id(
         self,
         session: AsyncSession,

@@ -20,6 +20,9 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.runtime_provider_policy.repository import (
+    RuntimeProviderPolicyRepository,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.runtime.control_protocol.data import (
@@ -94,6 +97,7 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
     )
     reconciler = RuntimeLifecycleReconciler(
         runtime_repository=runtime_repository,
+        policy_repository=RuntimeProviderPolicyRepository(),
         session_manager=rdb_session_manager,
         coordination_store=store,
         control_protocol=control_protocol,
@@ -189,6 +193,7 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
     )
     reconciler = RuntimeLifecycleReconciler(
         runtime_repository=runtime_repository,
+        policy_repository=RuntimeProviderPolicyRepository(),
         session_manager=rdb_session_manager,
         coordination_store=store,
         control_protocol=control_protocol,
@@ -278,6 +283,7 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
     )
     reconciler = RuntimeLifecycleReconciler(
         runtime_repository=runtime_repository,
+        policy_repository=RuntimeProviderPolicyRepository(),
         session_manager=rdb_session_manager,
         coordination_store=store,
         control_protocol=control_protocol,

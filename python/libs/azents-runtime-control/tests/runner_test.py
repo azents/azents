@@ -10,6 +10,7 @@ from typing import TypedDict
 
 import pytest
 
+from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.runner import (
     RunnerControlClient,
     RunnerOperationCancel,
@@ -657,6 +658,18 @@ def _registration() -> RunnerRegistration:
         workspace_path="/workspace/agent",
         metadata=metadata,
         auth_credential_id="credential-1",
+        execution_policy=RuntimeExecutionPolicyEvidence(
+            snapshot_id="snapshot-1",
+            digest="d" * 64,
+            desired_generation=5,
+            module_versions={"container.run": 1},
+            source_versions={
+                "platform": 1,
+                "profile": 1,
+                "workspace": 1,
+                "agent": 1,
+            },
+        ),
     )
 
 

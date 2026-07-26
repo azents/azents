@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 import pytest
 from google.protobuf import struct_pb2
 
+from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.grpc_provider_client import (
     PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
     PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT,
@@ -64,6 +65,21 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                 control_endpoint="runtime-control:8020",
                 runner_auth_token="runner-token",
                 payload=command_payload,
+                execution_policy=runtime_provider_control_pb2.RuntimeExecutionPolicyEnvelope(
+                    evidence=runtime_provider_control_pb2.RuntimeExecutionPolicyEvidence(
+                        snapshot_id="snapshot-1",
+                        digest="d" * 64,
+                        desired_generation=5,
+                        module_versions={"container.run": 1},
+                        source_versions={
+                            "platform": 1,
+                            "profile": 1,
+                            "workspace": 1,
+                            "agent": 1,
+                        },
+                    ),
+                    effective_policy=struct_pb2.Struct(),
+                ),
             ),
         )
         heartbeat = await anext(requests)
@@ -238,6 +254,17 @@ def _report() -> RuntimeProviderReport:
         diagnostic={},
         reported_at=_now(),
         terminal_delete_acknowledged=False,
+        execution_policy=_execution_policy_evidence(),
+    )
+
+
+def _execution_policy_evidence() -> RuntimeExecutionPolicyEvidence:
+    return RuntimeExecutionPolicyEvidence(
+        snapshot_id="snapshot-1",
+        digest="d" * 64,
+        desired_generation=5,
+        module_versions={"container.run": 1},
+        source_versions={"platform": 1, "profile": 1, "workspace": 1, "agent": 1},
     )
 
 

@@ -12,6 +12,9 @@ from azents.core.runtime_execution_policy import RuntimeExecutionRestrictionExpa
 from azents.repos.runtime_execution_policy.data import (
     RuntimeExecutionPolicyAuditEvent,
 )
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionPolicyApplicationService,
+)
 from azents.services.runtime_execution_policy.service import (
     AgentRuntimeExecutionSettingMutation,
     RuntimeExecutionPolicyService,
@@ -22,6 +25,7 @@ from azents.services.runtime_execution_policy.service import (
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    AgentRuntimeExecutionPolicyApplyResponse,
     AgentRuntimeExecutionPolicyReplaceRequest,
     AgentRuntimeExecutionPolicyResponse,
     RuntimeExecutionPolicyAuditEventResponse,
@@ -180,6 +184,28 @@ async def replace_agent_policy(
     ) as error:
         _raise_policy_error(error)
     return AgentRuntimeExecutionPolicyResponse.convert_from(policy)
+
+
+@router.post("/workspaces/{handle}/agents/{agent_id}/apply")
+async def apply_agent_policy(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[RuntimeExecutionPolicyApplicationService, Depends()],
+    *,
+    agent_id: str,
+) -> AgentRuntimeExecutionPolicyApplyResponse:
+    """Apply current valid Agent execution intent to its Runtime."""
+    try:
+        result = await service.apply_agent_for_manager(
+            agent_id=agent_id,
+            workspace_id=member.workspace_id,
+            workspace_user_id=member.workspace_user_id,
+            role=member.role,
+            actor_workspace_user_id=member.workspace_user_id,
+            correlation_id=uuid7().hex,
+        )
+    except RuntimeExecutionPolicyUnavailable as error:
+        _raise_policy_error(error)
+    return AgentRuntimeExecutionPolicyApplyResponse.convert_from(result)
 
 
 @router.get("/workspaces/{handle}/agents/{agent_id}/audit-events")

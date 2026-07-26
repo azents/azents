@@ -4,6 +4,11 @@ import dataclasses
 import enum
 from datetime import datetime
 
+from azents_runtime_control.execution_policy import (
+    RuntimeExecutionPolicyEnvelope,
+    RuntimeExecutionPolicyEvidence,
+)
+
 
 class RuntimeDesiredState(enum.StrEnum):
     """Final desired Runtime state for reset."""
@@ -66,7 +71,8 @@ class RuntimeLifecycleCommand:
     provider_generation: int
     runner_image: str
     auth: RuntimeContainerAuth
-    reset_final_desired_state: RuntimeDesiredState | None = None
+    reset_final_desired_state: RuntimeDesiredState | None
+    execution_policy: RuntimeExecutionPolicyEnvelope
 
 
 @dataclasses.dataclass(frozen=True)
@@ -84,6 +90,7 @@ class RuntimeProviderReport:
     diagnostic: dict[str, str]
     reported_at: datetime
     terminal_delete_acknowledged: bool
+    execution_policy: RuntimeExecutionPolicyEvidence
 
 
 @dataclasses.dataclass(frozen=True)

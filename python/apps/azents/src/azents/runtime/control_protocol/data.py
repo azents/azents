@@ -4,6 +4,10 @@ import dataclasses
 from datetime import datetime
 from typing import Protocol
 
+from azents_runtime_control.execution_policy import (
+    RuntimeExecutionPolicyEnvelope,
+    RuntimeExecutionPolicyEvidence,
+)
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
 )
@@ -69,6 +73,7 @@ class RuntimeRunnerRegistration:
     workspace_path: str
     metadata: dict[str, JsonValue]
     auth_credential_id: str
+    execution_policy: RuntimeExecutionPolicyEvidence
     connection_id: str
     owner_replica_id: str
 
@@ -132,6 +137,7 @@ class RuntimeProviderCommand:
     reset_final_desired_state: str | None
     payload: dict[str, JsonValue]
     deadline_at: datetime | None
+    execution_policy: RuntimeExecutionPolicyEnvelope
 
 
 @dataclasses.dataclass(frozen=True)

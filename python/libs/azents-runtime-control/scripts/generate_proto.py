@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import subprocess
 
 import grpc_tools
 from grpc_tools import protoc
@@ -29,6 +30,7 @@ def main() -> None:
     proto_root = repo_root / "proto"
     grpc_tools_proto = pathlib.Path(grpc_tools.__file__).parent / "_proto"
     out_dir = root / "src" / "azents_runtime_control" / "proto"
+    generated_files: list[pathlib.Path] = []
     for proto_file in (
         proto_root
         / "azents"
@@ -54,10 +56,18 @@ def main() -> None:
         )
         if result != 0:
             raise SystemExit(result)
-        _fix_generated_imports(proto_file, out_dir)
+        generated_files.extend(_fix_generated_imports(proto_file, out_dir))
+    subprocess.run(
+        ["ruff", "format", *(str(path) for path in generated_files)],
+        check=True,
+        cwd=root,
+    )
 
 
-def _fix_generated_imports(proto_file: pathlib.Path, out_dir: pathlib.Path) -> None:
+def _fix_generated_imports(
+    proto_file: pathlib.Path,
+    out_dir: pathlib.Path,
+) -> tuple[pathlib.Path, pathlib.Path]:
     module_name = f"{proto_file.stem}_pb2"
     grpc_file = out_dir / f"{module_name}_grpc.py"
     content = grpc_file.read_text()
@@ -71,6 +81,7 @@ def _fix_generated_imports(proto_file: pathlib.Path, out_dir: pathlib.Path) -> N
 
     pb2_file = out_dir / f"{module_name}.py"
     pb2_file.write_text(_PB2_HEADER + pb2_file.read_text())
+    return pb2_file, grpc_file
 
 
 if __name__ == "__main__":

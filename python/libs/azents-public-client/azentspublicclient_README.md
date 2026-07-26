@@ -220,6 +220,7 @@ Class | Method | HTTP request | Description
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integrations**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integrations) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | List Integrations
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_sync_integration_catalog**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_sync_integration_catalog) | **POST** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-sync | Sync Integration Catalog
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_update_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_update_integration) | **PATCH** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Update Integration
+*RuntimeExecutionV1Api* | [**runtime_execution_v1_apply_agent_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_apply_agent_policy) | **POST** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/apply | Apply Agent Policy
 *RuntimeExecutionV1Api* | [**runtime_execution_v1_get_agent_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_get_agent_policy) | **GET** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/settings | Get Agent Policy
 *RuntimeExecutionV1Api* | [**runtime_execution_v1_get_workspace_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_get_workspace_policy) | **GET** /runtime-execution/v1/workspaces/{handle}/policy | Get Workspace Policy
 *RuntimeExecutionV1Api* | [**runtime_execution_v1_list_agent_audit_events**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_agent_audit_events) | **GET** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/audit-events | List Agent Audit Events
@@ -299,6 +300,7 @@ Class | Method | HTTP request | Description
  - [AgentRunPhase](azentspublicclient/docs/AgentRunPhase.md)
  - [AgentRunStatus](azentspublicclient/docs/AgentRunStatus.md)
  - [AgentRuntimeActionsResponse](azentspublicclient/docs/AgentRuntimeActionsResponse.md)
+ - [AgentRuntimeExecutionPolicyApplyResponse](azentspublicclient/docs/AgentRuntimeExecutionPolicyApplyResponse.md)
  - [AgentRuntimeExecutionPolicyReplaceRequest](azentspublicclient/docs/AgentRuntimeExecutionPolicyReplaceRequest.md)
  - [AgentRuntimeExecutionPolicyResponse](azentspublicclient/docs/AgentRuntimeExecutionPolicyResponse.md)
  - [AgentRuntimeFailureResponse](azentspublicclient/docs/AgentRuntimeFailureResponse.md)

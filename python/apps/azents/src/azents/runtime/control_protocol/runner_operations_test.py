@@ -5,6 +5,7 @@ import dataclasses
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
@@ -1508,6 +1509,18 @@ def _runner_registration() -> RuntimeRunnerRegistration:
         workspace_path="/workspace/agent",
         metadata={},
         auth_credential_id="credential-1",
+        execution_policy=RuntimeExecutionPolicyEvidence(
+            snapshot_id="snapshot-1",
+            digest="d" * 64,
+            desired_generation=3,
+            module_versions={"container.run": 1},
+            source_versions={
+                "platform": 1,
+                "profile": 1,
+                "workspace": 1,
+                "agent": 1,
+            },
+        ),
         connection_id="runner-connection-1",
         owner_replica_id="control-a",
     )

@@ -29,6 +29,10 @@ from azents.repos.agent_runtime.data import (
     AgentRuntimeFailureSummary,
     AgentRuntimeSummaryState,
 )
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionPolicyApplicationService,
+    RuntimeExecutionPolicyApplicationUnavailable,
+)
 from azents.services.runtime_provider_selection.data import (
     RuntimeProviderSelectionUnavailable,
 )
@@ -65,6 +69,10 @@ class AgentRuntimeService:
     ]
     runtime_provider_selection_service: Annotated[
         RuntimeProviderSelectionService,
+        Depends(),
+    ]
+    execution_policy_application_service: Annotated[
+        RuntimeExecutionPolicyApplicationService,
         Depends(),
     ]
 
@@ -216,20 +224,20 @@ class AgentRuntimeService:
             return Failure(access_error)
 
         try:
-            async with self.session_manager() as session:
-                runtime = await self._ensure_runtime_for_agent(agent_id)
-                if (
-                    runtime.provider_connection_state
-                    == RuntimeProviderConnectionState.DISCONNECTED
-                ):
-                    return Failure(ProviderDisconnected(runtime_id=runtime.id))
-                command = await self.runtime_repository.set_desired_state(
-                    session,
-                    runtime.id,
-                    RuntimeLifecycleCommandType.RESET,
-                    final_desired_state,
-                    reset_final_desired_state=final_desired_state,
-                )
+            runtime = await self._ensure_runtime_for_agent(agent_id)
+            if (
+                runtime.provider_connection_state
+                == RuntimeProviderConnectionState.DISCONNECTED
+            ):
+                return Failure(ProviderDisconnected(runtime_id=runtime.id))
+            application = self.execution_policy_application_service
+            command = await application.target_lifecycle_command(
+                agent_id=agent_id,
+                command_type=RuntimeLifecycleCommandType.RESET,
+                desired_state=final_desired_state,
+                reset_final_desired_state=final_desired_state,
+                terminal_delete_requested=False,
+            )
         except RuntimeProviderSelectionUnavailable as error:
             return Failure(
                 RuntimeProviderUnavailable(
@@ -238,8 +246,14 @@ class AgentRuntimeService:
                     message=error.message,
                 )
             )
-        if command is None:
-            return Failure(RuntimeNotFound(runtime_id=runtime.id))
+        except RuntimeExecutionPolicyApplicationUnavailable as error:
+            return Failure(
+                RuntimeProviderUnavailable(
+                    code=error.code,
+                    provider_id=None,
+                    message=error.code,
+                )
+            )
         return Success(
             AgentRuntimeLifecycleOutput(
                 runtime=command.runtime,
@@ -299,14 +313,15 @@ class AgentRuntimeService:
             return Failure(access_error)
 
         try:
-            async with self.session_manager() as session:
-                runtime = await self._ensure_runtime_for_agent(agent_id)
-                command = await self.runtime_repository.set_desired_state(
-                    session,
-                    runtime.id,
-                    command_type,
-                    desired_state,
-                )
+            await self._ensure_runtime_for_agent(agent_id)
+            application = self.execution_policy_application_service
+            command = await application.target_lifecycle_command(
+                agent_id=agent_id,
+                command_type=command_type,
+                desired_state=desired_state,
+                reset_final_desired_state=None,
+                terminal_delete_requested=False,
+            )
         except RuntimeProviderSelectionUnavailable as error:
             return Failure(
                 RuntimeProviderUnavailable(
@@ -315,8 +330,14 @@ class AgentRuntimeService:
                     message=error.message,
                 )
             )
-        if command is None:
-            return Failure(RuntimeNotFound(runtime_id=runtime.id))
+        except RuntimeExecutionPolicyApplicationUnavailable as error:
+            return Failure(
+                RuntimeProviderUnavailable(
+                    code=error.code,
+                    provider_id=None,
+                    message=error.code,
+                )
+            )
         return Success(
             AgentRuntimeLifecycleOutput(
                 runtime=command.runtime,

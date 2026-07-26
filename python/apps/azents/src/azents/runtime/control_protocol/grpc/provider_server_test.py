@@ -10,6 +10,10 @@ from typing import NoReturn
 
 import grpc
 import pytest
+from azents_runtime_control.execution_policy import (
+    RuntimeExecutionPolicyEnvelope,
+    RuntimeExecutionPolicyEvidence,
+)
 from azents_runtime_control.proto import runtime_provider_control_pb2
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
@@ -21,6 +25,11 @@ from azents.core.enums import (
     RuntimeProviderAuthMethod,
     RuntimeProviderKind,
     RuntimeProviderScope,
+)
+from azents.core.runtime_execution_policy import (
+    canonical_runtime_execution_policy,
+    digest_runtime_execution_policy,
+    standard_runtime_execution_policy,
 )
 from azents.core.runtime_runner_credential import RuntimeRunnerIssuedCredential
 from azents.runtime.control_protocol.data import (
@@ -335,6 +344,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
                 },
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            execution_policy=_execution_policy(),
         ),
         created_at=_now(),
     )
@@ -552,6 +562,48 @@ def _report_message() -> runtime_provider_control_pb2.RuntimeProviderReport:
         workspace_path="/workspace/agent",
         reason="container_running",
         reported_at=_timestamp(_now()),
+        execution_policy=_execution_policy_evidence_message(),
+    )
+
+
+def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
+    policy = standard_runtime_execution_policy()
+    canonical_policy = canonical_runtime_execution_policy(policy)
+    assert isinstance(canonical_policy, dict)
+    return RuntimeExecutionPolicyEnvelope(
+        evidence=RuntimeExecutionPolicyEvidence(
+            snapshot_id="snapshot-1",
+            digest=digest_runtime_execution_policy(policy),
+            desired_generation=5,
+            module_versions={
+                "container.compose": 1,
+                "container.image_build": 1,
+                "container.resources": 1,
+                "container.run": 1,
+                "engine.storage": 1,
+                "network.egress": 1,
+            },
+            source_versions={
+                "platform": 1,
+                "profile": 1,
+                "workspace": 1,
+                "agent": 1,
+            },
+        ),
+        effective_policy=canonical_policy,
+    )
+
+
+def _execution_policy_evidence_message() -> (
+    runtime_provider_control_pb2.RuntimeExecutionPolicyEvidence
+):
+    evidence = _execution_policy().evidence
+    return runtime_provider_control_pb2.RuntimeExecutionPolicyEvidence(
+        snapshot_id=evidence.snapshot_id,
+        digest=evidence.digest,
+        desired_generation=evidence.desired_generation,
+        module_versions=dict(evidence.module_versions),
+        source_versions=dict(evidence.source_versions),
     )
 
 

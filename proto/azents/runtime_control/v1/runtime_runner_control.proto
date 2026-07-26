@@ -46,6 +46,7 @@ message RunnerRegister {
   map<string, string> metadata = 6;
   string auth_credential_id = 7;
   string workspace_path = 8;
+  RunnerExecutionPolicyEvidence execution_policy = 9;
 }
 
 message RunnerRegisterAccepted {
@@ -89,6 +90,15 @@ message RunnerStateReport {
   map<string, string> diagnostic = 8;
   string workspace_path = 9;
   google.protobuf.Timestamp reported_at = 10;
+  RunnerExecutionPolicyEvidence execution_policy = 11;
+}
+
+message RunnerExecutionPolicyEvidence {
+  string snapshot_id = 1;
+  string digest = 2;
+  uint64 desired_generation = 3;
+  map<string, uint32> module_versions = 4;
+  map<string, uint64> source_versions = 5;
 }
 
 message RunnerOperationRequest {

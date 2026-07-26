@@ -104,6 +104,10 @@ from azents.services.file_storage import (
     GrepResult,
 )
 from azents.services.model_file import ModelFileService
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionPolicyApplicationService,
+    RuntimeExecutionPolicyApplicationUnavailable,
+)
 from azents.services.runtime_storage_error import (
     RuntimeStorageError,
 )
@@ -555,6 +559,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         runner_operations: RuntimeRunnerOperationClient,
         session_manager: SessionManager[AsyncSession],
         agent_runtime_repo: AgentRuntimeRepository,
+        execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
         project_repo: SessionWorkspaceProjectRepository,
     ) -> None:
         self._config = config
@@ -571,6 +576,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self._peer_toolkits: Sequence[RuntimeEnvProvider] = ()
         self.session_manager = session_manager
         self.agent_runtime_repo = agent_runtime_repo
+        self.execution_policy_application_service = execution_policy_application_service
         self.project_repo = project_repo
         self.agents_store = agents_store
         self._agents_context: RuntimeInstructionContext | None = None
@@ -656,6 +662,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         file_ss = RuntimeRunnerFileStorage(
             runner_operations=self.runner_operations,
             agent_runtime_repo=self.agent_runtime_repo,
+            execution_policy_application_service=(
+                self.execution_policy_application_service
+            ),
             session_manager=self.session_manager,
             runtime_agent_id=runtime_agent_id,
             owner_session_id=self._runtime_session_id,
@@ -664,6 +673,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         async def resolve_patch_target() -> RuntimePatchTarget:
             runtime = await _ready_runtime_for_agent(
                 agent_runtime_repo=self.agent_runtime_repo,
+                execution_policy_application_service=(
+                    self.execution_policy_application_service
+                ),
                 session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
             )
@@ -675,6 +687,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         async def resolve_edit_target() -> RuntimeEditTarget:
             runtime = await _ready_runtime_for_agent(
                 agent_runtime_repo=self.agent_runtime_repo,
+                execution_policy_application_service=(
+                    self.execution_policy_application_service
+                ),
                 session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
             )
@@ -744,6 +759,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             make_exec_command_tool(
                 self.runner_operations,
                 agent_runtime_repo=self.agent_runtime_repo,
+                execution_policy_application_service=(
+                    self.execution_policy_application_service
+                ),
                 session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
@@ -753,6 +771,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             make_write_stdin_tool(
                 self.runner_operations,
                 agent_runtime_repo=self.agent_runtime_repo,
+                execution_policy_application_service=(
+                    self.execution_policy_application_service
+                ),
                 session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
@@ -902,6 +923,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         session_manager: SessionManager[AsyncSession],
         memory_repo: MemoryRepository,
         agent_runtime_repo: AgentRuntimeRepository,
+        execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
         runner_operations: RuntimeRunnerOperationClient,
         project_repo: SessionWorkspaceProjectRepository,
     ) -> None:
@@ -912,6 +934,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.session_manager = session_manager
         self.memory_repo = memory_repo
         self.agent_runtime_repo = agent_runtime_repo
+        self.execution_policy_application_service = execution_policy_application_service
         self.runner_operations = runner_operations
         self.project_repo = project_repo
         self.agents_store = agents_store
@@ -941,6 +964,9 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             agent_id=context.agent_id,
             session_manager=self.session_manager,
             agent_runtime_repo=self.agent_runtime_repo,
+            execution_policy_application_service=(
+                self.execution_policy_application_service
+            ),
             project_repo=self.project_repo,
             agents_store=self.agents_store,
         )
@@ -1020,6 +1046,7 @@ async def _collect_secret_env(
 async def _ready_runtime_for_agent(
     *,
     agent_runtime_repo: AgentRuntimeRepository,
+    execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
     session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     wait_timeout_seconds: float | None = None,
@@ -1061,13 +1088,18 @@ async def _ready_runtime_for_agent(
         ):
             raise RuntimeStorageError(_RUNTIME_PROVIDER_DISCONNECTED_MSG)
         if runtime.desired_state != RuntimeDesiredState.RUNNING:
-            async with session_manager() as session:
-                await agent_runtime_repo.set_desired_state(
-                    session,
-                    runtime.id,
-                    RuntimeLifecycleCommandType.START,
-                    RuntimeDesiredState.RUNNING,
+            try:
+                await execution_policy_application_service.target_lifecycle_command(
+                    agent_id=agent_id,
+                    command_type=RuntimeLifecycleCommandType.START,
+                    desired_state=RuntimeDesiredState.RUNNING,
+                    reset_final_desired_state=None,
+                    terminal_delete_requested=False,
                 )
+            except RuntimeExecutionPolicyApplicationUnavailable as error:
+                raise RuntimeStorageError(
+                    f"Runtime execution policy is unavailable: {error.code}"
+                ) from error
         if time.monotonic() >= deadline:
             break
         await asyncio.sleep(poll_interval_seconds)
@@ -1110,12 +1142,14 @@ class RuntimeRunnerFileStorage:
         *,
         runner_operations: RuntimeRunnerOperationClient,
         agent_runtime_repo: AgentRuntimeRepository,
+        execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
         session_manager: SessionManager[AsyncSession] | None,
         runtime_agent_id: str,
         owner_session_id: str | None,
     ) -> None:
         self.runner_operations = runner_operations
         self.agent_runtime_repo = agent_runtime_repo
+        self.execution_policy_application_service = execution_policy_application_service
         self.session_manager = session_manager
         self.runtime_agent_id = runtime_agent_id
         self.owner_session_id = owner_session_id
@@ -1415,6 +1449,9 @@ class RuntimeRunnerFileStorage:
             if runtime is None:
                 runtime = await _ready_runtime_for_agent(
                     agent_runtime_repo=self.agent_runtime_repo,
+                    execution_policy_application_service=(
+                        self.execution_policy_application_service
+                    ),
                     session_manager=self.session_manager,
                     agent_id=self.runtime_agent_id,
                 )
@@ -1557,6 +1594,7 @@ def make_exec_command_tool(
     runner_operations: RuntimeRunnerOperationClient,
     *,
     agent_runtime_repo: AgentRuntimeRepository,
+    execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
     session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
@@ -1570,6 +1608,9 @@ def make_exec_command_tool(
         try:
             runtime = await _ready_runtime_for_agent(
                 agent_runtime_repo=agent_runtime_repo,
+                execution_policy_application_service=(
+                    execution_policy_application_service
+                ),
                 session_manager=session_manager,
                 agent_id=agent_id,
             )
@@ -1619,6 +1660,7 @@ def make_exec_command_tool(
         cancel_handler=_make_process_cancel_handler(
             runner_operations=runner_operations,
             agent_runtime_repo=agent_runtime_repo,
+            execution_policy_application_service=execution_policy_application_service,
             session_manager=session_manager,
             agent_id=agent_id,
             owner_session_id=owner_session_id,
@@ -1630,6 +1672,7 @@ def make_write_stdin_tool(
     runner_operations: RuntimeRunnerOperationClient,
     *,
     agent_runtime_repo: AgentRuntimeRepository,
+    execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
     session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
@@ -1641,6 +1684,9 @@ def make_write_stdin_tool(
         try:
             runtime = await _ready_runtime_for_agent(
                 agent_runtime_repo=agent_runtime_repo,
+                execution_policy_application_service=(
+                    execution_policy_application_service
+                ),
                 session_manager=session_manager,
                 agent_id=agent_id,
             )
@@ -1690,6 +1736,7 @@ def make_write_stdin_tool(
         cancel_handler=_make_process_cancel_handler(
             runner_operations=runner_operations,
             agent_runtime_repo=agent_runtime_repo,
+            execution_policy_application_service=execution_policy_application_service,
             session_manager=session_manager,
             agent_id=agent_id,
             owner_session_id=owner_session_id,
@@ -1701,6 +1748,7 @@ def _make_process_cancel_handler(
     *,
     runner_operations: RuntimeRunnerOperationClient,
     agent_runtime_repo: AgentRuntimeRepository,
+    execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
     session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     owner_session_id: str,
@@ -1712,6 +1760,9 @@ def _make_process_cancel_handler(
         try:
             runtime = await _ready_runtime_for_agent(
                 agent_runtime_repo=agent_runtime_repo,
+                execution_policy_application_service=(
+                    execution_policy_application_service
+                ),
                 session_manager=session_manager,
                 agent_id=agent_id,
             )

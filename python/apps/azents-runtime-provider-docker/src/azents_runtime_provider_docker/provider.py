@@ -1,6 +1,8 @@
 """Docker implementation of the Agent Runtime Provider lifecycle."""
 
 import dataclasses
+import json
+import logging
 import os
 import re
 import shutil
@@ -8,6 +10,11 @@ import stat
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+
+from azents_runtime_control.execution_policy import (
+    RuntimeExecutionPolicyEvidence,
+    validate_standard_execution_policy_envelope,
+)
 
 from azents_runtime_provider_docker.docker_api import (
     DockerApi,
@@ -36,6 +43,7 @@ _RUNNER_USER = f"{_RUNNER_UID}:{_RUNNER_GID}"
 _WORKSPACE_DIR_MODE = 0o755
 _NON_ROOT_WORKSPACE_DIR_MODE = 0o777
 _CONTROL_HOST_ALIAS = "host.docker.internal:host-gateway"
+_LOGGER = logging.getLogger(__name__)
 
 _LABEL_MANAGED_BY = "azents/managed-by"
 _LABEL_PROVIDER_ID = "azents/runtime-provider-id"
@@ -46,6 +54,10 @@ _LABEL_DESIRED_GENERATION = "azents/desired-generation"
 _LABEL_PROVIDER_GENERATION = "azents/provider-generation"
 _LABEL_WORKSPACE_PATH = "azents/workspace-path"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
+_LABEL_POLICY_SNAPSHOT_ID = "azents/execution-policy-snapshot-id"
+_LABEL_POLICY_DIGEST = "azents/execution-policy-digest"
+_LABEL_POLICY_MODULE_VERSIONS = "azents/execution-policy-module-versions"
+_LABEL_POLICY_SOURCE_VERSIONS = "azents/execution-policy-source-versions"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
 _ENV_CONTROL_TLS_CA_PEM = "AZ_RUNTIME_CONTROL_TLS_CA_PEM"
@@ -59,6 +71,11 @@ _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
 _ENV_RUNNER_AUTH_TOKEN = "AZ_RUNTIME_RUNNER_AUTH_TOKEN"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
 _ENV_WORKSPACE_PATH = "AZ_AGENT_WORKSPACE_PATH"
+_ENV_POLICY_SNAPSHOT_ID = "AZ_RUNTIME_EXECUTION_POLICY_SNAPSHOT_ID"
+_ENV_POLICY_DIGEST = "AZ_RUNTIME_EXECUTION_POLICY_DIGEST"
+_ENV_POLICY_DESIRED_GENERATION = "AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION"
+_ENV_POLICY_MODULE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS"
+_ENV_POLICY_SOURCE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS"
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -123,6 +140,7 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Start or create the Runtime container while preserving workspace data."""
+        self._validate_command(command)
         await self._ensure_container(command, replace=False)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.START,
@@ -134,6 +152,7 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Stop the Runtime container without deleting workspace data."""
+        self._validate_command(command)
         await self._docker.remove_container(
             _container_name(command.identity.runtime_id)
         )
@@ -152,6 +171,7 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Recreate the Runtime container while preserving workspace data."""
+        self._validate_command(command)
         await self._ensure_container(command, replace=True)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.RESTART,
@@ -163,6 +183,7 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Delete workspace data, then converge to the reset final desired state."""
+        self._validate_command(command)
         if command.reset_final_desired_state is None:
             raise InvalidResetFinalDesiredState("reset final desired state is required")
         await self._docker.remove_container(
@@ -190,6 +211,7 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Remove the Runtime container and all Provider-owned host data."""
+        self._validate_command(command)
         await self._docker.remove_container(
             _container_name(command.identity.runtime_id)
         )
@@ -213,6 +235,7 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeProviderReport:
         """Observe one Runtime container and report Provider-owned metadata."""
+        self._validate_command(command)
         container = await self._docker.get_container(
             _container_name(command.identity.runtime_id)
         )
@@ -245,18 +268,22 @@ class DockerRuntimeProvider:
             runtime_id = container.labels.get(_LABEL_RUNTIME_ID)
             if runtime_id is None:
                 continue
+            try:
+                report = self._report_from_container(container)
+            except ValueError:
+                _LOGGER.warning(
+                    "Docker Runtime observation skipped without trusted policy "
+                    "evidence",
+                    extra={
+                        "runtime_id": runtime_id,
+                        "provider_id": self._config.provider_id,
+                        "container_name": container.name,
+                    },
+                )
+                continue
             seen_runtime_ids.add(runtime_id)
-            reports.append(self._report_from_container(container))
+            reports.append(report)
 
-        root = self._config.host_data_root / "agent-runtimes"
-        if root.exists():
-            for runtime_dir in root.iterdir():
-                runtime_id = runtime_dir.name
-                if runtime_id in seen_runtime_ids:
-                    continue
-                if not _RUNTIME_ID_RE.fullmatch(runtime_id):
-                    continue
-                reports.append(self._report_from_directory(runtime_id))
         return tuple(reports)
 
     async def _ensure_container(
@@ -265,6 +292,7 @@ class DockerRuntimeProvider:
         *,
         replace: bool,
     ) -> None:
+        self._validate_command(command)
         container_name = _container_name(command.identity.runtime_id)
         container = await self._docker.get_container(container_name)
         if container is not None and (
@@ -320,6 +348,12 @@ class DockerRuntimeProvider:
         for key, value in self._runner_auth_env(command).items():
             if env.get(key) != value:
                 return False
+        for key, value in self._policy_labels(command).items():
+            if labels.get(key) != value:
+                return False
+        for key, value in self._policy_env(command).items():
+            if env.get(key) != value:
+                return False
         managed_runner_env = {
             key: env[key] for key in RUNNER_LIMIT_ENV_NAMES if key in env
         }
@@ -333,6 +367,7 @@ class DockerRuntimeProvider:
             _LABEL_DESIRED_GENERATION: str(command.desired_generation),
             _LABEL_PROVIDER_GENERATION: str(command.provider_generation),
             _LABEL_IMAGE_GENERATION: _IMAGE_GENERATION,
+            **self._policy_labels(command),
         }
 
     def _stable_labels(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
@@ -350,6 +385,7 @@ class DockerRuntimeProvider:
         return {
             **self._stable_env(command),
             **self._runner_auth_env(command),
+            **self._policy_env(command),
             _ENV_PROVIDER_GENERATION: str(command.provider_generation),
         }
 
@@ -377,6 +413,25 @@ class DockerRuntimeProvider:
             command.auth.allow_insecure_control
         ).lower()
         return env
+
+    def _policy_labels(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
+        evidence = command.execution_policy.evidence
+        return {
+            _LABEL_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
+            _LABEL_POLICY_DIGEST: evidence.digest,
+            _LABEL_POLICY_MODULE_VERSIONS: _canonical_mapping(evidence.module_versions),
+            _LABEL_POLICY_SOURCE_VERSIONS: _canonical_mapping(evidence.source_versions),
+        }
+
+    def _policy_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
+        evidence = command.execution_policy.evidence
+        return {
+            _ENV_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
+            _ENV_POLICY_DIGEST: evidence.digest,
+            _ENV_POLICY_DESIRED_GENERATION: str(evidence.desired_generation),
+            _ENV_POLICY_MODULE_VERSIONS: _canonical_mapping(evidence.module_versions),
+            _ENV_POLICY_SOURCE_VERSIONS: _canonical_mapping(evidence.source_versions),
+        }
 
     def _binds(self, runtime_id: str) -> tuple[DockerBindMount, ...]:
         return (
@@ -410,6 +465,7 @@ class DockerRuntimeProvider:
             diagnostic={},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
+            execution_policy=command.execution_policy.evidence,
         )
 
     def _report_from_container(
@@ -434,21 +490,19 @@ class DockerRuntimeProvider:
             diagnostic={"source": "docker_container"},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
+            execution_policy=_policy_evidence_from_metadata(
+                container.labels,
+                desired_generation=_int_label(
+                    container,
+                    _LABEL_DESIRED_GENERATION,
+                ),
+            ),
         )
 
-    def _report_from_directory(self, runtime_id: str) -> RuntimeProviderReport:
-        return RuntimeProviderReport(
-            runtime_id=runtime_id,
-            provider_id=self._config.provider_id,
-            provider_generation=0,
-            observed_state=RuntimeProviderObservedState.STOPPED,
-            observed_desired_generation=0,
-            provider_runtime_id=None,
-            workspace_path=self._workspace_mount_path,
-            reason="workspace_directory_without_container",
-            diagnostic={"source": "host_directory"},
-            reported_at=datetime.now(UTC),
-            terminal_delete_acknowledged=False,
+    def _validate_command(self, command: RuntimeLifecycleCommand) -> None:
+        validate_standard_execution_policy_envelope(
+            command.execution_policy,
+            desired_generation=command.desired_generation,
         )
 
     def _runtime_root(self, runtime_id: str) -> Path:
@@ -523,3 +577,43 @@ def _int_label(container: DockerContainerInfo, key: str) -> int:
         return int(value)
     except ValueError:
         return 0
+
+
+def _canonical_mapping(values: Mapping[str, int]) -> str:
+    return json.dumps(dict(values), sort_keys=True, separators=(",", ":"))
+
+
+def _policy_evidence_from_metadata(
+    values: Mapping[str, str],
+    *,
+    desired_generation: int,
+) -> RuntimeExecutionPolicyEvidence:
+    snapshot_id = values.get(_LABEL_POLICY_SNAPSHOT_ID)
+    digest = values.get(_LABEL_POLICY_DIGEST)
+    module_versions = values.get(_LABEL_POLICY_MODULE_VERSIONS)
+    source_versions = values.get(_LABEL_POLICY_SOURCE_VERSIONS)
+    if (
+        snapshot_id is None
+        or digest is None
+        or module_versions is None
+        or source_versions is None
+    ):
+        raise ValueError("Runtime execution-policy metadata is incomplete.")
+    try:
+        parsed_modules = json.loads(module_versions)
+        parsed_sources = json.loads(source_versions)
+        if not isinstance(parsed_modules, dict) or not isinstance(parsed_sources, dict):
+            raise ValueError("Runtime execution-policy metadata is invalid.")
+        return RuntimeExecutionPolicyEvidence(
+            snapshot_id=str(snapshot_id),
+            digest=str(digest),
+            desired_generation=desired_generation,
+            module_versions={
+                str(key): int(value) for key, value in parsed_modules.items()
+            },
+            source_versions={
+                str(key): int(value) for key, value in parsed_sources.items()
+            },
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("Runtime execution-policy metadata is invalid.") from error

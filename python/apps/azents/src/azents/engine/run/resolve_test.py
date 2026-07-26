@@ -351,6 +351,7 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
         session_manager=AsyncMock(),
         memory_repo=AsyncMock(),
         agent_runtime_repo=AsyncMock(),
+        execution_policy_application_service=AsyncMock(),
         runner_operations=AsyncMock(),
         project_repo=AsyncMock(),
     )
