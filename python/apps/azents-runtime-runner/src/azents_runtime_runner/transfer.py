@@ -871,11 +871,16 @@ def _read_orphan_record(
         created_at = datetime.fromisoformat(value["created_at"])
     except KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError:
         return None
+    if not isinstance(temporary_name, str):
+        return None
+    try:
+        expected_record_name = _orphan_record_name(temporary_name)
+    except ValueError:
+        return None
     if (
         not isinstance(parent, str)
         or not PurePath(parent).is_absolute()
-        or not isinstance(temporary_name, str)
-        or _orphan_record_name(temporary_name) != record_name
+        or expected_record_name != record_name
         or not isinstance(device, int)
         or not isinstance(inode, int)
         or created_at.tzinfo is None
