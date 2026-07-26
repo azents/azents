@@ -125,6 +125,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Directly Promote Continuation and Agent Messages Historical Requirements Reconstruction](requirements/directly-260712-directly-promote-continuation-and-messages.md) | directly-260712 | 2026-07-12 | - |
 | [Discord Toolkit Historical Requirements Reconstruction](requirements/discord-260312-discord-toolkit.md) | discord-260312 | 2026-03-12 | 2026-03-23 |
 | [Discord Gateway HA Historical Requirements Reconstruction](requirements/discord-260327-discord-gateway.md) | discord-260327 | 2026-03-27 | 2026-03-27 |
+| [Discord Agent App Routing Requirements](requirements/discord-260726-agent-app-routing.md) | discord-260726 | 2026-07-26 | - |
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
 | [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
@@ -458,6 +459,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Directly Promote Continuation and Agent Messages](adr/directly-260712-directly-promote-continuation-and-messages.md)
 - [Discord Toolkit Historical Decision Reconstruction](adr/discord-260312-discord-toolkit.md)
 - [Discord Gateway HA Historical Decision Reconstruction](adr/discord-260327-discord-gateway.md)
+- [Discord Agent App Routing](adr/discord-260726-agent-app-routing.md)
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 - [DockerAgentHomeClient sandbox-daemon Sidecar Historical Decision Reconstruction](adr/docker-260409-docker-home-sidecar.md)
 - [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)
