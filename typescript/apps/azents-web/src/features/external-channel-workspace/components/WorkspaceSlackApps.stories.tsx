@@ -27,6 +27,7 @@ const connection: ManagedMultiConnection = {
     thread_history: true,
     post_messages: true,
   },
+  provider_config: null,
   last_verified_at: "2026-07-25T04:30:00Z",
   last_health_at: "2026-07-25T05:00:00Z",
   socket_gap_detected_at: null,
