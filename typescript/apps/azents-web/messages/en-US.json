@@ -1815,6 +1815,7 @@
         "spawnAgent": "Spawned Subagent",
         "sendMessage": "Sent message",
         "followupTask": "Assigned follow-up",
+        "wait": "Waited",
         "waitAgent": "Waited for Subagents",
         "interruptAgent": "Interrupted Subagent",
         "listAgents": "Listed Subagents",
@@ -1873,6 +1874,7 @@
       "categoryMemory": "Memory",
       "categoryOrganize": "Organize",
       "categorySubagent": "Subagent",
+      "categoryWait": "Wait",
       "categoryOther": "Other"
     },
     "authorization": {

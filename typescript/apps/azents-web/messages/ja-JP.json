@@ -1815,6 +1815,7 @@
         "spawnAgent": "サブエージェントを作成",
         "sendMessage": "メッセージを送信",
         "followupTask": "フォローアップを割り当て",
+        "wait": "待機",
         "waitAgent": "サブエージェントを待機",
         "interruptAgent": "サブエージェントを中断",
         "listAgents": "サブエージェントを一覧表示",
@@ -1873,6 +1874,7 @@
       "categoryMemory": "Memory",
       "categoryOrganize": "整理",
       "categorySubagent": "サブエージェント",
+      "categoryWait": "待機",
       "categoryOther": "その他"
     },
     "authorization": {

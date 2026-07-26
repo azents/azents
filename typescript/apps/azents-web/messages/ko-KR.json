@@ -1815,6 +1815,7 @@
         "spawnAgent": "서브에이전트 생성",
         "sendMessage": "메시지 전송",
         "followupTask": "후속 작업 할당",
+        "wait": "대기",
         "waitAgent": "서브에이전트 대기",
         "interruptAgent": "서브에이전트 중단",
         "listAgents": "서브에이전트 목록 조회",
@@ -1873,6 +1874,7 @@
       "categoryMemory": "Memory",
       "categoryOrganize": "계획",
       "categorySubagent": "서브에이전트",
+      "categoryWait": "대기",
       "categoryOther": "기타"
     },
     "authorization": {

@@ -307,6 +307,7 @@ export const InputActionSuggestions = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("textbox"));
     await expect(
       canvas.getByText(
         "Polish the composer layout and verify the mobile model picker",
@@ -333,6 +334,24 @@ export const InputActionSuggestions = {
   },
 } satisfies Story;
 
+export const InputActionSuggestionsCloseOnBlur = {
+  args: {
+    ...baseArgs,
+    initialInputValue: "/",
+    sessionId: "story-session-suggestions-close-on-blur",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByRole("textbox");
+    await userEvent.click(input);
+    await expect(canvas.getByRole("listbox")).toBeVisible();
+    await userEvent.tab();
+    await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
+    await userEvent.click(input);
+    await expect(canvas.getByRole("listbox")).toBeVisible();
+  },
+} satisfies Story;
+
 export const SelectedActionChip = {
   args: {
     ...baseArgs,
@@ -351,6 +370,25 @@ export const SelectedActionChip = {
         "Polish the composer layout and verify the mobile model picker",
       ),
     ).toBeVisible();
+  },
+} satisfies Story;
+
+export const SelectedActionPreservesMessage = {
+  args: {
+    ...baseArgs,
+    initialInputValue: "/co Hello, Azents!",
+    sessionId: "story-session-selected-action-preserves-message",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByRole("textbox");
+    await userEvent.click(input);
+    await expect(
+      canvas.getByRole("option", { name: /compact/i }),
+    ).toBeVisible();
+    await userEvent.click(canvas.getByRole("option", { name: /compact/i }));
+    await expect(canvas.getByText("/compact")).toBeVisible();
+    await expect(input).toHaveValue("Hello, Azents!");
   },
 } satisfies Story;
 
