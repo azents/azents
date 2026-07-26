@@ -452,7 +452,7 @@ function fallbackActionDefinition(action: ChatAction): InputActionDefinition {
       return {
         id: "cleanup_orphan_git_worktrees",
         keyword: "cleanup-worktrees",
-        label: "Clean up orphan worktrees",
+        label: "Clean up worktrees",
         description: "",
         action,
         category: "turn",

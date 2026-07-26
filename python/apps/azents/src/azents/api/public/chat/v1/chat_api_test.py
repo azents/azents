@@ -1640,10 +1640,10 @@ class TestListInputActions:
         assert items[2] == {
             "id": "cleanup_orphan_git_worktrees",
             "keyword": "cleanup-worktrees",
-            "label": "Clean up orphan worktrees",
+            "label": "Clean up worktrees",
             "description": (
-                "Find and permanently remove orphan Git worktrees "
-                "from this runtime. Local branches are preserved."
+                "Remove managed Git worktrees not connected to an "
+                "active session. Local branches are preserved."
             ),
             "action": {"type": "cleanup_orphan_git_worktrees"},
             "category": "turn",
