@@ -537,6 +537,7 @@ async def test_authority_publishes_verified_object_without_body_relay() -> None:
         source=source,
         size_bytes=5 * 1024 * 1024,
         sha256=sha256,
+        publication_id="artifact-publication",
         filename="report.txt",
         media_type="text/plain",
     )
@@ -583,6 +584,7 @@ async def test_authority_publication_compensates_uncommitted_verified_object() -
         source=source,
         size_bytes=7,
         sha256="b" * 64,
+        publication_id="artifact-publication",
         filename="report.txt",
         media_type="text/plain",
     )

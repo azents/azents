@@ -299,6 +299,7 @@ class ArtifactService:
         source: S3ObjectIdentity,
         size_bytes: int,
         sha256: str,
+        publication_id: str,
         filename: str | None,
         media_type: str,
         source_tool_name: str | None = None,
@@ -311,7 +312,7 @@ class ArtifactService:
         async with self.session_manager() as session:
             if not await self._has_valid_resource_authority(session, authority):
                 return Failure(ArtifactAccessDenied())
-        artifact_id = uuid7().hex
+        artifact_id = publication_id
         object_key = artifact_storage_key(
             workspace_id=authority.workspace_id,
             session_id=authority.session_id,

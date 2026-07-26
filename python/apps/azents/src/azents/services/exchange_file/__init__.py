@@ -536,6 +536,7 @@ class ExchangeFileService:
         source: S3ObjectIdentity,
         size_bytes: int,
         sha256: str,
+        publication_id: str,
         provenance_kind: ExchangeFileProvenanceKind,
         source_tool_name: str | None,
         source_provider: str | None,
@@ -552,6 +553,7 @@ class ExchangeFileService:
             source=source,
             size_bytes=size_bytes,
             sha256=sha256,
+            publication_id=publication_id,
             provenance_kind=provenance_kind,
             source_tool_name=source_tool_name,
             source_provider=source_provider,
@@ -1061,6 +1063,7 @@ class ExchangeFileService:
         source: S3ObjectIdentity,
         size_bytes: int,
         sha256: str,
+        publication_id: str,
         provenance_kind: ExchangeFileProvenanceKind,
         source_tool_name: str | None,
         source_provider: str | None,
@@ -1089,6 +1092,7 @@ class ExchangeFileService:
         )
         source_create = source_prepared.create.model_copy(
             update={
+                "id": publication_id,
                 "size_bytes": size_bytes,
                 "sha256": sha256,
                 "preview_summary": await self._make_text_preview_from_object(
@@ -1101,6 +1105,10 @@ class ExchangeFileService:
         prepared[0] = dataclasses.replace(
             source_prepared,
             create=source_create,
+            object_key=exchange_file_object_key(
+                workspace_id=authority.workspace_id,
+                file_id=publication_id,
+            ),
             body=None,
             source=source,
             publication_metadata=S3ProductPublicationMetadata(
