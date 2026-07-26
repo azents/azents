@@ -45,6 +45,7 @@ message ProviderRegister {
   string config_schema_version = 7;
   google.protobuf.Struct metadata = 8;
   string auth_credential_id = 9;
+  google.protobuf.Struct capability_contract = 10;
 }
 
 message ProviderRegisterAccepted {

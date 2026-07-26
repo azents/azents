@@ -1,5 +1,7 @@
 """Runtime Provider selection service tests."""
 
+# pyright: reportPrivateUsage=false
+
 import datetime
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -19,6 +21,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider_policy.data import (
     RuntimeProviderConfigRevision,
@@ -108,6 +111,64 @@ def _service() -> RuntimeProviderSelectionService:
         policy_repository=cast(Any, Mock()),
         system_setting_repository=cast(Any, Mock()),
     )
+
+
+@pytest.mark.asyncio
+async def test_existing_runtime_receives_migration_binding_and_initial_snapshot() -> (
+    None
+):
+    """A pre-contract Runtime converges without replacing its logical identity."""
+    service = _service()
+    provider = _provider()
+    existing = AgentRuntime(
+        id="runtime-legacy",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        runtime_provider_id=provider.provider_id,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    bound = existing.model_copy(
+        update={
+            "runtime_provider_resource_id": provider.id,
+            "provider_binding_origin": RuntimeProviderBindingOrigin.MIGRATION,
+            "provider_binding_evidence": {"origin": "migration"},
+        }
+    )
+    upgraded = bound.model_copy(update={"runtime_policy_snapshot_id": "snapshot-1"})
+    service.provider_repository.get_by_provider_id_for_update = AsyncMock(
+        return_value=provider
+    )
+    service.validate_provider_candidate = AsyncMock(return_value=(_contract(), None))
+    service.runtime_repository.attach_provider_binding = AsyncMock(return_value=bound)
+    service.policy_repository.create_and_attach_target_snapshot = AsyncMock(
+        return_value=object()
+    )
+    service.runtime_repository.get_by_id = AsyncMock(return_value=upgraded)
+
+    result = await service._upgrade_existing_runtime(
+        cast(AsyncSession, Mock()),
+        runtime=existing,
+        workspace_id="workspace-1",
+        agent_runtime_provider_id=None,
+        requested_provider_id=None,
+        required_capabilities=None,
+    )
+
+    assert result is upgraded
+    attach_call = service.runtime_repository.attach_provider_binding.await_args
+    assert attach_call is not None
+    assert attach_call.kwargs["runtime_id"] == existing.id
+    assert (
+        attach_call.kwargs["binding_origin"] is RuntimeProviderBindingOrigin.MIGRATION
+    )
+    snapshot_call = (
+        service.policy_repository.create_and_attach_target_snapshot.await_args
+    )
+    assert snapshot_call is not None
+    assert snapshot_call.kwargs["create"].runtime_id == existing.id
+    assert snapshot_call.kwargs["create"].provider_id == provider.id
+    assert snapshot_call.kwargs["expected_target_snapshot_id"] is None
 
 
 @pytest.mark.asyncio

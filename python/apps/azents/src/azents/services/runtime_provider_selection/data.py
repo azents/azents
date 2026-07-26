@@ -6,7 +6,7 @@ from azents.core.enums import RuntimeProviderBindingOrigin
 from azents.repos.agent_runtime.data import AgentRuntime
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class RuntimeProviderSelectionUnavailable(Exception):
     """The requested exact Provider candidate cannot provision a Runtime."""
 

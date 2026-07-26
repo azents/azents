@@ -25,7 +25,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntimeCreate
+from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeCreate
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_control.repository import (
@@ -100,6 +100,15 @@ class RuntimeProviderSelectionService:
                 agent_id,
             )
             if existing is not None:
+                if existing.runtime_policy_snapshot_id is None:
+                    existing = await self._upgrade_existing_runtime(
+                        session,
+                        runtime=existing,
+                        workspace_id=agent.workspace_id,
+                        agent_runtime_provider_id=agent.runtime_provider_id,
+                        requested_provider_id=requested_provider_id,
+                        required_capabilities=required_capabilities,
+                    )
                 return RuntimeProviderBindingResult(
                     runtime=existing,
                     created=False,
@@ -128,14 +137,13 @@ class RuntimeProviderSelectionService:
                 workspace_id=agent.workspace_id,
                 required_capabilities=required_capabilities,
             )
-            binding_evidence: dict[str, object] = {
-                "workspace_id": agent.workspace_id,
-                "origin": origin.value,
-                "provider_admin_version": provider.admin_version,
-                "contract_revision_id": contract.id,
-                "contract_digest": contract.digest,
-                "config_revision_id": active_config.id if active_config else None,
-            }
+            binding_evidence = _binding_evidence(
+                workspace_id=agent.workspace_id,
+                origin=origin,
+                provider=provider,
+                contract=contract,
+                active_config=active_config,
+            )
             created = await self.runtime_repository.ensure_with_create(
                 session,
                 create=AgentRuntimeCreate(
@@ -159,56 +167,12 @@ class RuntimeProviderSelectionService:
 
             snapshot = await self.policy_repository.create_snapshot(
                 session,
-                create=RuntimePolicySnapshotCreate(
-                    runtime_id=created.runtime.id,
-                    provider_id=provider.id,
-                    contract_revision_id=contract.id,
-                    config_revision_id=active_config.id if active_config else None,
-                    override_provider_id=None,
-                    override_version=None,
-                    execution_profile_id=None,
-                    execution_platform_version=None,
-                    execution_profile_version=None,
-                    execution_workspace_version=None,
-                    execution_agent_version=None,
-                    resolved_execution_policy=None,
-                    execution_source_trace=None,
-                    execution_provider_compatibility=None,
-                    execution_target_digest=None,
-                    execution_reported_digest=None,
-                    resolved_config=active_config.config if active_config else {},
-                    encrypted_secrets=(
-                        active_config.encrypted_secrets if active_config else None
-                    ),
-                    secret_metadata=(
-                        active_config.secret_metadata if active_config else {}
-                    ),
-                    source_trace={
-                        "contract": contract.digest,
-                        "configuration": (
-                            active_config.revision if active_config else None
-                        ),
-                        "binding": origin.value,
-                    },
-                    digest=_snapshot_digest(
-                        runtime_id=created.runtime.id,
-                        provider_id=provider.id,
-                        contract_digest=contract.digest,
-                        config_revision_id=active_config.id if active_config else None,
-                        config=active_config.config if active_config else {},
-                        encrypted_secrets=(
-                            active_config.encrypted_secrets if active_config else None
-                        ),
-                        secret_metadata=(
-                            active_config.secret_metadata if active_config else {}
-                        ),
-                        override_provider_id=None,
-                        override_version=None,
-                        target_desired_generation=created.runtime.desired_generation,
-                        origin=origin,
-                    ),
-                    target_desired_generation=created.runtime.desired_generation,
-                    application_state=RuntimePolicySnapshotApplicationState.PENDING,
+                create=_initial_snapshot_create(
+                    runtime=created.runtime,
+                    provider=provider,
+                    contract=contract,
+                    active_config=active_config,
+                    origin=origin,
                 ),
             )
             if snapshot is None:
@@ -229,6 +193,96 @@ class RuntimeProviderSelectionService:
                     binding_evidence=binding_evidence,
                 ),
             )
+
+    async def _upgrade_existing_runtime(
+        self,
+        session: AsyncSession,
+        *,
+        runtime: AgentRuntime,
+        workspace_id: str,
+        agent_runtime_provider_id: str | None,
+        requested_provider_id: str | None,
+        required_capabilities: set[str] | None,
+    ) -> AgentRuntime:
+        """Attach accepted policy evidence to a pre-contract Runtime."""
+        if runtime.runtime_provider_resource_id is not None:
+            provider = await self.provider_repository.get_by_id(
+                session,
+                provider_id=runtime.runtime_provider_resource_id,
+                for_update=True,
+            )
+            origin = runtime.provider_binding_origin or (
+                RuntimeProviderBindingOrigin.MIGRATION
+            )
+        else:
+            if runtime.runtime_provider_id is not None:
+                selected_id = runtime.runtime_provider_id
+                origin = RuntimeProviderBindingOrigin.MIGRATION
+            else:
+                selected_id, origin = await self.resolve_candidate_id(
+                    session,
+                    agent_runtime_provider_id=agent_runtime_provider_id,
+                    requested_provider_id=requested_provider_id,
+                )
+            provider = await self.provider_repository.get_by_provider_id_for_update(
+                session,
+                provider_logical_id=selected_id,
+            )
+        if provider is None:
+            raise RuntimeProviderSelectionUnavailable(
+                code="provider_not_found",
+                provider_id=runtime.runtime_provider_id,
+                message="The Runtime's bound Provider was not found.",
+            )
+        contract, active_config = await self.validate_provider_candidate(
+            session,
+            provider_logical_id=provider.provider_id,
+            provider=provider,
+            workspace_id=workspace_id,
+            required_capabilities=required_capabilities,
+        )
+        binding_evidence = _binding_evidence(
+            workspace_id=workspace_id,
+            origin=origin,
+            provider=provider,
+            contract=contract,
+            active_config=active_config,
+        )
+        bound = await self.runtime_repository.attach_provider_binding(
+            session,
+            runtime_id=runtime.id,
+            provider_logical_id=provider.provider_id,
+            provider_resource_id=provider.id,
+            binding_origin=origin,
+            binding_evidence=binding_evidence,
+        )
+        if bound is None:
+            raise RuntimeProviderSelectionUnavailable(
+                code="provider_binding_conflict",
+                provider_id=provider.provider_id,
+                message="The existing Runtime Provider binding conflicts.",
+            )
+        snapshot = await self.policy_repository.create_and_attach_target_snapshot(
+            session,
+            create=_initial_snapshot_create(
+                runtime=bound,
+                provider=provider,
+                contract=contract,
+                active_config=active_config,
+                origin=origin,
+            ),
+            expected_target_snapshot_id=None,
+        )
+        if snapshot is None:
+            raise RuntimeProviderSelectionUnavailable(
+                code="runtime_policy_binding_conflict",
+                provider_id=provider.provider_id,
+                message="The existing Runtime policy binding changed concurrently.",
+            )
+        upgraded = await self.runtime_repository.get_by_id(session, runtime.id)
+        if upgraded is None:
+            raise RuntimeError("Upgraded Agent Runtime could not be reloaded")
+        return upgraded
 
     async def resolve_candidate_id(
         self,
@@ -375,6 +429,80 @@ class RuntimeProviderSelectionService:
                 message="The selected Provider has no active configuration.",
             )
         return contract, active_config
+
+
+def _binding_evidence(
+    *,
+    workspace_id: str,
+    origin: RuntimeProviderBindingOrigin,
+    provider: RuntimeProvider,
+    contract: RuntimeProviderContractRevision,
+    active_config: RuntimeProviderConfigRevision | None,
+) -> dict[str, object]:
+    """Build sanitized immutable Runtime Provider binding evidence."""
+    return {
+        "workspace_id": workspace_id,
+        "origin": origin.value,
+        "provider_admin_version": provider.admin_version,
+        "contract_revision_id": contract.id,
+        "contract_digest": contract.digest,
+        "config_revision_id": active_config.id if active_config else None,
+    }
+
+
+def _initial_snapshot_create(
+    *,
+    runtime: AgentRuntime,
+    provider: RuntimeProvider,
+    contract: RuntimeProviderContractRevision,
+    active_config: RuntimeProviderConfigRevision | None,
+    origin: RuntimeProviderBindingOrigin,
+) -> RuntimePolicySnapshotCreate:
+    """Build the first immutable policy target for one exact Runtime binding."""
+    config = active_config.config if active_config else {}
+    encrypted_secrets = active_config.encrypted_secrets if active_config else None
+    secret_metadata = active_config.secret_metadata if active_config else {}
+    return RuntimePolicySnapshotCreate(
+        runtime_id=runtime.id,
+        provider_id=provider.id,
+        contract_revision_id=contract.id,
+        config_revision_id=active_config.id if active_config else None,
+        override_provider_id=None,
+        override_version=None,
+        execution_profile_id=None,
+        execution_platform_version=None,
+        execution_profile_version=None,
+        execution_workspace_version=None,
+        execution_agent_version=None,
+        resolved_execution_policy=None,
+        execution_source_trace=None,
+        execution_provider_compatibility=None,
+        execution_target_digest=None,
+        execution_reported_digest=None,
+        resolved_config=config,
+        encrypted_secrets=encrypted_secrets,
+        secret_metadata=secret_metadata,
+        source_trace={
+            "contract": contract.digest,
+            "configuration": active_config.revision if active_config else None,
+            "binding": origin.value,
+        },
+        digest=_snapshot_digest(
+            runtime_id=runtime.id,
+            provider_id=provider.id,
+            contract_digest=contract.digest,
+            config_revision_id=active_config.id if active_config else None,
+            config=config,
+            encrypted_secrets=encrypted_secrets,
+            secret_metadata=secret_metadata,
+            override_provider_id=None,
+            override_version=None,
+            target_desired_generation=runtime.desired_generation,
+            origin=origin,
+        ),
+        target_desired_generation=runtime.desired_generation,
+        application_state=RuntimePolicySnapshotApplicationState.PENDING,
+    )
 
 
 def _snapshot_digest(

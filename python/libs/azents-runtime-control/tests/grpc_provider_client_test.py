@@ -111,6 +111,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
     )
 
     assert accepted.generation == 3
+    assert sent[0].register.capability_contract["schema_version"] == 1
     assert command is not None
     assert command.command.identity.runtime_id == "runtime-1"
     assert command.command.auth.control_endpoint == "runtime-control:8020"
@@ -238,6 +239,7 @@ def _registration() -> ProviderRegistration:
         capabilities=("lifecycle", "observe"),
         config_schema_version="v1",
         metadata={"workspace_path_source": "provider"},
+        capability_contract={"schema_version": 1},
     )
 
 

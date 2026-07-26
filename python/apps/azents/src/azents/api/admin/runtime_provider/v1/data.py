@@ -11,11 +11,15 @@ from azents.core.enums import (
     RuntimeProviderBindingAuditEventType,
     RuntimeProviderBindingOwner,
     RuntimeProviderBindingState,
+    RuntimeProviderContractStatus,
     RuntimeProviderLifecycleState,
 )
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider_binding.data import (
     RuntimeProviderAuthBindingAuditEvent,
+)
+from azents.repos.runtime_provider_policy.data import (
+    RuntimeProviderContractRevision,
 )
 from azents.services.runtime_provider_binding_admin.service import (
     RuntimeProviderBindingAdminProjection,
@@ -70,6 +74,56 @@ class RuntimeProviderListResponse(BaseModel):
     """Provider inventory response."""
 
     items: list[RuntimeProviderResponse]
+
+
+class RuntimeProviderContractResponse(BaseModel):
+    """One immutable Provider capability contract revision."""
+
+    id: str
+    digest: str
+    implementation_version: str
+    protocol_version: str
+    contract: dict[str, Any]
+    compatibility: dict[str, Any]
+    status: RuntimeProviderContractStatus
+    validation_code: str | None
+    validation_message: str | None
+    accepted_by_user_id: str | None
+    accepted_at: datetime.datetime | None
+    created_at: datetime.datetime
+
+    @classmethod
+    def convert_from(
+        cls,
+        contract: RuntimeProviderContractRevision,
+    ) -> "RuntimeProviderContractResponse":
+        """Convert the repository contract to an Admin-safe response."""
+        return cls(
+            id=contract.id,
+            digest=contract.digest,
+            implementation_version=contract.implementation_version,
+            protocol_version=contract.protocol_version,
+            contract=contract.contract,
+            compatibility=contract.compatibility,
+            status=contract.status,
+            validation_code=contract.validation_code,
+            validation_message=contract.validation_message,
+            accepted_by_user_id=contract.accepted_by_user_id,
+            accepted_at=contract.accepted_at,
+            created_at=contract.created_at,
+        )
+
+
+class RuntimeProviderContractListResponse(BaseModel):
+    """Provider contract revision history."""
+
+    items: list[RuntimeProviderContractResponse]
+
+
+class RuntimeProviderContractAcceptRequest(BaseModel):
+    """Optimistic concurrency input for explicit contract acceptance."""
+
+    expected_admin_version: int = Field(ge=0)
 
 
 class RuntimeProviderPolicyUpdateRequest(BaseModel):

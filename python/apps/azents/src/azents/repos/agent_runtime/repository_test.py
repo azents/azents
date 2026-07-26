@@ -10,14 +10,22 @@ from azents.core.enums import (
     LLMProvider,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimeProviderAvailabilityMode,
+    RuntimeProviderBindingOrigin,
     RuntimeProviderConnectionState,
+    RuntimeProviderKind,
+    RuntimeProviderLifecycleState,
     RuntimeProviderObservedState,
+    RuntimeProviderRegistrationMethod,
+    RuntimeProviderScope,
     RuntimeRunnerState,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_runtime.data import AgentRuntimeFailurePatch
+from azents.repos.runtime_provider.data import RuntimeProviderCreate
+from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -172,6 +180,66 @@ class TestAgentRuntimeRepository:
         )
 
         assert runtime.runtime_provider_id == "workspace-provider"
+
+    async def test_attach_provider_binding_upgrades_exact_legacy_runtime(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Attach durable identity only when the historical logical ID matches."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-attach-provider-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-attach-provider",
+        )
+        repository = AgentRuntimeRepository()
+        runtime = await repository.ensure_for_agent(
+            rdb_session,
+            agent_id,
+            default_runtime_provider_id="system-kubernetes",
+        )
+        provider = await RuntimeProviderRepository().create(
+            rdb_session,
+            RuntimeProviderCreate(
+                provider_id="system-kubernetes",
+                scope=RuntimeProviderScope.SYSTEM,
+                workspace_id=None,
+                kind=RuntimeProviderKind.KUBERNETES,
+                display_name="Kubernetes",
+                registration_method=RuntimeProviderRegistrationMethod.ADMIN,
+                enabled=True,
+                lifecycle_state=RuntimeProviderLifecycleState.ACTIVE,
+                availability_mode=RuntimeProviderAvailabilityMode.PLATFORM_WIDE,
+                capabilities={},
+                config_schema=None,
+                metadata=None,
+            ),
+        )
+
+        bound = await repository.attach_provider_binding(
+            rdb_session,
+            runtime_id=runtime.id,
+            provider_logical_id=provider.provider_id,
+            provider_resource_id=provider.id,
+            binding_origin=RuntimeProviderBindingOrigin.MIGRATION,
+            binding_evidence={"origin": "migration"},
+        )
+
+        assert bound is not None
+        assert bound.runtime_provider_resource_id == provider.id
+        assert bound.provider_binding_origin is RuntimeProviderBindingOrigin.MIGRATION
+        assert bound.provider_binding_evidence == {"origin": "migration"}
+
+        conflicting = await repository.attach_provider_binding(
+            rdb_session,
+            runtime_id=runtime.id,
+            provider_logical_id="different-provider",
+            provider_resource_id=provider.id,
+            binding_origin=RuntimeProviderBindingOrigin.MIGRATION,
+            binding_evidence={"origin": "conflict"},
+        )
+        assert conflicting is None
 
     async def test_get_by_agent_id_returns_existing_runtime(
         self, rdb_session: AsyncSession

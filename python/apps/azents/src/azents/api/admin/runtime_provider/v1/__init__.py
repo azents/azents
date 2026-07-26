@@ -14,6 +14,10 @@ from azents.services.runtime_provider_binding_admin.service import (
     RuntimeProviderBindingAdminService,
     RuntimeProviderBindingAdminUnavailable,
 )
+from azents.services.runtime_provider_contract.service import (
+    RuntimeProviderContractService,
+    RuntimeProviderContractUnavailable,
+)
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
@@ -26,12 +30,53 @@ from .data import (
     RuntimeProviderAuthenticationBindingRotateRequest,
     RuntimeProviderAuthenticationBindingRotateResponse,
     RuntimeProviderAvailabilityRequest,
+    RuntimeProviderContractAcceptRequest,
+    RuntimeProviderContractListResponse,
+    RuntimeProviderContractResponse,
     RuntimeProviderListResponse,
     RuntimeProviderPolicyUpdateRequest,
     RuntimeProviderResponse,
 )
 
 router = APIRouter()
+
+
+@router.get("/providers/{provider_id}/contracts")
+async def list_contracts(
+    service: Annotated[RuntimeProviderContractService, Depends()],
+    *,
+    provider_id: str,
+) -> RuntimeProviderContractListResponse:
+    """List accepted and pending capability contract revisions."""
+    try:
+        contracts = await service.list_contracts(provider_id)
+    except RuntimeProviderContractUnavailable as error:
+        _raise_contract_unavailable(error)
+    return RuntimeProviderContractListResponse(
+        items=[RuntimeProviderContractResponse.convert_from(item) for item in contracts]
+    )
+
+
+@router.post("/providers/{provider_id}/contracts/{revision_id}/accept")
+async def accept_contract(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeProviderContractService, Depends()],
+    request_body: RuntimeProviderContractAcceptRequest,
+    *,
+    provider_id: str,
+    revision_id: str,
+) -> RuntimeProviderContractResponse:
+    """Explicitly accept one valid Provider capability contract candidate."""
+    try:
+        contract = await service.accept_contract(
+            provider_id,
+            revision_id,
+            expected_admin_version=request_body.expected_admin_version,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeProviderContractUnavailable as error:
+        _raise_contract_unavailable(error)
+    return RuntimeProviderContractResponse.convert_from(contract)
 
 
 @router.get("/providers/{provider_id}/authentication-bindings")
@@ -232,6 +277,29 @@ def _raise_unavailable(error: RuntimeProviderAdminUnavailable) -> NoReturn:
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail="Runtime Provider operation is unavailable.",
+    ) from None
+
+
+def _raise_contract_unavailable(
+    error: RuntimeProviderContractUnavailable,
+) -> NoReturn:
+    """Convert contract lifecycle failures to bounded Admin API errors."""
+    if error.code == "provider_not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": error.code},
+        ) from None
+    if error.code == "contract_invalid":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": error.code},
+        ) from None
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": error.code,
+            "current_admin_version": error.current_admin_version,
+        },
     ) from None
 
 

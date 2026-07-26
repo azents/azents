@@ -357,6 +357,7 @@ def _register_message(
             capabilities=list(registration.capabilities),
             config_schema_version=registration.config_schema_version,
             metadata=_struct(registration.metadata),
+            capability_contract=_struct(registration.capability_contract),
         ),
     )
 

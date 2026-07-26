@@ -123,6 +123,7 @@ class ProviderRegistration:
     capabilities: Sequence[str]
     config_schema_version: str
     metadata: Mapping[str, JsonValue]
+    capability_contract: Mapping[str, JsonValue]
 
 
 @dataclasses.dataclass(frozen=True)
