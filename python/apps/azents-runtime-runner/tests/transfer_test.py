@@ -660,3 +660,63 @@ async def test_close_does_not_wait_for_blocked_result_sink(tmpfs_path: Path) -> 
     await asyncio.wait_for(control.entered.wait(), timeout=1)
 
     await asyncio.wait_for(manager.close(), timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_bounded_result_queue_backpressures_without_dropping_terminal_results(
+    tmpfs_path: Path,
+) -> None:
+    """A full result queue delays admission instead of losing a terminal result."""
+    control = _BlockingControl()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_Transfer(),
+        accepted_generation=lambda: 1,
+        max_tombstones=1,
+    )
+    expired_at = datetime.now(UTC)
+    first = _intent(
+        tmpfs_path / "first.bin",
+        deadline_at=expired_at,
+        transfer_id="transfer-1",
+    )
+    second = _intent(
+        tmpfs_path / "second.bin",
+        deadline_at=expired_at,
+        transfer_id="transfer-2",
+    )
+    third = _intent(
+        tmpfs_path / "third.bin",
+        deadline_at=expired_at,
+        transfer_id="transfer-3",
+    )
+
+    await manager.handle_intent(first)
+    await asyncio.wait_for(control.entered.wait(), timeout=1)
+    await manager.handle_intent(second)
+    third_admission = asyncio.create_task(manager.handle_intent(third))
+    await asyncio.sleep(0)
+
+    assert not third_admission.done()
+    control.release.set()
+    await asyncio.wait_for(third_admission, timeout=1)
+    await asyncio.wait_for(
+        _wait_for_result_count(control, expected=3),
+        timeout=1,
+    )
+
+    assert [result.identity.transfer_id for result in control.results] == [
+        "transfer-1",
+        "transfer-2",
+        "transfer-3",
+    ]
+    assert all(
+        result.failure is RunnerTransferFailure.PROTOCOL_VIOLATION
+        for result in control.results
+    )
+    await manager.close()
+
+
+async def _wait_for_result_count(control: _Control, *, expected: int) -> None:
+    while len(control.results) < expected:
+        await asyncio.sleep(0)

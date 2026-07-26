@@ -134,13 +134,17 @@ class RunnerTransferManager:
         self._active_by_identity: dict[_TransferIdentityKey, _TransferKey] = {}
         self._tombstones: dict[_TransferKey, _TransferTombstone] = {}
         self._completed_by_identity: dict[_TransferIdentityKey, _TransferKey] = {}
-        self._pending_emits: set[asyncio.Task[None]] = set()
+        self._results: asyncio.Queue[RunnerTransferResult] = asyncio.Queue(
+            maxsize=max_tombstones
+        )
+        self._result_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._commit_lock = asyncio.Lock()
         self._closed = False
 
     async def start(self) -> None:
         """Provide a lifecycle hook without pathname-backed transfer state."""
+        self._ensure_result_task()
 
     async def handle_intent(self, intent: RunnerTransferIntent) -> None:
         """Validate and admit one intent without awaiting its transfer task."""
@@ -174,7 +178,7 @@ class RunnerTransferManager:
                 self._active_by_identity[identity_key] = key
                 task.add_done_callback(lambda _: asyncio.create_task(self._reap(key)))
         if result is not None:
-            self._emit_later(result)
+            await self._enqueue_result(result)
 
     async def handle_cancel(self, cancel: RunnerTransferCancel) -> None:
         """Cancel only the exact active transfer identity and dispatch."""
@@ -194,18 +198,19 @@ class RunnerTransferManager:
         async with self._lock:
             self._closed = True
             active = tuple(self._active.values())
-            pending_emits = tuple(self._pending_emits)
+            result_task = self._result_task
+            self._result_task = None
             for item in active:
                 item.cancelled.set()
                 item.task.cancel()
-            for task in pending_emits:
-                task.cancel()
+            if result_task is not None:
+                result_task.cancel()
         for item in active:
             with contextlib.suppress(asyncio.CancelledError):
                 await item.task
-        for task in pending_emits:
+        if result_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
-                await task
+                await result_task
 
     async def _reap(self, key: "_TransferKey") -> None:
         async with self._lock:
@@ -216,26 +221,30 @@ class RunnerTransferManager:
     async def _run(
         self, intent: RunnerTransferIntent, cancelled: asyncio.Event
     ) -> None:
+        result: RunnerTransferResult | None = None
         try:
-            if intent.direction is RunnerTransferDirection.DOWNLOAD:
-                result = await self._download(intent, cancelled)
-            else:
-                result = await self._upload(intent, cancelled)
-        except asyncio.CancelledError:
-            result = _cancelled(intent)
+            try:
+                if intent.direction is RunnerTransferDirection.DOWNLOAD:
+                    result = await self._download(intent, cancelled)
+                else:
+                    result = await self._upload(intent, cancelled)
+            except grpc.aio.AioRpcError as exc:
+                result = _failed(intent, runner_transfer_failure_from_grpc(exc))
+            except _TransferFailure as exc:
+                result = _failed(intent, exc.failure)
+            except OSError:
+                result = _failed(intent, _local_io_failure(intent))
+            except ValueError:
+                result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
             self._remember(intent, result)
-            self._emit_later(result)
+            await self._enqueue_result(result)
+        except asyncio.CancelledError:
+            if result is None:
+                result = _cancelled(intent)
+                self._remember(intent, result)
+                if not self._closed:
+                    await self._enqueue_result(result)
             raise
-        except grpc.aio.AioRpcError as exc:
-            result = _failed(intent, runner_transfer_failure_from_grpc(exc))
-        except _TransferFailure as exc:
-            result = _failed(intent, exc.failure)
-        except OSError:
-            result = _failed(intent, _local_io_failure(intent))
-        except ValueError:
-            result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
-        self._remember(intent, result)
-        self._emit_later(result)
 
     async def _download(
         self,
@@ -407,23 +416,23 @@ class RunnerTransferManager:
                 os.close(snapshot_fd)
             os.close(parent_fd)
 
-    async def _emit(self, result: RunnerTransferResult) -> None:
-        await self._control.append_runner_transfer_result(result)
-
-    def _emit_later(self, result: RunnerTransferResult) -> None:
-        if self._closed or len(self._pending_emits) >= self._max_tombstones:
+    async def _enqueue_result(self, result: RunnerTransferResult) -> None:
+        if self._closed:
             return
-        task = asyncio.create_task(self._emit(result))
-        self._pending_emits.add(task)
-        task.add_done_callback(self._complete_emit)
+        self._ensure_result_task()
+        await self._results.put(result)
 
-    def _complete_emit(self, task: asyncio.Task[None]) -> None:
-        self._pending_emits.discard(task)
-        with contextlib.suppress(asyncio.CancelledError):
+    def _ensure_result_task(self) -> None:
+        if self._result_task is None:
+            self._result_task = asyncio.create_task(self._emit_results())
+
+    async def _emit_results(self) -> None:
+        while True:
+            result = await self._results.get()
             try:
-                task.result()
-            except Exception:
-                _LOGGER.warning("Runner transfer result emission failed", exc_info=True)
+                await self._control.append_runner_transfer_result(result)
+            finally:
+                self._results.task_done()
 
     def _remember(
         self,
