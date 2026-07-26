@@ -76,6 +76,7 @@ def _settings() -> RuntimeControlSettings:
         runtime_control_workspace_s3_secret_access_key="secret-key",
         runtime_runner_image="runner:test",
         runtime_runner_control_endpoint="runtime-control:8030",
+        runtime_runner_transfer_endpoint="runtime-transfer:8031",
         credential_encryption_key=Fernet.generate_key().decode(),
     )
 

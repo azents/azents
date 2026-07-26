@@ -120,6 +120,7 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
         config=RuntimeLifecycleDispatchConfig(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
             runner_credential_identifier=_runner_credential_verifier(),
             runner_control_tls_ca_pem=None,
             allow_insecure_runner_control=True,
@@ -207,6 +208,7 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
         config=RuntimeLifecycleDispatchConfig(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
             runner_credential_identifier=_runner_credential_verifier(),
             runner_control_tls_ca_pem=None,
             allow_insecure_runner_control=True,
@@ -233,6 +235,7 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
     auth = payload["auth"]
     assert isinstance(auth, dict)
     assert isinstance(auth["runner_auth_credential_id"], str)
+    assert auth["transfer_endpoint"] == "runtime-transfer:9091"
     assert "runner_auth_token" not in auth
     assert "control_token" not in auth
     assert updated is not None
@@ -308,6 +311,7 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
         config=RuntimeLifecycleDispatchConfig(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
             runner_credential_identifier=_runner_credential_verifier(),
             runner_control_tls_ca_pem=None,
             allow_insecure_runner_control=True,
@@ -403,6 +407,7 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
         config=RuntimeLifecycleDispatchConfig(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
             runner_credential_identifier=_runner_credential_verifier(),
             runner_control_tls_ca_pem=None,
             allow_insecure_runner_control=True,

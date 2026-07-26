@@ -35,6 +35,7 @@ data:
   {{- if .Values.runtimeProviderKubernetes.enabled }}
   AZ_RUNTIME_RUNNER_IMAGE: {{ include "azents.runtimeRunnerImage" . | quote }}
   AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT: {{ include "azents.runtimeControlEndpoint" . | quote }}
+  AZ_RUNTIME_RUNNER_TRANSFER_ENDPOINT: {{ include "azents.runtimeControlEndpoint" . | quote }}
   {{- end }}
   {{- if .Values.server.mcpEgressProxy.enabled }}
   AZ_MCP_PROXY_URL: {{ printf "http://mcp-egress-proxy.%s.svc.cluster.local:3128" (include "azents.serverNamespace" .) | quote }}

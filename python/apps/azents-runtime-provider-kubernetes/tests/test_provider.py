@@ -287,6 +287,7 @@ def _command(
         runner_image=runner_image,
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
+            transfer_endpoint="runtime-transfer:8030",
             runner_auth_token=runner_auth_token,
             runner_auth_credential_id=runner_auth_credential_id,
             control_tls_ca_pem=None,
@@ -313,6 +314,7 @@ def _control_command(
         runner_image=_RUNNER_IMAGE,
         auth=ControlRuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
+            transfer_endpoint="runtime-transfer:8030",
             runner_auth_token="runner-token-1",
             runner_auth_credential_id="runner-credential-1",
             control_tls_ca_pem=None,
@@ -337,6 +339,7 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     container = pod.spec.containers[0]
     env = {item.name: item.value for item in container.env}
     assert container.image == _RUNNER_IMAGE
+    assert env["AZ_RUNTIME_TRANSFER_ENDPOINT"] == "runtime-transfer:8030"
     assert container.working_dir == "/workspace/agent"
     assert container.resources == ContainerResources(
         requests={"cpu": "500m", "memory": "1Gi"},
@@ -1240,6 +1243,7 @@ async def test_observe_known_runtimes_reports_pod_and_pvc() -> None:
         runner_image=_RUNNER_IMAGE,
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
+            transfer_endpoint="runtime-transfer:8030",
             runner_auth_token="runner-token-2",
             runner_auth_credential_id="runner-credential-2",
             control_tls_ca_pem=None,

@@ -165,6 +165,7 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_tls_ca_file: str | None = None
     runtime_runner_image: str
     runtime_runner_control_endpoint: str
+    runtime_runner_transfer_endpoint: str
     credential_encryption_key: str
     rdb_host: str = "localhost"
     rdb_port: int = 5432
@@ -297,6 +298,7 @@ async def runtime_control_server_lifespan(
         config=RuntimeLifecycleDispatchConfig(
             runner_image=settings.runtime_runner_image,
             runner_control_endpoint=settings.runtime_runner_control_endpoint,
+            runner_transfer_endpoint=settings.runtime_runner_transfer_endpoint,
             runner_credential_identifier=runner_credential_verifier,
             runner_control_tls_ca_pem=transport.ca_pem,
             allow_insecure_runner_control=transport.allow_insecure,

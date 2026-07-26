@@ -67,6 +67,7 @@ class RuntimeLifecycleDispatchConfig:
 
     runner_image: str
     runner_control_endpoint: str
+    runner_transfer_endpoint: str
     runner_credential_identifier: RuntimeRunnerCredentialIdentifier
     runner_control_tls_ca_pem: str | None
     allow_insecure_runner_control: bool
@@ -274,6 +275,7 @@ class RuntimeLifecycleReconciler:
                     "runner_image": self._config.runner_image,
                     "auth": {
                         "control_endpoint": self._config.runner_control_endpoint,
+                        "transfer_endpoint": self._config.runner_transfer_endpoint,
                         "runner_auth_credential_id": runner_credential_id,
                         "control_tls_ca_pem": (self._config.runner_control_tls_ca_pem),
                         "allow_insecure_control": (

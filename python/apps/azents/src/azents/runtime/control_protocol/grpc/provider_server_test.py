@@ -348,6 +348,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
                 "runner_image": "runner:latest",
                 "auth": {
                     "control_endpoint": "runtime-control:8020",
+                    "transfer_endpoint": "runtime-transfer:8030",
                     "runner_auth_credential_id": "runner-credential-1",
                 },
             },
@@ -361,6 +362,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
     assert isinstance(result, RuntimeDispatchResult)
     assert command.provider_command.runtime_id == "runtime-1"
     assert command.provider_command.runner_image == "runner:latest"
+    assert command.provider_command.transfer_endpoint == "runtime-transfer:8030"
     assert command.provider_command.runner_auth_token == "runner-token"
     auth_fields = command.provider_command.payload.fields["auth"].struct_value.fields
     assert "runner_auth_token" not in auth_fields

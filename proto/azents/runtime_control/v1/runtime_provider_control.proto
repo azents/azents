@@ -77,6 +77,7 @@ message ProviderCommand {
   google.protobuf.Struct payload = 11;
   google.protobuf.Timestamp deadline_at = 12;
   RuntimeExecutionPolicyEnvelope execution_policy = 13;
+  string transfer_endpoint = 14;
 }
 
 message RuntimeProviderReport {

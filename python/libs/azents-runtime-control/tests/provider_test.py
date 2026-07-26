@@ -335,6 +335,7 @@ def _command(command_type: RuntimeLifecycleCommandType) -> RuntimeLifecycleComma
         runner_image="runner:latest",
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
+            transfer_endpoint="runtime-transfer:8030",
             runner_auth_token="runner-token",
             runner_auth_credential_id="runner-credential-1",
             control_tls_ca_pem=None,

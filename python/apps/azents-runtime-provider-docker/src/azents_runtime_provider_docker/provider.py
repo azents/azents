@@ -60,6 +60,7 @@ _LABEL_POLICY_MODULE_VERSIONS = "azents/execution-policy-module-versions"
 _LABEL_POLICY_SOURCE_VERSIONS = "azents/execution-policy-source-versions"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
+_ENV_TRANSFER_ENDPOINT = "AZ_RUNTIME_TRANSFER_ENDPOINT"
 _ENV_CONTROL_TLS_CA_PEM = "AZ_RUNTIME_CONTROL_TLS_CA_PEM"
 _ENV_CONTROL_ALLOW_INSECURE = "AZ_RUNTIME_CONTROL_ALLOW_INSECURE"
 _ENV_RUNTIME_ID = "AZ_RUNTIME_ID"
@@ -401,6 +402,7 @@ class DockerRuntimeProvider:
         env = {
             **self._runner_env,
             _ENV_CONTROL_ENDPOINT: command.auth.control_endpoint,
+            _ENV_TRANSFER_ENDPOINT: command.auth.transfer_endpoint,
             _ENV_RUNTIME_ID: identity.runtime_id,
             _ENV_AGENT_ID: identity.agent_id,
             _ENV_WORKSPACE_ID: identity.workspace_id,

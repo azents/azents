@@ -70,6 +70,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                 command_type="start",
                 runner_image="runner:latest",
                 control_endpoint="runtime-control:8020",
+                transfer_endpoint="runtime-transfer:8030",
                 runner_auth_token="runner-token",
                 payload=command_payload,
                 execution_policy=runtime_provider_control_pb2.RuntimeExecutionPolicyEnvelope(
@@ -123,6 +124,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
     assert command is not None
     assert command.command.identity.runtime_id == "runtime-1"
     assert command.command.auth.control_endpoint == "runtime-control:8020"
+    assert command.command.auth.transfer_endpoint == "runtime-transfer:8030"
     assert command.command.auth.runner_auth_token == "runner-token"
     assert command.command.auth.runner_auth_credential_id == "runner-credential-1"
     validate_standard_execution_policy_envelope(

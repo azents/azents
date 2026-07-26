@@ -88,7 +88,7 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 `runtimeProviderKubernetes` is default-off. When enabled, the provider Pod runs in the server namespace and creates Runtime Pods and PVCs in `runtimeProviderKubernetes.workloadNamespace.name`.
 
 - Server bootstrap source: the chart always renders a non-secret authoritative Provider declaration document and mounts it into `adminserver` for startup and periodic reconciliation
-- Server ConfigMap: `AZ_RUNTIME_RUNNER_IMAGE`, `AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT`
+- Server ConfigMap: `AZ_RUNTIME_RUNNER_IMAGE`, `AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT`, `AZ_RUNTIME_RUNNER_TRANSFER_ENDPOINT`
 - Provider authentication: `AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE` points to a projected ServiceAccount token with audience `azents-runtime-control`. The Provider watches the file and reconnects after rotation. It is separate from Runtime Runner authentication.
 - Provider Deployment: `AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKSPACE_PATH`, `AZ_RUNTIME_PROVIDER_STORAGE_CLASS`, `AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS`
 - Provider RBAC: leader election Lease permissions are scoped to the provider namespace, while Runtime Pod/PVC/NetworkPolicy permissions are scoped to the workload namespace

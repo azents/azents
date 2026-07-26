@@ -114,7 +114,7 @@ def main() -> None:
 
 async def run_runtime_runner() -> None:
     endpoint = _required_env("AZ_RUNTIME_CONTROL_ENDPOINT")
-    transfer_endpoint = os.environ.get("AZ_RUNTIME_TRANSFER_ENDPOINT") or endpoint
+    transfer_endpoint = _required_env("AZ_RUNTIME_TRANSFER_ENDPOINT")
     runtime_id = _required_env("AZ_RUNTIME_ID")
     workspace_path = _required_env("AZ_AGENT_WORKSPACE_PATH")
     runner_id = os.environ.get("AZ_RUNTIME_RUNNER_ID") or f"runner-{uuid.uuid4()}"

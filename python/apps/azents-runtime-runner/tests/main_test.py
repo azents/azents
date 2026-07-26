@@ -23,6 +23,7 @@ async def test_runner_requires_auth_credential_id(
 ) -> None:
     """Runner startup requires the provider-injected credential identifier."""
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
+    monkeypatch.setenv("AZ_RUNTIME_TRANSFER_ENDPOINT", "runtime-transfer:8031")
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
     monkeypatch.setenv("AZ_RUNTIME_ID", "runtime-1")
     monkeypatch.setenv("AZ_AGENT_WORKSPACE_PATH", "/workspace/agent")
@@ -38,6 +39,7 @@ async def test_runner_requires_auth_token(
 ) -> None:
     """Runner startup requires the provider-injected signed credential."""
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
+    monkeypatch.setenv("AZ_RUNTIME_TRANSFER_ENDPOINT", "runtime-transfer:8031")
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
     monkeypatch.setenv("AZ_RUNTIME_ID", "runtime-1")
     monkeypatch.setenv("AZ_AGENT_WORKSPACE_PATH", "/workspace/agent")
@@ -69,6 +71,19 @@ def test_runner_reads_provider_injected_policy_evidence(
     assert evidence.snapshot_id == "snapshot-1"
     assert evidence.desired_generation == 3
     assert evidence.source_versions["agent"] == 4
+
+
+@pytest.mark.asyncio
+async def test_runner_requires_explicit_transfer_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runner startup rejects a deployment without transfer endpoint wiring."""
+    monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
+    monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
+    monkeypatch.delenv("AZ_RUNTIME_TRANSFER_ENDPOINT", raising=False)
+
+    with pytest.raises(SystemExit, match="AZ_RUNTIME_TRANSFER_ENDPOINT"):
+        await run_runtime_runner()
 
 
 _LIMIT_ENV_NAMES = (
