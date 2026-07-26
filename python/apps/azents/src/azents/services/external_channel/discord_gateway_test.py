@@ -4,6 +4,7 @@ import json
 from collections.abc import Awaitable, Callable
 
 import pytest
+from pytest import MonkeyPatch
 
 from azents.services.external_channel.discord_gateway import (
     DISCORD_GATEWAY_INTENTS,
@@ -98,6 +99,54 @@ async def test_identify_persists_ready_checkpoint_before_reconnect() -> None:
     assert result.can_resume is True
     assert result.reason == "reconnect_requested"
     assert socket.closed is True
+
+
+@pytest.mark.asyncio
+async def test_test_gateway_ready_can_checkpoint_an_explicit_ws_fake(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Allow a test-only fake URL through the same READY checkpoint boundary."""
+    monkeypatch.setenv(
+        "AZ_TESTENV_DISCORD_API_BASE_URL",
+        "http://discord-fake:8085/api/v10",
+    )
+    monkeypatch.setenv("AZ_TESTENV_DISCORD_ALLOW_INSECURE_GATEWAY", "true")
+    socket = _Socket(
+        [
+            {"op": 10, "d": {"heartbeat_interval": 60_000}},
+            {
+                "op": 0,
+                "s": 4,
+                "t": "READY",
+                "d": {
+                    "session_id": "session-1",
+                    "resume_gateway_url": "ws://discord-fake:8086",
+                },
+            },
+            {"op": 7, "d": None},
+        ]
+    )
+    checkpoints: list[DiscordGatewayCheckpoint] = []
+    client = DiscordGatewayClient(
+        connector=lambda *args: _connector(socket, *args),
+    )
+
+    result = await client.run_connection(
+        endpoint_url="ws://discord-fake:8086",
+        bot_token="redacted-token",
+        checkpoint=None,
+        persist_checkpoint=_checkpoint_sink(checkpoints),
+        handle_dispatch=_dispatch_sink([]),
+    )
+
+    assert checkpoints == [
+        DiscordGatewayCheckpoint(
+            session_id="session-1",
+            resume_gateway_url="ws://discord-fake:8086",
+            sequence=4,
+        )
+    ]
+    assert result.can_resume is True
 
 
 @pytest.mark.asyncio

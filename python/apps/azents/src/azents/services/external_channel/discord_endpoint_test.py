@@ -5,6 +5,7 @@ from pytest import MonkeyPatch
 from azents.services.external_channel.discord_endpoint import (
     DISCORD_API_BASE_URL,
     discord_api_base_url,
+    discord_gateway_url_allowed,
     discord_insecure_gateway_allowed,
     discord_test_origin_matches,
 )
@@ -19,6 +20,8 @@ def test_discord_endpoint_uses_production_defaults_without_test_overrides(
 
     assert discord_api_base_url() == DISCORD_API_BASE_URL
     assert discord_insecure_gateway_allowed() is False
+    assert discord_gateway_url_allowed("wss://gateway.discord.gg") is True
+    assert discord_gateway_url_allowed("ws://discord-fake:8086") is False
     assert (
         discord_test_origin_matches("http://discord-fake:8085/attachments/1") is False
     )
@@ -42,3 +45,4 @@ def test_discord_endpoint_allows_insecure_gateway_only_for_test_origin(
     monkeypatch.setenv("AZ_TESTENV_DISCORD_ALLOW_INSECURE_GATEWAY", "true")
 
     assert discord_insecure_gateway_allowed() is True
+    assert discord_gateway_url_allowed("ws://discord-fake:8086") is True

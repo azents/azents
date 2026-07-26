@@ -34,7 +34,7 @@ from azents.services.external_channel.credentials import ExternalChannelCredenti
 from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_endpoint import (
     discord_api_base_url,
-    discord_insecure_gateway_allowed,
+    discord_gateway_url_allowed,
 )
 from azents.services.external_channel.discord_events import (
     project_discord_gateway_dispatch,
@@ -475,10 +475,7 @@ class DiscordGatewayManagerService:
             raise DiscordGatewayError(
                 "Discord Gateway discovery returned an invalid endpoint."
             )
-        endpoint_scheme_allowed = endpoint_url.startswith("wss://") or (
-            discord_insecure_gateway_allowed() and endpoint_url.startswith("ws://")
-        )
-        if not endpoint_scheme_allowed:
+        if not discord_gateway_url_allowed(endpoint_url):
             raise DiscordGatewayError(
                 "Discord Gateway discovery returned an invalid endpoint."
             )
@@ -526,7 +523,7 @@ def _decode_checkpoint(
         not isinstance(session_id, str)
         or not session_id
         or not isinstance(resume_gateway_url, str)
-        or not resume_gateway_url.startswith("wss://")
+        or not discord_gateway_url_allowed(resume_gateway_url)
         or not isinstance(sequence, int)
         or isinstance(sequence, bool)
         or sequence < 0

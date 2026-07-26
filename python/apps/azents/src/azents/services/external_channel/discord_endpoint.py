@@ -30,6 +30,13 @@ def discord_insecure_gateway_allowed() -> bool:
     )
 
 
+def discord_gateway_url_allowed(url: str) -> bool:
+    """Return whether one production or explicit-test Gateway URL is allowed."""
+    return url.startswith("wss://") or (
+        discord_insecure_gateway_allowed() and url.startswith("ws://")
+    )
+
+
 def discord_test_origin_matches(url: str) -> bool:
     """Return whether a URL belongs to the explicit deterministic test origin."""
     api_base_url = discord_api_base_url()

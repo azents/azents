@@ -10,6 +10,10 @@ from typing import Protocol
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
+from azents.services.external_channel.discord_endpoint import (
+    discord_gateway_url_allowed,
+)
+
 MAX_DISCORD_GATEWAY_MESSAGE_BYTES = 256 * 1024
 DISCORD_GATEWAY_INTENTS = 1 | 512 | 32768
 _DEFAULT_PROPERTIES = {
@@ -340,8 +344,8 @@ def _advance_checkpoint(
         resume_gateway_url = data.get("resume_gateway_url")
         if not isinstance(session_id, str) or not session_id:
             raise DiscordGatewayInvalidPayload("Discord READY is missing a session ID.")
-        if not isinstance(resume_gateway_url, str) or not resume_gateway_url.startswith(
-            "wss://"
+        if not isinstance(resume_gateway_url, str) or not discord_gateway_url_allowed(
+            resume_gateway_url
         ):
             raise DiscordGatewayInvalidPayload(
                 "Discord READY has an invalid resume Gateway URL."
