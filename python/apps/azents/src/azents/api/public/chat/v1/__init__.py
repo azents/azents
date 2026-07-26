@@ -2161,13 +2161,7 @@ async def list_input_actions(
                         attachments=InputActionAttachmentPolicyResponse(
                             policy="unsupported"
                         ),
-                        availability_hint=InputActionAvailabilityHintResponse(
-                            state="warning",
-                            message=(
-                                "This permanently removes orphaned worktree "
-                                "files without deleting their local branches."
-                            ),
-                        ),
+                        availability_hint=None,
                     ),
                     *[
                         InputActionDefinitionResponse(
