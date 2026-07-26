@@ -25,6 +25,7 @@ from azents.core.enums import (
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
+    ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
     LLMProvider,
@@ -34,10 +35,13 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAction,
+    RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelResource,
     RDBExternalChannelWork,
+    RDBExternalChannelWorkProjectionPart,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_session import AgentSessionRepository
@@ -224,6 +228,36 @@ async def _setup_binding(session: AsyncSession) -> tuple[str, str]:
     )
     await session.flush()
     return agent.id, binding.id
+
+
+async def _as_discord_binding(
+    session: AsyncSession,
+    *,
+    binding_id: str,
+) -> None:
+    """Turn the generic test binding into one active Discord thread binding."""
+    binding = await session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    resource = await session.get(RDBExternalChannelResource, binding.resource_id)
+    connection = await session.scalar(
+        sa.select(RDBExternalChannelConnection)
+        .join(
+            RDBExternalChannelAgentRoute,
+            RDBExternalChannelAgentRoute.connection_id
+            == RDBExternalChannelConnection.id,
+        )
+        .where(RDBExternalChannelAgentRoute.id == binding.route_id)
+    )
+    assert resource is not None
+    assert connection is not None
+    connection.provider = ExternalChannelProvider.DISCORD
+    connection.provider_tenant_id = "111"
+    resource.labels = {
+        "guild_id": "111",
+        "thread_id": "333",
+        "channel_name": "incident",
+    }
+    await session.flush()
 
 
 async def test_channel_action_commits_work_and_delivery_intents_idempotently(
@@ -418,6 +452,197 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
     assert snapshots[0].latest_action_mode is None
     assert snapshots[0].latest_deliveries == []
     assert snapshots[0].projection_drift == "none"
+
+
+async def test_discord_progress_pages_update_only_changed_page_and_finish_cleanup(
+    rdb_session: AsyncSession,
+) -> None:
+    """Discord Tracker pages retain stable ordinals through update and cleanup."""
+    agent_id, binding_id = await _setup_binding(rdb_session)
+    await _as_discord_binding(rdb_session, binding_id=binding_id)
+    agent_session = await rdb_session.scalar(
+        sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+    )
+    assert agent_session is not None
+    repository = ExternalChannelWorkRepository()
+    await repository.ensure_active_work(rdb_session, binding_id=binding_id)
+    task = _task(
+        id="investigate",
+        title="Inspect the incident",
+        status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+    )
+    initial = await repository.commit_action(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent_id,
+        run_id=None,
+        client_tool_call_id="discord-progress-initial",
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Inspecting the incident…",
+        tasks=[task],
+        files=(),
+        now=_at(2),
+    )
+
+    assert [delivery.operation for delivery in initial.deliveries] == [
+        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+    ]
+    create_rows = list(
+        await rdb_session.scalars(
+            sa.select(RDBExternalChannelDeliveryAttempt)
+            .where(
+                RDBExternalChannelDeliveryAttempt.channel_action_id == initial.action_id
+            )
+            .order_by(RDBExternalChannelDeliveryAttempt.part_ordinal)
+        )
+    )
+    assert [row.part_ordinal for row in create_rows] == [0, 1]
+    for ordinal, row in enumerate(create_rows):
+        assert await repository.start_delivery(
+            rdb_session,
+            delivery_attempt_id=row.id,
+            now=_at(3 + ordinal),
+        )
+        assert (
+            await repository.finish_delivery(
+                rdb_session,
+                delivery_attempt_id=row.id,
+                status=ExternalChannelDeliveryStatus.DELIVERED,
+                provider_message_key=f"discord:111:{500 + ordinal}",
+                error_kind=None,
+                error_summary=None,
+                now=_at(5 + ordinal),
+            )
+            is None
+        )
+
+    changed = task.model_copy(update={"details": "Inspect current provider logs."})
+    update = await repository.commit_action(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent_id,
+        run_id=None,
+        client_tool_call_id="discord-progress-update",
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Inspecting the incident…",
+        tasks=[changed],
+        files=(),
+        now=_at(7),
+    )
+
+    assert [delivery.operation for delivery in update.deliveries] == [
+        ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+    ]
+    update_row = await rdb_session.get(
+        RDBExternalChannelDeliveryAttempt,
+        update.deliveries[0].id,
+    )
+    assert update_row is not None
+    assert update_row.part_ordinal == 1
+    assert update_row.request_payload["provider_message_key"] == "discord:111:501"
+    assert await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=update_row.id,
+        now=_at(8),
+    )
+    assert (
+        await repository.finish_delivery(
+            rdb_session,
+            delivery_attempt_id=update_row.id,
+            status=ExternalChannelDeliveryStatus.DELIVERED,
+            provider_message_key="discord:111:501",
+            error_kind=None,
+            error_summary=None,
+            now=_at(9),
+        )
+        is None
+    )
+
+    finish = await repository.commit_action(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent_id,
+        run_id=None,
+        client_tool_call_id="discord-progress-finish",
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.FINISH,
+        message="Done. " * 700,
+        title=None,
+        tasks=None,
+        files=(),
+        now=_at(10),
+    )
+    replies = [
+        delivery
+        for delivery in finish.deliveries
+        if delivery.operation is ExternalChannelDeliveryOperation.REPLY
+    ]
+    assert len(replies) > 1
+    reply_ordinals = {
+        row.id: row.part_ordinal
+        for row in await rdb_session.scalars(
+            sa.select(RDBExternalChannelDeliveryAttempt).where(
+                RDBExternalChannelDeliveryAttempt.id.in_(
+                    [reply.id for reply in replies]
+                )
+            )
+        )
+    }
+    assert [reply_ordinals[reply.id] for reply in replies] == list(range(len(replies)))
+    cleanup_id: str | None = None
+    for ordinal, reply in enumerate(replies):
+        assert await repository.start_delivery(
+            rdb_session,
+            delivery_attempt_id=reply.id,
+            now=_at(11 + ordinal),
+        )
+        cleanup_id = await repository.finish_delivery(
+            rdb_session,
+            delivery_attempt_id=reply.id,
+            status=ExternalChannelDeliveryStatus.DELIVERED,
+            provider_message_key=f"discord:111:{600 + ordinal}",
+            error_kind=None,
+            error_summary=None,
+            now=_at(13 + ordinal),
+        )
+        if ordinal < len(replies) - 1:
+            assert cleanup_id is None
+    assert cleanup_id is not None
+
+    cleanup_ids: list[str] = []
+    while cleanup_id is not None:
+        cleanup_ids.append(cleanup_id)
+        assert await repository.start_delivery(
+            rdb_session,
+            delivery_attempt_id=cleanup_id,
+            now=_at(20 + len(cleanup_ids)),
+        )
+        cleanup_id = await repository.finish_delivery(
+            rdb_session,
+            delivery_attempt_id=cleanup_id,
+            status=ExternalChannelDeliveryStatus.DELIVERED,
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
+            now=_at(30 + len(cleanup_ids)),
+        )
+
+    parts = list(
+        await rdb_session.scalars(
+            sa.select(RDBExternalChannelWorkProjectionPart)
+            .where(RDBExternalChannelWorkProjectionPart.work_id == finish.work_id)
+            .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
+        )
+    )
+    assert len(cleanup_ids) == 2
+    assert all(
+        part.status is ExternalChannelWorkProjectionStatus.DELETED for part in parts
+    )
 
 
 async def test_recreated_tracker_catches_up_to_latest_desired_revision(

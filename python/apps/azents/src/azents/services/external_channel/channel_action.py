@@ -40,12 +40,19 @@ from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
+from azents.services.external_channel.discord_delivery import (
+    DiscordDeliveryClient,
+    DiscordDeliveryResult,
+    DiscordOutboundFile,
+    DiscordOutboundFileContentError,
+)
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferError,
     iter_external_channel_exchange_file_chunks,
     iter_external_channel_outbound_file_chunks,
 )
 from azents.services.external_channel.presentation import (
+    normalize_slack_agent_name,
     prepend_agent_blocks,
     prepend_agent_fallback,
     prepend_agent_markdown,
@@ -77,6 +84,22 @@ def get_slack_delivery_client(
     return SlackConversationClient(http_client)
 
 
+async def get_discord_delivery_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Provide a bounded HTTP client for Discord message delivery."""
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
+        yield client
+
+
+def get_discord_delivery_client(
+    http_client: Annotated[
+        httpx.AsyncClient,
+        Depends(get_discord_delivery_http_client),
+    ],
+) -> DiscordDeliveryClient:
+    """Provide the Discord Channel Action adapter."""
+    return DiscordDeliveryClient(http_client)
+
+
 @dataclass
 class ExternalChannelActionService:
     """Commit Channel Work before attempting provider operations once."""
@@ -96,6 +119,10 @@ class ExternalChannelActionService:
     slack_client: Annotated[
         SlackConversationClient,
         Depends(get_slack_delivery_client),
+    ]
+    discord_client: Annotated[
+        DiscordDeliveryClient,
+        Depends(get_discord_delivery_client),
     ]
     exchange_file_service: Annotated[
         ExchangeFileService,
@@ -175,6 +202,10 @@ class ExternalChannelActionService:
             await session.commit()
         reply_delivered = (
             committed.work_status is not ExternalChannelWorkStatus.FINISHED
+            or any(
+                delivery.operation is ExternalChannelDeliveryOperation.REPLY
+                for delivery in committed.deliveries
+            )
         )
         for delivery in committed.deliveries:
             if (
@@ -182,7 +213,8 @@ class ExternalChannelActionService:
                 and delivery.status is not ExternalChannelDeliveryStatus.PENDING
             ):
                 reply_delivered = (
-                    delivery.status is ExternalChannelDeliveryStatus.DELIVERED
+                    reply_delivered
+                    and delivery.status is ExternalChannelDeliveryStatus.DELIVERED
                 )
             if delivery.status is ExternalChannelDeliveryStatus.PENDING:
                 if (
@@ -211,7 +243,10 @@ class ExternalChannelActionService:
                     authority=authority,
                 )
                 if delivery.operation is ExternalChannelDeliveryOperation.REPLY:
-                    reply_delivered = outcome is ExternalChannelDeliveryStatus.DELIVERED
+                    reply_delivered = (
+                        reply_delivered
+                        and outcome is ExternalChannelDeliveryStatus.DELIVERED
+                    )
         async with self.session_manager() as session:
             result = await self.repository.complete_action(
                 session,
@@ -363,7 +398,7 @@ class ExternalChannelActionService:
         file_storage: FileStorage | None,
         agent_id: str | None,
         authority: SessionResourceAuthority | None,
-    ) -> SlackControlMessageResult:
+    ) -> SlackControlMessageResult | DiscordDeliveryResult:
         if target.encrypted_credentials is None:
             return SlackControlMessageResult(
                 status="failed",
@@ -382,7 +417,144 @@ class ExternalChannelActionService:
                     authority=authority,
                 )
             case ExternalChannelProvider.DISCORD:
-                raise RuntimeError("Discord delivery is not enabled.")
+                return await self._deliver_discord(
+                    target,
+                    bot_token=credentials.bot_token,
+                    file_storage=file_storage,
+                    agent_id=agent_id,
+                    authority=authority,
+                )
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    async def _deliver_discord(
+        self,
+        target: ChannelDeliveryTarget,
+        *,
+        bot_token: str,
+        file_storage: FileStorage | None,
+        agent_id: str | None,
+        authority: SessionResourceAuthority | None,
+    ) -> DiscordDeliveryResult:
+        """Deliver one Discord text or multipart file mutation."""
+        payload = target.request_payload
+        guild_id = payload.get("guild_id")
+        channel_id = payload.get("channel_id")
+        if (
+            not isinstance(guild_id, str)
+            or not guild_id.isdigit()
+            or target.provider_tenant_id != guild_id
+            or not isinstance(channel_id, str)
+            or not channel_id.isdigit()
+        ):
+            return _discord_invalid_payload()
+        files = _outbound_files(payload.get("files"))
+        if files is None:
+            return _discord_invalid_payload()
+        match target.operation:
+            case (
+                ExternalChannelDeliveryOperation.REPLY
+                | ExternalChannelDeliveryOperation.PROGRESS_CREATE
+            ):
+                text = payload.get("text")
+                if not isinstance(text, str):
+                    return _discord_invalid_payload()
+                if files:
+                    runtime_files = [
+                        file
+                        for file in files
+                        if file.source is ExternalChannelOutboundFileSource.RUNTIME
+                    ]
+                    exchange_files = [
+                        file
+                        for file in files
+                        if file.source is ExternalChannelOutboundFileSource.EXCHANGE
+                    ]
+                    if runtime_files and (
+                        file_storage is None
+                        or agent_id is None
+                        or not callable(getattr(file_storage, "read_range", None))
+                    ):
+                        return DiscordDeliveryResult(
+                            status="failed",
+                            provider_message_key=None,
+                            error_kind="runtime_file_source_unavailable",
+                            error_summary=(
+                                "The original Runtime file source is unavailable."
+                            ),
+                        )
+                    if exchange_files and authority is None:
+                        return DiscordDeliveryResult(
+                            status="failed",
+                            provider_message_key=None,
+                            error_kind="exchange_file_source_unavailable",
+                            error_summary=(
+                                "The original Exchange file source is unavailable."
+                            ),
+                        )
+                    ranged_storage = (
+                        None
+                        if file_storage is None
+                        else cast(RangedFileStorage, file_storage)
+                    )
+                    return await self.discord_client.create_file_message(
+                        bot_token=bot_token,
+                        guild_id=guild_id,
+                        channel_id=channel_id,
+                        content=_discord_agent_content(target, text),
+                        files=tuple(
+                            DiscordOutboundFile(
+                                filename=file.filename,
+                                media_type=file.media_type,
+                                length=file.expected_size,
+                                content=lambda file=file: _discord_outbound_content(
+                                    manifest=file,
+                                    file_storage=ranged_storage,
+                                    agent_id=agent_id,
+                                    exchange_file_service=self.exchange_file_service,
+                                    authority=authority,
+                                ),
+                            )
+                            for file in files
+                        ),
+                        delivery_attempt_id=target.delivery_attempt_id,
+                    )
+                return await self.discord_client.create_message(
+                    bot_token=bot_token,
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    content=_discord_agent_content(target, text),
+                    delivery_attempt_id=target.delivery_attempt_id,
+                )
+            case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
+                text = payload.get("text")
+                message_id = _discord_provider_message_id(
+                    payload.get("provider_message_key"),
+                    guild_id=guild_id,
+                )
+                if not isinstance(text, str) or message_id is None:
+                    return _discord_invalid_payload()
+                return await self.discord_client.update_message(
+                    bot_token=bot_token,
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    content=_discord_agent_content(target, text),
+                )
+            case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
+                message_id = _discord_provider_message_id(
+                    payload.get("provider_message_key"),
+                    guild_id=guild_id,
+                )
+                if message_id is None:
+                    return _discord_invalid_payload()
+                return await self.discord_client.delete_message(
+                    bot_token=bot_token,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                )
+            case ExternalChannelDeliveryOperation.CONTROL_MESSAGE:
+                return _discord_invalid_payload()
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -542,12 +714,47 @@ def _provider_message_ts(value: object) -> str | None:
     return message_ts or None
 
 
+def _discord_provider_message_id(
+    value: object,
+    *,
+    guild_id: str,
+) -> str | None:
+    """Extract an exact message snowflake from one canonical Discord key."""
+    if not isinstance(value, str):
+        return None
+    provider, separator, remainder = value.partition(":")
+    if provider != "discord" or not separator:
+        return None
+    message_guild_id, separator, message_id = remainder.partition(":")
+    if not separator or message_guild_id != guild_id or not message_id.isdigit():
+        return None
+    return message_id
+
+
+def _discord_agent_content(target: ChannelDeliveryTarget, text: str) -> str:
+    """Prefix visible Discord text with a safely rendered current Agent name."""
+    name = normalize_slack_agent_name(target.agent_name)
+    if name is None:
+        return text
+    escaped_name = name.replace("\\", "\\\\").replace("*", "\\*")
+    return f"**{escaped_name}**\n{text}"
+
+
 def _invalid_payload() -> SlackControlMessageResult:
     return SlackControlMessageResult(
         status="failed",
         provider_message_key=None,
         error_kind="provider_payload_invalid",
         error_summary="The committed provider request is incomplete.",
+    )
+
+
+def _discord_invalid_payload() -> DiscordDeliveryResult:
+    return DiscordDeliveryResult(
+        status="failed",
+        provider_message_key=None,
+        error_kind="provider_payload_invalid",
+        error_summary="The committed Discord provider request is incomplete.",
     )
 
 
@@ -609,6 +816,45 @@ async def _slack_outbound_content(
                 assert_never(unreachable)
     except ExternalChannelFileTransferError as error:
         raise SlackOutboundFileContentError from error
+
+
+async def _discord_outbound_content(
+    *,
+    manifest: ExternalChannelOutboundFileManifest,
+    file_storage: RangedFileStorage | None,
+    agent_id: str | None,
+    exchange_file_service: ExchangeFileService,
+    authority: SessionResourceAuthority | None,
+) -> AsyncIterator[bytes]:
+    """Yield one current source once for a Discord multipart request."""
+    try:
+        match manifest.source:
+            case ExternalChannelOutboundFileSource.RUNTIME:
+                if file_storage is None or agent_id is None:
+                    raise ExternalChannelFileTransferError(
+                        "Runtime file source is unavailable."
+                    )
+                async for chunk in iter_external_channel_outbound_file_chunks(
+                    file_storage=file_storage,
+                    manifest=manifest,
+                    agent_id=agent_id,
+                ):
+                    yield chunk
+            case ExternalChannelOutboundFileSource.EXCHANGE:
+                if authority is None:
+                    raise ExternalChannelFileTransferError(
+                        "Exchange file source is unavailable."
+                    )
+                async for chunk in iter_external_channel_exchange_file_chunks(
+                    exchange_file_service=exchange_file_service,
+                    manifest=manifest,
+                    authority=authority,
+                ):
+                    yield chunk
+            case _ as unreachable:
+                assert_never(unreachable)
+    except ExternalChannelFileTransferError as error:
+        raise DiscordOutboundFileContentError from error
 
 
 def _blocks(value: object) -> list[dict[str, object]] | None:

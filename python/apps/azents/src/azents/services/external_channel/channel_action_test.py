@@ -39,6 +39,11 @@ from azents.services.external_channel.channel_action import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
+from azents.services.external_channel.discord_delivery import (
+    DiscordDeliveryClient,
+    DiscordDeliveryResult,
+    DiscordOutboundFile,
+)
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
     SlackConversationClient,
@@ -273,6 +278,53 @@ class _SlackClient:
         return self._result()
 
 
+class _DiscordClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+        self.uploaded: list[tuple[str, bytes]] = []
+
+    async def create_message(self, **kwargs: object) -> DiscordDeliveryResult:
+        self.calls.append(("create", kwargs))
+        return DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+
+    async def create_file_message(self, **kwargs: object) -> DiscordDeliveryResult:
+        files = cast(tuple[DiscordOutboundFile, ...], kwargs["files"])
+        for file in files:
+            self.uploaded.append(
+                (file.filename, b"".join([chunk async for chunk in file.content()]))
+            )
+        self.calls.append(("file", kwargs))
+        return DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+
+    async def update_message(self, **kwargs: object) -> DiscordDeliveryResult:
+        self.calls.append(("update", kwargs))
+        return DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+
+    async def delete_message(self, **kwargs: object) -> DiscordDeliveryResult:
+        self.calls.append(("delete", kwargs))
+        return DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
+        )
+
+
 class _RangedStorage:
     def __init__(self, body: bytes) -> None:
         self.body = body
@@ -316,6 +368,7 @@ def _service(
     repository: _RepositoryDouble,
     slack_client: _SlackClient,
     exchange_file_service: _ExchangeFileService | None = None,
+    discord_client: _DiscordClient | None = None,
 ) -> ExternalChannelActionService:
     return ExternalChannelActionService(
         session_manager=cast(
@@ -328,6 +381,7 @@ def _service(
             _CredentialsCodec(),
         ),
         slack_client=cast(SlackConversationClient, slack_client),
+        discord_client=cast(DiscordDeliveryClient, discord_client or _DiscordClient()),
         exchange_file_service=cast(
             ExchangeFileService,
             exchange_file_service or _ExchangeFileService(),
@@ -470,6 +524,117 @@ async def test_failed_delivery_is_terminal_and_not_reported_as_success() -> None
         (ExternalChannelDeliveryStatus.FAILED, None, "resource_unavailable")
     ]
     assert events.count("provider") == 1
+
+
+@pytest.mark.asyncio
+async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> None:
+    """Discord reply attempts retain durable ordering and shared-App attribution."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "agent_name": "Research * Agent",
+            "request_payload": {
+                "guild_id": "111",
+                "channel_id": "333",
+                "text": "Reply",
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.DELIVERED,
+            "discord:111:555",
+            None,
+        )
+    ]
+    assert discord_client.calls == [
+        (
+            "create",
+            {
+                "bot_token": "xoxb-secret",
+                "guild_id": "111",
+                "channel_id": "333",
+                "content": "**Research \\* Agent**\nReply",
+                "delivery_attempt_id": "delivery-1",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discord_file_delivery_streams_the_current_runtime_source() -> None:
+    """Discord multipart delivery reads only the bounded current Runtime source."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "request_payload": {
+                "guild_id": "111",
+                "channel_id": "333",
+                "text": "Report",
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        path="/workspace/agent/report.txt",
+                        filename="report.txt",
+                        media_type="text/plain",
+                        expected_size=6,
+                    ).model_dump(mode="json")
+                ],
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+    )
+    storage = _RangedStorage(b"report")
+
+    await service.attempt_delivery(
+        "delivery-1",
+        file_storage=cast(FileStorage, storage),
+        agent_id="agent-1",
+    )
+
+    assert discord_client.calls[0][0] == "file"
+    assert discord_client.uploaded == [("report.txt", b"report")]
+    assert storage.calls == [
+        ("/workspace/agent/report.txt", "agent-1", 0, 6),
+        ("/workspace/agent/report.txt", "agent-1", 6, 1),
+    ]
 
 
 @pytest.mark.asyncio
@@ -832,6 +997,62 @@ async def test_recovered_failed_final_reply_skips_tracker_deletion() -> None:
     assert repository.skipped == [
         ("cleanup", "final_reply_not_delivered"),
     ]
+    assert "provider" not in events
+
+
+@pytest.mark.asyncio
+async def test_finish_without_a_final_reply_skips_tracker_deletion() -> None:
+    """A FINISH action without a reply cannot remove the existing Tracker."""
+    events: list[str] = []
+    committed = ChannelActionCommit(
+        action_id="action-finish",
+        binding_id="binding-1",
+        work_id="work-1",
+        work_status=ExternalChannelWorkStatus.FINISHED,
+        state_revision=3,
+        deliveries=[
+            ChannelWorkDelivery(
+                id="cleanup",
+                operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+                created_at=_at(1),
+                completed_at=None,
+            ),
+        ],
+    )
+    repository = _ExecutionRepositoryDouble(events, committed)
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    await service.execute(
+        session_id="session-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        client_tool_call_id="call-finish-without-reply",
+        binding_id="binding-1",
+        mode=ExternalChannelActionMode.FINISH,
+        message=None,
+        title=None,
+        tasks=None,
+        files=(),
+        file_storage=None,
+    )
+
+    assert repository.skipped == [("cleanup", "final_reply_not_delivered")]
     assert "provider" not in events
 
 
