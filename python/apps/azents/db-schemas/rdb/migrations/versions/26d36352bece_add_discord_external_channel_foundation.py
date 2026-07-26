@@ -285,9 +285,7 @@ def upgrade() -> None:
             "resource_id",
             "conversation_admission_id",
             "operation",
-            name=(
-                "uq_external_channel_resource_provisionings_resource_admission_operation"
-            ),
+            name=("uq_ec_resource_provisionings_admission_operation"),
         ),
     )
     op.create_index(

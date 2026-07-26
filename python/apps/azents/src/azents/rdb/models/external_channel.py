@@ -2417,9 +2417,7 @@ class RDBExternalChannelResourceProvisioning(RDBModel):
         "resource_id",
         "conversation_admission_id",
         "operation",
-        name=(
-            "uq_external_channel_resource_provisionings_resource_admission_operation"
-        ),
+        name=("uq_ec_resource_provisionings_admission_operation"),
     )
     IX_STATUS_CREATED_AT = sa.Index(
         "ix_external_channel_resource_provisionings_status_created_at",
