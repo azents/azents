@@ -36,6 +36,9 @@ class FakeState:
             self.membership_scenario = "member"
             self.history_scenario = "ok"
             self.permalink_scenario = "ok"
+            self.provider_app_id = "A-E2E"
+            self.provider_team_id = "T-E2E"
+            self.provider_bot_user_id = "U-BOT-E2E"
             self.granted_scopes = (
                 "app_mentions:read",
                 "channels:history",
@@ -59,6 +62,10 @@ class FakeState:
                 "file.upload": "available",
                 "files.completeUploadExternal": "available",
             }
+            self.view_scenarios: dict[str, str] = {
+                "views.open": "available",
+                "views.update": "available",
+            }
             self.files: dict[str, dict[str, object]] = {}
             self.uploads: dict[str, dict[str, object]] = {}
             self.history_pages: list[list[dict[str, object]]] = []
@@ -67,11 +74,13 @@ class FakeState:
             self.request_counts: dict[str, int] = {}
             self.requests: list[dict[str, object]] = []
             self.deliveries: list[dict[str, object]] = []
+            self.views: list[dict[str, object]] = []
             self.socket_connections = 0
             self.socket_envelope_ids: list[str] = []
             self.socket_acknowledgements: list[str] = []
             self._message_sequence = 0
             self._upload_sequence = 0
+            self._view_sequence = 0
 
     def configure(self, payload: dict[str, object]) -> None:
         """Apply one bounded deterministic provider scenario."""
@@ -80,9 +89,13 @@ class FakeState:
             "membership_scenario",
             "history_scenario",
             "permalink_scenario",
+            "provider_app_id",
+            "provider_team_id",
+            "provider_bot_user_id",
             "granted_scopes",
             "delivery_scenarios",
             "file_scenarios",
+            "view_scenarios",
             "files",
             "history_pages",
             "socket_envelopes",
@@ -96,6 +109,9 @@ class FakeState:
                 "membership_scenario",
                 "history_scenario",
                 "permalink_scenario",
+                "provider_app_id",
+                "provider_team_id",
+                "provider_bot_user_id",
             ):
                 value = payload.get(name)
                 if value is not None:
@@ -132,6 +148,17 @@ class FakeState:
                         file_scenarios,
                     ).items()
                 }
+            view_scenarios = payload.get("view_scenarios")
+            if view_scenarios is not None:
+                if not isinstance(view_scenarios, dict):
+                    raise ValueError("view_scenarios must be an object.")
+                self.view_scenarios = {
+                    str(key): str(value)
+                    for key, value in cast(
+                        dict[object, object],
+                        view_scenarios,
+                    ).items()
+                }
             files = payload.get("files")
             if files is not None:
                 self.files = _configured_files(files)
@@ -152,11 +179,13 @@ class FakeState:
             self.request_counts = {}
             self.requests = []
             self.deliveries = []
+            self.views = []
             self.uploads = {}
             self.socket_connections = 0
             self.socket_envelope_ids = []
             self.socket_acknowledgements = []
             self._upload_sequence = 0
+            self._view_sequence = 0
 
     def record_request(
         self,
@@ -207,6 +236,35 @@ class FakeState:
             upload["uploaded"] = matched
             return matched
 
+    def record_view(
+        self,
+        *,
+        operation: str,
+        requested_view_id: str | None,
+        callback_id: str | None,
+        private_metadata: str | None,
+        route_ids: list[str],
+        has_submit: bool,
+    ) -> tuple[str, str]:
+        """Record one sanitized view mutation and return provider view identity."""
+        with self.lock:
+            self._view_sequence += 1
+            view_id = requested_view_id or f"V-E2E-{self._view_sequence}"
+            view_hash = f"hash-{self._view_sequence}"
+            self.views.append(
+                {
+                    "operation": operation,
+                    "view_id": view_id,
+                    "view_hash": view_hash,
+                    "callback_id": callback_id,
+                    "private_metadata": private_metadata,
+                    "route_ids": route_ids,
+                    "has_submit": has_submit,
+                    "outcome": "delivered",
+                }
+            )
+            return view_id, view_hash
+
     def completed_uploads(
         self,
         file_ids: list[str],
@@ -231,6 +289,7 @@ class FakeState:
                 "request_counts": dict(self.request_counts),
                 "requests": list(self.requests),
                 "deliveries": list(self.deliveries),
+                "views": list(self.views),
                 "socket": {
                     "connections": self.socket_connections,
                     "envelope_ids": list(self.socket_envelope_ids),
@@ -324,6 +383,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if operation in {"chat.postMessage", "chat.update", "chat.delete"}:
             self._delivery(operation, body)
             return
+        if operation in {"views.open", "views.update"}:
+            self._view_mutation(operation, body)
+            return
         if operation == "files.getUploadURLExternal":
             self._get_upload_url(body)
             return
@@ -344,8 +406,8 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             200,
             {
                 "ok": True,
-                "team_id": "T-E2E",
-                "user_id": "U-BOT-E2E",
+                "team_id": self.state.provider_team_id,
+                "user_id": self.state.provider_bot_user_id,
                 "bot_id": "B-E2E",
             },
             headers={"X-OAuth-Scopes": ",".join(self.state.granted_scopes)},
@@ -362,7 +424,47 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "bot": {
                     "id": bot_id,
-                    "app_id": "A-E2E",
+                    "app_id": self.state.provider_app_id,
+                },
+            },
+        )
+
+    def _view_mutation(
+        self,
+        operation: str,
+        body: dict[str, object],
+    ) -> None:
+        """Capture bounded selector state without retaining triggers or visible text."""
+        with self.state.lock:
+            scenario = self.state.view_scenarios.get(operation, "available")
+        if scenario == "trigger_expired":
+            self._json_response(200, {"ok": False, "error": "trigger_expired"})
+            return
+        if scenario == "invalid_hash":
+            self._json_response(200, {"ok": False, "error": "invalid_hash"})
+            return
+        if self._common_failure(scenario):
+            return
+        view = body.get("view")
+        typed_view = cast(dict[str, object], view) if isinstance(view, dict) else {}
+        route_ids = _selector_route_ids(typed_view)
+        callback_id = _optional_string(typed_view, "callback_id")
+        private_metadata = _optional_string(typed_view, "private_metadata")
+        view_id, view_hash = self.state.record_view(
+            operation=operation,
+            requested_view_id=_optional_string(body, "view_id"),
+            callback_id=callback_id,
+            private_metadata=private_metadata,
+            route_ids=route_ids,
+            has_submit=isinstance(typed_view.get("submit"), dict),
+        )
+        self._json_response(
+            200,
+            {
+                "ok": True,
+                "view": {
+                    "id": view_id,
+                    "hash": view_hash,
                 },
             },
         )
@@ -638,6 +740,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         timestamp = _optional_string(body, "ts") or self.state.next_message_timestamp()
         approval_request_id = _approval_request_id(body)
+        action_ids, selector_admission_id = _selector_control_evidence(body)
         delivery: dict[str, object] = {
             "operation": operation,
             "channel": _optional_string(body, "channel"),
@@ -646,6 +749,10 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             "outcome": "delivered",
             "approval_request_id": approval_request_id,
         }
+        if action_ids:
+            delivery["action_ids"] = action_ids
+        if selector_admission_id is not None:
+            delivery["selector_admission_id"] = selector_admission_id
         blocks = body.get("blocks")
         typed_blocks = cast(list[object], blocks) if isinstance(blocks, list) else []
         first_block: object | None = typed_blocks[0] if typed_blocks else None
@@ -913,6 +1020,25 @@ def _approval_request_id(payload: dict[str, object]) -> str | None:
     return None
 
 
+def _selector_control_evidence(
+    payload: dict[str, object],
+) -> tuple[list[str], str | None]:
+    """Return selector action IDs and its opaque admission without visible copy."""
+    action_ids: list[str] = []
+    selector_admission_id: str | None = None
+    for block in _object_list_or_empty(payload.get("blocks")):
+        for element in _object_list_or_empty(block.get("elements")):
+            action_id = element.get("action_id")
+            if not isinstance(action_id, str) or not action_id:
+                continue
+            action_ids.append(action_id)
+            if action_id == "azents_agent_selector_open":
+                value = element.get("value")
+                if isinstance(value, str) and value:
+                    selector_admission_id = value
+    return action_ids, selector_admission_id
+
+
 def _query_metadata(query: dict[str, list[str]]) -> dict[str, object]:
     return {
         key: values[0]
@@ -936,6 +1062,21 @@ def _body_metadata(body: dict[str, object]) -> dict[str, object]:
     if isinstance(files, list):
         metadata["file_count"] = len(cast(list[object], files))
     return metadata
+
+
+def _selector_route_ids(view: dict[str, object]) -> list[str]:
+    """Extract only bounded selector option identities from one modal payload."""
+    route_ids: list[str] = []
+    for block in _object_list_or_empty(view.get("blocks")):
+        element = block.get("element")
+        if not isinstance(element, dict):
+            continue
+        options = cast(dict[str, object], element).get("options")
+        for option in _object_list_or_empty(options):
+            value = option.get("value")
+            if isinstance(value, str) and value:
+                route_ids.append(value)
+    return route_ids
 
 
 def _read_http_headers(connection: socket.socket) -> dict[str, str]:

@@ -635,6 +635,7 @@ def _configure_azents_server_container(
             _SLACK_PROVIDER_INTERNAL_API_URL,
         )
         .with_env("AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET", "true")
+        .with_env("AZ_EXTERNAL_CHANNEL_MULTI_APP_ENABLED", "true")
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")
         .with_env("AZ_AGENT_HOME_IDLE_TIMEOUT_SECS", "60")
