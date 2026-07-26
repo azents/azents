@@ -896,7 +896,7 @@ def _remove_owned_orphan(
             str(PurePath(parent) / "placeholder"),
             create=False,
         )
-    except OSError:
+    except OSError, _TransferFailure:
         return False
     try:
         observed = os.stat(temporary_name, dir_fd=parent_fd, follow_symlinks=False)
