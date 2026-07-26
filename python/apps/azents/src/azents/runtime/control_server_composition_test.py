@@ -13,6 +13,7 @@ from azents.runtime.control_server import (
     RuntimeControlSettings,
     repair_transfer_once,
     runtime_control_server_lifespan,
+    validate_runtime_control_transfer_settings,
 )
 
 
@@ -150,6 +151,23 @@ def test_runtime_control_server_keeps_default_grpc_message_limits() -> None:
     assert "grpc.aio.server()" in source
     assert "max_receive_message_length" not in source
     assert "max_send_message_length" not in source
+
+
+def test_transfer_settings_reject_unbounded_or_invalid_deployment_values() -> None:
+    """Control refuses unsafe transfer bounds before composing services."""
+    settings = _settings()
+    settings = settings.model_copy(
+        update={"runtime_control_transfer_terminal_ttl_seconds": 3_601}
+    )
+
+    with pytest.raises(ValueError, match="within 3,600 seconds"):
+        validate_runtime_control_transfer_settings(settings)
+
+    settings = _settings().model_copy(
+        update={"runtime_control_transfer_multipart_part_bytes": 1}
+    )
+    with pytest.raises(ValueError, match="at least 5 MiB"):
+        validate_runtime_control_transfer_settings(settings)
 
 
 @pytest.mark.asyncio

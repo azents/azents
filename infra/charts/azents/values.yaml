@@ -76,6 +76,30 @@ server:
     reconcileIntervalSeconds: 15
     lifecycleRetryDelaySeconds: 15
     startTimeoutSeconds: 300
+    transfer:
+      stateBackend: redis
+      redisNamespace: azents:runtime:transfer
+      perRuntimeAttempts: 8
+      perRuntimeBytes: 8388608
+      deploymentAttempts: 32
+      deploymentBytes: 33554432
+      admissionLeaseSeconds: 300
+      consumerLeaseSeconds: 60
+      streamLeaseSeconds: 30
+      terminalTtlSeconds: 300
+      listPageSize: 100
+      maxConcurrentDownloads: 4
+      maxConcurrentUploads: 4
+      chunkBytes: 262144
+      multipartPartBytes: 5242880
+      repairIntervalSeconds: 5
+      objectPrefix: runtime-transfer
+      lifecycleAcknowledgement:
+        prefixExpirationHours: 1
+        incompleteMultipartAbortHours: 1
+        owner: ""
+        evidenceTimestamp: ""
+        rollbackOwner: ""
     tls:
       existingSecret: ""
       certificateKey: tls.crt
