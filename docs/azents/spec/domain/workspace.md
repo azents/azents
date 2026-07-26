@@ -13,6 +13,10 @@ code_paths:
   - python/apps/azents/src/azents/services/workspace_user/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
   - python/apps/azents/src/azents/services/workspace_join_request/**
+  - python/apps/azents/src/azents/services/external_channel/management.py
+  - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
+  - python/apps/azents/src/azents/core/auth/permissions.py
+  - python/apps/azents/src/azents/core/auth/roles.py
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
@@ -40,6 +44,7 @@ code_paths:
   - python/apps/azents/src/azents/api/internal/agent_home/v1/projects.py
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/features/workspace/**
+  - typescript/apps/azents-web/src/features/external-channel-workspace/**
   - typescript/apps/azents-web/src/features/agent-workspace/**
   - typescript/apps/azents-web/src/features/agents/AgentAutomaticProjectsPage.tsx
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
@@ -67,9 +72,13 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/agents/{agent_id}/git-refs
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-24
-spec_version: 47
+last_verified_at: 2026-07-26
+spec_version: 48
 ---
 
 # Workspace & Membership
@@ -335,6 +344,26 @@ A non-primary session can own a Git worktree allocation created by a `create_git
 
 Each created worktree is prompt-eligible only through its context-owned `SessionWorkspaceProject` projection, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Explicit user-requested cleanup remains session-scoped. After a Session archive transaction commits, archive makes one forced best-effort pass over every non-cleaned root-tree allocation. Successful cleanup removes the owned worktree and Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog and linked Project rows, and marks the allocation cleaned. Failure is recorded and logged but does not fail archive or schedule retry. Durable purge does not inspect or remove physical worktrees and deletes allocation rows through database finalization regardless of cleanup status.
 
+### Workspace Slack Multi Apps
+
+Workspace is the management authority for Slack Multi Apps. Owners and Managers can
+list, create, inspect, validate, edit, and disconnect Multi Apps; manage their
+available/removed Agent catalog; preview destructive impact; and replace or clear
+channel defaults. Members cannot read or mutate this surface. These permissions are
+independent from AgentAdmin, which owns only Single App management.
+
+A Multi App can be created with zero Agents. Agent associations are many-to-many:
+one Multi App may expose several Workspace Agents and one Agent may appear in several
+Apps. App mode is immutable, route addition/re-enable remains rollout-gated, and
+destructive route/default/App mutations use the current connection generation.
+Disconnected Multi Apps remain readable history but are not mutable.
+
+Azents Web exposes Multi management under Workspace integrations. Agent settings
+show Multi associations only as read-only context. An opaque Slack management
+handoff can open the current channel in the Workspace surface, but the Web request
+must authenticate a current Owner or Manager and revalidate handoff expiry and scope
+before reading or replacing the default.
+
 ## Business Rules
 
 At least 7 rules — all actually verified in code:
@@ -416,6 +445,10 @@ stateDiagram-v2
 | List invitations I received | ✅ | ✅ | ✅ | ❌ |
 | Join request | — | — | — | authenticated user |
 | Approve/reject/mute join request | ✅ | ✅ | ❌ | ❌ |
+| Read Slack Multi Apps/routes/defaults | ✅ | ✅ | ❌ | ❌ |
+| Create/edit/disconnect Slack Multi Apps | ✅ | ✅ | ❌ | ❌ |
+| Add/remove/re-enable Multi App Agents | ✅ | ✅ | ❌ | ❌ |
+| Replace/clear Multi App channel defaults | ✅ | ✅ | ❌ | ❌ |
 
 > ✅ = allowed, ❌ = forbidden, "admin" = path exposed only in admin API. Public API role-based guards are implemented through `WorkspaceMember` / manager guard dependencies; at time of writing, admin API paths use separate internal auth.
 
@@ -458,6 +491,13 @@ stateDiagram-v2
 | `chat_v1_register_agent_project` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` | `[project-existing-directory]` |
 | `chat_v1_delete_agent_project` | DELETE `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` | `[project-registry-only-delete]` |
 | `chat_v1_cleanup_session_git_worktree` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` | `[worktree-cleanup-authority]`, `[worktree-cleanup-non-force]` |
+| `external_channel_v1_list_multi_slack_connections` | GET `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi` | Workspace External Channel read permission |
+| `external_channel_v1_setup_multi_slack_connection` | POST `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi` | Workspace External Channel write permission; rollout gate |
+| `external_channel_v1_get_multi_slack_connection` | GET `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}` | Workspace boundary; disconnected history readable |
+| `external_channel_v1_add_multi_slack_route` | POST `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents` | Workspace External Channel write permission; rollout gate |
+| `external_channel_v1_remove_multi_slack_route` | DELETE `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}` | generation fence and impact scope |
+| `external_channel_v1_replace_multi_slack_channel_default` | PUT `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id}` | generation fence and available route |
+| `external_channel_v1_disconnect_multi_slack_connection` | DELETE `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}` | generation fence; terminal mutation |
 
 ### Admin API
 
@@ -493,6 +533,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-26 (spec_version=48)** — Added Workspace Owner/Manager authority for
+  zero-or-more-Agent Slack Multi Apps, many-to-many catalogs, channel defaults,
+  generation-fenced lifecycle, and authenticated Slack management handoffs.
 - **2026-07-24 (spec_version=47)** — Added the revisioned Agent automatic root
   Session Project policy and corrected authoritative Project ownership to shared
   `SessionAgentContext` rows inherited by subagent Sessions.

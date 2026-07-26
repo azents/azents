@@ -19,8 +19,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-23
-spec_version: 9
+last_verified_at: 2026-07-26
+spec_version: 10
 ---
 
 # External Channel Lifecycle
@@ -33,7 +33,19 @@ Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, clears
 credentials, and commits terminal local state before provider cleanup runs. Repeating
 the command is safe. Disconnected connection rows remain durable history roots but
-are excluded from the active management list.
+are excluded from the active Single management list. Disconnected Multi Apps remain
+readable through Workspace history but reject mutation.
+
+Removing the sole Single App association disconnects the entire App. Removing one
+Multi App route generation-fences the connection, marks only that catalog route
+removed, disconnects bindings owned by that route, and invalidates its active channel
+defaults. It preserves the connection and every other route. A removed Multi route
+can be explicitly re-enabled only while the connection is mutable and Multi growth is
+rollout-enabled; detached historical Agent snapshots never become routable.
+
+Replacing or clearing a Multi channel default is generation-fenced and never rewrites
+an established resource binding. Stale impact previews fail with conflict instead of
+applying a destructive mutation against newer state.
 
 Editing a visible Slack connection replaces App ID, HTTP/Socket transport, and the
 complete submitted credential set in one operation. It clears stale provider
@@ -92,15 +104,22 @@ Connection, route, resource, canonical event, principal, message, revision, Agen
 
 ## Agent Decommission
 
-Agent deletion is asynchronous and irreversible. Its lifecycle status fences new routing and invocation, then decommission archives/terminalizes owned Session state through the normal lifecycle participant, commits provider cleanup intents, and removes direct Agent-owned routes and authorization policy only after required lifecycle work is complete. The finalizer never bypasses restrictive ownership boundaries.
+Agent deletion is asynchronous and irreversible. Its lifecycle status fences new
+routing and invocation, then decommission archives/terminalizes owned Session state
+through the normal lifecycle participant and commits provider cleanup intents. A
+Single App route removal disconnects that App; a Multi App route removal preserves
+the Workspace-owned App and its other Agents. Historical routes retain the immutable
+Agent snapshot with no routable Agent ID. The finalizer never bypasses restrictive
+ownership boundaries.
 
 ## Operational Projection
 
-Agent Settings shows active connection health, reconnect requirement, revocation,
-transport, complete connection editing, unconditional disconnect, and complete
-provider user IDs for grants and blocks. Connection disconnect, grant revocation,
-and block removal use in-product confirmation dialogs. Disconnected connections
-disappear from this active list.
+Agent Settings shows active Single App health, reconnect requirement, revocation,
+transport, complete connection editing, unconditional disconnect, complete provider
+user IDs for grants and blocks, and associated Multi Apps as read-only
+Workspace-managed context. Workspace integrations owns Multi App setup, catalog,
+channel defaults, impact previews, and terminal disconnect. Destructive connection,
+route, default, grant, and block actions use in-product confirmation dialogs.
 
 Session Channels remains readable after archive and displays disconnected bindings,
 ended work, ordered task state, the Activity Tracker projection state, truncation,
@@ -109,6 +128,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 10) — Added mode-specific association removal,
+  generation-fenced Multi route/default/App mutations, invalidated defaults,
+  historical route snapshots, and read-only disconnected Multi Apps.
 - **2026-07-23** (spec_version 9) — Applied existing binding, connection, Session, and
   Agent fences to every file transfer and clarified that transferred bytes add no
   retention or purge participant.

@@ -31,12 +31,14 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_automatic_project/**
   - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/services/runtime_directory_validation.py
   - python/apps/azents/src/azents/services/builtin_capabilities.py
   - python/apps/azents/src/azents/services/workspace_model_settings/**
   - python/apps/azents/src/azents/api/public/agent/**
+  - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/**
   - python/apps/azents/src/azents/api/public/workspace_model_settings/**
   - python/apps/azents/src/azents/engine/run/contracts.py
@@ -48,6 +50,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
+  - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
 api_routes:
   - /agent/v1/workspaces/{handle}/agents
@@ -63,8 +66,10 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-24
-spec_version: 54
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
+last_verified_at: 2026-07-26
+spec_version: 55
 ---
 
 # Agent Domain Spec
@@ -358,12 +363,27 @@ remains a content-free tombstone; no public immediate-delete or request-specific
 path exists.
 
 External Channel state follows the same irreversible coordinator boundary.
-Decommission terminalizes owned routes and active bindings, ends Channel Work,
-commits provider cleanup intents without calling the provider inside the
+Decommission disconnects an Agent-owned Single App, removes only the Agent's route
+from Workspace-owned Multi Apps, terminalizes affected active bindings, ends Channel
+Work, commits provider cleanup intents without calling the provider inside the
 lifecycle transaction, and removes direct Agent-owned grants/blocks only after
-Session lifecycle ownership is satisfied. Canonical provider resources,
-messages, revisions, and delivery audit roots are not cascade-deleted through
-the AgentSession tree.
+Session lifecycle ownership is satisfied. Historical Multi routes retain an
+immutable Agent snapshot with no routable Agent ID. Canonical provider resources,
+messages, revisions, and delivery audit roots are not cascade-deleted through the
+AgentSession tree.
+
+### 2.7 External Channel Single App ownership
+
+Agent administrators own the Single App management surface for their Agent. A Single
+App has exactly one route to that Agent and exposes setup guidance, health,
+validation, complete credential replacement, grants/blocks, and terminal disconnect.
+Removing the association disconnects the App; it never converts the connection into
+a Multi App.
+
+Workspace-owned Multi Apps can also include the Agent, but their catalog and
+connection lifecycle are not Agent-admin mutations. Agent settings show those
+associations as read-only context and direct operators to Workspace integrations.
+Agent visibility does not grant Workspace External Channel permissions.
 
 ## 3. Runtime Resolve
 
@@ -423,6 +443,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-26 | 55 | Added Agent-admin Single App ownership, read-only Multi App association context, and mode-aware decommission behavior |
 | 2026-07-24 | 54 | Added AgentAdmin-managed revisioned automatic root Session Project policy, Runtime-backed non-empty replacement validation, empty clear, and stable conflict semantics |
 | 2026-07-22 | 52 | Integrated External Channel route, binding, Channel Work, cleanup-intent, authorization, and restrictive ownership behavior into Agent decommission |
 | 2026-07-21 | 51 | Added durable finite-retention Agent decommission, admission fencing, and Runtime acknowledgement-gated finalization |

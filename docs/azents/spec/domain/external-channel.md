@@ -28,7 +28,9 @@ code_paths:
   - python/libs/azents-public-client/src/azentspublicclient/models/managed_*.py
   - typescript/apps/azents-web/src/features/external-channel-approval/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
+  - typescript/apps/azents-web/src/features/external-channel-workspace/**
   - typescript/apps/azents-web/src/features/session-channels/**
+  - typescript/apps/azents-web/src/app/(app)/w/[handle]/(workspace)/integrations/slack/**
   - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.module.css
   - typescript/apps/azents-web/src/features/chat/components/ExternalChannelMessage.tsx
@@ -39,11 +41,16 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
+  - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{handoff_id}
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-07-24
-spec_version: 15
+last_verified_at: 2026-07-26
+spec_version: 16
 ---
 
 # External Channel
@@ -52,7 +59,12 @@ spec_version: 15
 
 External Channels connect provider conversations to Azents Agents without treating provider credentials, conversations, participants, or delivery state as AgentSession-owned chat data. Workspace owns connection credentials and provider identity. An Agent route selects the Agent for a connection. A resource represents one provider conversation, and an active binding links that resource to one AgentSession.
 
-Slack is the first provider. Each connection uses a manually configured dedicated Slack App and selects either signed HTTP callbacks or Socket Mode. One Agent may own multiple connections, and one AgentSession may contain multiple independent bindings.
+Slack is the first provider. Each connection uses a manually configured Slack App,
+selects either signed HTTP callbacks or Socket Mode, and has an immutable App mode.
+A Single App is managed by one Agent's administrators and has exactly one Agent
+route. A Multi App is managed by Workspace Owners and Managers and may have zero or
+more Agent routes. One Agent may appear in several Apps, and one AgentSession may
+contain multiple independent bindings.
 
 ## Ownership and Security Boundaries
 
@@ -74,8 +86,11 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 
 | Record | Current contract |
 | --- | --- |
-| Connection | Workspace-owned provider app identity, selected transport, encrypted credentials, capability/health snapshot, terminal disconnect state, and Socket lease/gap state. |
-| Agent route | Persistent connection-to-Agent relationship. Current Slack management creates a dedicated route. |
+| Connection | Workspace-owned provider app identity, immutable `single` or `multi` mode, selected transport, encrypted credentials, capability/health snapshot, mutation generation, terminal disconnect state, and Socket lease/gap state. |
+| Agent route | Persistent connection-to-Agent relationship. Single Apps require exactly one current route. Multi Apps retain zero or more available or removed catalog routes; immutable Agent identity snapshots preserve history after Agent deletion. |
+| Channel default | Multi App channel-to-route preference. At most one active default exists per connection and provider channel. Removing its route invalidates rather than silently retargets it. |
+| Conversation admission | Durable, expiring unbound-conversation scope that records the initiating provider principal and may become selected exactly once. |
+| Interaction | Idempotent signed Slack shortcut, block-action, navigation, or view-submission claim. Provider triggers stay transient and are never persisted or replayed. |
 | Resource | One Slack thread with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. |
 | Event | Durable provider envelope admission keyed by connection and provider event identity. Processing is at-least-once and domain writes are idempotent. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
@@ -89,7 +104,20 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 ## State Invariants
 
 - Connection status owns provider ingress and credential health: it may be `configuring`, `active`, `degraded`, `reconnect_required`, `disconnecting`, or `disconnected`; disconnect is terminal and does not silently fall back to another transport.
-- A route has no lifecycle state. A dedicated connection has exactly one route; platform routing may later permit multiple routes. New execution requires a locked `active` or `degraded` connection and active Agent lifecycle, so disconnect cannot commit between admission and related writes. Provider health, reconnect, disconnect, and Agent decommission never write route state.
+- App mode is immutable. Existing dedicated connections are Single Apps. Single Apps
+  have exactly one route and association removal disconnects the App. Multi Apps may
+  have zero or more routes; catalog removal is durable history and can be explicitly
+  re-enabled while the rollout gate permits growth.
+- Provider health and reconnect do not rewrite route catalog state. New execution
+  requires a locked `active` or `degraded` connection, an available route, and active
+  Agent lifecycle.
+- An unbound resource resolves only through an existing binding, the Single App's
+  sole route, a valid Multi App channel default, or explicit selector completion, in
+  that order. It never chooses an arbitrary candidate. A resource has at most one
+  active binding, so a later Agent choice cannot replace an established thread.
+- Durable execution mutations are fenced by the current Session owner generation.
+  Provider principals, Slack callback actors, Workspace requesters, and approvers
+  remain provenance or authorization identities and never become the execution User.
 - A resource is `active`, `unavailable`, or `deleted`; hydration is `pending`, `running`, `complete`, `bounded`, or `incomplete`.
 - A binding is either active or disconnected. Activation moves from `waiting_hydration` to `active` only after the admitted-event reconciliation boundary is clear.
 - Connection capabilities expose `download_files` and `upload_files` independently.
@@ -135,12 +163,25 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 
 ## Management Surface
 
-Agent administrators can retrieve a complete copy-ready Slack App Manifest, follow
-equivalent manual Slack UI instructions, create a connection and route, validate a
-connection, replace its App ID, transport, and complete credential set, disconnect
-it terminally, and manage grants and blocks. Saving setup or replacement values
-immediately validates them together. Secret fields remain blank and required when an
-existing connection is edited.
+Agent administrators manage Single Apps from Agent settings. They can retrieve a
+complete copy-ready Slack App Manifest, follow equivalent manual Slack UI
+instructions, create the App and its sole route, validate it, replace its App ID,
+transport, and complete credential set, disconnect it terminally, and manage grants
+and blocks. Removing the Single association disconnects the App. Secret fields
+remain blank and required when an existing connection is edited.
+
+Workspace Owners and Managers manage Multi Apps from Workspace integrations.
+Ordinary Members have neither Multi read nor write authority. Multi creation starts
+with zero Agents and remains rollout-gated. The management surface supports paged App
+and Agent catalogs, idempotent Agent association, removed-route re-enable, channel
+defaults, validation and complete credential replacement, impact previews, and
+generation-fenced route removal/default mutation/App disconnect. Disconnected Multi
+Apps remain readable historical records but accept no further mutation.
+
+Agent settings show associated Multi Apps as Workspace-managed read-only context.
+Slack can open an opaque, expiring management handoff for the current Multi App
+channel; the authenticated Web surface rechecks Workspace write permission and
+handoff scope before reading or replacing that channel's default.
 
 Slack validation first uses `auth.test` to resolve Team and Bot identity, then uses
 `bots.info` to verify that the Bot Token's actual App ID equals the configured App
@@ -173,6 +214,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-26** (spec_version 16) — Added immutable Single/Multi App modes,
+  mode-aware route cardinality and resolution, durable selector/default state,
+  Workspace Multi management, generation fences, and read-only disconnected history.
 - **2026-07-24** (spec_version 15) — Defined provider-principal provenance as distinct from
   Userless Team Session execution and made External Channel wake-ups routing-only.
 - **2026-07-24** (spec_version 14) — Added automatic Project policy snapshotting for

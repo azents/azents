@@ -8,6 +8,9 @@ touches_domains: [external-channel, agent, conversation]
 code_paths:
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
+  - python/apps/azents/src/azents/services/external_channel/interaction.py
+  - python/apps/azents/src/azents/services/external_channel/selector.py
+  - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
@@ -23,8 +26,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-07-24
-spec_version: 6
+last_verified_at: 2026-07-26
+spec_version: 7
 ---
 
 # External Channel Authorization
@@ -46,10 +49,19 @@ An unknown human may contribute bounded same-route/resource pending context but 
 
 When the participant invokes the Agent:
 
-1. The event processor creates one idempotent access request for the route and source message.
-2. The request snapshots truncation counters, expires after seven days, and contains an opaque ID.
-3. One Slack Block Kit control-message intent is persisted and attempted once with the participant display label, complete provider user ID, and an authenticated Azents approval URL rendered as a button plus accessible fallback text.
-4. The approval page requires an authenticated user who is an administrator of the routed Agent. Unauthorized, cross-Agent, missing, and expired requests do not disclose the request and appear not found or unavailable.
+1. A bound thread or resolved Single/default route proceeds directly. An unresolved
+   Multi App shortcut or mention first requires one explicit selector admission and
+   validates the chosen route.
+2. The event processor creates one idempotent access request for the selected route
+   and original source message.
+3. The request snapshots truncation counters, expires after seven days, and contains an opaque ID.
+4. One Slack Block Kit control-message intent is persisted and attempted once with the participant display label, complete provider user ID, and an authenticated Azents approval URL rendered as a button plus accessible fallback text.
+5. The approval page requires an authenticated user who is an administrator of the routed Agent. Unauthorized, cross-Agent, missing, and expired requests do not disclose the request and appear not found or unavailable.
+
+Selector completion does not grant access. It preserves the original sender and
+uploader provenance, then applies the chosen Agent's existing grant, block, and
+approval policy. The Slack callback actor can confirm interaction scope but never
+becomes the execution User or replaces the initiating principal.
 
 ## Decisions
 
@@ -93,6 +105,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 7) — Inserted explicit Multi App selection before
+  Agent-specific access evaluation while preserving source provenance, callback actor
+  isolation, and duplicate selection/decision convergence.
 - **2026-07-24** (spec_version 6) — Kept External Channel principal and administrator identity
   outside Team Session execution, which now derives only from canonical durable work after a
   routing-only wake.

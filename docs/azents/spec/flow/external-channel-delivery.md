@@ -16,6 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
+  - python/apps/azents/src/azents/services/external_channel/presentation.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/session_resource_authority.py
@@ -25,8 +26,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-25
-spec_version: 12
+last_verified_at: 2026-07-26
+spec_version: 13
 ---
 
 # External Channel Delivery and Channel Work
@@ -60,6 +61,21 @@ desired snapshot must fit 64 KiB; an oversized update is rejected before canonic
 state changes so accepted continuation context is never silently truncated. Each
 binding has independent work state even when several bindings share one AgentSession.
 The ordinary Session Todo toolkit is not the Channel Work source of truth.
+
+## Agent Presentation
+
+Every Slack output associated with an Agent starts with that Agent's current display
+name in bold. This applies to conversational replies, checking/progress controls,
+route-resolved approval controls, errors, and file-bearing publication. App-level
+selector controls have no selected Agent and do not invent one. The name is provider
+presentation only and does not alter canonical source text or execution authority.
+
+When the validated Slack installation exposes the required message-customization
+capability and the Agent has a provider-safe image URL, delivery may override the
+message icon. Missing capability, missing or invalid image data, or provider rejection
+falls back to the normal App icon without failing the underlying delivery. Agent
+identity is therefore always present through the required bold name even when icon
+customization is unavailable.
 
 ## Durable Commit Before Provider Calls
 
@@ -189,6 +205,8 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-26** (spec_version 13) — Added the required bold Agent-name prefix for
+  Agent-associated Slack output and capability-aware icon override with safe fallback.
 - **2026-07-25** (spec_version 12) — Added authority-resolved `exchange://` outbound
   sources, explicit source-kind manifests, post-commit Exchange revalidation, supported
   source guidance, and form-encoded Slack external-upload completion.

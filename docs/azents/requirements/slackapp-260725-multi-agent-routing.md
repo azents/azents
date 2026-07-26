@@ -1,7 +1,8 @@
 ---
 title: "Multi-Agent Slack App Routing Requirements"
 created: 2026-07-25
-updated: 2026-07-25
+updated: 2026-07-26
+implemented: 2026-07-26
 tags: [slack, external-channel, agent, frontend, security]
 document_role: primary
 document_type: requirements
