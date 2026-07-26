@@ -1,6 +1,9 @@
 """Static regression checks for mailbox migration safety boundaries."""
 
+import ast
+
 import pytest
+import sqlalchemy as sa
 
 from azents.consts import PROJECT_ROOT
 
@@ -16,6 +19,35 @@ _MIGRATION = (
 
 def _migration_source() -> str:
     return _MIGRATION.read_text()
+
+
+def test_generic_item_key_sql_has_no_bind_parameter_for_suffix() -> None:
+    """The literal colon suffix must not be parsed as a SQLAlchemy bind."""
+    tree = ast.parse(_migration_source())
+    sql_text: str | None = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if (
+            not isinstance(node.func, ast.Attribute)
+            or node.func.attr != "text"
+            or not isinstance(node.func.value, ast.Name)
+            or node.func.value.id != "sa"
+            or not node.args
+            or not isinstance(node.args[0], ast.Constant)
+            or not isinstance(node.args[0].value, str)
+        ):
+            continue
+        if (
+            "'item_key'" in node.args[0].value
+            and "kind::text || chr(58)" in node.args[0].value
+        ):
+            sql_text = node.args[0].value
+            break
+
+    assert sql_text is not None
+    assert "kind::text || chr(58) || '0'" in sql_text
+    assert sa.text(sql_text).compile().params == {}
 
 
 def test_external_resource_preflight_is_mailbox_scoped() -> None:

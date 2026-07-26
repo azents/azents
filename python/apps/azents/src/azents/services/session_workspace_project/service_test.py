@@ -327,7 +327,7 @@ class TestSessionWorkspaceProjectService:
             ActionExecutionCreate(
                 id=None,
                 session_id=fixture.session_id,
-                input_buffer_id="01900000000070008000000000000010",
+                mailbox_item_id="01900000000070008000000000000010",
                 sender_user_id=None,
                 action_type="cleanup_orphan_git_worktrees",
                 action={"type": "cleanup_orphan_git_worktrees"},
@@ -382,7 +382,7 @@ class TestSessionWorkspaceProjectService:
             ActionExecutionCreate(
                 id=None,
                 session_id=fixture.session_id,
-                input_buffer_id="01900000000070008000000000000011",
+                mailbox_item_id="01900000000070008000000000000011",
                 sender_user_id=None,
                 action_type="cleanup_orphan_git_worktrees",
                 action={"type": "cleanup_orphan_git_worktrees"},
@@ -417,7 +417,7 @@ class TestSessionWorkspaceProjectService:
             ActionExecutionCreate(
                 id=None,
                 session_id=fixture.session_id,
-                input_buffer_id="01900000000070008000000000000012",
+                mailbox_item_id="01900000000070008000000000000012",
                 sender_user_id=None,
                 action_type="cleanup_orphan_git_worktrees",
                 action={"type": "cleanup_orphan_git_worktrees"},
@@ -453,7 +453,7 @@ class TestSessionWorkspaceProjectService:
             ActionExecutionCreate(
                 id=None,
                 session_id=fixture.session_id,
-                input_buffer_id="01900000000070008000000000000013",
+                mailbox_item_id="01900000000070008000000000000013",
                 sender_user_id=None,
                 action_type="cleanup_orphan_git_worktrees",
                 action={"type": "cleanup_orphan_git_worktrees"},
@@ -491,7 +491,7 @@ class TestSessionWorkspaceProjectService:
             ActionExecutionCreate(
                 id=None,
                 session_id=fixture.session_id,
-                input_buffer_id="01900000000070008000000000000014",
+                mailbox_item_id="01900000000070008000000000000014",
                 sender_user_id=None,
                 action_type="cleanup_orphan_git_worktrees",
                 action={"type": "cleanup_orphan_git_worktrees"},
@@ -530,7 +530,7 @@ class TestSessionWorkspaceProjectService:
             ActionExecutionCreate(
                 id=None,
                 session_id=fixture.session_id,
-                input_buffer_id="01900000000070008000000000000015",
+                mailbox_item_id="01900000000070008000000000000015",
                 sender_user_id=None,
                 action_type="cleanup_orphan_git_worktrees",
                 action={"type": "cleanup_orphan_git_worktrees"},

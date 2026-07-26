@@ -492,7 +492,7 @@ def upgrade() -> None:
             SET payload = jsonb_build_object(
                 'type', kind::text,
                 'items', jsonb_build_array(jsonb_build_object(
-                    'item_key', kind::text || ':0',
+                    'item_key', kind::text || chr(58) || '0',
                     'presentation_kind', kind::text,
                     'content', content,
                     'metadata', COALESCE(metadata, '{}'::jsonb),
