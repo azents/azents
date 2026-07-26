@@ -29,11 +29,13 @@ import {
   IconCopy,
   IconPencil,
   IconPlugConnected,
+  IconSettings,
   IconShieldCheck,
   IconShieldX,
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import type { ExternalChannelSettingsContainerOutput } from "../containers/useExternalChannelSettingsContainer";
 import type { ConnectionDialogState, ManifestGuidanceState } from "../types";
 import type {
@@ -41,6 +43,7 @@ import type {
   ManagedBlock,
   ManagedConnection,
   ManagedGrant,
+  ManagedMultiConnection,
 } from "@azents/public-client";
 
 function statusColor(status: ExternalChannelConnectionStatus): string {
@@ -205,6 +208,53 @@ function ConnectionRow({
         </Group>
       </Stack>
     </Paper>
+  );
+}
+
+function AssociatedMultiAppRow({
+  connection,
+}: {
+  connection: ManagedMultiConnection;
+}): React.ReactElement {
+  const t = useTranslations("workspace.agents.externalChannels");
+
+  return (
+    <Group
+      justify="space-between"
+      align="flex-start"
+      wrap="wrap"
+      py="sm"
+      data-testid={`associated-multi-app-${connection.id}`}
+    >
+      <Box style={{ minWidth: 0 }}>
+        <Group gap="xs">
+          <Text fw={600} size="sm">
+            {connection.provider_app_id ?? connection.id}
+          </Text>
+          <Badge color={statusColor(connection.status)} variant="light">
+            {t(`status.${connection.status}`)}
+          </Badge>
+          <Badge color="gray" variant="outline">
+            {t(`transport.${connection.transport}`)}
+          </Badge>
+        </Group>
+        <Text size="xs" c="dimmed" mt={4}>
+          {connection.provider_tenant_id ?? t("identityUnavailable")}
+        </Text>
+      </Box>
+      <Group gap="xs">
+        <Badge variant="light">
+          {t("associatedAgentCount", {
+            count: connection.active_agent_count,
+          })}
+        </Badge>
+        <Badge variant="light" color="gray">
+          {t("associatedDefaultCount", {
+            count: connection.configured_default_count,
+          })}
+        </Badge>
+      </Group>
+    </Group>
   );
 }
 
@@ -591,12 +641,14 @@ function ConnectionDialog({
 }
 
 export function ExternalChannelSettings({
+  handle,
   state,
   manifestState,
   dialogState,
   actionError,
   actionTarget,
   actionsBusy,
+  canManageWorkspaceMultiApps,
   onOpenSetup,
   onOpenEdit,
   onCloseDialog,
@@ -699,6 +751,42 @@ export function ExternalChannelSettings({
                 ))
               )}
             </Stack>
+
+            <Paper withBorder radius="lg" p="md">
+              <Stack gap="sm">
+                <Group justify="space-between" align="flex-start">
+                  <Box>
+                    <Text fw={700}>{t("associatedMultiAppsTitle")}</Text>
+                    <Text size="sm" c="dimmed">
+                      {t("associatedMultiAppsDescription")}
+                    </Text>
+                  </Box>
+                  {canManageWorkspaceMultiApps && (
+                    <Button
+                      component={Link}
+                      href={`/w/${handle}/integrations/slack`}
+                      variant="light"
+                      size="xs"
+                      leftSection={<IconSettings size={rem(14)} />}
+                    >
+                      {t("manageWorkspaceApps")}
+                    </Button>
+                  )}
+                </Group>
+                {loaded.associatedMultiApps.length === 0 ? (
+                  <Text size="sm" c="dimmed">
+                    {t("emptyAssociatedMultiApps")}
+                  </Text>
+                ) : (
+                  loaded.associatedMultiApps.map((connection, index) => (
+                    <Box key={connection.id}>
+                      {index > 0 && <Divider />}
+                      <AssociatedMultiAppRow connection={connection} />
+                    </Box>
+                  ))
+                )}
+              </Stack>
+            </Paper>
 
             <Paper withBorder radius="lg" p="md">
               <Stack gap="sm">

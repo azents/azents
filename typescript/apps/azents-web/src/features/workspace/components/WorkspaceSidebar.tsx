@@ -8,6 +8,7 @@
  */
 import { Divider, NavLink, Stack } from "@mantine/core";
 import {
+  IconBrandSlack,
   IconHome2,
   IconLayoutGrid,
   IconSettings,
@@ -37,6 +38,7 @@ export function WorkspaceSidebar({
   const isHome = pathname === basePath;
   const isMembers = pathname === `${basePath}/members`;
   const isToolkits = pathname.startsWith(`${basePath}/toolkits`);
+  const isSlackApps = pathname.startsWith(`${basePath}/integrations/slack`);
   const isSettings = pathname === `${basePath}/settings`;
   const isProfile = pathname === `${basePath}/profile`;
 
@@ -84,6 +86,14 @@ export function WorkspaceSidebar({
         label={t("toolkits")}
         leftSection={<IconTool size={18} />}
         active={isToolkits}
+        onClick={onNavigate}
+      />
+      <NavLink
+        component={Link}
+        href={`${basePath}/integrations/slack`}
+        label={t("slackApps")}
+        leftSection={<IconBrandSlack size={18} />}
+        active={isSlackApps}
         onClick={onNavigate}
       />
       <NavLink
