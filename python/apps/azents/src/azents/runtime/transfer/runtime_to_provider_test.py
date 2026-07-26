@@ -1,5 +1,6 @@
 """Focused Runtime-to-provider batch consumer tests."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -47,6 +48,8 @@ class _Coordinator:
 
     ack_fails: bool = False
     abandon_fails: bool = False
+    second_admit_started: asyncio.Event | None = None
+    release_second_admit: asyncio.Event | None = None
 
     def __post_init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
@@ -60,6 +63,13 @@ class _Coordinator:
     ) -> CoordinatorAdmitTransferResult:
         self.calls.append(("admit", request.identity.transfer_id))
         self.sizes[request.identity.transfer_id] = request.expected_manifest.size or 0
+        if (
+            len([call for call in self.calls if call[0] == "admit"]) == 2
+            and self.second_admit_started is not None
+            and self.release_second_admit is not None
+        ):
+            self.second_admit_started.set()
+            await self.release_second_admit.wait()
         return CoordinatorAdmitTransferResult(
             _status(1, request.identity, self.sizes[request.identity.transfer_id]),
             CoordinatorOpaqueObjectHandle(f"handle-{request.identity.transfer_id}"),
@@ -272,6 +282,8 @@ def _status(
 def _service(
     coordinator: _Coordinator,
     object_store: _ObjectStore,
+    *,
+    consumer_lease_renew_interval: timedelta = timedelta(seconds=1),
 ) -> RuntimeToProviderBatchService:
     return RuntimeToProviderBatchService(
         coordinator=coordinator,
@@ -279,7 +291,7 @@ def _service(
         object_store=object_store,
         clock=lambda: _NOW,
         status_poll_interval=timedelta(milliseconds=1),
-        consumer_lease_renew_interval=timedelta(seconds=1),
+        consumer_lease_renew_interval=consumer_lease_renew_interval,
         maximum_chunk_size=1024 * 1024,
     )
 
@@ -337,6 +349,39 @@ async def test_batch_holds_all_claims_until_provider_completion() -> None:
 
 
 @pytest.mark.asyncio
+async def test_first_claim_renews_while_later_source_prepares() -> None:
+    """The first live claim renews before a delayed second source is admitted."""
+    second_admit_started = asyncio.Event()
+    release_second_admit = asyncio.Event()
+    coordinator = _Coordinator(
+        second_admit_started=second_admit_started,
+        release_second_admit=release_second_admit,
+    )
+    service = _service(
+        coordinator,
+        _ObjectStore(()),
+        consumer_lease_renew_interval=timedelta(milliseconds=1),
+    )
+    preparation = asyncio.create_task(
+        service.prepare(
+            _request(
+                _source("/workspace/agent/first.bin", 5),
+                _source("/workspace/agent/second.bin", 6),
+            )
+        )
+    )
+
+    await second_admit_started.wait()
+    await asyncio.sleep(0.01)
+    release_second_admit.set()
+    batch = await preparation
+
+    first_claim = next(call[1] for call in coordinator.calls if call[0] == "claim")
+    assert ("renew", first_claim) in coordinator.calls
+    await batch.abandon_or_cancel()
+
+
+@pytest.mark.asyncio
 async def test_batch_provider_failure_abandons_every_unacknowledged_source() -> None:
     coordinator = _Coordinator()
     object_store = _ObjectStore(())
@@ -388,6 +433,32 @@ async def test_batch_acknowledgement_recovers_without_restreaming_provider_bytes
     assert [call[0] for call in coordinator.calls].count("status") >= 2
     assert [call[0] for call in coordinator.calls].count("settle") == 1
     assert object_store.maximum_reads == [len(body)]
+
+
+@pytest.mark.asyncio
+async def test_recovery_settles_persisted_completion_without_provider_replay() -> None:
+    """A process-loss recovery settles exact claims without another upload."""
+    body = b"payload"
+    coordinator = _Coordinator()
+    object_store = _ObjectStore((body,))
+    service = _service(coordinator, object_store)
+    batch = await service.prepare(
+        _request(_source("/workspace/agent/payload.bin", len(body)))
+    )
+
+    assert b"".join([chunk async for chunk in batch.iter_source_chunks(0)]) == body
+    recoveries = await batch.provider_completed()
+    await batch.close()
+    calls_before_recovery = list(coordinator.calls)
+
+    await service.recover(recoveries=recoveries)
+
+    recovery_calls = coordinator.calls[len(calls_before_recovery) :]
+    assert [call[0] for call in recovery_calls] == ["ack", "settle"]
+    assert [call for call in coordinator.calls if call[0] == "admit"] == [
+        call for call in calls_before_recovery if call[0] == "admit"
+    ]
+    assert object_store.opened == 1
 
 
 @pytest.mark.asyncio

@@ -59,6 +59,14 @@ class RuntimeToProviderDeliveryExecutor(Protocol):
         """Prepare the Runtime sources selected for one provider completion."""
         ...
 
+    async def recover(
+        self,
+        *,
+        recoveries: tuple[RuntimeToProviderRecovery, ...],
+    ) -> None:
+        """Acknowledge and settle an already completed provider batch."""
+        ...
+
 
 class RuntimeToProviderCoordinator(Protocol):
     """Typed trusted coordinator surface required by provider consumers."""
@@ -187,6 +195,12 @@ class RuntimeToProviderRecovery:
     attempt_id: str
     consumer_claim_id: str
     revision: int
+    runtime_id: str
+    desired_generation: int
+    operation_id: str
+    session_id: str
+    agent_id: str
+    deadline_at: datetime.datetime
 
 
 @dataclass
@@ -220,6 +234,7 @@ class RuntimeToProviderBatch:
         deadline_at: datetime.datetime,
         sources: list[_PreparedRuntimeSource],
         maximum_chunk_size: int,
+        settlement_recovery: bool = False,
     ) -> None:
         self._coordinator = coordinator
         self._resolver = resolver
@@ -230,6 +245,7 @@ class RuntimeToProviderBatch:
         self._deadline_at = deadline_at
         self._sources = sources
         self._maximum_chunk_size = maximum_chunk_size
+        self._settlement_recovery = settlement_recovery
         self._provider_completed = False
         self._closed = False
 
@@ -237,6 +253,11 @@ class RuntimeToProviderBatch:
     def source_count(self) -> int:
         """Return the ordered number of prepared Runtime sources."""
         return len(self._sources)
+
+    @property
+    def deadline_at(self) -> datetime.datetime:
+        """Return the authoritative expiry shared by every batch source."""
+        return self._deadline_at
 
     async def ensure_active(self) -> None:
         """Fail before provider I/O when any batch claim is no longer usable."""
@@ -316,15 +337,39 @@ class RuntimeToProviderBatch:
             if source.lease_failure is not None:
                 raise source.lease_failure
         self._provider_completed = True
-        return tuple(
-            RuntimeToProviderRecovery(
-                transfer_id=source.identity.transfer_id,
-                attempt_id=source.identity.attempt_id,
-                consumer_claim_id=_required_claim_id(source),
-                revision=source.revision,
+        return self.recovery_evidence()
+
+    def recovery_evidence(self) -> tuple[RuntimeToProviderRecovery, ...]:
+        """Return exact claim ownership without exposing object-store identity."""
+        if self._closed:
+            raise RuntimeToProviderTransferError("Runtime provider batch is closed")
+        recoveries: list[RuntimeToProviderRecovery] = []
+        for source in self._sources:
+            session_id = source.identity.session_id
+            agent_id = source.identity.agent_id
+            if session_id is None or agent_id is None:
+                raise RuntimeToProviderTransferError(
+                    "Runtime provider source identity is incomplete"
+                )
+            recoveries.append(
+                RuntimeToProviderRecovery(
+                    transfer_id=source.identity.transfer_id,
+                    attempt_id=source.identity.attempt_id,
+                    consumer_claim_id=_required_claim_id(source),
+                    revision=source.revision,
+                    runtime_id=source.identity.runtime_id,
+                    desired_generation=source.identity.desired_generation,
+                    operation_id=source.identity.operation_id,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    deadline_at=self._deadline_at,
+                )
             )
-            for source in self._sources
-        )
+        return tuple(recoveries)
+
+    def restore_provider_completed(self) -> None:
+        """Mark a reconstructed batch as already completed by its provider."""
+        self._provider_completed = True
 
     async def acknowledge_and_settle(self) -> None:
         """Acknowledge and settle every source after durable provider completion."""
@@ -376,7 +421,7 @@ class RuntimeToProviderBatch:
     async def _acknowledge(self, source: _PreparedRuntimeSource) -> int:
         revision = source.revision
         claim_id = _required_claim_id(source)
-        while self._clock() < self._deadline_at:
+        while self._settlement_recovery or self._clock() < self._deadline_at:
             try:
                 status = await self._coordinator.acknowledge_consumer(
                     CoordinatorConsumerRequest(
@@ -398,6 +443,10 @@ class RuntimeToProviderBatch:
                     "Provider-completed Runtime source acknowledgement was rejected"
                 )
             revision = status.revision
+            if self._settlement_recovery:
+                raise RuntimeToProviderTransferError(
+                    "Provider-completed Runtime source acknowledgement is pending"
+                )
             await asyncio.sleep(self._status_poll_interval.total_seconds())
         raise RuntimeToProviderTransferError(
             "Provider-completed Runtime source acknowledgement was not confirmed"
@@ -405,7 +454,7 @@ class RuntimeToProviderBatch:
 
     async def _settle(self, source: _PreparedRuntimeSource) -> None:
         revision = source.revision
-        while self._clock() < self._deadline_at:
+        while self._settlement_recovery or self._clock() < self._deadline_at:
             try:
                 status = await self._coordinator.settle_transfer(
                     CoordinatorSettleTransferRequest(
@@ -426,6 +475,10 @@ class RuntimeToProviderBatch:
                     "Provider-completed Runtime source was not settled"
                 )
             revision = status.revision
+            if self._settlement_recovery:
+                raise RuntimeToProviderTransferError(
+                    "Provider-completed Runtime source settlement is pending"
+                )
             await asyncio.sleep(self._status_poll_interval.total_seconds())
         raise RuntimeToProviderTransferError(
             "Provider-completed Runtime source settlement was not confirmed"
@@ -547,11 +600,17 @@ class RuntimeToProviderBatchService:
         prepared: list[_PreparedRuntimeSource] = []
         try:
             for index, source in enumerate(request.sources):
-                await self._prepare_source(
+                prepared_source = await self._prepare_source(
                     request=request,
                     source=source,
                     index=index,
                     prepared=prepared,
+                )
+                prepared_source.renewal_task = asyncio.create_task(
+                    self._renew_consumer_lease(
+                        source=prepared_source,
+                        deadline_at=request.deadline_at,
+                    )
                 )
             batch = RuntimeToProviderBatch(
                 coordinator=self.coordinator,
@@ -564,15 +623,9 @@ class RuntimeToProviderBatchService:
                 sources=prepared,
                 maximum_chunk_size=self.maximum_chunk_size,
             )
-            for source in prepared:
-                source.renewal_task = asyncio.create_task(
-                    self._renew_consumer_lease(
-                        source=source,
-                        deadline_at=request.deadline_at,
-                    )
-                )
             return batch
         except asyncio.CancelledError:
+            await _close_prepared_renewals(prepared)
             try:
                 await _cleanup_prepared_sources(
                     coordinator=self.coordinator,
@@ -585,6 +638,7 @@ class RuntimeToProviderBatchService:
                 pass
             raise
         except Exception:
+            await _close_prepared_renewals(prepared)
             await _cleanup_prepared_sources(
                 coordinator=self.coordinator,
                 prepared=prepared,
@@ -593,6 +647,58 @@ class RuntimeToProviderBatchService:
                 status_poll_interval=self.status_poll_interval,
             )
             raise
+
+    async def recover(
+        self,
+        *,
+        recoveries: tuple[RuntimeToProviderRecovery, ...],
+    ) -> None:
+        """Settle exactly the claims recorded after provider completion."""
+        if not recoveries:
+            raise RuntimeToProviderTransferError(
+                "Runtime provider recovery requires at least one claim"
+            )
+        deadline_at = min(recovery.deadline_at for recovery in recoveries)
+        sources = [
+            _PreparedRuntimeSource(
+                source=RuntimeToProviderSource(
+                    runtime_path="recovery",
+                    filename="recovery",
+                    media_type="application/octet-stream",
+                    expected_size=1,
+                ),
+                identity=CoordinatorTransferIdentity(
+                    transfer_id=recovery.transfer_id,
+                    attempt_id=recovery.attempt_id,
+                    runtime_id=recovery.runtime_id,
+                    desired_generation=recovery.desired_generation,
+                    direction=CoordinatorTransferDirection.UPLOAD.value,
+                    operation_id=recovery.operation_id,
+                    session_id=recovery.session_id,
+                    agent_id=recovery.agent_id,
+                ),
+                claim_id=recovery.consumer_claim_id,
+                revision=recovery.revision,
+                verified_object_handle=None,
+                verified_size=None,
+                verified_sha256=None,
+            )
+            for recovery in recoveries
+        ]
+        batch = RuntimeToProviderBatch(
+            coordinator=self.coordinator,
+            resolver=self.resolver,
+            object_store=self.object_store,
+            clock=self.clock,
+            status_poll_interval=self.status_poll_interval,
+            consumer_lease_renew_interval=self.consumer_lease_renew_interval,
+            deadline_at=deadline_at,
+            sources=sources,
+            maximum_chunk_size=self.maximum_chunk_size,
+            settlement_recovery=True,
+        )
+        batch.restore_provider_completed()
+        await batch.acknowledge_and_settle()
 
     async def _prepare_source(
         self,
@@ -821,6 +927,14 @@ class RuntimeToProviderDeliveryService:
             )
         )
 
+    async def recover(
+        self,
+        *,
+        recoveries: tuple[RuntimeToProviderRecovery, ...],
+    ) -> None:
+        """Recover an already completed provider delivery without replaying it."""
+        await self.batch_service.recover(recoveries=recoveries)
+
 
 @dataclass(frozen=True)
 class RuntimeToProviderDeliveryCapability:
@@ -847,6 +961,28 @@ class RuntimeToProviderDeliveryCapability:
             batch_id=batch_id,
             sources=sources,
         )
+
+    async def recover(
+        self,
+        *,
+        recoveries: tuple[RuntimeToProviderRecovery, ...],
+    ) -> None:
+        """Settle exact persisted claims without issuing another provider request."""
+        await self.service.recover(recoveries=recoveries)
+
+
+async def _close_prepared_renewals(
+    prepared: Sequence[_PreparedRuntimeSource],
+) -> None:
+    """Stop source renewals before exact pre-provider cleanup begins."""
+    tasks = [
+        source.renewal_task for source in prepared if source.renewal_task is not None
+    ]
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _cleanup_prepared_sources(
