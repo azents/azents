@@ -68,6 +68,19 @@ class _BlockingControl(_Control):
         await super().append_runner_transfer_result(result)
 
 
+class _FailingBlockingControl(_Control):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def append_runner_transfer_result(self, result: RunnerTransferResult) -> None:
+        del result
+        self.entered.set()
+        await self.release.wait()
+        raise RuntimeError("injected result sink failure")
+
+
 class _Transfer:
     def __init__(
         self,
@@ -719,4 +732,122 @@ async def test_bounded_result_queue_backpressures_without_dropping_terminal_resu
 
 async def _wait_for_result_count(control: _Control, *, expected: int) -> None:
     while len(control.results) < expected:
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_failed_result_sink_unblocks_queue_and_shutdown(
+    tmpfs_path: Path,
+) -> None:
+    """A disconnected result sink cannot wedge later admission or close."""
+    control = _FailingBlockingControl()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_Transfer(),
+        accepted_generation=lambda: 1,
+        max_tombstones=1,
+    )
+    expired_at = datetime.now(UTC)
+    first = _intent(
+        tmpfs_path / "first.bin",
+        deadline_at=expired_at,
+        transfer_id="transfer-1",
+    )
+    second = _intent(
+        tmpfs_path / "second.bin",
+        deadline_at=expired_at,
+        transfer_id="transfer-2",
+    )
+    third = _intent(
+        tmpfs_path / "third.bin",
+        deadline_at=expired_at,
+        transfer_id="transfer-3",
+    )
+    fourth = _intent(
+        tmpfs_path / "fourth.bin",
+        deadline_at=expired_at,
+        transfer_id="transfer-4",
+    )
+
+    await manager.handle_intent(first)
+    await asyncio.wait_for(control.entered.wait(), timeout=1)
+    await manager.handle_intent(second)
+    third_admission = asyncio.create_task(manager.handle_intent(third))
+    fourth_admission = asyncio.create_task(manager.handle_intent(fourth))
+    await asyncio.sleep(0)
+    assert not third_admission.done()
+    assert not fourth_admission.done()
+
+    control.release.set()
+    await asyncio.wait_for(
+        asyncio.gather(third_admission, fourth_admission),
+        timeout=1,
+    )
+    await asyncio.wait_for(manager.close(), timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_post_publication_cancellation_waits_for_successful_result_enqueue(
+    tmpfs_path: Path,
+) -> None:
+    """A cancellation after publication cannot erase the committed success result."""
+    control = _BlockingControl()
+    data = b"committed"
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_Transfer(
+            (
+                RunnerDownloadChunk(offset=0, data=data),
+                RunnerDownloadComplete(
+                    actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
+                ),
+            )
+        ),
+        accepted_generation=lambda: 1,
+        max_tombstones=1,
+    )
+    expired_at = datetime.now(UTC)
+    first = _intent(
+        tmpfs_path / "first.bin",
+        deadline_at=expired_at,
+        transfer_id="transfer-1",
+    )
+    second = _intent(
+        tmpfs_path / "second.bin",
+        deadline_at=expired_at,
+        transfer_id="transfer-2",
+    )
+    destination = tmpfs_path / "destination.bin"
+    committed = _intent(destination, data=data, transfer_id="transfer-3")
+
+    await manager.handle_intent(first)
+    await asyncio.wait_for(control.entered.wait(), timeout=1)
+    await manager.handle_intent(second)
+    await manager.handle_intent(committed)
+    await asyncio.wait_for(_wait_for_path(destination), timeout=1)
+
+    await manager.handle_cancel(
+        RunnerTransferCancel(
+            identity=committed.identity,
+            operation_id=committed.operation_id,
+            dispatch_id=committed.dispatch_id,
+            reason=RunnerTransferCancelReason.CALLER,
+        )
+    )
+    control.release.set()
+    await asyncio.wait_for(
+        _wait_for_result_count(control, expected=3),
+        timeout=1,
+    )
+
+    committed_result = control.results[-1]
+    assert destination.read_bytes() == data
+    assert committed_result.identity == committed.identity
+    assert committed_result.outcome is RunnerTransferOutcome.SUCCEEDED
+    assert committed_result.destination_committed is True
+    await manager.close()
+
+
+async def _wait_for_path(path: Path) -> None:
+    while not path.exists():
         await asyncio.sleep(0)

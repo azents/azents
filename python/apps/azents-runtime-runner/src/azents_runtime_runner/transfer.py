@@ -209,7 +209,7 @@ class RunnerTransferManager:
             with contextlib.suppress(asyncio.CancelledError):
                 await item.task
         if result_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await result_task
 
     async def _reap(self, key: "_TransferKey") -> None:
@@ -237,13 +237,13 @@ class RunnerTransferManager:
             except ValueError:
                 result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
             self._remember(intent, result)
-            await self._enqueue_result(result)
+            await self._enqueue_terminal_result(result)
         except asyncio.CancelledError:
             if result is None:
                 result = _cancelled(intent)
                 self._remember(intent, result)
                 if not self._closed:
-                    await self._enqueue_result(result)
+                    await self._enqueue_terminal_result(result)
             raise
 
     async def _download(
@@ -422,6 +422,29 @@ class RunnerTransferManager:
         self._ensure_result_task()
         await self._results.put(result)
 
+    async def _enqueue_terminal_result(self, result: RunnerTransferResult) -> None:
+        enqueue = asyncio.create_task(self._enqueue_result(result))
+        cancelled = False
+        try:
+            while True:
+                try:
+                    await asyncio.shield(enqueue)
+                    break
+                except asyncio.CancelledError:
+                    if self._closed:
+                        enqueue.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await enqueue
+                        raise
+                    cancelled = True
+        finally:
+            if not enqueue.done():
+                enqueue.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await enqueue
+        if cancelled:
+            raise asyncio.CancelledError
+
     def _ensure_result_task(self) -> None:
         if self._result_task is None:
             self._result_task = asyncio.create_task(self._emit_results())
@@ -431,6 +454,11 @@ class RunnerTransferManager:
             result = await self._results.get()
             try:
                 await self._control.append_runner_transfer_result(result)
+            except Exception:
+                _LOGGER.warning(
+                    "Runner transfer result delivery became unavailable",
+                    exc_info=True,
+                )
             finally:
                 self._results.task_done()
 
