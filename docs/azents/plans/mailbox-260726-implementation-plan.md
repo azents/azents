@@ -85,7 +85,9 @@ Use one implementation owner because the phases share rename-sensitive symbols, 
 ### PR 3 — Phase 1: Mailbox Persistence Foundation
 
 - Branch/base: `feature/mailbox-260726-persistence` → `feature/mailbox-260726-plan`
-- Deliverable: canonical mailbox persistence types, generated in-place migration, typed envelope schema, repository/service rename, and migration fixtures.
+- Deliverable: canonical mailbox persistence types, generated in-place migration,
+  typed envelope schema, repository/service rename, complete internal
+  producer/processor data-shape cutover, and migration fixtures.
 - Data changes:
   - Rename `input_buffers` to `mailbox_items` while preserving IDs and FIFO order.
   - Generate the new Alembic revision with the repository migration command,
@@ -102,11 +104,18 @@ Use one implementation owner because the phases share rename-sensitive symbols, 
   - Move every ORM, repository, service, worker, action-execution, replay, and
     External Channel caller to mailbox types in this phase so the branch compiles
     without storage/service aliases, dual-read, or dual-write.
+  - Make every current producer construct the final typed payload and every
+    preparation processor consume it before superseded columns are removed.
+  - Finalize External Channel context-plus-trigger snapshots at admission and
+    consume only that mailbox payload during promotion; source-domain rows remain
+    audit/provenance rather than delivery input.
   - The existing public JSON field names may remain only as a temporary
     serialization boundary backed by mailbox-domain values until Phase 4 updates
     OpenAPI and generated clients. This is not an internal InputBuffer alias and is
     removed in Phase 4.
-- Runtime/API boundary: no producer behavior, public wire contract, or Wait Toolkit behavior change.
+- Runtime/API boundary: producer scheduling/wakeup behavior, public wire contract,
+  and Wait Toolkit behavior do not change. The internal data source changes to the
+  typed mailbox payload.
 - Tests:
   - migration upgrade with one pending row of every kind;
   - pending External Channel backfill with an intact source batch and a malformed
@@ -115,13 +124,18 @@ Use one implementation owner because the phases share rename-sensitive symbols, 
   - FIFO, idempotency, row-locking, stale-head, and delete-after-handoff repository/service tests;
   - focused Ruff, Pyright, and pytest.
 
-### PR 4 — Phase 2: Producer, Preparation, and Terminal Cutover
+### PR 4 — Phase 2: Producer Orchestration and Terminal Cutover
 
 - Branch/base: `feature/mailbox-260726-producers` → `feature/mailbox-260726-persistence`
-- Deliverable: every producer and Agent input preparation path uses typed mailbox envelopes; External Channel input is immutable after admission; terminal delivery is atomic and queue-only.
+- Deliverable: producer orchestration preserves the accepted scheduling contract,
+  operation handoff remains atomic, and every descendant terminal delivery becomes
+  atomic and queue-only.
 - Data/runtime changes:
-  - Cut over user messages, Goal continuations, Turn Actions, Agent messages, spawn assignments, follow-up tasks, and terminal results.
-  - Build complete ordered External Channel context-plus-trigger payloads before enqueue; promotion no longer calls source projection repositories.
+  - Reconcile user messages, Goal continuations, Turn Actions, Agent messages,
+    spawn assignments, follow-up tasks, and External Channel admission around the
+    passive mailbox boundary established in Phase 1.
+  - Verify that post-admission External Channel processing remains independent of
+    mutable source projection repositories.
   - Preserve full wakeup for existing wake-session producers and queue-only admission for `send_message` and terminal results.
   - Introduce one transaction-aware terminal finalization coordinator for completed, failed, stopped, interrupted, and cancelled child Runs.
   - Atomically commit terminal state, direct-parent mailbox envelope, and enqueued/suppressed delivery marker.
