@@ -1080,7 +1080,6 @@ class TestSubagents:
             session_id=root_session_id,
             call_id=_MAILBOX_WAIT_CALL_ID,
             outcome="activity",
-            reason="mailbox",
         )
         _wait_for_content(
             public_url=azents_public_server_url,
