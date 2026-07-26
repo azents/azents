@@ -7,7 +7,16 @@ description: "Perform code review. Use for: (1) '/code-review' to review the cur
 
 Review changed code and report issues and improvements grouped by severity.
 
-**Unless instructed otherwise, always apply review findings to the code.** Fix Critical and Warning findings immediately. Apply Suggestion and Consistency findings when they are reasonable.
+Choose review ownership before starting:
+
+- **Implementation-owner or self-review:** Apply Critical and Warning findings
+  immediately. Apply Suggestion and Consistency findings when reasonable.
+- **Designated independent review:** Perform a read-only review. Do not edit,
+  stage, commit, or fix the code. Report findings to the implementation owner
+  that requested the review; that owner applies fixes and requests recheck.
+
+When another agent explicitly assigns this agent as the independent reviewer,
+use designated independent review mode.
 
 ## Workflow
 
