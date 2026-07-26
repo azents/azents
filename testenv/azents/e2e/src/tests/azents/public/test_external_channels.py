@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import json
 import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import Any, cast
 from urllib.parse import urlencode
 
@@ -85,6 +87,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+from testcontainers.core.container import DockerContainer
 
 from support.utils import (
     authenticate_user,
@@ -2201,11 +2204,12 @@ def test_discord_single_activation_interaction_and_gateway_journey(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    azents_discord_gateway_worker_container: Container,
     discord_provider_fake_url: str,
+    azents_discord_gateway_worker_factory: Callable[
+        [], AbstractContextManager[DockerContainer]
+    ],
 ) -> None:
     """Exercise Discord activation, signed ingress, and fenced Gateway admission."""
-    del azents_discord_gateway_worker_container
     gateway_message_id = "500000000000000001"
     requests.post(
         f"{discord_provider_fake_url}/__testenv/reset",
@@ -2308,17 +2312,18 @@ def test_discord_single_activation_interaction_and_gateway_journey(
             return state
         return None
 
-    state = cast(
-        dict[str, object],
-        wait_until(
-            admitted_gateway_state,
-            timeout=20,
-            interval=0.2,
-            message=(
-                "Discord Gateway Dispatch was not durably admitted and checkpointed"
+    with azents_discord_gateway_worker_factory():
+        state = cast(
+            dict[str, object],
+            wait_until(
+                admitted_gateway_state,
+                timeout=20,
+                interval=0.2,
+                message=(
+                    "Discord Gateway Dispatch was not durably admitted and checkpointed"
+                ),
             ),
-        ),
-    )
+        )
     interactions = state.get("interactions")
     assert interactions == [
         {
