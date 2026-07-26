@@ -12,19 +12,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
+    ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelProvider,
+    ExternalChannelRouteCatalogStatus,
+    ExternalChannelRouteMode,
     ExternalChannelTransport,
+    LLMProvider,
 )
+from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.external_channel.data import (
+    ExternalChannelAgentRouteCreate,
     ExternalChannelConnectionCreate,
     ExternalChannelEventCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.testing.model_selection import make_test_model_selection_dict
 
 
 def _at(minute: int) -> datetime.datetime:
@@ -59,6 +67,7 @@ def _connection_create(workspace_id: str) -> ExternalChannelConnectionCreate:
         workspace_id=workspace_id,
         provider=ExternalChannelProvider.SLACK,
         transport=ExternalChannelTransport.HTTP,
+        app_mode=ExternalChannelAppMode.SINGLE,
         status=ExternalChannelConnectionStatus.ACTIVE,
         provider_app_id="app-1",
         provider_tenant_id="tenant-1",
@@ -498,3 +507,105 @@ class TestExternalChannelRepository:
         assert recovered is not None
         assert recovered.status is ExternalChannelConnectionStatus.ACTIVE
         assert recovered.socket_gap_reason is None
+
+
+async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
+    rdb_session: AsyncSession,
+) -> None:
+    """Route creation locks the connection and rejects mismatched boundaries."""
+    first_workspace = await _create_workspace(rdb_session, "route-boundary-first")
+    second_workspace = await _create_workspace(rdb_session, "route-boundary-second")
+    integration = RDBLLMProviderIntegration(
+        workspace_id=first_workspace,
+        provider=LLMProvider.ANTHROPIC,
+        name="route-boundary-integration",
+        encrypted_credentials="encrypted",
+        config=None,
+    )
+    rdb_session.add(integration)
+    await rdb_session.flush()
+    selection = make_test_model_selection_dict(
+        integration_id=integration.id,
+        provider=LLMProvider.ANTHROPIC,
+        model_identifier="route-boundary-model",
+    )
+    agent = RDBAgent(
+        workspace_id=first_workspace,
+        name="Route Agent",
+        model_selection=selection,
+        lightweight_model_selection=selection,
+    )
+    foreign_agent = RDBAgent(
+        workspace_id=second_workspace,
+        name="Foreign Route Agent",
+        model_selection=selection,
+        lightweight_model_selection=selection,
+    )
+    second_agent = RDBAgent(
+        workspace_id=first_workspace,
+        name="Second Route Agent",
+        model_selection=selection,
+        lightweight_model_selection=selection,
+    )
+    rdb_session.add_all((agent, second_agent, foreign_agent))
+    await rdb_session.flush()
+    repository = ExternalChannelRepository()
+    connection = await repository.create_connection(
+        rdb_session, _connection_create(first_workspace)
+    )
+    create = ExternalChannelAgentRouteCreate(
+        connection_id=connection.id,
+        agent_id=agent.id,
+        route_mode=ExternalChannelRouteMode.DEDICATED,
+        connection_app_mode=ExternalChannelAppMode.SINGLE,
+        catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
+        catalog_removed_at=None,
+        catalog_removed_by_user_id=None,
+    )
+    route = await repository.create_agent_route(rdb_session, create)
+    assert route.agent_id == agent.id
+    with pytest.raises(
+        IntegrityError,
+        match="uq_external_channel_agent_routes_single_connection",
+    ):
+        async with rdb_session.begin_nested():
+            await repository.create_agent_route(
+                rdb_session,
+                create.model_copy(update={"agent_id": second_agent.id}),
+            )
+    with pytest.raises(ValueError, match="App mode"):
+        await repository.create_agent_route(
+            rdb_session,
+            create.model_copy(
+                update={"connection_app_mode": ExternalChannelAppMode.MULTI}
+            ),
+        )
+    with pytest.raises(ValueError, match="Workspace"):
+        await repository.create_agent_route(
+            rdb_session,
+            create.model_copy(update={"agent_id": foreign_agent.id}),
+        )
+    with pytest.raises(ValueError, match="dedicated mode"):
+        await repository.create_agent_route(
+            rdb_session,
+            create.model_copy(update={"route_mode": ExternalChannelRouteMode.PLATFORM}),
+        )
+    with pytest.raises(ValueError, match="catalog-available"):
+        await repository.create_agent_route(
+            rdb_session,
+            create.model_copy(
+                update={"catalog_status": ExternalChannelRouteCatalogStatus.REMOVED}
+            ),
+        )
+    with pytest.raises(ValueError, match="catalog-removal metadata"):
+        await repository.create_agent_route(
+            rdb_session,
+            create.model_copy(update={"catalog_removed_at": _at(1)}),
+        )
+    with pytest.raises(ValueError, match="catalog-removal metadata"):
+        await repository.create_agent_route(
+            rdb_session,
+            create.model_copy(
+                update={"catalog_removed_by_user_id": "not-a-route-owner"}
+            ),
+        )

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
+    ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelProvider,
     ExternalChannelTransport,
@@ -121,6 +122,7 @@ class ExternalChannelConnectionService:
             workspace_id=workspace_id,
             provider=ExternalChannelProvider.SLACK,
             transport=transport,
+            app_mode=ExternalChannelAppMode.SINGLE,
             status=ExternalChannelConnectionStatus.CONFIGURING,
             provider_app_id=app_id,
             provider_tenant_id=None,

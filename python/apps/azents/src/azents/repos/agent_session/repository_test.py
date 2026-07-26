@@ -16,6 +16,7 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
+    ExternalChannelAppMode,
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
@@ -23,6 +24,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
     LLMProvider,
@@ -1165,6 +1167,7 @@ class TestAgentSessionRepository:
             provider=ExternalChannelProvider.SLACK,
             transport=ExternalChannelTransport.HTTP,
             status=ExternalChannelConnectionStatus.ACTIVE,
+            app_mode=ExternalChannelAppMode.SINGLE,
         )
         rdb_session.add(connection)
         await rdb_session.flush()
@@ -1172,6 +1175,8 @@ class TestAgentSessionRepository:
             connection_id=connection.id,
             agent_id=agent_id,
             route_mode=ExternalChannelRouteMode.DEDICATED,
+            connection_app_mode=ExternalChannelAppMode.SINGLE,
+            catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
         )
         resource = RDBExternalChannelResource(
             connection_id=connection.id,

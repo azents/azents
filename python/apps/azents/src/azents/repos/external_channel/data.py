@@ -9,21 +9,28 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
+    ExternalChannelAppMode,
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
+    ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationAdmissionOrigin,
+    ExternalChannelConversationAdmissionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelHydrationStatus,
+    ExternalChannelInteractionStatus,
+    ExternalChannelInteractionType,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
@@ -44,6 +51,7 @@ class ExternalChannelConnection(_Record):
     provider: ExternalChannelProvider
     transport: ExternalChannelTransport
     status: ExternalChannelConnectionStatus
+    app_mode: ExternalChannelAppMode
     provider_app_id: str | None
     provider_tenant_id: str | None
     provider_bot_user_id: str | None
@@ -69,6 +77,7 @@ class ExternalChannelConnectionCreate(_Record):
     provider: ExternalChannelProvider
     transport: ExternalChannelTransport
     status: ExternalChannelConnectionStatus
+    app_mode: ExternalChannelAppMode
     provider_app_id: str | None
     provider_tenant_id: str | None
     provider_bot_user_id: str | None
@@ -94,6 +103,7 @@ class ExternalChannelConnectionConfiguration(_Record):
     provider: ExternalChannelProvider
     transport: ExternalChannelTransport
     status: ExternalChannelConnectionStatus
+    app_mode: ExternalChannelAppMode
     provider_app_id: str | None
     provider_tenant_id: str | None
     provider_bot_user_id: str | None
@@ -120,6 +130,10 @@ class ExternalChannelAgentRoute(_Record):
     connection_id: str
     agent_id: str
     route_mode: ExternalChannelRouteMode
+    connection_app_mode: ExternalChannelAppMode
+    catalog_status: ExternalChannelRouteCatalogStatus
+    catalog_removed_at: datetime.datetime | None
+    catalog_removed_by_user_id: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -130,6 +144,10 @@ class ExternalChannelAgentRouteCreate(_Record):
     connection_id: str
     agent_id: str
     route_mode: ExternalChannelRouteMode
+    connection_app_mode: ExternalChannelAppMode
+    catalog_status: ExternalChannelRouteCatalogStatus
+    catalog_removed_at: datetime.datetime | None
+    catalog_removed_by_user_id: str | None
 
 
 class ExternalChannelResource(_Record):
@@ -231,6 +249,110 @@ class ExternalChannelEventAdmission(_Record):
 
     event: ExternalChannelEvent
     created: bool
+
+
+class ExternalChannelInteraction(_Record):
+    """Durable, bounded provider interaction admission."""
+
+    id: str
+    connection_id: str
+    transport: ExternalChannelTransport
+    provider_interaction_key: str
+    interaction_type: ExternalChannelInteractionType
+    callback_id: str | None
+    action_id: str | None
+    principal_id: str | None
+    resource_correlation_key: str | None
+    projection: dict[str, Any]
+    status: ExternalChannelInteractionStatus
+    expires_at: datetime.datetime
+    error_kind: str | None
+    error_summary: str | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelInteractionCreate(_Record):
+    """Provider interaction admission payload without raw provider content."""
+
+    connection_id: str
+    transport: ExternalChannelTransport
+    provider_interaction_key: str
+    interaction_type: ExternalChannelInteractionType
+    callback_id: str | None
+    action_id: str | None
+    principal_id: str | None
+    resource_correlation_key: str | None
+    projection: dict[str, Any]
+    status: ExternalChannelInteractionStatus
+    expires_at: datetime.datetime
+    error_kind: str | None
+    error_summary: str | None
+
+
+class ExternalChannelInteractionAdmission(_Record):
+    """Idempotent interaction-admission result."""
+
+    interaction: ExternalChannelInteraction
+    created: bool
+
+
+class ExternalChannelConversationAdmission(_Record):
+    """Route-neutral admission for an unbound provider conversation."""
+
+    id: str
+    connection_id: str
+    resource_id: str
+    source_message_id: str
+    initiating_principal_id: str | None
+    origin: ExternalChannelConversationAdmissionOrigin
+    status: ExternalChannelConversationAdmissionStatus
+    selected_route_id: str | None
+    interaction_id: str | None
+    expires_at: datetime.datetime
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelConversationAdmissionCreate(_Record):
+    """Conversation-admission creation payload."""
+
+    connection_id: str
+    resource_id: str
+    source_message_id: str
+    initiating_principal_id: str | None
+    origin: ExternalChannelConversationAdmissionOrigin
+    status: ExternalChannelConversationAdmissionStatus
+    selected_route_id: str | None
+    interaction_id: str | None
+    expires_at: datetime.datetime
+
+
+class ExternalChannelChannelDefault(_Record):
+    """Durable route default for one provider channel."""
+
+    id: str
+    connection_id: str
+    provider_channel_id: str
+    route_id: str
+    status: ExternalChannelChannelDefaultStatus
+    configured_by_user_id: str
+    invalidated_at: datetime.datetime | None
+    invalidation_reason: str | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelChannelDefaultCreate(_Record):
+    """Channel-default creation payload."""
+
+    connection_id: str
+    provider_channel_id: str
+    route_id: str
+    status: ExternalChannelChannelDefaultStatus
+    configured_by_user_id: str
+    invalidated_at: datetime.datetime | None
+    invalidation_reason: str | None
 
 
 class ExternalChannelPrincipal(_Record):

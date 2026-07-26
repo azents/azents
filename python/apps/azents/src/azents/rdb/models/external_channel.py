@@ -13,21 +13,28 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
+    ExternalChannelAppMode,
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
+    ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationAdmissionOrigin,
+    ExternalChannelConversationAdmissionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelHydrationStatus,
+    ExternalChannelInteractionStatus,
+    ExternalChannelInteractionType,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
@@ -59,9 +66,51 @@ external_channel_connection_status_enum = ENUM(
     create_type=False,
     values_callable=_enum_values,
 )
+external_channel_app_mode_enum = ENUM(
+    ExternalChannelAppMode,
+    name="external_channel_app_mode",
+    create_type=False,
+    values_callable=_enum_values,
+)
 external_channel_route_mode_enum = ENUM(
     ExternalChannelRouteMode,
     name="external_channel_route_mode",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_route_catalog_status_enum = ENUM(
+    ExternalChannelRouteCatalogStatus,
+    name="external_channel_route_catalog_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_interaction_type_enum = ENUM(
+    ExternalChannelInteractionType,
+    name="external_channel_interaction_type",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_interaction_status_enum = ENUM(
+    ExternalChannelInteractionStatus,
+    name="external_channel_interaction_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_conversation_admission_origin_enum = ENUM(
+    ExternalChannelConversationAdmissionOrigin,
+    name="external_channel_conversation_admission_origin",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_conversation_admission_status_enum = ENUM(
+    ExternalChannelConversationAdmissionStatus,
+    name="external_channel_conversation_admission_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_channel_default_status_enum = ENUM(
+    ExternalChannelChannelDefaultStatus,
+    name="external_channel_channel_default_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -199,6 +248,11 @@ class RDBExternalChannelConnection(RDBModel):
         unique=True,
         postgresql_where=sa.text("http_callback_selector_hash IS NOT NULL"),
     )
+    UQ_ID_APP_MODE = sa.UniqueConstraint(
+        "id",
+        "app_mode",
+        name="uq_external_channel_connections_id_app_mode",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -223,6 +277,11 @@ class RDBExternalChannelConnection(RDBModel):
         external_channel_connection_status_enum,
         nullable=False,
         server_default=ExternalChannelConnectionStatus.CONFIGURING.value,
+    )
+    app_mode: Mapped[ExternalChannelAppMode] = mapped_column(
+        external_channel_app_mode_enum,
+        nullable=False,
+        server_default=ExternalChannelAppMode.SINGLE.value,
     )
     provider_app_id: Mapped[str | None] = mapped_column(
         sa.String(255),
@@ -319,6 +378,7 @@ class RDBExternalChannelConnection(RDBModel):
         IX_SOCKET_LEASE_UNTIL,
         UQ_INSTALLATION_IDENTITY,
         UQ_HTTP_CALLBACK_SELECTOR_HASH,
+        UQ_ID_APP_MODE,
     )
 
 
@@ -332,11 +392,27 @@ class RDBExternalChannelAgentRoute(RDBModel):
         "ix_external_channel_agent_routes_connection_id",
         "connection_id",
     )
-    UQ_DEDICATED_CONNECTION = sa.Index(
-        "uq_external_channel_agent_routes_dedicated_connection",
+    UQ_CONNECTION_AGENT = sa.UniqueConstraint(
+        "connection_id",
+        "agent_id",
+        name="uq_external_channel_agent_routes_connection_agent",
+    )
+    UQ_CONNECTION_ID_ID = sa.UniqueConstraint(
+        "connection_id",
+        "id",
+        name="uq_external_channel_agent_routes_connection_id_id",
+    )
+    UQ_SINGLE_CONNECTION = sa.Index(
+        "uq_external_channel_agent_routes_single_connection",
         "connection_id",
         unique=True,
-        postgresql_where=sa.text("route_mode = 'dedicated'"),
+        postgresql_where=sa.text("connection_app_mode = 'single'"),
+    )
+    FK_CONNECTION_APP_MODE = sa.ForeignKeyConstraint(
+        ["connection_id", "connection_app_mode"],
+        ["external_channel_connections.id", "external_channel_connections.app_mode"],
+        name="fk_external_channel_agent_routes_connection_app_mode",
+        ondelete="RESTRICT",
     )
 
     id: Mapped[str] = mapped_column(
@@ -345,11 +421,7 @@ class RDBExternalChannelAgentRoute(RDBModel):
         init=False,
         default_factory=lambda: uuid7().hex,
     )
-    connection_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_connections.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
+    connection_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
         sa.ForeignKey("agents.id", ondelete="RESTRICT"),
@@ -359,6 +431,31 @@ class RDBExternalChannelAgentRoute(RDBModel):
         external_channel_route_mode_enum,
         nullable=False,
         server_default=ExternalChannelRouteMode.DEDICATED.value,
+    )
+    connection_app_mode: Mapped[ExternalChannelAppMode] = mapped_column(
+        external_channel_app_mode_enum,
+        nullable=False,
+        server_default=ExternalChannelAppMode.SINGLE.value,
+    )
+    catalog_status: Mapped[ExternalChannelRouteCatalogStatus] = mapped_column(
+        external_channel_route_catalog_status_enum,
+        nullable=False,
+        server_default=ExternalChannelRouteCatalogStatus.AVAILABLE.value,
+    )
+    catalog_removed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    catalog_removed_by_user_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "users.id",
+            name="external_channel_agent_routes_catalog_removed_by_user_id_fkey",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        default=None,
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
@@ -373,10 +470,318 @@ class RDBExternalChannelAgentRoute(RDBModel):
         server_default=sa.func.now(),
         onupdate=sa.func.now(),
     )
+
     __table_args__ = (
         IX_AGENT_ID,
         IX_CONNECTION_ID,
-        UQ_DEDICATED_CONNECTION,
+        UQ_CONNECTION_AGENT,
+        UQ_CONNECTION_ID_ID,
+        UQ_SINGLE_CONNECTION,
+        FK_CONNECTION_APP_MODE,
+    )
+
+
+class RDBExternalChannelInteraction(RDBModel):
+    """Durable, bounded provider interaction admission."""
+
+    __tablename__ = "external_channel_interactions"
+
+    UQ_CONNECTION_PROVIDER_INTERACTION_KEY = sa.UniqueConstraint(
+        "connection_id",
+        "provider_interaction_key",
+        name="uq_external_channel_interactions_connection_provider_key",
+    )
+    UQ_CONNECTION_ID_ID = sa.UniqueConstraint(
+        "connection_id",
+        "id",
+        name="uq_external_channel_interactions_connection_id_id",
+    )
+    IX_EXPIRES_AT = sa.Index(
+        "ix_external_channel_interactions_expires_at",
+        "expires_at",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    connection_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_connections.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    transport: Mapped[ExternalChannelTransport] = mapped_column(
+        external_channel_transport_enum,
+        nullable=False,
+    )
+    provider_interaction_key: Mapped[str] = mapped_column(
+        sa.String(128), nullable=False
+    )
+    interaction_type: Mapped[ExternalChannelInteractionType] = mapped_column(
+        external_channel_interaction_type_enum,
+        nullable=False,
+    )
+    projection: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[ExternalChannelInteractionStatus] = mapped_column(
+        external_channel_interaction_status_enum,
+        nullable=False,
+        server_default=ExternalChannelInteractionStatus.ACCEPTED.value,
+    )
+    expires_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime, nullable=False
+    )
+    callback_id: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    action_id: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    principal_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_principals.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    resource_correlation_key: Mapped[str | None] = mapped_column(
+        sa.String(512),
+        nullable=True,
+        default=None,
+    )
+    error_kind: Mapped[str | None] = mapped_column(
+        sa.String(120),
+        nullable=True,
+        default=None,
+    )
+    error_summary: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        UQ_CONNECTION_PROVIDER_INTERACTION_KEY,
+        UQ_CONNECTION_ID_ID,
+        IX_EXPIRES_AT,
+    )
+
+
+class RDBExternalChannelConversationAdmission(RDBModel):
+    """Route-neutral admission for one unbound provider conversation."""
+
+    __tablename__ = "external_channel_conversation_admissions"
+
+    UQ_OPEN_RESOURCE = sa.Index(
+        "uq_external_channel_conversation_admissions_open_resource",
+        "resource_id",
+        unique=True,
+        postgresql_where=sa.text(
+            "status IN ('pending_selection', 'selected', 'awaiting_access')"
+        ),
+    )
+    IX_CONNECTION_STATUS = sa.Index(
+        "ix_external_channel_conversation_admissions_connection_status",
+        "connection_id",
+        "status",
+    )
+    IX_EXPIRES_AT = sa.Index(
+        "ix_external_channel_conversation_admissions_expires_at",
+        "expires_at",
+    )
+    FK_CONNECTION_RESOURCE = sa.ForeignKeyConstraint(
+        ["connection_id", "resource_id"],
+        [
+            "external_channel_resources.connection_id",
+            "external_channel_resources.id",
+        ],
+        name="fk_external_channel_conv_admissions_connection_resource",
+        ondelete="RESTRICT",
+    )
+    FK_RESOURCE_SOURCE_MESSAGE = sa.ForeignKeyConstraint(
+        ["resource_id", "source_message_id"],
+        [
+            "external_channel_messages.resource_id",
+            "external_channel_messages.id",
+        ],
+        name="fk_external_channel_conv_admissions_resource_source_message",
+        ondelete="RESTRICT",
+    )
+    FK_CONNECTION_SELECTED_ROUTE = sa.ForeignKeyConstraint(
+        ["connection_id", "selected_route_id"],
+        [
+            "external_channel_agent_routes.connection_id",
+            "external_channel_agent_routes.id",
+        ],
+        name="fk_external_channel_conv_admissions_connection_selected_route",
+        ondelete="RESTRICT",
+    )
+    FK_CONNECTION_INTERACTION = sa.ForeignKeyConstraint(
+        ["connection_id", "interaction_id"],
+        [
+            "external_channel_interactions.connection_id",
+            "external_channel_interactions.id",
+        ],
+        name="fk_external_channel_conv_admissions_connection_interaction",
+        ondelete="RESTRICT",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    connection_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_connections.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    resource_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    source_message_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    origin: Mapped[ExternalChannelConversationAdmissionOrigin] = mapped_column(
+        external_channel_conversation_admission_origin_enum,
+        nullable=False,
+    )
+    status: Mapped[ExternalChannelConversationAdmissionStatus] = mapped_column(
+        external_channel_conversation_admission_status_enum,
+        nullable=False,
+    )
+    expires_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime, nullable=False
+    )
+    initiating_principal_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_principals.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    selected_route_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    interaction_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        UQ_OPEN_RESOURCE,
+        IX_CONNECTION_STATUS,
+        IX_EXPIRES_AT,
+        FK_CONNECTION_RESOURCE,
+        FK_RESOURCE_SOURCE_MESSAGE,
+        FK_CONNECTION_SELECTED_ROUTE,
+        FK_CONNECTION_INTERACTION,
+    )
+
+
+class RDBExternalChannelChannelDefault(RDBModel):
+    """Durable route default for one provider channel in a Multi App."""
+
+    __tablename__ = "external_channel_channel_defaults"
+
+    UQ_ACTIVE_CONNECTION_CHANNEL = sa.Index(
+        "uq_external_channel_channel_defaults_active_connection_channel",
+        "connection_id",
+        "provider_channel_id",
+        unique=True,
+        postgresql_where=sa.text("status = 'active'"),
+    )
+    IX_ROUTE_ID_STATUS = sa.Index(
+        "ix_external_channel_channel_defaults_route_id_status",
+        "route_id",
+        "status",
+    )
+    FK_CONNECTION_ROUTE = sa.ForeignKeyConstraint(
+        ["connection_id", "route_id"],
+        [
+            "external_channel_agent_routes.connection_id",
+            "external_channel_agent_routes.id",
+        ],
+        name="fk_external_channel_channel_defaults_connection_route",
+        ondelete="RESTRICT",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    connection_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    provider_channel_id: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    route_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    status: Mapped[ExternalChannelChannelDefaultStatus] = mapped_column(
+        external_channel_channel_default_status_enum,
+        nullable=False,
+        server_default=ExternalChannelChannelDefaultStatus.ACTIVE.value,
+    )
+    configured_by_user_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    invalidated_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    invalidation_reason: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        UQ_ACTIVE_CONNECTION_CHANNEL,
+        IX_ROUTE_ID_STATUS,
+        FK_CONNECTION_ROUTE,
     )
 
 
@@ -399,6 +804,11 @@ class RDBExternalChannelResource(RDBModel):
         "resource_type",
         "provider_resource_key",
         name="uq_external_channel_resources_connection_type_provider_key",
+    )
+    UQ_CONNECTION_ID_ID = sa.UniqueConstraint(
+        "connection_id",
+        "id",
+        name="uq_external_channel_resources_connection_id_id",
     )
 
     id: Mapped[str] = mapped_column(
@@ -513,6 +923,7 @@ class RDBExternalChannelResource(RDBModel):
         IX_CONNECTION_ID_STATUS,
         IX_LATEST_ACTIVITY_AT,
         UQ_CONNECTION_TYPE_PROVIDER_KEY,
+        UQ_CONNECTION_ID_ID,
     )
 
 
@@ -753,6 +1164,11 @@ class RDBExternalChannelMessage(RDBModel):
         "provider_message_key",
         name="uq_external_channel_messages_resource_provider_message",
     )
+    UQ_RESOURCE_ID_ID = sa.UniqueConstraint(
+        "resource_id",
+        "id",
+        name="uq_external_channel_messages_resource_id_id",
+    )
     FK_CURRENT_REVISION = sa.ForeignKeyConstraint(
         ["id", "current_revision_id"],
         [
@@ -843,6 +1259,7 @@ class RDBExternalChannelMessage(RDBModel):
         IX_RESOURCE_POSITION,
         IX_PRINCIPAL_ID,
         UQ_RESOURCE_PROVIDER_MESSAGE,
+        UQ_RESOURCE_ID_ID,
         FK_CURRENT_REVISION,
     )
 
@@ -1010,10 +1427,9 @@ class RDBExternalChannelBinding(RDBModel):
         "route_id",
         "status",
     )
-    UQ_ACTIVE_RESOURCE_ROUTE = sa.Index(
-        "uq_external_channel_bindings_active_resource_route",
+    UQ_ACTIVE_RESOURCE = sa.Index(
+        "uq_external_channel_bindings_active_resource",
         "resource_id",
-        "route_id",
         unique=True,
         postgresql_where=sa.text("status = 'active'"),
     )
@@ -1110,7 +1526,7 @@ class RDBExternalChannelBinding(RDBModel):
     __table_args__ = (
         IX_AGENT_SESSION_ID_STATUS,
         IX_ROUTE_ID_STATUS,
-        UQ_ACTIVE_RESOURCE_ROUTE,
+        UQ_ACTIVE_RESOURCE,
     )
 
 

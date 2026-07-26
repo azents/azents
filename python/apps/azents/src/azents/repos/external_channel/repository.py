@@ -1,6 +1,8 @@
 """External Channel persistence repository."""
 
 import datetime
+import json
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, cast
 
@@ -16,8 +18,10 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
+    ExternalChannelAppMode,
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
+    ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
@@ -25,11 +29,14 @@ from azents.core.enums import (
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelHydrationStatus,
+    ExternalChannelInteractionStatus,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelRouteCatalogStatus,
+    ExternalChannelRouteMode,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -42,9 +49,12 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelBlock,
+    RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
+    RDBExternalChannelConversationAdmission,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelEvent,
+    RDBExternalChannelInteraction,
     RDBExternalChannelInvocationBatch,
     RDBExternalChannelInvocationBatchItem,
     RDBExternalChannelMessage,
@@ -68,15 +78,22 @@ from .data import (
     ExternalChannelBindingCreate,
     ExternalChannelBlock,
     ExternalChannelBlockCreate,
+    ExternalChannelChannelDefault,
+    ExternalChannelChannelDefaultCreate,
     ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
+    ExternalChannelConversationAdmission,
+    ExternalChannelConversationAdmissionCreate,
     ExternalChannelDeliveryAttempt,
     ExternalChannelDeliveryAttemptCreate,
     ExternalChannelEvent,
     ExternalChannelEventAdmission,
     ExternalChannelEventBoundary,
     ExternalChannelEventCreate,
+    ExternalChannelInteraction,
+    ExternalChannelInteractionAdmission,
+    ExternalChannelInteractionCreate,
     ExternalChannelInvocationBatch,
     ExternalChannelInvocationBatchCreate,
     ExternalChannelInvocationBatchItem,
@@ -98,6 +115,34 @@ from .data import (
 )
 
 _RecordT = TypeVar("_RecordT", bound=BaseModel)
+
+_MAX_INTERACTION_PROJECTION_BYTES = 16 * 1024
+_MAX_INTERACTION_PROJECTION_DEPTH = 4
+_MAX_INTERACTION_PROJECTION_ENTRIES = 64
+_MAX_INTERACTION_PROJECTION_KEY_LENGTH = 128
+_MAX_INTERACTION_PROJECTION_STRING_LENGTH = 2048
+_FORBIDDEN_INTERACTION_PROJECTION_KEY_PARTS = (
+    "token",
+    "secret",
+    "authorization",
+    "cookie",
+    "responseurl",
+    "rawbody",
+    "body",
+    "payload",
+    "messagetext",
+    "messagebody",
+    "content",
+    "filebytes",
+    "attachment",
+)
+_FORBIDDEN_INTERACTION_PROJECTION_VALUE_PATTERNS = (
+    re.compile(r"(?i)(?:https?|slack)://"),
+    re.compile(r"(?i)(?:^|[^a-z0-9])(?:xox[a-z]?|xapp|xoxe|xoxs)-[a-z0-9-]+"),
+    re.compile(r"(?i)^\s*(?:bearer|basic)\s+\S+"),
+    re.compile(r"(?i)^\s*cookie\s*:\s*\S+"),
+)
+_INTERACTION_OPAQUE_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/=@+-]*$")
 
 
 class ExternalChannelRepository:
@@ -619,9 +664,262 @@ class ExternalChannelRepository:
         session: AsyncSession,
         create: ExternalChannelAgentRouteCreate,
     ) -> ExternalChannelAgentRoute:
-        """Create a route from a connection to one Agent."""
+        """Create a workspace-fenced route with the authoritative App mode."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == create.connection_id)
+            .with_for_update()
+        )
+        if connection is None:
+            raise ValueError("External Channel connection does not exist.")
+        if connection.app_mode is not create.connection_app_mode:
+            raise ValueError(
+                "External Channel route App mode does not match connection."
+            )
+        if create.route_mode is not ExternalChannelRouteMode.DEDICATED:
+            raise ValueError("New External Channel routes must use dedicated mode.")
+        if create.catalog_status is not ExternalChannelRouteCatalogStatus.AVAILABLE:
+            raise ValueError("New External Channel routes must be catalog-available.")
+        if (
+            create.catalog_removed_at is not None
+            or create.catalog_removed_by_user_id is not None
+        ):
+            raise ValueError(
+                "New External Channel routes cannot include catalog-removal metadata."
+            )
+        agent = await session.get(RDBAgent, create.agent_id)
+        if agent is None or agent.workspace_id != connection.workspace_id:
+            raise ValueError(
+                "External Channel route Agent must belong to connection Workspace."
+            )
         return ExternalChannelAgentRoute.model_validate(
             await self._create(session, RDBExternalChannelAgentRoute, create)
+        )
+
+    async def admit_interaction(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelInteractionCreate,
+    ) -> ExternalChannelInteractionAdmission:
+        """Atomically admit one provider interaction or return its prior admission."""
+        if create.status is not ExternalChannelInteractionStatus.ACCEPTED:
+            raise ValueError(
+                "New External Channel interactions must start as accepted."
+            )
+        if create.error_kind is not None or create.error_summary is not None:
+            raise ValueError(
+                "New External Channel interactions cannot include error metadata."
+            )
+        _validate_interaction_identifier(
+            "provider interaction key",
+            create.provider_interaction_key,
+            max_length=128,
+        )
+        for field_name, value, max_length in (
+            ("callback ID", create.callback_id, 255),
+            ("action ID", create.action_id, 255),
+            ("resource correlation key", create.resource_correlation_key, 512),
+        ):
+            if value is not None:
+                _validate_interaction_identifier(
+                    field_name,
+                    value,
+                    max_length=max_length,
+                )
+        validate_interaction_projection(create.projection)
+        if create.principal_id is not None:
+            connection = await session.get(
+                RDBExternalChannelConnection,
+                create.connection_id,
+            )
+            principal = await session.get(
+                RDBExternalChannelPrincipal,
+                create.principal_id,
+            )
+            if (
+                connection is None
+                or principal is None
+                or principal.provider is not connection.provider
+                or principal.provider_tenant_id != connection.provider_tenant_id
+            ):
+                raise ValueError(
+                    "External Channel interaction principal does not match connection."
+                )
+        result = await session.execute(
+            pg_insert(RDBExternalChannelInteraction)
+            .values(id=uuid7().hex, **create.model_dump())
+            .on_conflict_do_nothing(
+                constraint="uq_external_channel_interactions_connection_provider_key"
+            )
+            .returning(RDBExternalChannelInteraction)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is not None:
+            return ExternalChannelInteractionAdmission(
+                interaction=ExternalChannelInteraction.model_validate(rdb),
+                created=True,
+            )
+        existing = await self.get_interaction_by_provider_key(
+            session,
+            connection_id=create.connection_id,
+            provider_interaction_key=create.provider_interaction_key,
+        )
+        if existing is None:
+            raise RuntimeError("External Channel interaction admission lookup failed")
+        return ExternalChannelInteractionAdmission(interaction=existing, created=False)
+
+    async def get_interaction_by_provider_key(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        provider_interaction_key: str,
+    ) -> ExternalChannelInteraction | None:
+        """Fetch an interaction by its connection-scoped provider identity."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelInteraction).where(
+                RDBExternalChannelInteraction.connection_id == connection_id,
+                RDBExternalChannelInteraction.provider_interaction_key
+                == provider_interaction_key,
+            )
+        )
+        return self._as(ExternalChannelInteraction, rdb)
+
+    async def create_conversation_admission_idempotent(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelConversationAdmissionCreate,
+    ) -> ExternalChannelConversationAdmission:
+        """Create or return the open route-neutral admission for one resource."""
+        await self._validate_conversation_admission_owners(session, create)
+        rdb = await self._insert_or_lookup(
+            session,
+            RDBExternalChannelConversationAdmission,
+            create,
+            lambda: session.scalar(
+                sa.select(RDBExternalChannelConversationAdmission).where(
+                    RDBExternalChannelConversationAdmission.resource_id
+                    == create.resource_id,
+                    RDBExternalChannelConversationAdmission.status.in_(
+                        (
+                            "pending_selection",
+                            "selected",
+                            "awaiting_access",
+                        )
+                    ),
+                )
+            ),
+        )
+        return ExternalChannelConversationAdmission.model_validate(rdb)
+
+    async def _validate_conversation_admission_owners(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelConversationAdmissionCreate,
+    ) -> None:
+        """Reject foreign owners before an idempotent conflict can mask them."""
+        connection = await session.get(
+            RDBExternalChannelConnection,
+            create.connection_id,
+        )
+        resource = await session.get(
+            RDBExternalChannelResource,
+            create.resource_id,
+        )
+        source_message = await session.get(
+            RDBExternalChannelMessage,
+            create.source_message_id,
+        )
+        if (
+            connection is None
+            or resource is None
+            or resource.connection_id != connection.id
+        ):
+            raise ValueError(
+                "External Channel admission resource does not match connection."
+            )
+        if source_message is None or source_message.resource_id != resource.id:
+            raise ValueError(
+                "External Channel admission source message does not match resource."
+            )
+        if create.selected_route_id is not None:
+            route = await session.get(
+                RDBExternalChannelAgentRoute,
+                create.selected_route_id,
+            )
+            if route is None or route.connection_id != connection.id:
+                raise ValueError(
+                    "External Channel admission route does not match connection."
+                )
+        if create.interaction_id is not None:
+            interaction = await session.get(
+                RDBExternalChannelInteraction,
+                create.interaction_id,
+            )
+            if interaction is None or interaction.connection_id != connection.id:
+                raise ValueError(
+                    "External Channel admission interaction does not match connection."
+                )
+        if create.initiating_principal_id is not None:
+            principal = await session.get(
+                RDBExternalChannelPrincipal,
+                create.initiating_principal_id,
+            )
+            if (
+                principal is None
+                or principal.provider is not connection.provider
+                or principal.provider_tenant_id != connection.provider_tenant_id
+            ):
+                raise ValueError(
+                    "External Channel admission principal does not match connection."
+                )
+
+    async def create_channel_default(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelChannelDefaultCreate,
+    ) -> ExternalChannelChannelDefault:
+        """Create an active, eligible Multi App channel default."""
+        if create.status is not ExternalChannelChannelDefaultStatus.ACTIVE:
+            raise ValueError("New External Channel defaults must be active.")
+        if create.invalidated_at is not None or create.invalidation_reason is not None:
+            raise ValueError(
+                "Active External Channel defaults cannot include invalidation metadata."
+            )
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == create.connection_id)
+            .with_for_update()
+        )
+        if connection is None:
+            raise ValueError(
+                "External Channel default connection or route does not exist."
+            )
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == create.route_id,
+                RDBExternalChannelAgentRoute.connection_id == connection.id,
+            )
+            .with_for_update()
+        )
+        if route is None:
+            raise ValueError(
+                "External Channel default connection or route does not exist."
+            )
+        agent = await session.get(RDBAgent, route.agent_id)
+        if (
+            connection.app_mode is not ExternalChannelAppMode.MULTI
+            or route.connection_id != connection.id
+            or route.connection_app_mode is not connection.app_mode
+            or route.catalog_status is not ExternalChannelRouteCatalogStatus.AVAILABLE
+            or agent is None
+            or agent.workspace_id != connection.workspace_id
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+        ):
+            raise ValueError("External Channel default route is not eligible.")
+        return ExternalChannelChannelDefault.model_validate(
+            await self._create(session, RDBExternalChannelChannelDefault, create)
         )
 
     async def get_routable_route_by_connection_id(
@@ -1549,7 +1847,6 @@ class ExternalChannelRepository:
             lambda: session.scalar(
                 sa.select(RDBExternalChannelBinding).where(
                     RDBExternalChannelBinding.resource_id == create.resource_id,
-                    RDBExternalChannelBinding.route_id == create.route_id,
                     RDBExternalChannelBinding.status
                     == ExternalChannelBindingStatus.ACTIVE,
                 )
@@ -2596,3 +2893,116 @@ def _message_lifecycle_rank(
         ExternalChannelMessageLifecycle.EDITED: 1,
         ExternalChannelMessageLifecycle.DELETED: 2,
     }[lifecycle]
+
+
+def validate_interaction_projection(projection: dict[str, Any]) -> None:
+    """Reject unbounded or capability-bearing interaction metadata before storage."""
+    _validate_interaction_projection_value(projection, depth=0)
+    try:
+        encoded = json.dumps(
+            projection,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "External Channel interaction projection must be JSON."
+        ) from error
+    if len(encoded) > _MAX_INTERACTION_PROJECTION_BYTES:
+        raise ValueError("External Channel interaction projection exceeds 16 KiB.")
+
+
+def _validate_interaction_identifier(
+    field_name: str,
+    value: str,
+    *,
+    max_length: int,
+) -> None:
+    """Require one bounded non-capability-bearing opaque provider identifier."""
+    if not value or len(value) > max_length:
+        raise ValueError(
+            f"External Channel interaction {field_name} has an invalid length."
+        )
+    if any(
+        pattern.search(value)
+        for pattern in _FORBIDDEN_INTERACTION_PROJECTION_VALUE_PATTERNS
+    ):
+        raise ValueError(
+            f"External Channel interaction {field_name} contains a forbidden value."
+        )
+    if _INTERACTION_OPAQUE_VALUE_PATTERN.fullmatch(value) is None:
+        raise ValueError(
+            f"External Channel interaction {field_name} must be an opaque identifier."
+        )
+
+
+def _validate_interaction_projection_value(value: object, *, depth: int) -> None:
+    """Validate recursive interaction metadata bounds and safe key names."""
+    if depth > _MAX_INTERACTION_PROJECTION_DEPTH:
+        raise ValueError(
+            "External Channel interaction projection is too deeply nested."
+        )
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raise ValueError(
+            "External Channel interaction projection cannot contain binary."
+        )
+    if isinstance(value, dict):
+        if len(value) > _MAX_INTERACTION_PROJECTION_ENTRIES:
+            raise ValueError(
+                "External Channel interaction projection has too many entries."
+            )
+        for key, nested_value in value.items():
+            if not isinstance(key, str):
+                raise ValueError(
+                    "External Channel interaction projection keys must be strings."
+                )
+            if len(key) > _MAX_INTERACTION_PROJECTION_KEY_LENGTH:
+                raise ValueError(
+                    "External Channel interaction projection key is too long."
+                )
+            normalized_key = re.sub(r"[^a-z0-9]", "", key.lower())
+            if any(
+                forbidden in normalized_key
+                for forbidden in _FORBIDDEN_INTERACTION_PROJECTION_KEY_PARTS
+            ) or normalized_key.endswith(("url", "uri")):
+                raise ValueError(
+                    "External Channel interaction projection contains a forbidden key."
+                )
+            _validate_interaction_projection_value(nested_value, depth=depth + 1)
+        return
+    if isinstance(value, (list, tuple)):
+        if len(value) > _MAX_INTERACTION_PROJECTION_ENTRIES:
+            raise ValueError(
+                "External Channel interaction projection has too many entries."
+            )
+        for nested_value in value:
+            _validate_interaction_projection_value(nested_value, depth=depth + 1)
+        return
+    if (
+        isinstance(value, str)
+        and len(value) > _MAX_INTERACTION_PROJECTION_STRING_LENGTH
+    ):
+        raise ValueError("External Channel interaction projection string is too long.")
+    if isinstance(value, str) and any(
+        pattern.search(value)
+        for pattern in _FORBIDDEN_INTERACTION_PROJECTION_VALUE_PATTERNS
+    ):
+        raise ValueError(
+            "External Channel interaction projection contains a forbidden value."
+        )
+    if (
+        isinstance(value, str)
+        and value
+        and _INTERACTION_OPAQUE_VALUE_PATTERN.fullmatch(value) is None
+    ):
+        raise ValueError(
+            "External Channel interaction projection strings must be opaque "
+            "identifiers."
+        )
+    if value is None or isinstance(value, bool | int | float | str):
+        return
+    raise ValueError(
+        "External Channel interaction projection contains an invalid value."
+    )
