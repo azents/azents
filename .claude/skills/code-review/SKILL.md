@@ -7,16 +7,9 @@ description: "Perform code review. Use for: (1) '/code-review' to review the cur
 
 Review changed code and report issues and improvements grouped by severity.
 
-Choose review ownership before starting:
-
-- **Implementation-owner or self-review:** Apply Critical and Warning findings
-  immediately. Apply Suggestion and Consistency findings when reasonable.
-- **Designated independent review:** Perform a read-only review. Do not edit,
-  stage, commit, or fix the code. Report findings to the implementation owner
-  that requested the review; that owner applies fixes and requests recheck.
-
 When another agent explicitly assigns this agent as the independent reviewer,
-use designated independent review mode.
+perform a read-only review. Do not edit, stage, commit, or fix the code. Report
+findings to the implementation owner that requested the review.
 
 ## Workflow
 
@@ -101,7 +94,20 @@ Review in priority order:
 - Issues already caught by the type checker or linter
 - Pre-existing problems in unchanged code
 
-### 5. Output format
+### 5. Re-review criteria
+
+Require targeted re-review when the resulting correction:
+
+- resolves a Requirements, ADR, Design, or current-spec mismatch;
+- changes a security, authorization, credential, isolation, or data-loss boundary; or
+- materially restructures code or interfaces to resolve a major convention or project-rule violation.
+
+Affected validation is sufficient for behavior-preserving mechanical
+conventions, typos, comments, and other low-priority findings. Batch accepted
+findings before deciding, and limit re-review to the addressed high-risk
+findings and resulting diff.
+
+### 6. Output format
 
 Group findings by severity. Omit severities with no findings.
 

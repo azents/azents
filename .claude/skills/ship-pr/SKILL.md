@@ -14,28 +14,25 @@ Check that the current branch is ready for review, then create the PR through `/
 Satisfy the `/code-review` gate before creating the PR.
 
 - For a single-agent change, the current agent is the implementation owner. Run
-  `/code-review`, apply required findings, and commit.
+  `/code-review`, address required findings, run affected validation, and commit.
 - For a delegated implementation, use the completed review evidence when the
   named implementation owner directly requested review from the named
-  independent reviewer, applied required findings, ran affected validation,
-  and received the reviewer's recheck. The shipping agent performs final
-  verification only; it does not start a replacement review or apply findings.
-- If delegated review evidence is incomplete, return the work to the
-  implementation owner and its assigned reviewer before continuing.
+  independent reviewer, required findings were addressed, affected validation
+  ran, and any required targeted re-review completed.
+- Complete any missing review evidence before continuing.
 
-### 2. Complete required fixes
+### 2. Complete the review gate
 
-The implementation owner applies review findings on the same branch.
+Batch accepted findings into one correction pass on the same branch.
 
-- Fix Critical and Warning findings, run affected validation, and commit.
-- Apply Suggestion and Consistency findings when reasonable.
-- In a delegated workflow, have the same independent reviewer recheck addressed
-  findings. The shipping agent must route required final-verification changes
-  back to the implementation owner instead of editing them directly.
-
-For a single-agent change, run review and fixes only once. After
-`/code-review` → apply required fixes → commit, do not start another review loop
-within the same `/ship-pr` execution. Continue to PR creation.
+- Address Critical and Warning findings. Address Suggestion and Consistency
+  findings when reasonable.
+- Run affected validation and commit the resulting changes.
+- Use the `/code-review` re-review criteria. When required, the implementation
+  owner directly requests targeted re-review from the same independent reviewer.
+  After self-review, assign an independent reviewer before the request.
+- If final verification changes the diff, rerun affected validation and apply
+  the re-review criteria again before calling `/create-pr`.
 
 ### 3. Call `/create-pr`
 
@@ -49,5 +46,5 @@ Follow the `/create-pr` rules.
 ### 4. Report the result
 
 - Created PR URL
-- Review owner, reviewer, findings, and recheck result
+- Review requester, reviewer, findings, and re-review decision or result
 - Final verification result
