@@ -7,7 +7,11 @@ from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.infra.s3.service import S3TransferCleanupRequired
 from azcommon.result import Failure, Success
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorTransferFailure,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -284,14 +288,18 @@ class _FileStorage:
         *,
         exists: bool = False,
         put_error: Exception | None = None,
+        exists_error: Exception | None = None,
     ) -> None:
         self.existing = exists
         self.put_error = put_error
+        self.exists_error = exists_error
         self.put_calls: list[tuple[str, bytes, str, str]] = []
 
     async def exists(self, path: str, *, agent_id: str) -> bool:
         assert path == "/workspace/agent/report.csv"
         assert agent_id == "agent-1"
+        if self.exists_error is not None:
+            raise self.exists_error
         return self.existing
 
     async def put(
@@ -732,6 +740,29 @@ async def test_existing_destination_fails_before_provider_access() -> None:
 
 
 @pytest.mark.asyncio
+async def test_inaccessible_destination_fails_before_provider_access() -> None:
+    """Destination read-only preflight retains the External Channel contract."""
+    slack_client = _SlackClient()
+    service = _service(repository=_Repository(_target()), slack_client=slack_client)
+
+    with pytest.raises(ExternalChannelFileTransferError, match="not accessible"):
+        await _download(
+            service,
+            session_id="session-1",
+            agent_id="agent-1",
+            file=_locator(),
+            path="/workspace/agent/report.csv",
+            overwrite=False,
+            file_storage=cast(
+                FileStorage,
+                _FileStorage(exists_error=PermissionError("read-only")),
+            ),
+        )
+
+    assert slack_client.info_file_ids == []
+
+
+@pytest.mark.asyncio
 async def test_explicit_overwrite_skips_existence_rejection() -> None:
     """Explicit overwrite permits the existing Runtime destination policy."""
     slack_client = _SlackClient()
@@ -933,6 +964,73 @@ async def test_terminal_runtime_failure_is_not_reported_as_success() -> None:
             overwrite=False,
             file_storage=cast(FileStorage, _FileStorage()),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            ServerToRuntimeTransferError(
+                "terminal cancellation",
+                failure=CoordinatorTransferFailure.CANCELLED,
+            ),
+            "cancelled before destination commit",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "terminal deadline",
+                failure=CoordinatorTransferFailure.EXPIRED,
+            ),
+            "did not complete before its deadline",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "terminal integrity",
+                failure=CoordinatorTransferFailure.INTEGRITY,
+            ),
+            "integrity verification failed",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "terminal destination",
+                failure=CoordinatorTransferFailure.CONSUMER,
+            ),
+            "destination is not writable",
+        ),
+        (
+            S3TransferCleanupRequired(
+                "bucket/internal-key must remain hidden",
+                multipart_cleanup_required=True,
+                completed_object_cleanup_required=False,
+            ),
+            "stage the Slack file",
+        ),
+    ],
+)
+async def test_inbound_staging_and_terminal_failures_remain_controlled(
+    error: Exception,
+    message: str,
+) -> None:
+    """Provider staging and terminal outcomes do not leak transfer internals."""
+    service = _service(
+        repository=_Repository(_target()),
+        slack_client=_SlackClient(),
+    )
+
+    with pytest.raises(ExternalChannelFileTransferError, match=message) as raised:
+        await _download(
+            service,
+            transfer=_TransferService(error),
+            session_id="session-1",
+            agent_id="agent-1",
+            file=_locator(),
+            path="/workspace/agent/report.csv",
+            overwrite=False,
+            file_storage=cast(FileStorage, _FileStorage()),
+        )
+
+    assert "bucket/internal-key" not in str(raised.value)
 
 
 @pytest.mark.asyncio

@@ -5,8 +5,11 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
-from azcommon.infra.s3.service import S3Service
+from azcommon.infra.s3.service import S3Service, S3TransferCleanupRequired
 from azcommon.result import Failure, Success
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorTransferFailure,
+)
 
 from azents.core.enums import (
     ArtifactStatus,
@@ -50,6 +53,20 @@ class _TransferService:
         self.requests.append(request)
         if self.failure is not None:
             raise self.failure
+
+
+class _ReadOnlyStorage(FakeSharedStorage):
+    """Storage double that rejects destination preflight access."""
+
+    async def exists(
+        self,
+        path: str,
+        *,
+        agent_id: str = "",
+        user_id: str = "",
+    ) -> bool:
+        del path, agent_id, user_id
+        raise PermissionError("read-only")
 
 
 def _transfer_capability(service: _TransferService) -> RuntimeTransferCapability:
@@ -388,10 +405,130 @@ async def test_import_file_maps_terminal_transfer_failure_to_tool_error() -> Non
         transfer_service=transfer_service,
     )
 
-    with pytest.raises(FunctionToolError, match="failed before destination commit"):
+    with pytest.raises(FunctionToolError, match="Failed to write imported file"):
         await tool.handler(json.dumps({"uri": exchange_file.uri}))
 
     assert len(transfer_service.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_import_file_preserves_read_only_and_staging_error_contracts() -> None:
+    """Expected destination and staging failures remain controlled tool errors."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    read_only_tool = _tool(
+        storage=_ReadOnlyStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(None),
+    )
+    with pytest.raises(FunctionToolError, match="read-only scope"):
+        await read_only_tool.handler(
+            json.dumps(
+                {
+                    "uri": exchange_file.uri,
+                    "path": "/workspace/agent/report.csv",
+                }
+            )
+        )
+
+    staging_tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(
+            S3TransferCleanupRequired(
+                "bucket/internal-key must remain hidden",
+                multipart_cleanup_required=True,
+                completed_object_cleanup_required=False,
+            )
+        ),
+    )
+    with pytest.raises(FunctionToolError, match="prepare imported file"):
+        await staging_tool.handler(json.dumps({"uri": exchange_file.uri}))
+
+    invalid_staging_tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(
+            ValueError("internal transfer key hash does not match")
+        ),
+    )
+    with pytest.raises(
+        FunctionToolError,
+        match="integrity verification failed",
+    ) as raised:
+        await invalid_staging_tool.handler(json.dumps({"uri": exchange_file.uri}))
+    assert "internal transfer key" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            ServerToRuntimeTransferError(
+                "Runtime transfer cancelled",
+                failure=CoordinatorTransferFailure.CANCELLED,
+            ),
+            "cancelled before destination commit",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "Runtime transfer expired",
+                failure=CoordinatorTransferFailure.EXPIRED,
+            ),
+            "did not complete before its deadline",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "Runtime transfer integrity failure",
+                failure=CoordinatorTransferFailure.INTEGRITY,
+            ),
+            "integrity verification failed",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "Runtime transfer destination failure",
+                failure=CoordinatorTransferFailure.CONSUMER,
+            ),
+            "destination is not writable",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "Transfer source authority changed before dispatch"
+            ),
+            "Session resource authority changed",
+        ),
+    ],
+)
+async def test_import_file_maps_bounded_transfer_failures(
+    error: ServerToRuntimeTransferError,
+    message: str,
+) -> None:
+    """Terminal and authority outcomes retain feature-specific safe messages."""
+    exchange_file = _make_exchange_file()
+    exchange_service = AsyncMock()
+    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
+        ExchangeFileTransferSource(file=exchange_file)
+    )
+    tool = _tool(
+        storage=FakeSharedStorage(),
+        exchange_file_service=exchange_service,
+        artifact_service=AsyncMock(),
+        vfs_projection_service=None,
+        transfer_service=_TransferService(error),
+    )
+
+    with pytest.raises(FunctionToolError, match=message):
+        await tool.handler(json.dumps({"uri": exchange_file.uri}))
 
 
 @pytest.mark.asyncio

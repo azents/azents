@@ -23,6 +23,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorPromotePreparationCleanupRequest,
     CoordinatorRegisterPreparationCleanupRequest,
     CoordinatorTransferDirection,
+    CoordinatorTransferFailure,
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
     CoordinatorTransferStatus,
@@ -143,6 +144,7 @@ def _status(
     phase: CoordinatorTransferPhase = CoordinatorTransferPhase.PREPARING,
     dispatch_status: CoordinatorDispatchStatus = CoordinatorDispatchStatus.NOT_BOUND,
     outcome: CoordinatorTransferOutcome | None = None,
+    failure: CoordinatorTransferFailure | None = None,
 ) -> CoordinatorTransferStatus:
     return CoordinatorTransferStatus(
         identity=CoordinatorTransferIdentity(
@@ -165,7 +167,7 @@ def _status(
         deadline_at=_NOW + timedelta(minutes=1),
         logical_expires_at=_NOW + timedelta(minutes=1),
         outcome=outcome,
-        failure=None,
+        failure=failure,
         cleanup_status=CoordinatorCleanupStatus.NOT_REQUIRED,
         cancellation_requested=False,
         preparation_cleanup_state=CoordinatorPreparationCleanupState.NOT_REQUIRED,
@@ -241,6 +243,7 @@ async def test_transfer_failure_is_not_success_and_cancels_exact_attempt() -> No
                 4,
                 phase=CoordinatorTransferPhase.TERMINAL,
                 outcome=CoordinatorTransferOutcome.FAILED,
+                failure=CoordinatorTransferFailure.CONSUMER,
             )
         ]
     )
@@ -250,9 +253,10 @@ async def test_transfer_failure_is_not_success_and_cancels_exact_attempt() -> No
         status_poll_interval=timedelta(milliseconds=1),
     )
 
-    with pytest.raises(ServerToRuntimeTransferError, match="failed"):
+    with pytest.raises(ServerToRuntimeTransferError, match="failed") as raised:
         await service.transfer(_request(source))
 
+    assert raised.value.failure is CoordinatorTransferFailure.CONSUMER
     assert coordinator.calls[-1][0] == "cancel"
 
 

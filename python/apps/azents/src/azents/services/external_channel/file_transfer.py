@@ -8,7 +8,11 @@ from pathlib import PurePosixPath
 from typing import Annotated, Protocol, TypeGuard, assert_never
 
 import httpx
+from azcommon.infra.s3.service import S3TransferCleanupRequired
 from azcommon.uuid import uuid7
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorTransferFailure,
+)
 from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -415,7 +419,23 @@ class ExternalChannelFileTransferService:
             raise _map_slack_download_error(error, limit=limit) from None
         except ServerToRuntimeTransferError as error:
             raise ExternalChannelFileTransferError(
-                f"Failed to write the Runtime file: {error}"
+                _slack_transfer_error_message(error, path=path)
+            ) from None
+        except PermissionError:
+            raise ExternalChannelFileTransferError(
+                f"Runtime destination is not writable: {path}."
+            ) from None
+        except FileExistsError:
+            raise ExternalChannelFileTransferError(
+                f"File already exists: {path}. Set overwrite=true to replace it."
+            ) from None
+        except RuntimeStorageError as error:
+            raise ExternalChannelFileTransferError(
+                f"Failed to write the Runtime file: {error.detail}"
+            ) from None
+        except S3TransferCleanupRequired:
+            raise ExternalChannelFileTransferError(
+                "Failed to stage the Slack file for Runtime transfer."
             ) from None
         except ValueError as error:
             message = str(error)
@@ -430,9 +450,9 @@ class ExternalChannelFileTransferService:
             raise ExternalChannelFileTransferError(
                 "Failed to write the Runtime file."
             ) from None
-        except Exception:
+        except OSError:
             raise ExternalChannelFileTransferError(
-                "Failed to write the Runtime file."
+                f"Failed to write the Runtime file: {path}."
             ) from None
         return ExternalChannelFileDownloadResult(
             path=path,
@@ -965,6 +985,32 @@ def _map_slack_download_error(
             )
         case _ as unreachable:
             assert_never(unreachable)
+
+
+def _slack_transfer_error_message(
+    error: ServerToRuntimeTransferError,
+    *,
+    path: str,
+) -> str:
+    """Map bounded Runtime transfer outcomes to Slack's established contract."""
+    match error.failure:
+        case CoordinatorTransferFailure.CANCELLED:
+            return "Runtime file transfer was cancelled before destination commit."
+        case CoordinatorTransferFailure.EXPIRED:
+            return "Runtime file transfer did not complete before its deadline."
+        case CoordinatorTransferFailure.INTEGRITY:
+            return "Slack file integrity verification failed before destination commit."
+        case CoordinatorTransferFailure.CONSUMER:
+            return f"Runtime destination is not writable: {path}."
+        case (
+            CoordinatorTransferFailure.ADMISSION
+            | CoordinatorTransferFailure.FENCED
+            | CoordinatorTransferFailure.STREAM
+            | None
+        ):
+            return f"Failed to write the Runtime file: {path}."
+        case _:
+            return f"Failed to write the Runtime file: {path}."
 
 
 async def iter_external_channel_outbound_file_chunks(

@@ -24,6 +24,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorPromotePreparationCleanupRequest,
     CoordinatorRegisterPreparationCleanupRequest,
     CoordinatorTransferDirection,
+    CoordinatorTransferFailure,
     CoordinatorTransferOutcome,
     CoordinatorTransferPhase,
     CoordinatorTransferStatus,
@@ -33,6 +34,15 @@ from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 class ServerToRuntimeTransferError(RuntimeError):
     """Raised when a Server-to-Runtime transfer cannot commit its destination."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure: CoordinatorTransferFailure | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.failure = failure
 
 
 @dataclass(frozen=True)
@@ -349,7 +359,8 @@ class ServerToRuntimeTransferService:
             now = self.clock()
             if now >= deadline_at:
                 raise ServerToRuntimeTransferError(
-                    "Runtime transfer did not complete before its deadline"
+                    "Runtime transfer did not complete before its deadline",
+                    failure=CoordinatorTransferFailure.EXPIRED,
                 )
             status = await self.coordinator.get_transfer_status(
                 CoordinatorGetTransferStatusRequest(identity=identity)
@@ -359,7 +370,8 @@ class ServerToRuntimeTransferService:
                 if status.outcome is CoordinatorTransferOutcome.SUCCEEDED:
                     return
                 raise ServerToRuntimeTransferError(
-                    "Runtime transfer failed before destination commit"
+                    "Runtime transfer failed before destination commit",
+                    failure=status.failure,
                 )
             await asyncio.sleep(
                 min(
