@@ -373,7 +373,14 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
     agent_session = await rdb_session.scalar(
         sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
     )
+    agent = await rdb_session.get(RDBAgent, agent_id)
+    connection = await rdb_session.scalar(sa.select(RDBExternalChannelConnection))
     assert agent_session is not None
+    assert agent is not None
+    assert connection is not None
+    agent.avatar = {"kind": "generated", "seed": "channel-work-agent"}
+    connection.capabilities = {"upload_files": True}
+    await rdb_session.flush()
     repository = ExternalChannelWorkRepository()
     await repository.ensure_active_work(rdb_session, binding_id=binding_id)
     work = await _seed_activity_tracker(rdb_session, binding_id=binding_id)
@@ -398,11 +405,15 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
         now=_at(2),
     )
     update_delivery = continued.deliveries[0]
-    assert await repository.start_delivery(
+    target = await repository.start_delivery(
         rdb_session,
         delivery_attempt_id=update_delivery.id,
         now=_at(3),
     )
+    assert target is not None
+    assert target.capabilities == connection.capabilities
+    assert target.agent_name == agent.name
+    assert target.agent_avatar == agent.avatar
     await repository.finish_delivery(
         rdb_session,
         delivery_attempt_id=update_delivery.id,
