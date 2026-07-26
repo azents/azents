@@ -776,6 +776,7 @@ def _copy_final_success(
             worktree.dirty = dirty
         return
     if "discovered_worktrees" in payload:
+        message.git_discover_managed_worktrees.SetInParent()
         message.git_discover_managed_worktrees.entries.extend(
             _discovered_worktree_entries(payload)
         )

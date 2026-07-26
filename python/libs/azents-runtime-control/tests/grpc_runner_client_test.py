@@ -834,6 +834,66 @@ async def test_grpc_client_maps_git_operation_payloads_and_results() -> None:
 
 
 @pytest.mark.asyncio
+async def test_grpc_client_round_trips_empty_managed_worktree_discovery_result() -> (
+    None
+):
+    """An empty managed-worktree discovery result remains a typed success."""
+    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        sent.append(await anext(requests))
+
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
+    accepted = await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    await client.append_runner_event(
+        RunnerOperationEvent(
+            request_id="req-discovery",
+            runtime_id="runtime-1",
+            generation=accepted.generation,
+            event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+            payload={"discovered_worktrees": []},
+            created_at=_now(),
+            final=True,
+        )
+    )
+    for _ in range(10):
+        if sent:
+            break
+        await asyncio.sleep(0)
+
+    message = sent[0].operation_event
+    assert message.WhichOneof("payload") == "final_success"
+    assert message.final_success.WhichOneof("result") == (
+        "git_discover_managed_worktrees"
+    )
+    assert runner_event_from_message(
+        message,
+        request_id="req-discovery",
+    ).payload == {"discovered_worktrees": []}
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_grpc_client_maps_git_worktree_integrity_operations() -> None:
     """Inspection and guarded cleanup fields round-trip through protobuf."""
     sent: list[runtime_runner_control_pb2.RunnerMessage] = []

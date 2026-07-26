@@ -688,6 +688,24 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
         RuntimeRunnerOperation(
             runtime_id="runtime-1",
             runner_generation=accepted.register_accepted.generation,
+            operation_type="discover_managed_git_worktrees",
+            owner_session_id="session-1",
+            payload={},
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+    command = await anext(stream)
+    assert command.operation_request.WhichOneof("payload") == (
+        "git_discover_managed_worktrees"
+    )
+    assert command.operation_request.owner_session_id == "session-1"
+
+    await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
             operation_type="remove_git_worktree",
             owner_session_id="session-1",
             payload={

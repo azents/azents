@@ -806,20 +806,40 @@ async def test_start_replaces_pod_for_new_runner_credential_and_preserves_pvc() 
 
 
 @pytest.mark.asyncio
-async def test_start_deletes_stale_pod_before_later_recreate() -> None:
+async def test_start_replaces_stale_runner_image_and_preserves_pvc() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
     await provider.start(
         _command(RuntimeLifecycleCommandType.START, runner_image="runner:old")
     )
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+    pvc = api.pvcs[pvc_key]
 
     await provider.start(
         _command(RuntimeLifecycleCommandType.START, runner_image="runner:new")
     )
 
     assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    assert api.deleted_pvcs == []
+    assert api.pvcs[pvc_key] == pvc
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert pod.spec.containers[0].image == "runner:new"
+
+
+@pytest.mark.asyncio
+async def test_start_reuses_pod_when_runner_image_and_config_are_unchanged() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+
+    await provider.start(command)
+
+    assert api.deleted_pods == []
+    assert api.deleted_pvcs == []
+    assert api.pods[pod_key] == pod
 
 
 @pytest.mark.asyncio

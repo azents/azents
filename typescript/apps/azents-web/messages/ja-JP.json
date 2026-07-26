@@ -1565,7 +1565,7 @@
       "branch": "ブランチ: {branch}",
       "baseRef": "基準 ref: {ref}",
       "cleanup": {
-        "title": "孤立 worktree のクリーンアップ",
+        "title": "Worktree のクリーンアップ",
         "phase": "フェーズ: {phase}",
         "examined": "{count} 件を確認",
         "removed": "{count} 件を削除",

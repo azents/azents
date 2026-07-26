@@ -191,6 +191,21 @@ const inputActions: InputActionDefinition[] = [
     },
     attachments: { policy: "unsupported" },
   },
+  {
+    id: "cleanup_orphan_git_worktrees",
+    keyword: "cleanup-worktrees",
+    label: "Clean up worktrees",
+    description:
+      "Remove managed Git worktrees not connected to an active session.",
+    action: { type: "cleanup_orphan_git_worktrees" },
+    category: "turn",
+    message: {
+      policy: "optional",
+      placeholder: "Optional cleanup note.",
+      max_length: null,
+    },
+    attachments: { policy: "unsupported" },
+  },
 ];
 
 const meta = {
@@ -298,7 +313,7 @@ export const InputActionSuggestions = {
       ),
     ).toBeVisible();
     await expect(
-      canvas.getByRole("button", { name: /compact/i }),
+      canvas.getByRole("option", { name: /compact/i }),
     ).toBeVisible();
 
     const suggestions = canvas
@@ -327,7 +342,7 @@ export const SelectedActionChip = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.type(canvas.getByRole("textbox"), "/");
-    await userEvent.click(canvas.getByRole("button", { name: /compact/i }));
+    await userEvent.click(canvas.getByRole("option", { name: /compact/i }));
     const chip = canvas.getByText("/compact").parentElement;
     await expect(chip).toBeVisible();
     await expect(chip).toHaveStyle({ borderStyle: "none" });
@@ -336,6 +351,59 @@ export const SelectedActionChip = {
         "Polish the composer layout and verify the mobile model picker",
       ),
     ).toBeVisible();
+  },
+} satisfies Story;
+
+export const CleanupActionSelection = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-cleanup-action-selection",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByRole("textbox"), "/cleanup");
+    await userEvent.click(
+      canvas.getByRole("option", { name: /clean up worktrees/i }),
+    );
+    await expect(canvas.getByText("/cleanup-worktrees")).toBeVisible();
+    await expect(canvas.getByRole("textbox")).toHaveValue("");
+  },
+} satisfies Story;
+
+export const KeyboardInputActionSelection = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-keyboard-action-selection",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByRole("textbox");
+    await userEvent.click(input);
+    await userEvent.keyboard("/");
+    await expect(canvas.getByRole("listbox")).toBeVisible();
+    await expect(
+      canvas.getByRole("option", { name: /clean up worktrees/i }),
+    ).toHaveAttribute("aria-selected", "true");
+
+    await userEvent.keyboard("{ArrowDown}");
+    await expect(
+      canvas.getByRole("option", { name: /compact/i }),
+    ).toHaveAttribute("aria-selected", "true");
+    await userEvent.keyboard("{ArrowUp}");
+    await expect(
+      canvas.getByRole("option", { name: /clean up worktrees/i }),
+    ).toHaveAttribute("aria-selected", "true");
+    await userEvent.keyboard("{ArrowDown}");
+    await userEvent.keyboard("{Enter}");
+    await expect(canvas.getByText("/compact")).toBeVisible();
+    await expect(input).toHaveValue("");
+
+    await userEvent.keyboard("/cleanup");
+    await expect(canvas.getByRole("listbox")).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
+    await expect(input).toHaveValue("/cleanup");
+    await expect(input).toHaveAttribute("aria-expanded", "false");
   },
 } satisfies Story;
 

@@ -1565,7 +1565,7 @@
       "branch": "Branche : {branch}",
       "baseRef": "Ref de base : {ref}",
       "cleanup": {
-        "title": "Nettoyage des worktrees orphelins",
+        "title": "Nettoyage des worktrees",
         "phase": "Phase : {phase}",
         "examined": "{count} examinés",
         "removed": "{count} supprimés",

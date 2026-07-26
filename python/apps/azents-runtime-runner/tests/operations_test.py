@@ -1455,6 +1455,57 @@ async def test_git_create_remove_worktree_and_delete_branch(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_git_discover_managed_worktrees_ignores_worktree_children(
+    tmp_path: Path,
+) -> None:
+    source = _init_git_repo(tmp_path / "source")
+    managed_root = tmp_path / ".azents" / "worktrees"
+    legacy_worktree = managed_root / "legacy"
+    nested_worktree = managed_root / "session" / "project"
+    _git(
+        source,
+        "worktree",
+        "add",
+        "-b",
+        "azents/legacy",
+        str(legacy_worktree),
+        "main",
+    )
+    _git(
+        source,
+        "worktree",
+        "add",
+        "-b",
+        "azents/nested",
+        str(nested_worktree),
+        "main",
+    )
+    (legacy_worktree / "child-directory").mkdir()
+    (legacy_worktree / "child-file").write_text("ignored\n")
+
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="discover_managed_git_worktrees",
+            payload={},
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    entries = client.events[-1].payload["discovered_worktrees"]
+    assert isinstance(entries, list)
+    discovered_entries = [entry for entry in entries if isinstance(entry, dict)]
+    assert len(discovered_entries) == len(entries)
+    assert [entry["worktree_path"] for entry in discovered_entries] == [
+        str(legacy_worktree),
+        str(nested_worktree),
+    ]
+    assert all(entry["registered"] is True for entry in discovered_entries)
+
+
+@pytest.mark.asyncio
 async def test_git_remove_worktree_treats_missing_target_as_terminal(
     tmp_path: Path,
 ) -> None:

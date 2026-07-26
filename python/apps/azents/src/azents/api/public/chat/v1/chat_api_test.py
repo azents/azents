@@ -1637,6 +1637,26 @@ class TestListInputActions:
         assert items[1]["id"] == "goal"
         assert items[1]["action"] == {"type": "goal"}
         assert items[1]["message"]["policy"] == "required"
+        assert items[2] == {
+            "id": "cleanup_orphan_git_worktrees",
+            "keyword": "cleanup-worktrees",
+            "label": "Clean up worktrees",
+            "description": (
+                "Remove managed Git worktrees not connected to an "
+                "active session. Local branches are preserved."
+            ),
+            "action": {"type": "cleanup_orphan_git_worktrees"},
+            "category": "turn",
+            "message": {
+                "policy": "optional",
+                "placeholder": "Optional cleanup note.",
+                "max_length": None,
+            },
+            "attachments": {"policy": "unsupported"},
+            "availability_hint": None,
+            "source_label": None,
+            "relative_hint": None,
+        }
 
 
 class TestEventRoutes:
