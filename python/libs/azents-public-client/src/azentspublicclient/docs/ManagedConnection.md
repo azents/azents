@@ -16,6 +16,7 @@ Name | Type | Description | Notes
 **provider_bot_user_id** | **str** |  | 
 **credentials_configured** | **bool** |  | 
 **capabilities** | **Dict[str, object]** |  | 
+**provider_config** | **Dict[str, object]** |  | 
 **last_verified_at** | **datetime** |  | 
 **last_health_at** | **datetime** |  | 
 **socket_gap_detected_at** | **datetime** |  | 

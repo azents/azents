@@ -40,6 +40,8 @@ from azents.services.external_channel.connection import (
     ExternalChannelConnectionStateChanged,
 )
 from azents.services.external_channel.data import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
     ExternalChannelConnectionStatusSnapshot,
     SlackConnectionCredentials,
 )
@@ -63,6 +65,16 @@ class SlackConnectionSetupRequest(BaseModel):
     app_id: str = Field(min_length=1, max_length=255)
     transport: ExternalChannelTransport
     credentials: SlackConnectionCredentials
+
+
+class DiscordConnectionSetupRequest(BaseModel):
+    """Secret-bearing Discord App setup input."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    app_id: str = Field(min_length=1, max_length=255)
+    configuration: DiscordConnectionConfiguration
+    credentials: DiscordConnectionCredentials
 
 
 class ManagedConnectionListResponse(BaseModel):
@@ -146,6 +158,31 @@ async def setup_multi_slack_connection(
             workspace_id=member.workspace_id,
             app_id=request_body.app_id,
             transport=request_body.transport,
+            credentials=request_body.credentials,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post(
+    "/workspaces/{handle}/external-channels/discord/multi",
+    status_code=status.HTTP_201_CREATED,
+)
+async def setup_multi_discord_connection(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    *,
+    request_body: DiscordConnectionSetupRequest,
+) -> ManagedMultiConnectionSetup:
+    """Create a zero-Agent-capable configuring Workspace Discord Multi App."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    _require_discord_enabled(config)
+    try:
+        return await service.setup_multi_discord(
+            workspace_id=member.workspace_id,
+            app_id=request_body.app_id,
+            configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
     except ValueError as error:
@@ -578,6 +615,38 @@ async def setup_slack_connection(
 
 
 @router.post(
+    "/workspaces/{handle}/agents/{agent_id}/external-channels/discord",
+    status_code=status.HTTP_201_CREATED,
+)
+async def setup_discord_connection(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    *,
+    agent_id: str,
+    request_body: DiscordConnectionSetupRequest,
+) -> ManagedConnectionSetup:
+    """Create a configuring dedicated Discord App and its sole Agent route."""
+    _require_discord_enabled(config)
+    try:
+        return await service.setup_discord(
+            workspace_id=member.workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=member.workspace_user_id,
+            app_id=request_body.app_id,
+            configuration=request_body.configuration,
+            credentials=request_body.credentials,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+
+
+@router.post(
     "/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/validate"
 )
 async def validate_connection(
@@ -848,4 +917,15 @@ def _require_multi_app_enabled(config: Config) -> None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=("Slack Multi App creation is not enabled for this deployment."),
+        )
+
+
+def _require_discord_enabled(config: Config) -> None:
+    """Reject Discord mutations until the full provider rollout is ready."""
+    if not config.external_channel_discord_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Discord External Channel creation is not enabled for this deployment."
+            ),
         )

@@ -181,6 +181,8 @@ Class | Method | HTTP request | Description
 *ExternalChannelV1Api* | [**external_channel_v1_remove_multi_slack_route**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_remove_multi_slack_route) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id} | Remove Multi Slack Route
 *ExternalChannelV1Api* | [**external_channel_v1_replace_multi_slack_channel_default**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_replace_multi_slack_channel_default) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id} | Replace Multi Slack Channel Default
 *ExternalChannelV1Api* | [**external_channel_v1_revoke_access_grant**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_revoke_access_grant) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/grants/{grant_id} | Revoke Access Grant
+*ExternalChannelV1Api* | [**external_channel_v1_setup_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/discord | Setup Discord Connection
+*ExternalChannelV1Api* | [**external_channel_v1_setup_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi | Setup Multi Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_update_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_multi_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Update Multi Slack Connection
@@ -378,6 +380,9 @@ Class | Method | HTTP request | Description
  - [CreateWorkspaceResponse](azentspublicclient/docs/CreateWorkspaceResponse.md)
  - [CurrentMemberResponse](azentspublicclient/docs/CurrentMemberResponse.md)
  - [Detail](azentspublicclient/docs/Detail.md)
+ - [DiscordConnectionConfiguration](azentspublicclient/docs/DiscordConnectionConfiguration.md)
+ - [DiscordConnectionCredentials](azentspublicclient/docs/DiscordConnectionCredentials.md)
+ - [DiscordConnectionSetupRequest](azentspublicclient/docs/DiscordConnectionSetupRequest.md)
  - [ElevateResponse](azentspublicclient/docs/ElevateResponse.md)
  - [ElevateWithEmailRequest](azentspublicclient/docs/ElevateWithEmailRequest.md)
  - [ElevateWithPasswordRequest](azentspublicclient/docs/ElevateWithPasswordRequest.md)

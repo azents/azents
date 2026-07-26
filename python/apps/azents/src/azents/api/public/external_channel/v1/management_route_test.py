@@ -54,6 +54,7 @@ def _connection() -> ManagedConnection:
         provider_bot_user_id=None,
         credentials_configured=True,
         capabilities=None,
+        provider_config=None,
         last_verified_at=None,
         last_health_at=None,
         socket_gap_detected_at=None,
@@ -74,6 +75,7 @@ def _multi_connection() -> ManagedMultiConnection:
         provider_bot_user_id=None,
         credentials_configured=True,
         capabilities=None,
+        provider_config=None,
         last_verified_at=None,
         last_health_at=None,
         socket_gap_detected_at=None,
@@ -90,6 +92,7 @@ def _client(
     *,
     role: WorkspaceUserRole = WorkspaceUserRole.OWNER,
     multi_app_enabled: bool = True,
+    discord_enabled: bool = False,
 ) -> TestClient:
     app = create_dummy_public_app()
     app.dependency_overrides[ExternalChannelManagementService] = lambda: service
@@ -111,6 +114,7 @@ def _client(
         ),
         api_url="https://api.example.test",
         external_channel_multi_app_enabled=multi_app_enabled,
+        external_channel_discord_enabled=discord_enabled,
     )
     return TestClient(app)
 
@@ -185,6 +189,7 @@ def test_agent_connection_list_includes_read_only_associated_multi_apps() -> Non
             "provider_bot_user_id": None,
             "credentials_configured": True,
             "capabilities": None,
+            "provider_config": None,
             "last_verified_at": None,
             "last_health_at": None,
             "socket_gap_detected_at": None,
@@ -286,6 +291,42 @@ def test_multi_app_creation_is_blocked_before_mode_aware_enablement() -> None:
         "detail": "Slack Multi App creation is not enabled for this deployment."
     }
     service.setup_multi_slack.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/external-channel/v1/workspaces/ws/agents/agent-1/external-channels/discord",
+        "/external-channel/v1/workspaces/ws/external-channels/discord/multi",
+    ],
+)
+def test_discord_creation_is_blocked_until_full_provider_rollout(path: str) -> None:
+    """Discord setup cannot create provider state before required later phases."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+
+    response = _client(service).post(
+        path,
+        json={
+            "app_id": "discord-app-1",
+            "configuration": {
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+            },
+            "credentials": {
+                "provider": "discord",
+                "bot_token": "discord-bot-token",
+            },
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": (
+            "Discord External Channel creation is not enabled for this deployment."
+        )
+    }
+    service.setup_discord.assert_not_awaited()
+    service.setup_multi_discord.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -431,6 +472,17 @@ def test_openapi_includes_management_but_excludes_provider_callback() -> None:
     assert "post" in paths[multi_path]
     assert f"{multi_path}/{{connection_id}}/impact" in paths
     assert f"{multi_path}/{{connection_id}}/agents/{{route_id}}/impact" in paths
+    discord_single_path = (
+        "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/"
+        "external-channels/discord"
+    )
+    discord_multi_path = (
+        "/external-channel/v1/workspaces/{handle}/external-channels/discord/multi"
+    )
+    assert discord_single_path in paths
+    assert "post" in paths[discord_single_path]
+    assert discord_multi_path in paths
+    assert "post" in paths[discord_multi_path]
     assert not any(
         "multi" in path and "/agents/{agent_id}/external-channels" in path
         for path in paths

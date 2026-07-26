@@ -4885,6 +4885,64 @@
         }
       }
     },
+    "/external-channel/v1/workspaces/{handle}/external-channels/discord/multi": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Setup Multi Discord Connection",
+        "description": "Create a zero-Agent-capable configuring Workspace Discord Multi App.",
+        "operationId": "external_channel_v1_setup_multi_discord_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscordConnectionSetupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedMultiConnectionSetup"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}": {
       "get": {
         "tags": [
@@ -5992,6 +6050,73 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SlackConnectionSetupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnectionSetup"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/discord": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Setup Discord Connection",
+        "description": "Create a configuring dedicated Discord App and its sole Agent route.",
+        "operationId": "external_channel_v1_setup_discord_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscordConnectionSetupRequest"
               }
             }
           }
@@ -14805,6 +14930,72 @@
         "title": "CurrentMemberResponse",
         "description": "Current user workspace member info response schema."
       },
+      "DiscordConnectionConfiguration": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "const": "discord",
+            "title": "Provider",
+            "default": "discord"
+          },
+          "target_guild_id": {
+            "type": "string",
+            "title": "Target Guild Id",
+            "description": "Target Discord Guild snowflake"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_guild_id"
+        ],
+        "title": "DiscordConnectionConfiguration",
+        "description": "Validated non-secret configuration for one Discord App connection."
+      },
+      "DiscordConnectionCredentials": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "const": "discord",
+            "title": "Provider",
+            "default": "discord"
+          },
+          "bot_token": {
+            "type": "string",
+            "title": "Bot Token",
+            "description": "Discord bot token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bot_token"
+        ],
+        "title": "DiscordConnectionCredentials",
+        "description": "Validated secret payload for one Discord App connection."
+      },
+      "DiscordConnectionSetupRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "App Id"
+          },
+          "configuration": {
+            "$ref": "#/components/schemas/DiscordConnectionConfiguration"
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/DiscordConnectionCredentials"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "configuration",
+          "credentials"
+        ],
+        "title": "DiscordConnectionSetupRequest",
+        "description": "Secret-bearing Discord App setup input."
+      },
       "ElevateResponse": {
         "properties": {
           "access_token": {
@@ -17719,6 +17910,18 @@
             ],
             "title": "Capabilities"
           },
+          "provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Config"
+          },
           "last_verified_at": {
             "anyOf": [
               {
@@ -17792,6 +17995,7 @@
           "provider_bot_user_id",
           "credentials_configured",
           "capabilities",
+          "provider_config",
           "last_verified_at",
           "last_health_at",
           "socket_gap_detected_at",
@@ -18048,6 +18252,18 @@
             ],
             "title": "Capabilities"
           },
+          "provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Config"
+          },
           "last_verified_at": {
             "anyOf": [
               {
@@ -18133,6 +18349,7 @@
           "provider_bot_user_id",
           "credentials_configured",
           "capabilities",
+          "provider_config",
           "last_verified_at",
           "last_health_at",
           "socket_gap_detected_at",

@@ -27,6 +27,8 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
     ExternalChannelCapabilitySnapshot,
     ExternalChannelConnectionCredentialPayload,
     ExternalChannelConnectionStatusSnapshot,
@@ -34,6 +36,7 @@ from azents.services.external_channel.data import (
     SlackConnectionCredentials,
 )
 from azents.services.external_channel.provider import (
+    DiscordExternalChannelProviderContract,
     SlackExternalChannelProviderContract,
 )
 from azents.services.external_channel.slack_http import (
@@ -144,6 +147,55 @@ class ExternalChannelConnectionService:
             encrypted_credentials=self.credentials_codec.encrypt(validated),
             capabilities=None,
             provider_config=None,
+            last_verified_at=None,
+            last_health_at=None,
+            disconnected_at=None,
+            socket_lease_owner=None,
+            socket_lease_until=None,
+            socket_heartbeat_at=None,
+            socket_gap_detected_at=None,
+            socket_gap_reason=None,
+        )
+        async with self.session_manager() as session:
+            connection = await self.repository.create_connection(session, create)
+            await session.commit()
+        return ExternalChannelConnectionSetup(connection=connection)
+
+    async def create_discord_connection(
+        self,
+        *,
+        workspace_id: str,
+        app_id: str,
+        configuration: DiscordConnectionConfiguration,
+        credentials: DiscordConnectionCredentials,
+        app_mode: ExternalChannelAppMode = ExternalChannelAppMode.SINGLE,
+    ) -> ExternalChannelConnectionSetup:
+        """Persist one configuring Discord connection without activating ingress."""
+        if not app_id.strip():
+            raise ValueError("Discord App ID must not be blank.")
+        payload = ExternalChannelConnectionCredentialPayload(
+            provider=ExternalChannelProvider.DISCORD,
+            transport=ExternalChannelTransport.HTTP,
+            ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+            credentials=credentials,
+        )
+        contract = DiscordExternalChannelProviderContract()
+        validated = contract.validate_connection_credentials(payload)
+        create = ExternalChannelConnectionCreate(
+            workspace_id=workspace_id,
+            provider=ExternalChannelProvider.DISCORD,
+            transport=ExternalChannelTransport.HTTP,
+            ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+            configuration_generation=1,
+            app_mode=app_mode,
+            status=ExternalChannelConnectionStatus.CONFIGURING,
+            provider_app_id=app_id,
+            provider_tenant_id=None,
+            provider_bot_user_id=None,
+            http_callback_selector_hash=None,
+            encrypted_credentials=self.credentials_codec.encrypt(validated),
+            capabilities=None,
+            provider_config=configuration.model_dump(mode="json"),
             last_verified_at=None,
             last_health_at=None,
             disconnected_at=None,

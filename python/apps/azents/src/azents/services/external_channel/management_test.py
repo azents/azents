@@ -55,6 +55,7 @@ def _connection() -> ManagedConnection:
         provider_bot_user_id=None,
         credentials_configured=False,
         capabilities=None,
+        provider_config=None,
         last_verified_at=None,
         last_health_at=None,
         socket_gap_detected_at=None,

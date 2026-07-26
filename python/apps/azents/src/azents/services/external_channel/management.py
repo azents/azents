@@ -55,6 +55,8 @@ from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
 )
 from azents.services.external_channel.data import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
     ExternalChannelConnectionCredentialPayload,
     ExternalChannelConnectionStatusSnapshot,
     SlackConnectionCredentials,
@@ -243,6 +245,54 @@ class ExternalChannelManagementService:
         )
         return ManagedConnectionSetup(connection=connection)
 
+    async def setup_discord(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+        app_id: str,
+        configuration: DiscordConnectionConfiguration,
+        credentials: DiscordConnectionCredentials,
+    ) -> ManagedConnectionSetup:
+        """Create a configuring dedicated Discord App and its sole Agent route."""
+        await self._require_agent(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            admin=True,
+        )
+        setup = await self.connection_service.create_discord_connection(
+            workspace_id=workspace_id,
+            app_id=app_id,
+            configuration=configuration,
+            credentials=credentials,
+        )
+        async with self.session_manager() as session:
+            await self.domain_repository.create_agent_route(
+                session,
+                ExternalChannelAgentRouteCreate(
+                    connection_id=setup.connection.id,
+                    agent_id=agent_id,
+                    agent_id_snapshot=agent_id,
+                    route_mode=ExternalChannelRouteMode.DEDICATED,
+                    connection_app_mode=ExternalChannelAppMode.SINGLE,
+                    catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
+                    catalog_removed_at=None,
+                    catalog_removed_by_user_id=None,
+                ),
+            )
+            await session.commit()
+        connections = await self.list_connections(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+        )
+        connection = next(
+            item for item in connections if item.id == setup.connection.id
+        )
+        return ManagedConnectionSetup(connection=connection)
+
     async def list_multi_connections(
         self,
         *,
@@ -296,6 +346,28 @@ class ExternalChannelManagementService:
         )
         await self.connection_service.validate_connection(
             connection_id=setup.connection.id
+        )
+        connection = await self.get_multi_connection(
+            workspace_id=workspace_id,
+            connection_id=setup.connection.id,
+        )
+        return ManagedMultiConnectionSetup(connection=connection)
+
+    async def setup_multi_discord(
+        self,
+        *,
+        workspace_id: str,
+        app_id: str,
+        configuration: DiscordConnectionConfiguration,
+        credentials: DiscordConnectionCredentials,
+    ) -> ManagedMultiConnectionSetup:
+        """Create a zero-Agent-capable configuring Workspace Discord Multi App."""
+        setup = await self.connection_service.create_discord_connection(
+            workspace_id=workspace_id,
+            app_id=app_id,
+            configuration=configuration,
+            credentials=credentials,
+            app_mode=ExternalChannelAppMode.MULTI,
         )
         connection = await self.get_multi_connection(
             workspace_id=workspace_id,
