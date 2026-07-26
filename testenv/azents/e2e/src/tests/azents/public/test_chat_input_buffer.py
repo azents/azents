@@ -61,9 +61,11 @@ class _Workspace:
 
 @dataclass(frozen=True)
 class _PendingBuffer:
-    """Live event t t pending buffer projection."""
+    """Native pending mailbox item projection."""
 
     id: str
+    mailbox_item_id: str
+    item_key: str
     content: str
 
 
@@ -430,27 +432,40 @@ def _assert_split_rest_contract(
 
 
 def _pending_buffers(payload: dict[str, object]) -> list[_PendingBuffer]:
-    """Return pending user-message items from the mailbox projection."""
+    """Return pending user-message items from native mailbox envelopes."""
     raw_envelopes = payload.get("mailbox_items")
     buffers: list[_PendingBuffer] = []
     for envelope in _object_items(raw_envelopes, label="live mailbox_items"):
-        mailbox_item_id = envelope.get("mailbox_item_id")
-        if not isinstance(mailbox_item_id, str):
-            raise AssertionError(f"invalid mailbox envelope: {envelope!r}")
+        envelope_id = envelope.get("mailbox_item_id")
+        if not isinstance(envelope_id, str):
+            raise AssertionError(f"invalid mailbox envelope identity: {envelope!r}")
+        if envelope.get("kind") != "user_message":
+            continue
         for item in _object_items(
             envelope.get("items"),
-            label="live mailbox items",
+            label="mailbox envelope items",
         ):
+            item_id = item.get("id")
+            item_key = item.get("item_key")
+            if not isinstance(item_id, str) or not isinstance(item_key, str):
+                raise AssertionError(f"invalid mailbox item identity: {item!r}")
             presentation = _object_item(
                 item.get("presentation"),
-                label="live mailbox presentation",
+                label="mailbox item presentation",
             )
             if presentation.get("type") != "user_message":
                 continue
             content = presentation.get("content")
             if not isinstance(content, str):
-                raise AssertionError(f"invalid mailbox item projection: {item!r}")
-            buffers.append(_PendingBuffer(id=mailbox_item_id, content=content))
+                raise AssertionError(f"invalid user mailbox presentation: {item!r}")
+            buffers.append(
+                _PendingBuffer(
+                    id=item_id,
+                    mailbox_item_id=envelope_id,
+                    item_key=item_key,
+                    content=content,
+                )
+            )
     return buffers
 
 
@@ -690,7 +705,11 @@ def _wait_for_pending_buffer(
             session_id=session_id,
         )
         last_buffers = _pending_buffers(live_payload)
-        if expected in last_buffers:
+        if any(
+            candidate.mailbox_item_id == expected.mailbox_item_id
+            and candidate.content == expected.content
+            for candidate in last_buffers
+        ):
             return
         time.sleep(0.25)
     raise TimeoutError(
@@ -749,7 +768,7 @@ def _delete_mailbox_item(
     session_id: str,
     mailbox_item_id: str,
 ) -> None:
-    """Delete one pending mailbox item through the public REST API."""
+    """Delete one pending mailbox envelope through the public REST API."""
     response = requests.delete(
         f"{server_url}/chat/v1/sessions/{session_id}/mailbox-items/{mailbox_item_id}",
         headers=_headers(token),
@@ -881,11 +900,15 @@ class TestChatInputBuffer:
             client_request_id=f"second-follow-up-{unique()}",
         )
         follow_up_buffer = _PendingBuffer(
-            id=str(_accepted_write(follow_up_response)["id"]),
+            id="",
+            mailbox_item_id=str(_accepted_write(follow_up_response)["id"]),
+            item_key="",
             content=_FOLLOW_UP_MESSAGE,
         )
         second_follow_up_buffer = _PendingBuffer(
-            id=str(_accepted_write(second_follow_up_response)["id"]),
+            id="",
+            mailbox_item_id=str(_accepted_write(second_follow_up_response)["id"]),
+            item_key="",
             content=_SECOND_FOLLOW_UP_MESSAGE,
         )
         pending_payload = _list_live(
@@ -923,8 +946,8 @@ class TestChatInputBuffer:
             final_payload.get("history"),
             label="final history",
         )
-        assert follow_up_buffer.id not in json.dumps(final_live)
-        assert second_follow_up_buffer.id not in json.dumps(final_live)
+        assert follow_up_buffer.mailbox_item_id not in json.dumps(final_live)
+        assert second_follow_up_buffer.mailbox_item_id not in json.dumps(final_live)
         assert _input_buffer_contents(final_live) == []
         final_contents = _message_contents(final_history)
         first_follow_up_index = final_contents.index(_FOLLOW_UP_MESSAGE)
@@ -992,7 +1015,9 @@ class TestChatInputBuffer:
                 client_request_id=f"deleted-{unique()}",
             )
             deleted_buffer = _PendingBuffer(
-                id=str(_accepted_write(deleted_response)["id"]),
+                id="",
+                mailbox_item_id=str(_accepted_write(deleted_response)["id"]),
+                item_key="",
                 content=_DELETED_MESSAGE,
             )
             _wait_for_pending_buffer(
@@ -1005,7 +1030,7 @@ class TestChatInputBuffer:
                 server_url=azents_public_server_url,
                 token=workspace.token,
                 session_id=session_id,
-                mailbox_item_id=deleted_buffer.id,
+                mailbox_item_id=deleted_buffer.mailbox_item_id,
             )
             pending_payload = _list_live(
                 server_url=azents_public_server_url,
@@ -1013,6 +1038,7 @@ class TestChatInputBuffer:
                 session_id=session_id,
             )
             assert _pending_buffers(pending_payload) == []
+            assert deleted_buffer.mailbox_item_id not in json.dumps(pending_payload)
         finally:
             _set_release_file(
                 azents_engine_worker_container,

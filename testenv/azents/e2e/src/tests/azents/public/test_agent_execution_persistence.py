@@ -56,14 +56,14 @@ _CANONICAL_WS_ACTION_TYPES = frozenset(
     {
         "action_execution_removed",
         "action_execution_updated",
+        "mailbox_item_removed",
+        "mailbox_item_upserted",
         "history_event_appended",
         "input_actions_updated",
         "live_event_removed",
         "live_event_upserted",
         "live_run_cleared",
         "live_run_updated",
-        "mailbox_item_removed",
-        "mailbox_item_upserted",
         "subagent_tree_changed",
         "subscribed",
         "subscription_health_check_ack",
@@ -1151,6 +1151,116 @@ class TestAgentExecutionPersistence:
         assert _history_events(forward_page)
         assert forward_page.get("has_more") is True
         assert forward_page.get("has_newer") is True
+
+    def test_ws_mailbox_upsert_and_remove_use_native_identity(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Observe typed mailbox admission and removal around one promoted turn."""
+        del azents_engine_worker_container
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+        session_id = _team_primary_session_id(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
+        message = f"Native mailbox WebSocket identity {unique()}"
+
+        with _connect_chat(
+            public_api_client=public_api_client,
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=session_id,
+        ) as ws:
+            subscribed = _wait_for_ws_action(ws, action_type="subscribed")
+            assert subscribed.get("session_id") == session_id
+
+            response = requests.post(
+                f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
+                headers={
+                    **_headers(workspace.token),
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "agent_id": agent_id,
+                    "client_request_id": f"native-mailbox-{unique()}",
+                    "message": message,
+                    "inference_profile": {
+                        "model_target_label": "default",
+                        "reasoning_effort": None,
+                    },
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            write_payload = _json_object(response)
+            snapshot = _json_object_payload(
+                write_payload.get("snapshot"),
+                label="chat write snapshot",
+            )
+            _json_object_list_payload(
+                snapshot.get("mailbox_items"),
+                label="chat write snapshot mailbox_items",
+            )
+
+            upsert_action = _wait_for_ws_action(
+                ws,
+                action_type="mailbox_item_upserted",
+                timeout=30,
+            )
+            mailbox_item = _json_object_payload(
+                upsert_action.get("mailbox_item"),
+                label="mailbox_item_upserted mailbox_item",
+            )
+            assert upsert_action.get("session_id") == session_id
+            assert mailbox_item.get("session_id") == session_id
+            assert mailbox_item.get("kind") == "user_message"
+            items = _json_object_list_payload(
+                mailbox_item.get("items"),
+                label="mailbox envelope items",
+            )
+            assert len(items) == 1
+            item = items[0]
+            mailbox_item_id = mailbox_item.get("mailbox_item_id")
+            item_id = item.get("id")
+            item_key = item.get("item_key")
+            assert isinstance(mailbox_item_id, str)
+            assert isinstance(item_id, str)
+            assert isinstance(item_key, str)
+            assert item_id == f"{mailbox_item_id}:{item_key}"
+            presentation = _json_object_payload(
+                item.get("presentation"),
+                label="mailbox item presentation",
+            )
+            assert presentation.get("type") == "user_message"
+            assert presentation.get("content") == message
+
+            removal_action = _wait_for_ws_action(
+                ws,
+                action_type="mailbox_item_removed",
+                timeout=120,
+            )
+            assert removal_action == {
+                "type": "mailbox_item_removed",
+                "session_id": session_id,
+                "mailbox_item_id": mailbox_item_id,
+            }
+
+        history = _wait_for_rest_contents(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=session_id,
+            expected=[message],
+        )
+        assert message in _message_contents(history)
 
     def test_failed_run_retry_live_state_recovers_before_terminal_error(
         self,
