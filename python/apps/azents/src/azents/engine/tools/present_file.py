@@ -5,8 +5,8 @@ Export runtime file as Exchange artifact and share with user.
 
 import logging
 import posixpath
+import uuid
 
-from azcommon.uuid import uuid7
 from pydantic import BaseModel, Field
 
 from azents.engine.io.attachments import RuntimeAttachment
@@ -14,6 +14,9 @@ from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
     FunctionToolResult,
+)
+from azents.engine.tooling.execution_context import (
+    get_client_tool_execution_context,
 )
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
@@ -33,6 +36,10 @@ from azents.services.session_storage import guess_media_type
 logger = logging.getLogger(__name__)
 
 _PRESENTABLE_ROOT = "/workspace/agent"
+_PUBLICATION_ID_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_URL,
+    "https://azents.ai/runtime-transfer/present-file-publication",
+)
 
 
 def _is_presentable_path(path: str) -> bool:
@@ -41,6 +48,14 @@ def _is_presentable_path(path: str) -> bool:
     return normalized == _PRESENTABLE_ROOT or normalized.startswith(
         f"{_PRESENTABLE_ROOT}/"
     )
+
+
+def _publication_id(*, run_id: str, call_id: str, runtime_path: str) -> str:
+    """Derive a stable verified-object publication ID for one Runtime path."""
+    return uuid.uuid5(
+        _PUBLICATION_ID_NAMESPACE,
+        f"{run_id}:{call_id}:{runtime_path}",
+    ).hex
 
 
 class PresentFileInput(BaseModel):
@@ -71,6 +86,7 @@ def make_present_file_tool(
             raise FunctionToolError("No paths provided.")
         if publication_capability is None:
             raise FunctionToolError("Runtime file transfer is unavailable.")
+        execution = get_client_tool_execution_context()
 
         attachments: list[RuntimeAttachment] = []
         errors: list[str] = []
@@ -127,7 +143,11 @@ def make_present_file_tool(
                     media_type=media_type,
                     expected_size=expected_size,
                     authority=authority,
-                    publication_id=uuid7().hex,
+                    publication_id=_publication_id(
+                        run_id=authority.run_id,
+                        call_id=execution.call_id,
+                        runtime_path=abs_path,
+                    ),
                 )
             except PresentFilePublicationAccessDenied:
                 errors.append("Session resource access denied while presenting file.")

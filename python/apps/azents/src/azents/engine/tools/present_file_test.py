@@ -12,6 +12,7 @@ from azents.core.enums import (
     ExchangeFileStatus,
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
+from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.engine.tools.present_file import make_present_file_tool
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeToServerPublicationCapability,
@@ -142,6 +143,19 @@ def _tool(
     )
 
 
+async def _invoke(
+    tool: FunctionTool,
+    *,
+    paths: list[str],
+    call_id: str = "call-1",
+) -> FunctionToolResult:
+    """Run present_file under one durable client tool execution identity."""
+    with client_tool_execution_context(call_id=call_id, name="present_file"):
+        result = await tool.handler(json.dumps({"paths": paths}))
+    assert isinstance(result, FunctionToolResult)
+    return result
+
+
 def _output_item(result: FunctionToolResult, index: int) -> dict[str, object]:
     """Return one structured tool output item after type validation."""
     assert isinstance(result.output, list)
@@ -164,8 +178,9 @@ async def test_present_file_publishes_large_file_without_body_relay() -> None:
     storage = _NoBodyReadStorage({path: b"x" * (5 * 1024 * 1024)})
     service = _PublicationService()
 
-    result = await _tool(storage, _capability(service)).handler(
-        json.dumps({"paths": [path]})
+    result = await _invoke(
+        _tool(storage, _capability(service)),
+        paths=[path],
     )
 
     assert isinstance(result, FunctionToolResult)
@@ -189,7 +204,7 @@ async def test_present_file_fails_closed_without_publication_capability() -> Non
     storage = _NoBodyReadStorage({path: b"hello"})
 
     with pytest.raises(FunctionToolError, match="transfer is unavailable"):
-        await _tool(storage, None).handler(json.dumps({"paths": [path]}))
+        await _invoke(_tool(storage, None), paths=[path])
 
     assert storage.get_calls == []
 
@@ -202,8 +217,9 @@ async def test_present_file_preserves_partial_multi_path_results() -> None:
     storage = _NoBodyReadStorage({good_path: b"hello"})
     service = _PublicationService()
 
-    result = await _tool(storage, _capability(service)).handler(
-        json.dumps({"paths": [missing_path, good_path]})
+    result = await _invoke(
+        _tool(storage, _capability(service)),
+        paths=[missing_path, good_path],
     )
 
     assert isinstance(result, FunctionToolResult)
@@ -232,8 +248,9 @@ async def test_present_file_reports_authority_failure_and_continues() -> None:
         }
     )
 
-    result = await _tool(storage, _capability(service)).handler(
-        json.dumps({"paths": [denied_path, good_path]})
+    result = await _invoke(
+        _tool(storage, _capability(service)),
+        paths=[denied_path, good_path],
     )
 
     assert isinstance(result, FunctionToolResult)
@@ -257,8 +274,9 @@ async def test_present_file_reports_terminal_upload_failure_and_continues() -> N
         }
     )
 
-    result = await _tool(storage, _capability(service)).handler(
-        json.dumps({"paths": [failed_path, good_path]})
+    result = await _invoke(
+        _tool(storage, _capability(service)),
+        paths=[failed_path, good_path],
     )
 
     assert isinstance(result, FunctionToolResult)
@@ -276,7 +294,7 @@ async def test_present_file_rejects_disallowed_path_without_publication() -> Non
         _capability(service),
     )
 
-    result = await tool.handler(json.dumps({"paths": ["/tmp/output.txt"]}))
+    result = await _invoke(tool, paths=["/tmp/output.txt"])
 
     assert isinstance(result, FunctionToolResult)
     assert "Only files under /workspace/agent can be presented" in _output_text(result)
@@ -289,11 +307,46 @@ async def test_present_file_propagates_runtime_stat_failure() -> None:
     service = _PublicationService()
 
     with pytest.raises(FunctionToolError, match="Failed to access file"):
-        await _tool(_UnavailableStatStorage(), _capability(service)).handler(
-            json.dumps({"paths": ["/workspace/agent/result.txt"]})
+        await _invoke(
+            _tool(_UnavailableStatStorage(), _capability(service)),
+            paths=["/workspace/agent/result.txt"],
         )
 
     assert service.requests == []
+
+
+@pytest.mark.asyncio
+async def test_present_file_reuses_publication_id_for_a_retried_tool_call() -> None:
+    """Make a repeated durable tool call converge on one verified publication."""
+    path = "/workspace/agent/result.txt"
+    storage = _NoBodyReadStorage({path: b"hello"})
+    service = _PublicationService()
+    tool = _tool(storage, _capability(service))
+
+    await _invoke(tool, paths=[path], call_id="call-retry")
+    await _invoke(tool, paths=[path], call_id="call-retry")
+
+    publication_ids = [request.publication_id for request in service.requests]
+    assert publication_ids[0] == publication_ids[1]
+    assert len(service.requests[0].publication_id) == 32
+
+
+@pytest.mark.asyncio
+async def test_present_file_scopes_publication_id_to_runtime_path() -> None:
+    """Avoid merging different files from one multi-path tool call."""
+    first_path = "/workspace/agent/first.txt"
+    second_path = "/workspace/agent/second.txt"
+    storage = _NoBodyReadStorage({first_path: b"first", second_path: b"second"})
+    service = _PublicationService()
+
+    await _invoke(
+        _tool(storage, _capability(service)),
+        paths=[first_path, second_path],
+        call_id="call-multiple",
+    )
+
+    assert len(service.requests) == 2
+    assert service.requests[0].publication_id != service.requests[1].publication_id
 
 
 def _authority() -> SessionResourceAuthority:
