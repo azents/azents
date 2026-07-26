@@ -891,7 +891,7 @@ class AgentRunState(BaseModel):
     terminal_result_event_id: str | None = Field(default=None)
     terminal_result_message: str | None = Field(default=None)
     parent_result_delivery_state: AgentRunParentResultDeliveryState | None
-    parent_result_input_buffer_id: str | None
+    parent_result_mailbox_item_id: str | None
     parent_result_enqueued_at: datetime.datetime | None
     stop_requested_at: datetime.datetime | None = Field(default=None)
     created_at: datetime.datetime

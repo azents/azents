@@ -9,15 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionStatus,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
     SessionAgentKind,
 )
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import SessionAgent
-from azents.repos.input_buffer.data import InputBuffer
-from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.repos.mailbox.data import MailboxItem
+from azents.services.mailbox import MailboxEnqueue, MailboxService
 
 InstructionMessageKind = Literal["spawn_agent", "send_message", "followup_task"]
 
@@ -26,7 +26,7 @@ InstructionMessageKind = Literal["spawn_agent", "send_message", "followup_task"]
 class AgentMailboxService:
     """Persist operation-specific agent mailbox messages."""
 
-    input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
@@ -38,7 +38,7 @@ class AgentMailboxService:
         source: SessionAgent,
         target: SessionAgent,
         content: str,
-    ) -> InputBuffer:
+    ) -> MailboxItem:
         """Enqueue a wake-producing initial child assignment."""
         return await self._enqueue_instruction(
             session,
@@ -46,7 +46,7 @@ class AgentMailboxService:
             target=target,
             message_kind="spawn_agent",
             content=content,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         )
 
     async def enqueue_message(
@@ -56,7 +56,7 @@ class AgentMailboxService:
         source: SessionAgent,
         target: SessionAgent,
         content: str,
-    ) -> InputBuffer:
+    ) -> MailboxItem:
         """Enqueue an ordinary message without waking the target session."""
         return await self._enqueue_instruction(
             session,
@@ -64,7 +64,7 @@ class AgentMailboxService:
             target=target,
             message_kind="send_message",
             content=content,
-            scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+            scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
         )
 
     async def enqueue_followup_task(
@@ -74,7 +74,7 @@ class AgentMailboxService:
         source: SessionAgent,
         target: SessionAgent,
         content: str,
-    ) -> InputBuffer:
+    ) -> MailboxItem:
         """Enqueue a wake-producing follow-up assignment."""
         return await self._enqueue_instruction(
             session,
@@ -82,7 +82,7 @@ class AgentMailboxService:
             target=target,
             message_kind="followup_task",
             content=content,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         )
 
     async def enqueue_terminal_result(
@@ -93,7 +93,7 @@ class AgentMailboxService:
         target: SessionAgent,
         run: AgentRunState,
         content: str,
-    ) -> InputBuffer:
+    ) -> MailboxItem:
         """Enqueue one queue-only terminal result for the direct parent."""
         self._validate_tree(source, target)
         if source.kind != SessionAgentKind.SUBAGENT:
@@ -129,7 +129,7 @@ class AgentMailboxService:
             source=source,
             target=target,
             content=content,
-            scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+            scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
             idempotency_key=f"agent_result:{run.id}",
             metadata=metadata,
         )
@@ -142,8 +142,8 @@ class AgentMailboxService:
         target: SessionAgent,
         message_kind: InstructionMessageKind,
         content: str,
-        scheduling_mode: InputBufferSchedulingMode,
-    ) -> InputBuffer:
+        scheduling_mode: MailboxSchedulingMode,
+    ) -> MailboxItem:
         self._validate_tree(source, target)
         return await self._enqueue(
             session,
@@ -166,10 +166,10 @@ class AgentMailboxService:
         source: SessionAgent,
         target: SessionAgent,
         content: str,
-        scheduling_mode: InputBufferSchedulingMode,
+        scheduling_mode: MailboxSchedulingMode,
         idempotency_key: str | None,
         metadata: dict[str, str],
-    ) -> InputBuffer:
+    ) -> MailboxItem:
         locked_root = await self.agent_session_repository.lock_session_agent_by_id(
             session,
             source.root_session_agent_id,
@@ -185,15 +185,15 @@ class AgentMailboxService:
         if locked_target.status is not AgentSessionStatus.ACTIVE:
             raise ValueError("Target AgentSession is not active")
         if (
-            scheduling_mode is InputBufferSchedulingMode.WAKE_SESSION
+            scheduling_mode is MailboxSchedulingMode.WAKE_SESSION
             and locked_target.stop_requested_at is not None
         ):
             raise ValueError("Target AgentSession is stopping")
-        result = await self.input_buffer_service.enqueue(
+        result = await self.mailbox_item_service.enqueue(
             session,
-            InputBufferEnqueue(
+            MailboxEnqueue(
                 session_id=target.agent_session_id,
-                kind=InputBufferKind.AGENT_MESSAGE,
+                kind=MailboxItemKind.AGENT_MESSAGE,
                 scheduling_mode=scheduling_mode,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
@@ -212,12 +212,12 @@ class AgentMailboxService:
         await mark_activity(session, session_agent_id=source.id)
         if target.id != source.id:
             await mark_activity(session, session_agent_id=target.id)
-        if scheduling_mode == InputBufferSchedulingMode.WAKE_SESSION:
+        if scheduling_mode == MailboxSchedulingMode.WAKE_SESSION:
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 target.agent_session_id,
             )
-        return result.input_buffer
+        return result.mailbox_item
 
     @staticmethod
     def _base_metadata(

@@ -39,19 +39,19 @@ class RDBActionExecution(RDBModel):
     __tablename__ = "action_executions"
 
     IX_SESSION_ID = sa.Index("ix_action_executions_session_id", "session_id")
-    UQ_INPUT_BUFFER_ID = sa.UniqueConstraint(
-        "input_buffer_id",
-        name="uq_action_executions_input_buffer_id",
+    UQ_MAILBOX_ITEM_ID = sa.UniqueConstraint(
+        "mailbox_item_id",
+        name="uq_action_executions_mailbox_item_id",
     )
     IX_SESSION_STATUS = sa.Index(
         "ix_action_executions_session_id_status",
         "session_id",
         "status",
     )
-    IX_SESSION_INPUT_BUFFER = sa.Index(
-        "ix_action_executions_session_id_input_buffer_id",
+    IX_SESSION_MAILBOX_ITEM = sa.Index(
+        "ix_action_executions_session_id_mailbox_item_id",
         "session_id",
-        "input_buffer_id",
+        "mailbox_item_id",
     )
 
     id: Mapped[str] = mapped_column(
@@ -65,7 +65,7 @@ class RDBActionExecution(RDBModel):
         sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
-    input_buffer_id: Mapped[str] = mapped_column(
+    mailbox_item_id: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,
     )
@@ -132,9 +132,9 @@ class RDBActionExecution(RDBModel):
 
     __table_args__ = (
         IX_SESSION_ID,
-        UQ_INPUT_BUFFER_ID,
+        UQ_MAILBOX_ITEM_ID,
         IX_SESSION_STATUS,
-        IX_SESSION_INPUT_BUFFER,
+        IX_SESSION_MAILBOX_ITEM,
     )
 
 

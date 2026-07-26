@@ -1781,9 +1781,9 @@ class RDBExternalChannelInvocationBatch(RDBModel):
         nullable=False,
         server_default="0",
     )
-    input_buffer_id: Mapped[str | None] = mapped_column(
+    mailbox_item_id: Mapped[str | None] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("input_buffers.id", ondelete="SET NULL"),
+        sa.ForeignKey("mailbox_items.id", ondelete="SET NULL"),
         nullable=True,
         default=None,
     )

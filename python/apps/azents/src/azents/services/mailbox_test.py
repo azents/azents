@@ -1,4 +1,4 @@
-"""InputBufferService tests."""
+"""MailboxService tests."""
 
 import asyncio
 import dataclasses
@@ -28,9 +28,9 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
-    InputBufferKind,
-    InputBufferSchedulingMode,
     LLMProvider,
+    MailboxItemKind,
+    MailboxSchedulingMode,
     ModelFileStatus,
 )
 from azents.core.inference_profile import (
@@ -60,8 +60,8 @@ from azents.engine.tools.skill import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.event import RDBEvent
-from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
@@ -72,8 +72,8 @@ from azents.repos.external_channel.data import (
     ExternalChannelInvocationProjectionItem,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.input_buffer import InputBufferRepository
-from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import MailboxItem, MailboxItemCreate
 from azents.repos.model_file.data import ModelFile
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -100,16 +100,16 @@ from azents.testing.model_selection import (
     make_test_model_settings,
 )
 
-from .input_buffer import (
-    EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY,
-    ExternalChannelInvocationInputBufferProcessor,
-    InputBufferEnqueue,
-    InputBufferOwnerGenerationStaleError,
-    InputBufferPreparationContext,
-    InputBufferPreparationStaleError,
-    InputBufferService,
-    PreparedInputBufferFiles,
+from .mailbox import (
+    ExternalChannelInvocationMailboxProcessor,
+    MailboxEnqueue,
+    MailboxOwnerGenerationStaleError,
+    MailboxPreparationContext,
+    MailboxPreparationStaleError,
+    MailboxService,
+    PreparedMailboxFiles,
     TurnEffect,
+    build_external_channel_mailbox_payload,
     fold_turn_eligibility,
 )
 
@@ -142,7 +142,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     repo = WorkspaceRepository()
     result = await repo.create(
         session,
-        WorkspaceCreate(name="InputBufferService test", handle=handle),
+        WorkspaceCreate(name="MailboxService test", handle=handle),
     )
     assert isinstance(result, Success)
     workspace_id = await repo.resolve_id(session, handle)
@@ -165,7 +165,7 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
 
     agent = RDBAgent(
         workspace_id=workspace_id,
-        name="InputBufferService test agent",
+        name="MailboxService test agent",
         model_selection=make_test_model_selection_dict(
             integration_id=integration.id,
             provider=LLMProvider.ANTHROPIC,
@@ -186,7 +186,7 @@ async def _create_fixture(
     rdb_session_manager: SessionManager[AsyncSession],
     slug: str,
 ) -> tuple[str, str]:
-    """Create fixture satisfying InputBuffer FK."""
+    """Create fixture satisfying MailboxItem FK."""
     async with rdb_session_manager() as session:
         workspace_id = await _create_workspace(session, f"{slug}-ws")
         user = await UserRepository().create(
@@ -230,14 +230,14 @@ async def _create_buffer(
     attachments: list[str] | None = None,
     file_parts: list[FileOutputPart] | None = None,
 ) -> str:
-    """Create InputBuffer for tests."""
+    """Create MailboxItem for tests."""
     async with rdb_session_manager() as session:
-        created = await InputBufferRepository().create(
+        created = await MailboxRepository().create(
             session,
-            InputBufferCreate(
+            MailboxItemCreate(
                 session_id=session_id,
-                kind=InputBufferKind.USER_MESSAGE,
-                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                kind=MailboxItemKind.USER_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=model_target_label,
                 requested_reasoning_effort=reasoning_effort,
                 sender_user_id=user_id,
@@ -260,14 +260,14 @@ async def _create_action_buffer(
     content: str,
     action: GoalAction | SkillAction,
 ) -> str:
-    """Create action InputBuffer for tests."""
+    """Create action MailboxItem for tests."""
     async with rdb_session_manager() as session:
-        created = await InputBufferRepository().create(
+        created = await MailboxRepository().create(
             session,
-            InputBufferCreate(
+            MailboxItemCreate(
                 session_id=session_id,
-                kind=InputBufferKind.ACTION_MESSAGE,
-                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                kind=MailboxItemKind.ACTION_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label="Fast",
                 requested_reasoning_effort=ModelReasoningEffort.HIGH,
                 sender_user_id=user_id,
@@ -287,15 +287,15 @@ async def _create_agent_message_buffer(
     *,
     session_id: str,
     content: str,
-    scheduling_mode: InputBufferSchedulingMode,
+    scheduling_mode: MailboxSchedulingMode,
 ) -> str:
-    """Create agent_message InputBuffer for tests."""
+    """Create agent_message MailboxItem for tests."""
     async with rdb_session_manager() as session:
-        created = await InputBufferRepository().create(
+        created = await MailboxRepository().create(
             session,
-            InputBufferCreate(
+            MailboxItemCreate(
                 session_id=session_id,
-                kind=InputBufferKind.AGENT_MESSAGE,
+                kind=MailboxItemKind.AGENT_MESSAGE,
                 scheduling_mode=scheduling_mode,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
@@ -329,14 +329,14 @@ async def _create_agent_result_buffer(
     source_run_index: int,
     source_terminal_result_event_id: str,
 ) -> str:
-    """Create terminal agent_result InputBuffer for tests."""
+    """Create terminal agent_result MailboxItem for tests."""
     async with rdb_session_manager() as session:
-        created = await InputBufferRepository().create(
+        created = await MailboxRepository().create(
             session,
-            InputBufferCreate(
+            MailboxItemCreate(
                 session_id=session_id,
-                kind=InputBufferKind.AGENT_MESSAGE,
-                scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+                kind=MailboxItemKind.AGENT_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=None,
@@ -692,7 +692,7 @@ class _DeletingExchangeFileService(_ExchangeFileService):
     ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
         """Mutate FIFO state through another session before returning metadata."""
         async with self.session_manager() as session:
-            await InputBufferRepository().delete_by_session_and_id(
+            await MailboxRepository().delete_by_session_and_id(
                 session,
                 self.session_id,
                 self.buffer_id,
@@ -713,7 +713,7 @@ class _DeletingExchangeFileService(_ExchangeFileService):
     ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
         """Mutate FIFO state before root-claim metadata resolution returns."""
         async with self.session_manager() as session:
-            await InputBufferRepository().delete_by_session_and_id(
+            await MailboxRepository().delete_by_session_and_id(
                 session,
                 self.session_id,
                 self.buffer_id,
@@ -778,18 +778,18 @@ class _CancellingSecondAttachmentExchangeFileService(_ExchangeFileService):
         )
 
 
-def _input_buffer_service(
+def _mailbox_item_service(
     rdb_session_manager: SessionManager[AsyncSession],
     *,
     exchange_file_service: ExchangeFileService | None = None,
     model_file_service: ModelFileService | None = None,
     event_transcript_repository: EventTranscriptRepository | None = None,
     vfs_projection_service: object | None = None,
-) -> InputBufferService:
-    """Create InputBufferService for tests."""
-    return InputBufferService(
+) -> MailboxService:
+    """Create MailboxService for tests."""
+    return MailboxService(
         session_manager=rdb_session_manager,
-        input_buffer_repository=InputBufferRepository(),
+        mailbox_item_repository=MailboxRepository(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
@@ -815,11 +815,11 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
     user_id = "user-001"
     agent_id = "agent-001"
     attachment_uri = "exchange://exchange/workspace-001/session/image.png"
-    buffer = InputBuffer(
+    buffer = MailboxItem(
         id="buffer-001",
         session_id=session_id,
-        kind=InputBufferKind.USER_MESSAGE,
-        scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+        kind=MailboxItemKind.USER_MESSAGE,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         requested_model_target_label="Quality",
         requested_reasoning_effort=None,
         sender_user_id=None,
@@ -859,8 +859,8 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         created_at=tznow(),
     )
     model_file_service = _ModelFileService(Success(model_file))
-    input_buffer_repository = AsyncMock(spec=InputBufferRepository)
-    input_buffer_repository.list_for_flush.return_value = [buffer]
+    mailbox_item_repository = AsyncMock(spec=MailboxRepository)
+    mailbox_item_repository.list_for_flush.return_value = [buffer]
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
     agent_session_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-001",
@@ -878,14 +878,14 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         run_index=1,
         status=AgentRunStatus.RUNNING,
     )
-    service = InputBufferService(
+    service = MailboxService(
         session_manager=cast(
             SessionManager[AsyncSession],
             _unit_session_manager,
         ),
-        input_buffer_repository=cast(
-            InputBufferRepository,
-            input_buffer_repository,
+        mailbox_item_repository=cast(
+            MailboxRepository,
+            mailbox_item_repository,
         ),
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
@@ -909,7 +909,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         vfs_projection_service=None,
     )
 
-    prepared = await service._prepare_input_buffer_attachments(  # pyright: ignore[reportPrivateUsage]  # Verify the pre-lock attachment preparation boundary directly.
+    prepared = await service._prepare_mailbox_item_attachments(  # pyright: ignore[reportPrivateUsage]  # Verify the pre-lock attachment preparation boundary directly.
         session_id=session_id,
         expected_buffer_id=buffer.id,
         include_action_messages=True,
@@ -984,11 +984,11 @@ async def test_admitted_attachment_model_file_failure_is_terminal(
 async def test_prepare_skips_deferred_action_attachment_materialization() -> None:
     """A deferred action does not create unreferenced ModelFiles."""
     session_id = "session-001"
-    buffer = InputBuffer(
+    buffer = MailboxItem(
         id="buffer-001",
         session_id=session_id,
-        kind=InputBufferKind.ACTION_MESSAGE,
-        scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+        kind=MailboxItemKind.ACTION_MESSAGE,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         requested_model_target_label="Quality",
         requested_reasoning_effort=None,
         sender_user_id="user-001",
@@ -1000,22 +1000,22 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         file_parts=[],
         created_at=tznow(),
     )
-    input_buffer_repository = AsyncMock(spec=InputBufferRepository)
-    input_buffer_repository.list_for_flush.return_value = [buffer]
+    mailbox_item_repository = AsyncMock(spec=MailboxRepository)
+    mailbox_item_repository.list_for_flush.return_value = [buffer]
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
     agent_session_repository.get_by_id.return_value = SimpleNamespace(
         agent_id="agent-001"
     )
     exchange_file_service = _ExchangeFileService()
     model_file_service = _ModelFileService()
-    service = InputBufferService(
+    service = MailboxService(
         session_manager=cast(
             SessionManager[AsyncSession],
             _unit_session_manager,
         ),
-        input_buffer_repository=cast(
-            InputBufferRepository,
-            input_buffer_repository,
+        mailbox_item_repository=cast(
+            MailboxRepository,
+            mailbox_item_repository,
         ),
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
@@ -1039,7 +1039,7 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         vfs_projection_service=None,
     )
 
-    prepared = await service._prepare_input_buffer_attachments(  # pyright: ignore[reportPrivateUsage]  # Verify deferred actions skip external preparation.
+    prepared = await service._prepare_mailbox_item_attachments(  # pyright: ignore[reportPrivateUsage]  # Verify deferred actions skip external preparation.
         session_id=session_id,
         expected_buffer_id=buffer.id,
         include_action_messages=False,
@@ -1057,9 +1057,9 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
 async def test_cancelled_promotion_discards_prepared_model_files() -> None:
     """Cancellation preserves the signal after shielded ModelFile cleanup."""
     model_file_service = _ModelFileService()
-    service = InputBufferService(
+    service = MailboxService(
         session_manager=cast(SessionManager[AsyncSession], object()),
-        input_buffer_repository=cast(InputBufferRepository, object()),
+        mailbox_item_repository=cast(MailboxRepository, object()),
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=model_file_service,
         agent_session_repository=cast(AgentSessionRepository, object()),
@@ -1069,7 +1069,7 @@ async def test_cancelled_promotion_discards_prepared_model_files() -> None:
         external_channel_repository=cast(ExternalChannelRepository, object()),
         vfs_projection_service=None,
     )
-    prepared = PreparedInputBufferFiles(
+    prepared = PreparedMailboxFiles(
         attachments=[],
         file_parts=[],
         created_model_file_ids=["model-file-1"],
@@ -1129,8 +1129,8 @@ async def test_cancelled_attachment_preparation_discards_partial_model_files() -
     assert model_file_service.discarded_model_file_ids == [model_file.id]
 
 
-class TestInputBufferService:
-    """Validate InputBufferService behavior."""
+class TestMailboxService:
+    """Validate MailboxService behavior."""
 
     async def test_enqueue_creates_buffer_without_marking_session_running(
         self,
@@ -1141,7 +1141,7 @@ class TestInputBufferService:
             rdb_session_manager,
             "input-buffer-enqueue-running",
         )
-        service = _input_buffer_service(rdb_session_manager)
+        service = _mailbox_item_service(rdb_session_manager)
 
         async with rdb_session_manager() as session:
             before = await AgentSessionRepository().get_by_id(
@@ -1153,10 +1153,10 @@ class TestInputBufferService:
 
             result = await service.enqueue(
                 session,
-                InputBufferEnqueue(
+                MailboxEnqueue(
                     session_id=session_id,
-                    kind=InputBufferKind.USER_MESSAGE,
-                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                    kind=MailboxItemKind.USER_MESSAGE,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     sender_user_id=user_id,
@@ -1174,8 +1174,8 @@ class TestInputBufferService:
             )
 
         assert result.created is True
-        assert result.input_buffer.session_id == session_id
-        assert result.input_buffer.content == "wake me"
+        assert result.mailbox_item.session_id == session_id
+        assert result.mailbox_item.content == "wake me"
         assert after is not None
         assert after.run_state == AgentSessionRunState.IDLE
 
@@ -1192,13 +1192,13 @@ class TestInputBufferService:
             rdb_session_manager,
             session_id=session_id,
             content="queued note",
-            scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+            scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
         )
-        service = _input_buffer_service(rdb_session_manager)
+        service = _mailbox_item_service(rdb_session_manager)
 
-        assert await service.has_pending_session_input_buffers(session_id)
+        assert await service.has_pending_session_mailbox_items(session_id)
         assert await service.has_pending_agent_messages(session_id)
-        assert not await service.has_pending_wake_session_input_buffers(session_id)
+        assert not await service.has_pending_wake_session_mailbox_items(session_id)
 
         await _create_buffer(
             rdb_session_manager,
@@ -1207,7 +1207,7 @@ class TestInputBufferService:
             content="wake now",
         )
 
-        assert await service.has_pending_wake_session_input_buffers(session_id)
+        assert await service.has_pending_wake_session_mailbox_items(session_id)
 
     async def test_enqueue_deduplicates_only_the_same_inference_profile(
         self,
@@ -1218,11 +1218,11 @@ class TestInputBufferService:
             rdb_session_manager,
             "input-buffer-profile-idempotency",
         )
-        service = _input_buffer_service(rdb_session_manager)
-        enqueue = InputBufferEnqueue(
+        service = _mailbox_item_service(rdb_session_manager)
+        enqueue = MailboxEnqueue(
             session_id=session_id,
-            kind=InputBufferKind.USER_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.USER_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label="Quality",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             sender_user_id=user_id,
@@ -1240,7 +1240,7 @@ class TestInputBufferService:
 
             assert created.created is True
             assert deduplicated.created is False
-            assert deduplicated.input_buffer.id == created.input_buffer.id
+            assert deduplicated.mailbox_item.id == created.mailbox_item.id
 
             with pytest.raises(
                 ValueError,
@@ -1250,7 +1250,7 @@ class TestInputBufferService:
                     session,
                     dataclasses.replace(
                         enqueue,
-                        scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+                        scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
                     ),
                 )
 
@@ -1283,13 +1283,13 @@ class TestInputBufferService:
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
         """The atomic create result is checked even when the pre-read misses."""
-        repository = AsyncMock(spec=InputBufferRepository)
+        repository = AsyncMock(spec=MailboxRepository)
         repository.get_by_idempotency_key.return_value = None
-        repository.create_idempotent.return_value = InputBuffer(
+        repository.create_idempotent.return_value = MailboxItem(
             id="buffer-winner",
             session_id="session-001",
-            kind=InputBufferKind.USER_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.USER_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label="Fast",
             requested_reasoning_effort=ModelReasoningEffort.LOW,
             sender_user_id="user-001",
@@ -1301,9 +1301,9 @@ class TestInputBufferService:
             file_parts=[],
             created_at=datetime.datetime.now(datetime.UTC),
         )
-        service = InputBufferService(
+        service = MailboxService(
             session_manager=rdb_session_manager,
-            input_buffer_repository=repository,
+            mailbox_item_repository=repository,
             exchange_file_service=_ExchangeFileService(),
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
@@ -1313,10 +1313,10 @@ class TestInputBufferService:
             vfs_projection_service=None,
             external_channel_repository=ExternalChannelRepository(),
         )
-        enqueue = InputBufferEnqueue(
+        enqueue = MailboxEnqueue(
             session_id="session-001",
-            kind=InputBufferKind.USER_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.USER_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label="Quality",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             sender_user_id="user-001",
@@ -1351,9 +1351,9 @@ class TestInputBufferService:
             model_target_label="Quality",
             reasoning_effort=None,
         )
-        service = _input_buffer_service(rdb_session_manager)
+        service = _mailbox_item_service(rdb_session_manager)
 
-        result = await service.flush_session_input_buffers(
+        result = await service.flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -1404,8 +1404,8 @@ class TestInputBufferService:
         async with rdb_session_manager() as session:
             remaining = await session.scalar(
                 sa.select(sa.func.count())
-                .select_from(RDBInputBuffer)
-                .where(RDBInputBuffer.id == buffer_id)
+                .select_from(RDBMailboxItem)
+                .where(RDBMailboxItem.id == buffer_id)
             )
             stored_event = await session.get(RDBEvent, result.events[0].id)
         assert remaining == 0
@@ -1432,10 +1432,10 @@ class TestInputBufferService:
             model_target_label="Quality",
             reasoning_effort=None,
         )
-        service = _input_buffer_service(rdb_session_manager)
+        service = _mailbox_item_service(rdb_session_manager)
 
-        with pytest.raises(InputBufferPreparationStaleError):
-            await service.flush_session_input_buffers(
+        with pytest.raises(MailboxPreparationStaleError):
+            await service.flush_session_mailbox_items(
                 session_id=session_id,
                 owner_generation=0,
                 model="gpt-5.4",
@@ -1447,7 +1447,7 @@ class TestInputBufferService:
             )
 
         async with rdb_session_manager() as session:
-            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+            remaining = await MailboxRepository().get_by_id(session, buffer_id)
         assert remaining is not None
 
     async def test_flush_rejects_superseded_owner_generation(
@@ -1468,10 +1468,10 @@ class TestInputBufferService:
             reasoning_effort=None,
         )
 
-        with pytest.raises(InputBufferOwnerGenerationStaleError):
-            await _input_buffer_service(
+        with pytest.raises(MailboxOwnerGenerationStaleError):
+            await _mailbox_item_service(
                 rdb_session_manager
-            ).flush_session_input_buffers(
+            ).flush_session_mailbox_items(
                 session_id=session_id,
                 owner_generation=1,
                 model="gpt-5.4",
@@ -1483,7 +1483,7 @@ class TestInputBufferService:
             )
 
         async with rdb_session_manager() as session:
-            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+            remaining = await MailboxRepository().get_by_id(session, buffer_id)
         assert remaining is not None
 
     async def test_flush_resolves_attachments_before_locking_fifo_head(
@@ -1543,15 +1543,15 @@ class TestInputBufferService:
             created_at=tznow(),
         )
         model_file_service = _ModelFileService(Success(model_file))
-        service = _input_buffer_service(
+        service = _mailbox_item_service(
             rdb_session_manager,
             exchange_file_service=exchange_file_service,
             model_file_service=model_file_service,
         )
 
-        with pytest.raises(InputBufferPreparationStaleError):
+        with pytest.raises(MailboxPreparationStaleError):
             async with asyncio.timeout(2):
-                await service.flush_session_input_buffers(
+                await service.flush_session_mailbox_items(
                     session_id=session_id,
                     owner_generation=0,
                     model="gpt-5.4",
@@ -1602,13 +1602,13 @@ class TestInputBufferService:
             "append",
             AsyncMock(side_effect=RuntimeError("event append failed")),
         )
-        service = _input_buffer_service(
+        service = _mailbox_item_service(
             rdb_session_manager,
             event_transcript_repository=event_repository,
         )
 
         with pytest.raises(RuntimeError, match="event append failed"):
-            await service.flush_session_input_buffers(
+            await service.flush_session_mailbox_items(
                 session_id=session_id,
                 owner_generation=0,
                 model="prepared-model",
@@ -1627,7 +1627,7 @@ class TestInputBufferService:
                 session,
                 session_id,
             )
-            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+            remaining = await MailboxRepository().get_by_id(session, buffer_id)
         assert agent_session is not None
         goal = await GoalStateStore(session_manager=rdb_session_manager).load(
             agent_id,
@@ -1663,9 +1663,9 @@ class TestInputBufferService:
                 parent_agent_run_id=None,
             )
 
-        result = await _input_buffer_service(
+        result = await _mailbox_item_service(
             rdb_session_manager
-        ).flush_session_input_buffers(
+        ).flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -1684,7 +1684,7 @@ class TestInputBufferService:
                 session,
                 run_id=run.id,
             )
-            remaining = await session.get(RDBInputBuffer, buffer_id)
+            remaining = await session.get(RDBMailboxItem, buffer_id)
         assert associated_event_ids == result.promoted_event_ids
         assert remaining is None
 
@@ -1722,9 +1722,9 @@ class TestInputBufferService:
             reasoning_effort=ModelReasoningEffort.LOW,
         )
 
-        result = await _input_buffer_service(
+        result = await _mailbox_item_service(
             rdb_session_manager
-        ).flush_session_input_buffers(
+        ).flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -1745,8 +1745,8 @@ class TestInputBufferService:
             remaining_ids = list(
                 (
                     await session.execute(
-                        sa.select(RDBInputBuffer.id).where(
-                            RDBInputBuffer.session_id == session_id
+                        sa.select(RDBMailboxItem.id).where(
+                            RDBMailboxItem.session_id == session_id
                         )
                     )
                 ).scalars()
@@ -1771,9 +1771,9 @@ class TestInputBufferService:
             reasoning_effort=None,
         )
 
-        result = await _input_buffer_service(
+        result = await _mailbox_item_service(
             rdb_session_manager
-        ).flush_session_input_buffers(
+        ).flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -1794,7 +1794,7 @@ class TestInputBufferService:
         )
         assert len(result.promoted_event_ids) == 1
         async with rdb_session_manager() as session:
-            remaining = await session.get(RDBInputBuffer, buffer_id)
+            remaining = await session.get(RDBMailboxItem, buffer_id)
         assert remaining is None
 
     async def test_flush_promotes_agent_message_payload(
@@ -1810,11 +1810,11 @@ class TestInputBufferService:
             rdb_session_manager,
             session_id=session_id,
             content="continue with the next step",
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         )
-        service = _input_buffer_service(rdb_session_manager)
+        service = _mailbox_item_service(rdb_session_manager)
 
-        result = await service.flush_session_input_buffers(
+        result = await service.flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -1873,9 +1873,9 @@ class TestInputBufferService:
             source_terminal_result_event_id=terminal_event_id,
         )
 
-        result = await _input_buffer_service(
+        result = await _mailbox_item_service(
             rdb_session_manager
-        ).flush_session_input_buffers(
+        ).flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -1918,7 +1918,7 @@ class TestInputBufferService:
             rdb_session_manager,
             parent_session_id=session_id,
         )
-        service = _input_buffer_service(rdb_session_manager)
+        service = _mailbox_item_service(rdb_session_manager)
         runs: dict[int, tuple[str, str]] = {}
         for expected_run_index in (1, 2, 3):
             terminal_event_id = str(expected_run_index + 100).rjust(32, "0")
@@ -1942,7 +1942,7 @@ class TestInputBufferService:
                 source_run_index=source_run_index,
                 source_terminal_result_event_id=terminal_event_id,
             )
-            result = await service.flush_session_input_buffers(
+            result = await service.flush_session_mailbox_items(
                 session_id=session_id,
                 owner_generation=0,
                 model="gpt-5.4",
@@ -1996,9 +1996,9 @@ class TestInputBufferService:
             source_terminal_result_event_id=terminal_event_id,
         )
 
-        result = await _input_buffer_service(
+        result = await _mailbox_item_service(
             rdb_session_manager
-        ).flush_session_input_buffers(
+        ).flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -2049,9 +2049,9 @@ class TestInputBufferService:
             source_terminal_result_event_id=terminal_event_id,
         )
 
-        result = await _input_buffer_service(
+        result = await _mailbox_item_service(
             rdb_session_manager
-        ).flush_session_input_buffers(
+        ).flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -2102,15 +2102,15 @@ class TestInputBufferService:
             source_run_index=source_run_index,
             source_terminal_result_event_id=terminal_event_id,
         )
-        service = _input_buffer_service(rdb_session_manager)
+        service = _mailbox_item_service(rdb_session_manager)
         monkeypatch.setattr(
-            service.input_buffer_repository,
+            service.mailbox_item_repository,
             "delete_claimed_by_ids",
             AsyncMock(side_effect=RuntimeError("delete failed")),
         )
 
         with pytest.raises(RuntimeError, match="delete failed"):
-            await service.flush_session_input_buffers(
+            await service.flush_session_mailbox_items(
                 session_id=session_id,
                 owner_generation=0,
                 model="gpt-5.4",
@@ -2126,7 +2126,7 @@ class TestInputBufferService:
                 session,
                 child_id,
             )
-            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+            remaining = await MailboxRepository().get_by_id(session, buffer_id)
         assert child is not None
         assert child.parent_observed_run_index is None
         assert child.parent_observed_event_id is None
@@ -2157,9 +2157,9 @@ class TestInputBufferService:
             content="Review this PR",
             action=SkillAction(skill_path=item.skill_path),
         )
-        service = _input_buffer_service(rdb_session_manager)
+        service = _mailbox_item_service(rdb_session_manager)
 
-        result = await service.flush_session_input_buffers(
+        result = await service.flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -2216,12 +2216,12 @@ class TestInputBufferService:
             action=SkillAction(skill_path=uri),
         )
         vfs_service = _VfsService()
-        service = _input_buffer_service(
+        service = _mailbox_item_service(
             rdb_session_manager,
             vfs_projection_service=vfs_service,
         )
 
-        result = await service.flush_session_input_buffers(
+        result = await service.flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -2305,13 +2305,13 @@ class TestInputBufferService:
             created_at=tznow(),
         )
         model_file_service = _ModelFileService(Success(model_file))
-        service = _input_buffer_service(
+        service = _mailbox_item_service(
             rdb_session_manager,
             exchange_file_service=exchange_file_service,
             model_file_service=model_file_service,
         )
 
-        result = await service.flush_session_input_buffers(
+        result = await service.flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -2406,14 +2406,14 @@ class TestInputBufferService:
             created_at=tznow(),
         )
         model_file_service = _ModelFileService(Success(model_file))
-        service = _input_buffer_service(
+        service = _mailbox_item_service(
             rdb_session_manager,
             exchange_file_service=exchange_file_service,
             model_file_service=model_file_service,
         )
 
         with pytest.raises(RuntimeError, match="temporary object storage outage"):
-            await service.flush_session_input_buffers(
+            await service.flush_session_mailbox_items(
                 session_id=session_id,
                 owner_generation=0,
                 model="gpt-5.4",
@@ -2424,11 +2424,11 @@ class TestInputBufferService:
                 active_run_id=run.id,
             )
         async with rdb_session_manager() as session:
-            preserved = await InputBufferRepository().get_by_id(session, buffer_id)
+            preserved = await MailboxRepository().get_by_id(session, buffer_id)
         assert preserved is not None
 
         exchange_file_service.admitted_download_exception = None
-        promoted = await service.flush_session_input_buffers(
+        promoted = await service.flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -2442,7 +2442,7 @@ class TestInputBufferService:
         assert promoted.deleted_buffer_ids == [buffer_id]
         assert promoted.user_messages[0].payload.attachments[0].uri == attachment_uri
         async with rdb_session_manager() as session:
-            consumed = await InputBufferRepository().get_by_id(session, buffer_id)
+            consumed = await MailboxRepository().get_by_id(session, buffer_id)
         assert consumed is None
 
     async def test_flush_reuses_buffer_file_parts_without_rematerializing(
@@ -2481,13 +2481,13 @@ class TestInputBufferService:
             )
         )
         model_file_service = _ModelFileService()
-        service = _input_buffer_service(
+        service = _mailbox_item_service(
             rdb_session_manager,
             exchange_file_service=exchange_file_service,
             model_file_service=model_file_service,
         )
 
-        result = await service.flush_session_input_buffers(
+        result = await service.flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -2523,14 +2523,14 @@ class TestInputBufferService:
             content="deleted message",
         )
         async with rdb_session_manager() as session:
-            await InputBufferRepository().delete_by_session_and_id(
+            await MailboxRepository().delete_by_session_and_id(
                 session,
                 session_id,
                 buffer_id,
             )
-        service = _input_buffer_service(rdb_session_manager)
+        service = _mailbox_item_service(rdb_session_manager)
 
-        result = await service.flush_session_input_buffers(
+        result = await service.flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="gpt-5.4",
@@ -2544,6 +2544,65 @@ class TestInputBufferService:
         assert result.claimed_count == 0
         assert result.user_messages == []
         assert result.events == []
+
+
+def _external_projection_item(
+    **updates: object,
+) -> ExternalChannelInvocationProjectionItem:
+    """Build one valid projection item for malformed-boundary tests."""
+    item = ExternalChannelInvocationProjectionItem(
+        batch_id="batch-1",
+        binding_id="binding-1",
+        trigger_message_id="message-1",
+        truncation_message_count=0,
+        truncation_size=0,
+        sequence=0,
+        message_id="message-1",
+        revision_id="revision-1",
+        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+        revision_body="hello",
+        attachment_metadata={},
+        reference_mappings=None,
+        provider_occurred_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
+        resource_id="resource-1",
+        provider_resource_key="C123",
+        resource_type=ExternalChannelResourceType.THREAD,
+        resource_labels={"channel_id": "C123"},
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="tenant-1",
+        provider_message_key="C123:1",
+        provider_position="1",
+        principal_id=None,
+        provider_user_id=None,
+        sender_display_name=None,
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        provider_created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
+        provider_updated_at=None,
+        original_url=None,
+        correction_of_revision_id=None,
+    )
+    return item.model_copy(update=updates)
+
+
+@pytest.mark.parametrize(
+    "updates",
+    (
+        {"provider_resource_key": ""},
+        {"resource_labels": None},
+        {"resource_labels": {"thread_ts": "1.0"}},
+        {"resource_labels": {"channel_id": "C123", "thread_ts": 1.0}},
+    ),
+)
+def test_external_projection_rejects_malformed_resource_identity(
+    updates: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="External invocation"):
+        build_external_channel_mailbox_payload([_external_projection_item(**updates)])
+
+
+def test_external_projection_rejects_non_contiguous_sequence() -> None:
+    with pytest.raises(ValueError, match="sequence"):
+        build_external_channel_mailbox_payload([_external_projection_item(sequence=1)])
 
 
 async def test_external_invocation_projection() -> None:
@@ -2625,6 +2684,8 @@ async def test_external_invocation_projection() -> None:
                     update={
                         "sequence": 1,
                         "message_id": "message-2",
+                        "revision_kind": ExternalChannelMessageRevisionKind.EDIT,
+                        "correction_of_revision_id": "revision-1",
                         "revision_id": "revision-2",
                         "revision_body": "Invoke",
                         "provider_message_key": "C123:1.0:2",
@@ -2635,42 +2696,46 @@ async def test_external_invocation_projection() -> None:
                 ),
             ]
 
-    input_buffer = InputBuffer(
+    projection_items = await _ProjectionRepository().list_invocation_projection_items(
+        cast(AsyncSession, object()), batch_id="batch-1"
+    )
+    mailbox_item = MailboxItem(
         id="buffer-1",
         session_id="session-1",
-        kind=InputBufferKind.EXTERNAL_CHANNEL_INVOCATION,
-        scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+        kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         requested_model_target_label=None,
         requested_reasoning_effort=None,
         sender_user_id=None,
         content="",
         idempotency_key="external-channel-invocation:batch-1",
-        metadata={EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY: "batch-1"},
+        metadata={},
+        payload=build_external_channel_mailbox_payload(projection_items),
         action=None,
         attachments=[],
         file_parts=[],
         created_at=at(0),
     )
     service = cast(
-        InputBufferService,
+        MailboxService,
         SimpleNamespace(external_channel_repository=_ProjectionRepository()),
     )
-    processor = ExternalChannelInvocationInputBufferProcessor(service)
+    processor = ExternalChannelInvocationMailboxProcessor(service)
 
     outcome = await processor.process(
-        InputBufferPreparationContext(
+        MailboxPreparationContext(
             session=cast(AsyncSession, object()),
             session_id="session-1",
             active_run_id=None,
             required_inference_profile=None,
             prepared_inference_state=None,
-            prepared_files=PreparedInputBufferFiles(
+            prepared_files=PreparedMailboxFiles(
                 attachments=[],
                 file_parts=[],
                 created_model_file_ids=[],
             ),
         ),
-        input_buffer,
+        mailbox_item,
     )
 
     assert outcome.turn_effect is TurnEffect.ELIGIBLE
@@ -2680,6 +2745,10 @@ async def test_external_invocation_projection() -> None:
     ]
     assert outcome.promoted[0].payload["authorization"] == "context_only"
     assert outcome.promoted[1].payload["authorization"] == "authorized_invocation"
+    assert outcome.promoted[1].payload["revision_kind"] == "edit"
+    assert outcome.promoted[1].payload["correction_of_revision_id"] == "revision-1"
+    assert outcome.promoted[0].item_key == "external_channel:0"
+    assert outcome.promoted[1].item_key == "external_channel:1"
     assert outcome.promoted[0].payload["invocation_batch_id"] == "batch-1"
     projected_metadata = outcome.promoted[0].payload["attachment_metadata"]
     assert isinstance(projected_metadata, dict)
@@ -2687,6 +2756,12 @@ async def test_external_invocation_projection() -> None:
     assert isinstance(projected_files, list)
     assert isinstance(projected_files[0], dict)
     assert projected_files[0]["file"] == "external-file:v1:slack:binding-1:F123"
+    second_metadata = cast(
+        dict[str, object], outcome.promoted[1].payload["attachment_metadata"]
+    )
+    second_files = cast(list[object], second_metadata["files"])
+    second_file = cast(dict[str, object], second_files[0])
+    assert second_file["file"] == "external-file:v1:slack:binding-1:F123"
     source_files = source_attachment_metadata["files"]
     assert isinstance(source_files, list)
     assert isinstance(source_files[0], dict)

@@ -521,7 +521,7 @@ class ActionExecutionResponse(BaseModel):
         """Convert from domain model."""
         return cls(
             id=execution.id,
-            input_buffer_id=execution.input_buffer_id,
+            input_buffer_id=execution.mailbox_item_id,
             sender_user_id=execution.sender_user_id,
             action_type=execution.action_type,
             action=_CHAT_ACTION_ADAPTER.validate_python(execution.action),

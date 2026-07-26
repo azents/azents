@@ -13,8 +13,8 @@ from azents.core.enums import (
     AgentProjectDefaultItemType,
     AgentSessionKind,
     AgentSessionStatus,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import CreateGitWorktreeAction
@@ -33,7 +33,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import ChatWriteRequestCreate
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox.data import MailboxItem
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -41,7 +41,7 @@ from azents.services.exchange_file import (
     ExchangeFileInputClaimError,
     ExchangeFileService,
 )
-from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.services.mailbox import MailboxEnqueue, MailboxService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
@@ -62,12 +62,12 @@ from azents.services.session_workspace_project import (
 
 @dataclasses.dataclass(frozen=True)
 class BufferedAgentSessionInputResult:
-    """InputBuffer creation and broker wake-up result."""
+    """MailboxItem creation and broker wake-up result."""
 
     agent_runtime_id: str
     agent_session_id: str
-    accepted_input_buffer_id: str
-    input_buffer: InputBuffer | None
+    accepted_mailbox_item_id: str
+    mailbox_item: MailboxItem | None
     created: bool
 
 
@@ -77,8 +77,8 @@ class CreatedAgentSessionInputResult:
 
     agent_runtime_id: str
     agent_session: AgentSession
-    accepted_input_buffer_id: str
-    input_buffer: InputBuffer | None
+    accepted_mailbox_item_id: str
+    mailbox_item: MailboxItem | None
     created: bool
 
 
@@ -157,7 +157,7 @@ class AgentSessionInputService:
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
-    input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -173,11 +173,11 @@ class AgentSessionInputService:
         request_payload: dict[str, object],
         client_request_id: str | None = None,
     ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
-        """Store user input as durable InputBuffer row."""
+        """Store user input as durable MailboxItem row."""
         return await self._create_buffered_human_input(
             agent_id=agent_id,
             agent_session_id=agent_session_id,
-            kind=InputBufferKind.USER_MESSAGE,
+            kind=MailboxItemKind.USER_MESSAGE,
             action=None,
             message=message,
             inference_profile=inference_profile,
@@ -199,11 +199,11 @@ class AgentSessionInputService:
         request_payload: dict[str, object],
         client_request_id: str | None = None,
     ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
-        """Store user action input as durable InputBuffer row."""
+        """Store user action input as durable MailboxItem row."""
         return await self._create_buffered_human_input(
             agent_id=agent_id,
             agent_session_id=agent_session_id,
-            kind=InputBufferKind.ACTION_MESSAGE,
+            kind=MailboxItemKind.ACTION_MESSAGE,
             action=action,
             message=message,
             inference_profile=inference_profile,
@@ -218,7 +218,7 @@ class AgentSessionInputService:
         *,
         agent_id: str,
         agent_session_id: str,
-        kind: InputBufferKind,
+        kind: MailboxItemKind,
         action: dict[str, JSONValue] | None,
         message: InputMessage,
         inference_profile: RequestedInferenceProfile,
@@ -283,13 +283,13 @@ class AgentSessionInputService:
                                 "Client request ID already used for another payload"
                             )
                         )
-                    input_buffer = await self.input_buffer_service.get_by_id(
+                    mailbox_item = await self.mailbox_item_service.get_by_id(
                         session,
                         buffer_id=existing.accepted_id,
                     )
                     if (
-                        input_buffer is not None
-                        and input_buffer.session_id != agent_session.id
+                        mailbox_item is not None
+                        and mailbox_item.session_id != agent_session.id
                     ):
                         raise RuntimeError(
                             "Human input idempotency record resolved outside "
@@ -299,24 +299,24 @@ class AgentSessionInputService:
                         BufferedAgentSessionInputResult(
                             agent_runtime_id=runtime.id,
                             agent_session_id=agent_session.id,
-                            accepted_input_buffer_id=existing.accepted_id,
-                            input_buffer=input_buffer,
+                            accepted_mailbox_item_id=existing.accepted_id,
+                            mailbox_item=mailbox_item,
                             created=False,
                         )
                     )
 
-            result = await self.input_buffer_service.enqueue(
+            result = await self.mailbox_item_service.enqueue(
                 session,
-                InputBufferEnqueue(
+                MailboxEnqueue(
                     session_id=agent_session.id,
                     kind=kind,
-                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
                     sender_user_id=requester_user_id,
                     content=message.text,
                     idempotency_key=(
-                        _human_input_buffer_idempotency_key(
+                        _human_mailbox_item_idempotency_key(
                             requester_user_id=requester_user_id,
                             client_request_id=client_request_id,
                         )
@@ -334,7 +334,7 @@ class AgentSessionInputService:
                 agent_id=agent_session.agent_id,
                 session_id=agent_session.id,
                 user_id=requester_user_id,
-                attachment_uris=result.input_buffer.attachments,
+                attachment_uris=result.mailbox_item.attachments,
             )
             match claim:
                 case Success():
@@ -357,12 +357,12 @@ class AgentSessionInputService:
                         client_request_id=client_request_id,
                         write_type=write_type,
                         accepted_type=write_type,
-                        accepted_id=result.input_buffer.id,
+                        accepted_id=result.mailbox_item.id,
                         history_reload_required=False,
                         payload=canonical_request_payload,
                     ),
                 )
-                if not created or record.accepted_id != result.input_buffer.id:
+                if not created or record.accepted_id != result.mailbox_item.id:
                     raise RuntimeError(
                         "Session-locked Human input admission lost "
                         "idempotency ownership"
@@ -376,8 +376,8 @@ class AgentSessionInputService:
             BufferedAgentSessionInputResult(
                 agent_runtime_id=runtime.id,
                 agent_session_id=agent_session.id,
-                accepted_input_buffer_id=result.input_buffer.id,
-                input_buffer=result.input_buffer,
+                accepted_mailbox_item_id=result.mailbox_item.id,
+                mailbox_item=result.mailbox_item,
                 created=True,
             )
         )
@@ -461,13 +461,13 @@ class AgentSessionInputService:
                         raise RuntimeError(
                             "Session creation idempotency record has no Agent runtime"
                         )
-                    input_buffer = await self.input_buffer_service.get_by_id(
+                    mailbox_item = await self.mailbox_item_service.get_by_id(
                         session,
                         buffer_id=existing.accepted_id,
                     )
                     if (
-                        input_buffer is not None
-                        and input_buffer.session_id != agent_session.id
+                        mailbox_item is not None
+                        and mailbox_item.session_id != agent_session.id
                     ):
                         raise RuntimeError(
                             "Session creation idempotency record resolved an input "
@@ -477,8 +477,8 @@ class AgentSessionInputService:
                         CreatedAgentSessionInputResult(
                             agent_runtime_id=runtime.id,
                             agent_session=agent_session,
-                            accepted_input_buffer_id=existing.accepted_id,
-                            input_buffer=input_buffer,
+                            accepted_mailbox_item_id=existing.accepted_id,
+                            mailbox_item=mailbox_item,
                             created=False,
                         )
                     )
@@ -552,7 +552,7 @@ class AgentSessionInputService:
                 client_request_id=client_request_id,
             )
             match enqueue_result:
-                case Success(input_buffer):
+                case Success(mailbox_item):
                     pass
                 case Failure(error):
                     await session.rollback()
@@ -572,12 +572,12 @@ class AgentSessionInputService:
                         client_request_id=client_request_id,
                         write_type=ChatWriteRequestType.MESSAGE,
                         accepted_type=ChatWriteRequestType.MESSAGE,
-                        accepted_id=input_buffer.id,
+                        accepted_id=mailbox_item.id,
                         history_reload_required=False,
                         payload=canonical_request_payload,
                     ),
                 )
-                if not created or record.accepted_id != input_buffer.id:
+                if not created or record.accepted_id != mailbox_item.id:
                     raise RuntimeError(
                         "Agent-scoped Session creation lost idempotency ownership"
                     )
@@ -590,8 +590,8 @@ class AgentSessionInputService:
             CreatedAgentSessionInputResult(
                 agent_runtime_id=runtime.id,
                 agent_session=agent_session,
-                accepted_input_buffer_id=input_buffer.id,
-                input_buffer=input_buffer,
+                accepted_mailbox_item_id=mailbox_item.id,
+                mailbox_item=mailbox_item,
                 created=True,
             )
         )
@@ -620,12 +620,12 @@ class AgentSessionInputService:
                         source_project_path=source_project_path,
                         starting_ref=starting_ref,
                     )
-                    await self.input_buffer_service.enqueue(
+                    await self.mailbox_item_service.enqueue(
                         session,
-                        InputBufferEnqueue(
+                        MailboxEnqueue(
                             session_id=agent_session.id,
-                            kind=InputBufferKind.ACTION_MESSAGE,
-                            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                            kind=MailboxItemKind.ACTION_MESSAGE,
+                            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                             requested_model_target_label=inference_profile.model_target_label,
                             requested_reasoning_effort=inference_profile.reasoning_effort,
                             sender_user_id=user_id,
@@ -653,14 +653,14 @@ class AgentSessionInputService:
         inference_profile: RequestedInferenceProfile,
         user_id: str,
         client_request_id: str | None,
-    ) -> Result[InputBuffer, ExchangeFileInputClaimError]:
+    ) -> Result[MailboxItem, ExchangeFileInputClaimError]:
         """Enqueue one user message and claim its ExchangeFiles atomically."""
-        result = await self.input_buffer_service.enqueue(
+        result = await self.mailbox_item_service.enqueue(
             session,
-            InputBufferEnqueue(
+            MailboxEnqueue(
                 session_id=agent_session.id,
-                kind=InputBufferKind.USER_MESSAGE,
-                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                kind=MailboxItemKind.USER_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=inference_profile.model_target_label,
                 requested_reasoning_effort=inference_profile.reasoning_effort,
                 sender_user_id=user_id,
@@ -677,11 +677,11 @@ class AgentSessionInputService:
             agent_id=agent_session.agent_id,
             session_id=agent_session.id,
             user_id=user_id,
-            attachment_uris=result.input_buffer.attachments,
+            attachment_uris=result.mailbox_item.attachments,
         )
         match claim:
             case Success():
-                return Success(result.input_buffer)
+                return Success(result.mailbox_item)
             case Failure(error):
                 return Failure(error)
             case _:
@@ -854,12 +854,12 @@ def _dedupe_existing_project_items(
     return deduped
 
 
-def _human_input_buffer_idempotency_key(
+def _human_mailbox_item_idempotency_key(
     *,
     requester_user_id: str,
     client_request_id: str,
 ) -> str:
-    """Derive a requester-scoped legacy InputBuffer idempotency key."""
+    """Derive a requester-scoped legacy MailboxItem idempotency key."""
     digest = hashlib.sha256(
         f"{requester_user_id}\x00{client_request_id}".encode()
     ).hexdigest()

@@ -362,7 +362,7 @@ def _make_subagent_provider() -> SubagentToolkitProvider:
     return SubagentToolkitProvider(
         session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
         broker=AsyncMock(),
-        input_buffer_service=AsyncMock(),
+        mailbox_item_service=AsyncMock(),
         agent_repository=agent_repository,
     )
 

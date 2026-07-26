@@ -10,8 +10,8 @@ from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
 from azents.core.enums import (
     AgentSessionKind,
     EventKind,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.types import Event
@@ -22,11 +22,11 @@ from azents.engine.hooks.types import (
     SessionIdleResult,
 )
 from azents.engine.run.contracts import ToolkitBinding
-from azents.repos.input_buffer.data import InputBuffer
-from azents.services.input_buffer import (
-    InputBufferEnqueue,
-    InputBufferEnqueueResult,
-    InputBufferService,
+from azents.repos.mailbox.data import MailboxItem
+from azents.services.mailbox import (
+    MailboxAdmissionResult,
+    MailboxEnqueue,
+    MailboxService,
 )
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.session.execution_snapshot import (
@@ -36,23 +36,23 @@ from azents.worker.session.execution_snapshot import (
 from azents.worker.session.idle_continuation import IdleContinuationService
 
 
-class _InputBufferService:
-    """InputBufferService test double."""
+class _MailboxService:
+    """MailboxService test double."""
 
     def __init__(self) -> None:
-        self.enqueued_batches: list[list[InputBufferEnqueue]] = []
+        self.enqueued_batches: list[list[MailboxEnqueue]] = []
 
     async def enqueue_many(
         self,
         session: object,
-        inputs: list[InputBufferEnqueue],
-    ) -> list[InputBufferEnqueueResult]:
+        inputs: list[MailboxEnqueue],
+    ) -> list[MailboxAdmissionResult]:
         """Record the transaction-level enqueue request."""
         del session
         self.enqueued_batches.append(inputs)
         return [
-            InputBufferEnqueueResult(
-                input_buffer=InputBuffer(
+            MailboxAdmissionResult(
+                mailbox_item=MailboxItem(
                     id=f"{index + 1:032d}",
                     session_id=input.session_id,
                     kind=input.kind,
@@ -162,8 +162,8 @@ class _AgentRunRepository:
         return None
 
 
-class _InputBufferRepository:
-    """InputBufferRepository test double."""
+class _MailboxRepository:
+    """MailboxRepository test double."""
 
     def __init__(self, *, pending: bool) -> None:
         self.pending = pending
@@ -174,7 +174,7 @@ class _InputBufferRepository:
         session: object,
         *,
         session_id: str,
-        scheduling_mode: InputBufferSchedulingMode,
+        scheduling_mode: MailboxSchedulingMode,
     ) -> bool:
         """Return configured pending wake-producing input state."""
         del session, scheduling_mode
@@ -249,7 +249,7 @@ def _snapshot(
         session_agent_context_id="context-001",
         execution_mode=AgentSessionKind.ROOT,
         owner_generation=1,
-        fifo_input_buffer_id=None,
+        fifo_mailbox_item_id=None,
         pending_command=None,
         recoverable_run_id=None,
         recoverable_run_status=None,
@@ -259,23 +259,23 @@ def _snapshot(
 
 def _service(
     *,
-    input_buffer_service: _InputBufferService,
+    mailbox_item_service: _MailboxService,
     event_publisher: _EventPublisher,
     broker: _Broker,
     agent_session_repository: _AgentSessionRepository | None = None,
-    input_buffer_repository: _InputBufferRepository | None = None,
+    mailbox_item_repository: _MailboxRepository | None = None,
 ) -> IdleContinuationService:
     """Create IdleContinuationService under test."""
     return IdleContinuationService(
-        input_buffer_service=cast(InputBufferService, input_buffer_service),
+        mailbox_item_service=cast(MailboxService, mailbox_item_service),
         agent_session_repository=cast(
             Any,
             agent_session_repository or _AgentSessionRepository(),
         ),
         agent_run_repository=cast(Any, _AgentRunRepository()),
-        input_buffer_repository=cast(
+        mailbox_item_repository=cast(
             Any,
-            input_buffer_repository or _InputBufferRepository(pending=False),
+            mailbox_item_repository or _MailboxRepository(pending=False),
         ),
         event_publisher=cast(WorkerEventPublisher, event_publisher),
         broker=cast(SessionBroker, broker),
@@ -286,19 +286,19 @@ def _service(
 @pytest.mark.asyncio
 async def test_consume_defers_when_new_pending_input_exists() -> None:
     """Known pending input prevents idle hook evaluation and its outcome."""
-    input_buffer_service = _InputBufferService()
+    mailbox_item_service = _MailboxService()
     event_publisher = _EventPublisher()
     broker = _Broker()
-    input_buffer_repository = _InputBufferRepository(pending=True)
+    mailbox_item_repository = _MailboxRepository(pending=True)
     toolkit = _IdleToolkit(
         [SessionContinuationInput(content="", metadata={"source": "goal"})]
     )
 
     result = await _service(
-        input_buffer_service=input_buffer_service,
+        mailbox_item_service=mailbox_item_service,
         event_publisher=event_publisher,
         broker=broker,
-        input_buffer_repository=input_buffer_repository,
+        mailbox_item_repository=mailbox_item_repository,
     ).consume(
         _snapshot(),
         toolkits=[ToolkitBinding(toolkit, "goal", False)],
@@ -307,16 +307,16 @@ async def test_consume_defers_when_new_pending_input_exists() -> None:
 
     assert result is False
     assert toolkit.contexts == []
-    assert input_buffer_service.enqueued_batches == []
+    assert mailbox_item_service.enqueued_batches == []
     assert event_publisher.dispatched == []
     assert broker.sent_messages == []
-    assert input_buffer_repository.checked_session_ids == ["session-001"]
+    assert mailbox_item_repository.checked_session_ids == ["session-001"]
 
 
 @pytest.mark.asyncio
 async def test_consume_rejects_owner_generation_takeover() -> None:
     """A stale owner hands the idle continuation boundary to a fresh Worker."""
-    input_buffer_service = _InputBufferService()
+    mailbox_item_service = _MailboxService()
     event_publisher = _EventPublisher()
     broker = _Broker()
     toolkit = _IdleToolkit(
@@ -325,7 +325,7 @@ async def test_consume_rejects_owner_generation_takeover() -> None:
 
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
         await _service(
-            input_buffer_service=input_buffer_service,
+            mailbox_item_service=mailbox_item_service,
             event_publisher=event_publisher,
             broker=broker,
             agent_session_repository=_AgentSessionRepository(owner_generation=2),
@@ -336,7 +336,7 @@ async def test_consume_rejects_owner_generation_takeover() -> None:
         )
 
     assert toolkit.contexts == []
-    assert input_buffer_service.enqueued_batches == []
+    assert mailbox_item_service.enqueued_batches == []
     assert event_publisher.dispatched == []
     assert broker.sent_messages == []
 
@@ -344,7 +344,7 @@ async def test_consume_rejects_owner_generation_takeover() -> None:
 @pytest.mark.asyncio
 async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     """Idle continuation is buffered before sending the wake-up signal."""
-    input_buffer_service = _InputBufferService()
+    mailbox_item_service = _MailboxService()
     event_publisher = _EventPublisher()
     broker = _Broker()
     repository = _AgentSessionRepository()
@@ -358,7 +358,7 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     )
 
     result = await _service(
-        input_buffer_service=input_buffer_service,
+        mailbox_item_service=mailbox_item_service,
         event_publisher=event_publisher,
         broker=broker,
         agent_session_repository=repository,
@@ -377,11 +377,11 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     assert context.run_id == "run-001"
     assert context.reason == "completed"
 
-    assert len(input_buffer_service.enqueued_batches) == 1
-    [enqueue] = input_buffer_service.enqueued_batches[0]
+    assert len(mailbox_item_service.enqueued_batches) == 1
+    [enqueue] = mailbox_item_service.enqueued_batches[0]
     assert enqueue.session_id == "session-001"
-    assert enqueue.kind == InputBufferKind.GOAL_CONTINUATION
-    assert enqueue.scheduling_mode == InputBufferSchedulingMode.WAKE_SESSION
+    assert enqueue.kind == MailboxItemKind.GOAL_CONTINUATION
+    assert enqueue.scheduling_mode == MailboxSchedulingMode.WAKE_SESSION
     assert enqueue.metadata == {
         "source": "goal",
         "goal_objective": "Ship",
@@ -400,14 +400,14 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
 @pytest.mark.asyncio
 async def test_consume_uses_snapshot_workspace_for_idle_hook() -> None:
     """Idle hook context uses the canonical execution snapshot workspace."""
-    input_buffer_service = _InputBufferService()
+    mailbox_item_service = _MailboxService()
     event_publisher = _EventPublisher()
     broker = _Broker()
     repository = _AgentSessionRepository(workspace_id="workspace-authoritative")
     toolkit = _IdleToolkit([])
 
     result = await _service(
-        input_buffer_service=input_buffer_service,
+        mailbox_item_service=mailbox_item_service,
         event_publisher=event_publisher,
         broker=broker,
         agent_session_repository=repository,

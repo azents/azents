@@ -13,7 +13,7 @@ from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
-    InputBufferSchedulingMode,
+    MailboxSchedulingMode,
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.engine.events.types import AgentRunState
@@ -23,7 +23,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.input_buffer import InputBufferRepository
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution.data import PendingCommandSnapshot
 from azents.worker.deps import get_worker_broker
 from azents.worker.session.execution_snapshot import (
@@ -47,9 +47,7 @@ class SessionLifecycleService:
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
-    input_buffer_repository: Annotated[
-        InputBufferRepository, Depends(InputBufferRepository)
-    ]
+    mailbox_item_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
 
     async def claim_owner_generation(self, session_id: str) -> int:
         """Claim the next durable generation after Redis ownership acquisition."""
@@ -129,12 +127,12 @@ class SessionLifecycleService:
                     },
                 )
                 return False
-            input_buffer_repository = self.input_buffer_repository
+            mailbox_item_repository = self.mailbox_item_repository
             pending_wake_input = (
-                await input_buffer_repository.has_by_session_id_and_scheduling_mode(
+                await mailbox_item_repository.has_by_session_id_and_scheduling_mode(
                     db_session,
                     session_id=session_id,
-                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 )
             )
             if pending_wake_input:

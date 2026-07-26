@@ -10,8 +10,8 @@ from redis.asyncio import Redis
 from azents.core.enums import (
     AgentRunStatus,
     EventKind,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import ActionMessagePayload, SkillAction
@@ -25,25 +25,25 @@ from azents.engine.events.types import (
     ToolkitSourceSnapshot,
     UserMessagePayload,
 )
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox.data import MailboxItem
 
 from .live_events import (
     InMemoryLiveEventStore,
     LiveEventStore,
     RedisLiveEventStore,
     active_tool_call_to_live_event,
-    input_buffer_to_live_event,
+    mailbox_item_to_live_event,
 )
 
 
-def test_user_input_buffer_live_event_preserves_nullable_requested_profile() -> None:
+def test_user_mailbox_item_live_event_preserves_nullable_requested_profile() -> None:
     """Pending User input exposes explicit nullable reasoning intent."""
-    event = input_buffer_to_live_event(
-        InputBuffer(
+    event = mailbox_item_to_live_event(
+        MailboxItem(
             id="0023456789abcdef0123456789abcdef",
             session_id="1123456789abcdef0123456789abcdef",
-            kind=InputBufferKind.USER_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.USER_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label="quality",
             requested_reasoning_effort=None,
             sender_user_id="user-1",
@@ -62,16 +62,18 @@ def test_user_input_buffer_live_event_preserves_nullable_requested_profile() -> 
     assert event.payload.requested_inference_profile is not None
     assert event.payload.requested_inference_profile.model_target_label == "quality"
     assert event.payload.requested_inference_profile.reasoning_effort is None
+    assert event.payload.metadata["input_buffer_id"] == event.id
+    assert event.payload.metadata["live_projection"] == "input_buffer"
 
 
-def test_agent_result_input_buffer_live_event_restores_terminal_metadata() -> None:
+def test_agent_result_mailbox_item_live_event_restores_terminal_metadata() -> None:
     """Pending terminal result exposes the complete agent message payload."""
-    event = input_buffer_to_live_event(
-        InputBuffer(
+    event = mailbox_item_to_live_event(
+        MailboxItem(
             id="0223456789abcdef0123456789abcdef",
             session_id="1123456789abcdef0123456789abcdef",
-            kind=InputBufferKind.AGENT_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+            kind=MailboxItemKind.AGENT_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=None,
@@ -105,14 +107,14 @@ def test_agent_result_input_buffer_live_event_restores_terminal_metadata() -> No
     assert event.payload.source_terminal_result_event_id == "3" * 32
 
 
-def test_action_input_buffer_live_event_preserves_requested_profile() -> None:
+def test_action_mailbox_item_live_event_preserves_requested_profile() -> None:
     """Pending action projection exposes its requested inference profile."""
-    event = input_buffer_to_live_event(
-        InputBuffer(
+    event = mailbox_item_to_live_event(
+        MailboxItem(
             id="0123456789abcdef0123456789abcdef",
             session_id="1123456789abcdef0123456789abcdef",
-            kind=InputBufferKind.ACTION_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.ACTION_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label="reasoning",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             sender_user_id="user-1",
@@ -139,12 +141,12 @@ def test_action_input_buffer_live_event_preserves_requested_profile() -> None:
 
 def test_external_invocation_live_projection_defers_to_durable_event() -> None:
     """Reference-only external input does not copy untrusted message content live."""
-    event = input_buffer_to_live_event(
-        InputBuffer(
+    event = mailbox_item_to_live_event(
+        MailboxItem(
             id="0323456789abcdef0123456789abcdef",
             session_id="1123456789abcdef0123456789abcdef",
-            kind=InputBufferKind.EXTERNAL_CHANNEL_INVOCATION,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=None,

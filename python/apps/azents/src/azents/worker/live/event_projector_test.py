@@ -119,7 +119,7 @@ def _running_run(run_id: str) -> AgentRunState:
         active_tool_calls=[],
         last_completed_event_id=None,
         parent_result_delivery_state=None,
-        parent_result_input_buffer_id=None,
+        parent_result_mailbox_item_id=None,
         parent_result_enqueued_at=None,
         stop_requested_at=None,
         created_at=now,

@@ -150,12 +150,12 @@ from azents.services.chat.data import (
     ChatLiveRunState,
 )
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.input_buffer import (
-    InputBufferOwnerGenerationStaleError,
-    InputBufferPreparationStaleError,
-    InputBufferService,
+from azents.services.mailbox import (
+    MailboxOwnerGenerationStaleError,
+    MailboxPreparationStaleError,
+    MailboxService,
     OperationActionInput,
-    PromotedInputBuffers,
+    PromotedMailboxItems,
     TurnEffect,
     fold_turn_eligibility,
 )
@@ -353,7 +353,7 @@ class RunExecutor:
         ExchangeFileService, Depends(get_exchange_file_service)
     ]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
-    input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
     session_git_worktree_service: Annotated[
         SessionGitWorktreeService, Depends(SessionGitWorktreeService)
     ]
@@ -705,7 +705,7 @@ class RunExecutor:
             )
             if command is None:
                 pending_input = (
-                    await self.input_buffer_service.peek_pending_inference_profile(
+                    await self.mailbox_item_service.peek_pending_inference_profile(
                         snapshot.session_id
                     )
                 )
@@ -724,7 +724,7 @@ class RunExecutor:
             explicit_profile: RequestedInferenceProfile | None = None
             if command is None:
                 pending_input = (
-                    await self.input_buffer_service.peek_pending_inference_profile(
+                    await self.mailbox_item_service.peek_pending_inference_profile(
                         snapshot.session_id
                     )
                 )
@@ -791,7 +791,7 @@ class RunExecutor:
                 required_inference_profile=selected_profile.profile,
                 active_run_id=run_id,
                 owner_generation=owner_generation,
-                expected_input_buffer_id=snapshot.fifo_input_buffer_id,
+                expected_mailbox_item_id=snapshot.fifo_mailbox_item_id,
                 enforce_snapshot_head=True,
                 tool_admission_barrier=tool_admission_barrier,
                 initial_turn_eligible=(
@@ -2177,7 +2177,7 @@ class RunExecutor:
                 required_inference_profile=requested_inference_profile,
                 active_run_id=run_id,
                 owner_generation=owner_generation,
-                expected_input_buffer_id=None,
+                expected_mailbox_item_id=None,
                 enforce_snapshot_head=False,
                 tool_admission_barrier=tool_admission_barrier,
                 initial_turn_eligible=True,
@@ -2187,7 +2187,7 @@ class RunExecutor:
             )
             if result.context_invalidated:
                 mark_context_invalidated()
-                if await self.input_buffer_service.has_pending_session_input_buffers(
+                if await self.mailbox_item_service.has_pending_session_mailbox_items(
                     snapshot.session_id
                 ):
                     await self.session_lifecycle.send_session_wake_up(
@@ -2210,7 +2210,7 @@ class RunExecutor:
         required_inference_profile: RequestedInferenceProfile | None,
         active_run_id: str | None,
         owner_generation: int,
-        expected_input_buffer_id: str | None,
+        expected_mailbox_item_id: str | None,
         enforce_snapshot_head: bool,
         tool_admission_barrier: ToolAdmissionBarrier,
         initial_turn_eligible: bool,
@@ -2228,13 +2228,13 @@ class RunExecutor:
         first_promotion = True
         while True:
             pending_profile = (
-                await self.input_buffer_service.peek_pending_inference_profile(
+                await self.mailbox_item_service.peek_pending_inference_profile(
                     session_id
                 )
             )
             if enforce_snapshot_head:
                 if first_promotion:
-                    if pending_profile.input_buffer_id != expected_input_buffer_id:
+                    if pending_profile.mailbox_item_id != expected_mailbox_item_id:
                         raise CanonicalExecutionWorkDriftError(
                             "Canonical input buffer FIFO head changed before promotion"
                         )
@@ -2245,9 +2245,9 @@ class RunExecutor:
                 else:
                     break
             expected_buffer_id = (
-                expected_input_buffer_id
+                expected_mailbox_item_id
                 if first_promotion and enforce_snapshot_head
-                else pending_profile.input_buffer_id
+                else pending_profile.mailbox_item_id
             )
             profile_changed = (
                 initial_turn_eligible
@@ -2256,7 +2256,7 @@ class RunExecutor:
                 and selected_profile is not None
                 and pending_profile.requested_inference_profile != selected_profile
             )
-            promoted = await self._promote_input_buffers(
+            promoted = await self._promote_mailbox_items(
                 agent_id=agent_id,
                 session_id=session_id,
                 model=model,
@@ -2340,7 +2340,7 @@ class RunExecutor:
     ) -> OperationActionProcessResult:
         """Execute atomically claimed operation TurnActions before model dispatch."""
         context_invalidated = False
-        processed_input_buffer_ids: set[str] = set()
+        processed_mailbox_item_ids: set[str] = set()
         if operation_action is not None:
             if operation_action.execution is None:
                 raise RuntimeError("Operation action has no live execution claim")
@@ -2352,7 +2352,7 @@ class RunExecutor:
                 owner_generation=owner_generation,
                 tool_admission_barrier=tool_admission_barrier,
             )
-            processed_input_buffer_ids.add(operation_action.buffer.id)
+            processed_mailbox_item_ids.add(operation_action.buffer.id)
             context_invalidated = result.context_invalidated
 
         if context_invalidated:
@@ -2371,7 +2371,7 @@ class RunExecutor:
             for projection in projections
             if projection.execution.status
             in {ActionExecutionStatus.PENDING, ActionExecutionStatus.RUNNING}
-            and projection.execution.input_buffer_id not in processed_input_buffer_ids
+            and projection.execution.mailbox_item_id not in processed_mailbox_item_ids
         ]
         for execution in pending:
             action = _CHAT_ACTION_ADAPTER.validate_python(execution.action)
@@ -2508,7 +2508,7 @@ class RunExecutor:
             case _:
                 assert_never(action)
 
-    async def _promote_input_buffers(
+    async def _promote_mailbox_items(
         self,
         *,
         agent_id: str,
@@ -2519,17 +2519,17 @@ class RunExecutor:
         owner_generation: int,
         expected_buffer_id: str | None,
         include_action_messages: bool,
-    ) -> PromotedInputBuffers:
+    ) -> PromotedMailboxItems:
         """Promote input buffers and publish the matching live-state changes."""
         started_at = asyncio.get_running_loop().time()
         logger.info(
             "Input buffer flush started before model boundary",
             extra={"session_id": session_id, "model": model},
         )
-        pending = await self.input_buffer_service.peek_pending_inference_profile(
+        pending = await self.mailbox_item_service.peek_pending_inference_profile(
             session_id
         )
-        if pending.input_buffer_id != expected_buffer_id:
+        if pending.mailbox_item_id != expected_buffer_id:
             raise CanonicalExecutionWorkDriftError(
                 "Input buffer FIFO head changed before preparation"
             )
@@ -2588,7 +2588,7 @@ class RunExecutor:
                         resolved_at=datetime.datetime.now(datetime.UTC),
                     )
         try:
-            promoted = await self.input_buffer_service.flush_session_input_buffers(
+            promoted = await self.mailbox_item_service.flush_session_mailbox_items(
                 session_id=session_id,
                 owner_generation=owner_generation,
                 model=model,
@@ -2599,9 +2599,9 @@ class RunExecutor:
                 active_run_id=active_run_id,
                 include_action_messages=include_action_messages,
             )
-        except InputBufferOwnerGenerationStaleError as exc:
+        except MailboxOwnerGenerationStaleError as exc:
             raise CanonicalExecutionOwnerGenerationStaleError(str(exc)) from exc
-        except InputBufferPreparationStaleError as exc:
+        except MailboxPreparationStaleError as exc:
             raise CanonicalExecutionWorkDriftError(str(exc)) from exc
         logger.info(
             "Input buffer flush completed before model boundary",

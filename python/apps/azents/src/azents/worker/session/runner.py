@@ -21,7 +21,7 @@ from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.services.input_buffer import InputBufferService
+from azents.services.mailbox import MailboxService
 from azents.services.subagent_terminal_result import SubagentTerminalResultService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
@@ -88,7 +88,7 @@ class SessionRunner:
         execution_snapshot_loader: CanonicalExecutionSnapshotLoader,
         session_manager: SessionManager[AsyncSession],
         agent_session_repository: AgentSessionRepository,
-        input_buffer_service: InputBufferService,
+        mailbox_item_service: MailboxService,
         subagent_terminal_result_service: SubagentTerminalResultService,
         idle_continuation_service: IdleContinuationService,
         user_stop_finalizer: UserStopFinalizer,
@@ -102,7 +102,7 @@ class SessionRunner:
         self.execution_snapshot_loader = execution_snapshot_loader
         self.session_manager = session_manager
         self.agent_session_repository = agent_session_repository
-        self.input_buffer_service = input_buffer_service
+        self.mailbox_item_service = mailbox_item_service
         self.subagent_terminal_result_service = subagent_terminal_result_service
         self.idle_continuation_service = idle_continuation_service
         self.run_executor = run_executor
@@ -199,7 +199,7 @@ class SessionRunner:
         """Wake next turn only when pending buffer remains after Stop."""
         if not self.stop_controller.user_stop_requested:
             return
-        has_pending = self.input_buffer_service.has_pending_wake_session_input_buffers
+        has_pending = self.mailbox_item_service.has_pending_wake_session_mailbox_items
         if not await has_pending(message.session_id):
             discarded = self.inbox.discard_wake_ups(message.session_id)
             if discarded:
@@ -279,7 +279,7 @@ class SessionRunner:
         if await self._has_pending_command(session_id):
             return True
         has_pending_input = (
-            self.input_buffer_service.has_pending_wake_session_input_buffers
+            self.mailbox_item_service.has_pending_wake_session_mailbox_items
         )
         return await has_pending_input(session_id)
 

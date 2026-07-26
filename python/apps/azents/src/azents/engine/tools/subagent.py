@@ -58,7 +58,7 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.agent_mailbox import AgentMailboxService
-from azents.services.input_buffer import InputBufferService
+from azents.services.mailbox import MailboxService
 from azents.services.subagent_terminal_result import SubagentTerminalResultService
 
 _ROOT_AGENT_USAGE_HINT_TEXT = """You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
@@ -215,7 +215,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         agent_run_repository: AgentRunRepository,
         event_transcript_repository: EventTranscriptRepository,
         agent_mailbox_service: AgentMailboxService,
-        input_buffer_service: InputBufferService,
+        mailbox_item_service: MailboxService,
         subagent_terminal_result_service: SubagentTerminalResultService,
         broker: SessionBroker,
         agent_repository: AgentRepository,
@@ -227,7 +227,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.agent_run_repository = agent_run_repository
         self.event_transcript_repository = event_transcript_repository
         self.agent_mailbox_service = agent_mailbox_service
-        self.input_buffer_service = input_buffer_service
+        self.mailbox_item_service = mailbox_item_service
         self.subagent_terminal_result_service = subagent_terminal_result_service
         self.broker = broker
         self.agent_repository = agent_repository
@@ -700,7 +700,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     async def _observe_wait_state(self) -> _WaitObservation:
         """Read current mailbox state and descendant activity."""
         current_session_id = self._current_session_id()
-        mailbox_updated = await self.input_buffer_service.has_pending_agent_messages(
+        mailbox_updated = await self.mailbox_item_service.has_pending_agent_messages(
             current_session_id
         )
         async with self.session_manager() as session:
@@ -726,7 +726,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             session = sessions.get(descendant.agent_session_id)
             latest_run = latest_runs.get(descendant.agent_session_id)
             if _session_agent_active(session, latest_run) or (
-                await self.input_buffer_service.has_pending_wake_session_input_buffers(
+                await self.mailbox_item_service.has_pending_wake_session_mailbox_items(
                     descendant.agent_session_id
                 )
             ):
@@ -1084,12 +1084,12 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
         *,
         session_manager: SessionManager[AsyncSession],
         broker: SessionBroker,
-        input_buffer_service: InputBufferService,
+        mailbox_item_service: MailboxService,
         agent_repository: AgentRepository,
     ) -> None:
         self.session_manager = session_manager
         self.broker = broker
-        self.input_buffer_service = input_buffer_service
+        self.mailbox_item_service = mailbox_item_service
         self.agent_repository = agent_repository
 
     async def resolve(
@@ -1107,7 +1107,7 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
         agent_session_repository = AgentSessionRepository()
         agent_run_repository = AgentRunRepository()
         agent_mailbox_service = AgentMailboxService(
-            input_buffer_service=self.input_buffer_service,
+            mailbox_item_service=self.mailbox_item_service,
             agent_session_repository=agent_session_repository,
         )
         toolkit = SubagentToolkit(
@@ -1116,7 +1116,7 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
             agent_run_repository=agent_run_repository,
             event_transcript_repository=EventTranscriptRepository(),
             agent_mailbox_service=agent_mailbox_service,
-            input_buffer_service=self.input_buffer_service,
+            mailbox_item_service=self.mailbox_item_service,
             subagent_terminal_result_service=SubagentTerminalResultService(
                 session_manager=self.session_manager,
                 agent_run_repository=agent_run_repository,

@@ -10,19 +10,19 @@ from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
     AgentSessionStatus,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
     SessionAgentKind,
 )
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import SessionAgent
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_mailbox import AgentMailboxService
-from azents.services.input_buffer import (
-    InputBufferEnqueue,
-    InputBufferEnqueueResult,
-    InputBufferService,
+from azents.services.mailbox import (
+    MailboxAdmissionResult,
+    MailboxEnqueue,
+    MailboxService,
 )
 
 _NOW = datetime.datetime.now(datetime.UTC)
@@ -70,7 +70,7 @@ def _terminal_run(status: AgentRunStatus) -> AgentRunState:
         terminal_result_event_id="event-3",
         terminal_result_message="Finished safely.",
         parent_result_delivery_state=None,
-        parent_result_input_buffer_id=None,
+        parent_result_mailbox_item_id=None,
         parent_result_enqueued_at=None,
         stop_requested_at=None,
         created_at=_NOW,
@@ -81,19 +81,19 @@ def _terminal_run(status: AgentRunStatus) -> AgentRunState:
     )
 
 
-class _InputBufferService:
+class _MailboxService:
     def __init__(self) -> None:
-        self.inputs: list[InputBufferEnqueue] = []
+        self.inputs: list[MailboxEnqueue] = []
 
     async def enqueue(
         self,
         session: AsyncSession,
-        input: InputBufferEnqueue,
-    ) -> InputBufferEnqueueResult:
+        input: MailboxEnqueue,
+    ) -> MailboxAdmissionResult:
         del session
         self.inputs.append(input)
-        return InputBufferEnqueueResult(
-            input_buffer=InputBuffer(
+        return MailboxAdmissionResult(
+            mailbox_item=MailboxItem(
                 id=f"buffer-{len(self.inputs)}",
                 session_id=input.session_id,
                 kind=input.kind,
@@ -189,23 +189,23 @@ def _service(
     target_stopping: bool = False,
 ) -> tuple[
     AgentMailboxService,
-    _InputBufferService,
+    _MailboxService,
     _AgentSessionRepository,
 ]:
-    input_buffer_service = _InputBufferService()
+    mailbox_item_service = _MailboxService()
     agent_session_repository = _AgentSessionRepository(
         target_status=target_status,
         target_stopping=target_stopping,
     )
     return (
         AgentMailboxService(
-            input_buffer_service=cast(InputBufferService, input_buffer_service),
+            mailbox_item_service=cast(MailboxService, mailbox_item_service),
             agent_session_repository=cast(
                 AgentSessionRepository,
                 agent_session_repository,
             ),
         ),
-        input_buffer_service,
+        mailbox_item_service,
         agent_session_repository,
     )
 
@@ -213,15 +213,15 @@ def _service(
 @pytest.mark.parametrize(
     ("operation", "expected_kind", "expected_mode", "wakes"),
     [
-        ("spawn", "spawn_agent", InputBufferSchedulingMode.WAKE_SESSION, True),
-        ("message", "send_message", InputBufferSchedulingMode.QUEUE_ONLY, False),
-        ("followup", "followup_task", InputBufferSchedulingMode.WAKE_SESSION, True),
+        ("spawn", "spawn_agent", MailboxSchedulingMode.WAKE_SESSION, True),
+        ("message", "send_message", MailboxSchedulingMode.QUEUE_ONLY, False),
+        ("followup", "followup_task", MailboxSchedulingMode.WAKE_SESSION, True),
     ],
 )
 async def test_instruction_operations_own_scheduling_intent(
     operation: str,
     expected_kind: str,
-    expected_mode: InputBufferSchedulingMode,
+    expected_mode: MailboxSchedulingMode,
     wakes: bool,
 ) -> None:
     service, input_service, session_repository = _service()
@@ -253,7 +253,7 @@ async def test_instruction_operations_own_scheduling_intent(
     )
 
     [input] = input_service.inputs
-    assert input.kind is InputBufferKind.AGENT_MESSAGE
+    assert input.kind is MailboxItemKind.AGENT_MESSAGE
     assert input.scheduling_mode is expected_mode
     assert input.sender_user_id is None
     assert input.metadata["message_kind"] == expected_kind
@@ -302,7 +302,7 @@ async def test_terminal_result_is_queue_only_and_contains_run_metadata(
 
     [input] = input_service.inputs
     assert result.id == "buffer-1"
-    assert input.scheduling_mode is InputBufferSchedulingMode.QUEUE_ONLY
+    assert input.scheduling_mode is MailboxSchedulingMode.QUEUE_ONLY
     assert input.sender_user_id is None
     assert input.idempotency_key == f"agent_result:{_RUN_ID}"
     assert input.metadata == {

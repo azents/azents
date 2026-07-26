@@ -863,7 +863,7 @@ class AgentRunRepository:
         session: AsyncSession,
         *,
         run_id: str,
-        input_buffer_id: str,
+        mailbox_item_id: str,
         enqueued_at: datetime.datetime,
     ) -> AgentRunState:
         """Finalize a locked Run's parent mailbox delivery marker."""
@@ -881,7 +881,7 @@ class AgentRunRepository:
         }:
             raise ValueError("AgentRun is not terminal")
         rdb.parent_result_delivery_state = AgentRunParentResultDeliveryState.ENQUEUED
-        rdb.parent_result_input_buffer_id = input_buffer_id
+        rdb.parent_result_mailbox_item_id = mailbox_item_id
         rdb.parent_result_enqueued_at = enqueued_at
         await session.flush()
         await session.refresh(rdb)
@@ -1223,7 +1223,7 @@ class AgentRunRepository:
             terminal_result_event_id=rdb.terminal_result_event_id,
             terminal_result_message=rdb.terminal_result_message,
             parent_result_delivery_state=rdb.parent_result_delivery_state,
-            parent_result_input_buffer_id=rdb.parent_result_input_buffer_id,
+            parent_result_mailbox_item_id=rdb.parent_result_mailbox_item_id,
             parent_result_enqueued_at=rdb.parent_result_enqueued_at,
             stop_requested_at=rdb.stop_requested_at,
             created_at=rdb.created_at,

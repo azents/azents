@@ -41,7 +41,7 @@ class ActionExecutionRepository:
             .values(
                 id=action_execution_id,
                 session_id=create.session_id,
-                input_buffer_id=create.input_buffer_id,
+                mailbox_item_id=create.mailbox_item_id,
                 sender_user_id=create.sender_user_id,
                 action_type=create.action_type,
                 action=create.action,
@@ -49,15 +49,15 @@ class ActionExecutionRepository:
                 owner_generation=create.owner_generation,
             )
             .on_conflict_do_nothing(
-                constraint="uq_action_executions_input_buffer_id",
+                constraint="uq_action_executions_mailbox_item_id",
             )
             .returning(RDBActionExecution)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
-            existing = await self.get_by_input_buffer_id(
+            existing = await self.get_by_mailbox_item_id(
                 session,
-                input_buffer_id=create.input_buffer_id,
+                mailbox_item_id=create.mailbox_item_id,
             )
             if existing is None:
                 raise RuntimeError("ActionExecution conflict target not found")
@@ -77,16 +77,16 @@ class ActionExecutionRepository:
             return None
         return self._build_execution(rdb)
 
-    async def get_by_input_buffer_id(
+    async def get_by_mailbox_item_id(
         self,
         session: AsyncSession,
         *,
-        input_buffer_id: str,
+        mailbox_item_id: str,
     ) -> ActionExecution | None:
         """Fetch action execution by durable source input buffer ID."""
         result = await session.execute(
             sa.select(RDBActionExecution).where(
-                RDBActionExecution.input_buffer_id == input_buffer_id
+                RDBActionExecution.mailbox_item_id == mailbox_item_id
             )
         )
         rdb = result.scalar_one_or_none()
@@ -175,16 +175,16 @@ class ActionExecutionRepository:
         )
         return [self._build_event(rdb) for rdb in result.scalars()]
 
-    async def get_projection_by_input_buffer_id(
+    async def get_projection_by_mailbox_item_id(
         self,
         session: AsyncSession,
         *,
-        input_buffer_id: str,
+        mailbox_item_id: str,
     ) -> ActionExecutionProjection | None:
         """Fetch execution state plus ordered events by input buffer identity."""
-        execution = await self.get_by_input_buffer_id(
+        execution = await self.get_by_mailbox_item_id(
             session,
-            input_buffer_id=input_buffer_id,
+            mailbox_item_id=mailbox_item_id,
         )
         if execution is None:
             return None
@@ -347,7 +347,7 @@ class ActionExecutionRepository:
         return ActionExecution(
             id=rdb.id,
             session_id=rdb.session_id,
-            input_buffer_id=rdb.input_buffer_id,
+            mailbox_item_id=rdb.mailbox_item_id,
             sender_user_id=rdb.sender_user_id,
             action_type=rdb.action_type,
             action=_JSON_OBJECT_ADAPTER.validate_python(rdb.action),

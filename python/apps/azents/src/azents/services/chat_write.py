@@ -14,8 +14,8 @@ from azents.core.enums import (
     AgentSessionRunState,
     AgentSessionStatus,
     EventKind,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.types import FileOutputPart, SystemErrorPayload
@@ -32,7 +32,7 @@ from azents.repos.chat_write_request.data import (
     ChatWriteRequest,
     ChatWriteRequestCreate,
 )
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox.data import MailboxItem
 from azents.repos.message import MessageRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.exchange_file import (
@@ -43,7 +43,7 @@ from azents.services.exchange_file import (
     FileRetentionOwnerConflict,
     FileUnavailable,
 )
-from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.services.mailbox import MailboxEnqueue, MailboxService
 
 
 def _raise_attachment_claim_error(error: object) -> None:
@@ -77,7 +77,7 @@ class AcceptedEditInput:
     """REST edit acceptance and edited input buffer creation result."""
 
     request: AcceptedChatWriteRequest
-    input_buffer: InputBuffer | None
+    mailbox_item: MailboxItem | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -123,7 +123,7 @@ class ChatWriteService:
     ]
     message_repository: Annotated[MessageRepository, Depends(MessageRepository)]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
-    input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -166,7 +166,7 @@ class ChatWriteService:
                         record=existing,
                         created=False,
                     ),
-                    input_buffer=None,
+                    mailbox_item=None,
                 )
             self._validate_idle_control_state(locked)
             record, created = await self._create_idempotent_record(
@@ -187,7 +187,7 @@ class ChatWriteService:
                         record=record,
                         created=False,
                     ),
-                    input_buffer=None,
+                    mailbox_item=None,
                 )
 
             target = await self.message_repository.get_by_id(session, message_id)
@@ -203,16 +203,16 @@ class ChatWriteService:
                 session_id,
                 target.model_order,
             )
-            await self.input_buffer_service.delete_by_session_id(
+            await self.mailbox_item_service.delete_by_session_id(
                 session,
                 session_id,
             )
-            result = await self.input_buffer_service.enqueue(
+            result = await self.mailbox_item_service.enqueue(
                 session,
-                InputBufferEnqueue(
+                MailboxEnqueue(
                     session_id=session_id,
-                    kind=InputBufferKind.USER_MESSAGE,
-                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                    kind=MailboxItemKind.USER_MESSAGE,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
                     sender_user_id=user_id,
@@ -229,7 +229,7 @@ class ChatWriteService:
                 agent_id=agent_id,
                 session_id=session_id,
                 user_id=user_id,
-                attachment_uris=result.input_buffer.attachments,
+                attachment_uris=result.mailbox_item.attachments,
             )
             match claim:
                 case Success():
@@ -242,7 +242,7 @@ class ChatWriteService:
                 session,
                 session_id,
             )
-            input_buffer = result.input_buffer
+            mailbox_item = result.mailbox_item
 
         return AcceptedEditInput(
             request=AcceptedChatWriteRequest(
@@ -250,7 +250,7 @@ class ChatWriteService:
                 record=record,
                 created=True,
             ),
-            input_buffer=input_buffer,
+            mailbox_item=mailbox_item,
         )
 
     async def create_idempotent_pending_command(
@@ -289,7 +289,7 @@ class ChatWriteService:
                     command_id=None,
                 )
             self._validate_idle_control_state(locked)
-            pending_inputs = await self.input_buffer_service.list_by_session_id(
+            pending_inputs = await self.mailbox_item_service.list_by_session_id(
                 session,
                 session_id,
             )
@@ -373,7 +373,7 @@ class ChatWriteService:
                 )
 
             self._validate_idle_control_state(locked)
-            pending_inputs = await self.input_buffer_service.list_by_session_id(
+            pending_inputs = await self.mailbox_item_service.list_by_session_id(
                 session,
                 session_id,
             )
@@ -429,7 +429,7 @@ class ChatWriteService:
                     session_id,
                     target.model_order,
                 )
-                await self.input_buffer_service.delete_by_session_id(
+                await self.mailbox_item_service.delete_by_session_id(
                     session,
                     session_id,
                 )

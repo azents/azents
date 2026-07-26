@@ -9,11 +9,11 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
     AgentSessionStatus,
-    InputBufferSchedulingMode,
+    MailboxSchedulingMode,
 )
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.input_buffer import RDBInputBuffer
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 
 _MAX_BATCH_SIZE = 500
 
@@ -26,7 +26,7 @@ class CutoverReplayCandidate:
     owner_generation: int
     run_state: AgentSessionRunState
     wake_input_present: bool
-    fifo_input_buffer_id: str | None
+    fifo_mailbox_item_id: str | None
     pending_command_present: bool
     pending_command_id: str | None
     pending_command_complete: bool
@@ -162,19 +162,18 @@ class SessionCutoverReplayRepository:
 
     def _candidate_statement(self) -> sa.Select[tuple[object, ...]]:
         """Build the content-free exact durable-work projection."""
-        fifo_input_buffer_id = (
-            sa.select(RDBInputBuffer.id)
-            .where(RDBInputBuffer.session_id == RDBAgentSession.id)
-            .order_by(RDBInputBuffer.id)
+        fifo_mailbox_item_id = (
+            sa.select(RDBMailboxItem.id)
+            .where(RDBMailboxItem.session_id == RDBAgentSession.id)
+            .order_by(RDBMailboxItem.id)
             .limit(1)
             .correlate(RDBAgentSession)
             .scalar_subquery()
         )
         wake_input_present = sa.exists(
             sa.select(sa.literal(1)).where(
-                RDBInputBuffer.session_id == RDBAgentSession.id,
-                RDBInputBuffer.scheduling_mode
-                == InputBufferSchedulingMode.WAKE_SESSION,
+                RDBMailboxItem.session_id == RDBAgentSession.id,
+                RDBMailboxItem.scheduling_mode == MailboxSchedulingMode.WAKE_SESSION,
             )
         )
         recoverable_run_id = (
@@ -224,7 +223,7 @@ class SessionCutoverReplayRepository:
             RDBAgentSession.owner_generation,
             RDBAgentSession.run_state,
             wake_input_present.label("wake_input_present"),
-            fifo_input_buffer_id.label("fifo_input_buffer_id"),
+            fifo_mailbox_item_id.label("fifo_mailbox_item_id"),
             has_pending_command.label("pending_command_present"),
             RDBAgentSession.pending_command_id,
             sa.and_(*(column.is_not(None) for column in pending_command_columns)).label(
@@ -257,7 +256,7 @@ class SessionCutoverReplayRepository:
             owner_generation=row.owner_generation,  # type: ignore[attr-defined]
             run_state=row.run_state,  # type: ignore[attr-defined]
             wake_input_present=row.wake_input_present,  # type: ignore[attr-defined]
-            fifo_input_buffer_id=row.fifo_input_buffer_id,  # type: ignore[attr-defined]
+            fifo_mailbox_item_id=row.fifo_mailbox_item_id,  # type: ignore[attr-defined]
             pending_command_present=row.pending_command_present,  # type: ignore[attr-defined]
             pending_command_id=row.pending_command_id,  # type: ignore[attr-defined]
             pending_command_complete=row.pending_command_complete,  # type: ignore[attr-defined]

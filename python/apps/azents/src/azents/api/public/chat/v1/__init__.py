@@ -74,7 +74,7 @@ from azents.engine.tools.skill import (
     skill_action_id,
     skill_actions_from_snapshot,
 )
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_session_input import (
     AgentSessionInputError,
     AgentSessionInputIdempotencyConflict,
@@ -93,7 +93,7 @@ from azents.services.chat import ChatSessionService
 from azents.services.chat.context import SessionContextService
 from azents.services.chat.data import (
     AgentNotFound,
-    DeleteInputBufferError,
+    DeleteMailboxItemError,
     InvalidGoalStatusTransition,
     InvalidSessionTitle,
     NotWorkspaceMember,
@@ -109,7 +109,7 @@ from azents.services.chat.data import (
 from azents.services.chat.live_events import (
     LiveEventStore,
     get_live_event_store,
-    input_buffer_to_live_event,
+    mailbox_item_to_live_event,
 )
 from azents.services.chat.workspace import (
     AgentWorkspaceDirectory,
@@ -570,7 +570,7 @@ async def _build_chat_write_snapshot(
             ]
             input_buffer_events = [
                 ChatEventResponse.from_domain(event)
-                for event in live.input_buffer_events
+                for event in live.mailbox_item_events
             ]
             return ChatWriteSnapshotResponse(
                 partial_history_events=partial_history_events,
@@ -658,8 +658,8 @@ async def _write_message_via_rest(
         session_id=result.agent_session_id,
         user_id=user_id,
         client_request_id=request.client_request_id,
-        accepted_input_buffer_id=result.accepted_input_buffer_id,
-        input_buffer=result.input_buffer,
+        accepted_input_buffer_id=result.accepted_mailbox_item_id,
+        input_buffer=result.mailbox_item,
         created=result.created,
     )
 
@@ -696,12 +696,12 @@ async def _finalize_message_write_response(
     user_id: str,
     client_request_id: str,
     accepted_input_buffer_id: str,
-    input_buffer: InputBuffer | None,
+    input_buffer: MailboxItem | None,
     created: bool,
 ) -> ChatWriteResponse:
     """Publish live state, wake the worker, and return a snapshot."""
     live_event = (
-        input_buffer_to_live_event(input_buffer) if input_buffer is not None else None
+        mailbox_item_to_live_event(input_buffer) if input_buffer is not None else None
     )
     live_event_upserted = (
         chat_live_event_upserted_dump(live_event) if live_event is not None else None
@@ -1123,8 +1123,8 @@ async def _write_new_session_message_via_rest(
         session_id=result.agent_session.id,
         user_id=user_id,
         client_request_id=request.client_request_id,
-        accepted_input_buffer_id=result.accepted_input_buffer_id,
-        input_buffer=result.input_buffer,
+        accepted_input_buffer_id=result.accepted_mailbox_item_id,
+        input_buffer=result.mailbox_item,
         created=result.created,
     )
 
@@ -1173,7 +1173,7 @@ async def _write_edit_message_via_rest(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if accepted.request.created:
-        if accepted.input_buffer is not None:
+        if accepted.mailbox_item is not None:
             await broker.send_message(SessionWakeUp(session_id=resolved_session_id))
     snapshot = await _build_chat_write_snapshot(
         chat_service,
@@ -1359,8 +1359,8 @@ async def _write_turn_action_via_rest(
         session_id=result.agent_session_id,
         user_id=user_id,
         client_request_id=request.client_request_id,
-        accepted_input_buffer_id=result.accepted_input_buffer_id,
-        input_buffer=result.input_buffer,
+        accepted_input_buffer_id=result.accepted_mailbox_item_id,
+        input_buffer=result.mailbox_item,
         created=result.created,
     )
 
@@ -2448,7 +2448,7 @@ async def list_live_events(
             ]
             input_buffers = [
                 ChatEventResponse.from_domain(event)
-                for event in value.input_buffer_events
+                for event in value.mailbox_item_events
             ]
             return LiveEventListResponse(
                 partial_history=PartialHistoryResponse(
@@ -2523,8 +2523,8 @@ async def delete_input_buffer(
     _validate_session_id(session_id)
     _validate_uuid7_hex(buffer_id, label="buffer ID")
     result: Result[
-        None, DeleteInputBufferError
-    ] = await chat_service.delete_input_buffer(
+        None, DeleteMailboxItemError
+    ] = await chat_service.delete_mailbox_item(
         session_id,
         buffer_id,
         user_id=current_user.user_id,

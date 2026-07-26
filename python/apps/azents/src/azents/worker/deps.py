@@ -58,7 +58,7 @@ from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operati
 from azents.services.artifact import ArtifactService
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.input_buffer import InputBufferService
+from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
 from azents.services.vfs import VfsProjectionService
 from azents.utils.appctx import AppContext
@@ -202,14 +202,14 @@ def get_subagent_toolkit_provider(
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
     broker: Annotated[SessionBroker, Depends(get_worker_broker)],
-    input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)],
+    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)],
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
 ) -> SubagentToolkitProvider:
     """SubagentToolkitProvider dependency for Worker."""
     return SubagentToolkitProvider(
         session_manager=session_manager,
         broker=broker,
-        input_buffer_service=input_buffer_service,
+        mailbox_item_service=mailbox_item_service,
         agent_repository=agent_repository,
     )
 

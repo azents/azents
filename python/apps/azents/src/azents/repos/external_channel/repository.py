@@ -3158,14 +3158,14 @@ class ExternalChannelRepository:
         )
         return self._as(ExternalChannelInvocationBatch, rdb)
 
-    async def link_invocation_batch_input_buffer(
+    async def link_invocation_batch_mailbox_item(
         self,
         session: AsyncSession,
         *,
         batch_id: str,
-        input_buffer_id: str,
+        mailbox_item_id: str,
     ) -> ExternalChannelInvocationBatch | None:
-        """Link one batch to its idempotent reference-only InputBuffer."""
+        """Link one batch to its idempotent reference-only MailboxItem."""
         rdb = await session.scalar(
             sa.select(RDBExternalChannelInvocationBatch)
             .where(RDBExternalChannelInvocationBatch.id == batch_id)
@@ -3173,11 +3173,11 @@ class ExternalChannelRepository:
         )
         if rdb is None:
             return None
-        if rdb.input_buffer_id is None:
-            rdb.input_buffer_id = input_buffer_id
+        if rdb.mailbox_item_id is None:
+            rdb.mailbox_item_id = mailbox_item_id
             await session.flush()
-        elif rdb.input_buffer_id != input_buffer_id:
-            raise ValueError("Invocation batch is linked to another InputBuffer.")
+        elif rdb.mailbox_item_id != mailbox_item_id:
+            raise ValueError("Invocation batch is linked to another MailboxItem.")
         return ExternalChannelInvocationBatch.model_validate(rdb)
 
     async def create_invocation_batch_item_idempotent(

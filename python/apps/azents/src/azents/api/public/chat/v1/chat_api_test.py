@@ -68,8 +68,8 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     EventKind,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -92,7 +92,7 @@ from azents.repos.agent_session.data import (
     AgentSessionUnreadTerminalRunProjection,
 )
 from azents.repos.chat_write_request.data import ChatWriteRequest
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_session_input import (
     BufferedAgentSessionInputResult,
     CreatedAgentSessionInputResult,
@@ -288,8 +288,8 @@ class _BufferedInputService:
             BufferedAgentSessionInputResult(
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_session_id=session_id,
-                accepted_input_buffer_id=input_buffer.id,
-                input_buffer=input_buffer if self.pending else None,
+                accepted_mailbox_item_id=input_buffer.id,
+                mailbox_item=input_buffer if self.pending else None,
                 created=self.created,
             )
         )
@@ -303,11 +303,11 @@ class _BufferedInputService:
         self.kwargs.append(kwargs)
         session_id = self.target_session_id or str(kwargs["agent_session_id"])
         message = cast(InputMessage, kwargs["message"])
-        input_buffer = InputBuffer(
+        input_buffer = MailboxItem(
             id="0123456789abcdef0123456789abcdef",
             session_id=session_id,
-            kind=InputBufferKind.ACTION_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.ACTION_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=str(kwargs["user_id"]),
@@ -327,8 +327,8 @@ class _BufferedInputService:
             BufferedAgentSessionInputResult(
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_session_id=session_id,
-                accepted_input_buffer_id=input_buffer.id,
-                input_buffer=input_buffer,
+                accepted_mailbox_item_id=input_buffer.id,
+                mailbox_item=input_buffer,
                 created=True,
             )
         )
@@ -366,8 +366,8 @@ class _BufferedInputService:
                     created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                     updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 ),
-                accepted_input_buffer_id=input_buffer.id,
-                input_buffer=input_buffer if self.pending else None,
+                accepted_mailbox_item_id=input_buffer.id,
+                mailbox_item=input_buffer if self.pending else None,
                 created=self.created,
             )
         )
@@ -377,14 +377,14 @@ class _BufferedInputService:
         kwargs: dict[str, object],
         *,
         session_id: str,
-    ) -> InputBuffer:
+    ) -> MailboxItem:
         """Create an InputBuffer for test responses."""
         message = cast(InputMessage, kwargs["message"])
-        return InputBuffer(
+        return MailboxItem(
             id="0123456789abcdef0123456789abcdef",
             session_id=session_id,
-            kind=InputBufferKind.USER_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.USER_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=str(kwargs["user_id"]),
@@ -482,7 +482,7 @@ class _RestWriteChatService:
         return Success(
             ChatLiveStateSnapshot(
                 partial_history_events=[],
-                input_buffer_events=[self.event],
+                mailbox_item_events=[self.event],
                 run=None,
             )
         )
@@ -692,11 +692,11 @@ class _RestWriteIdempotencyService:
             accepted_id=str(kwargs["message_id"]),
         )
         input_buffer = (
-            InputBuffer(
+            MailboxItem(
                 id="0123456789abcdef0123456789abcdef",
                 session_id=str(kwargs["session_id"]),
-                kind=InputBufferKind.USER_MESSAGE,
-                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                kind=MailboxItemKind.USER_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=str(kwargs["user_id"]),
@@ -716,7 +716,7 @@ class _RestWriteIdempotencyService:
                 record=record,
                 created=self.created,
             ),
-            input_buffer=input_buffer,
+            mailbox_item=input_buffer,
         )
 
     async def create_idempotent_pending_command(
@@ -775,7 +775,7 @@ class _EmptySkillStore:
 class _DeleteInputBufferService:
     """ChatSessionService double for tests."""
 
-    async def delete_input_buffer(
+    async def delete_mailbox_item(
         self,
         session_id: str,
         buffer_id: str,
@@ -881,7 +881,7 @@ class _EventService:
         return Success(
             ChatLiveStateSnapshot(
                 partial_history_events=[self.event],
-                input_buffer_events=[],
+                mailbox_item_events=[],
                 run=ChatLiveRunState(
                     run_id="2123456789abcdef0123456789abcdef",
                     phase=AgentRunPhase.WAITING_FOR_MODEL,

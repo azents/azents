@@ -20,8 +20,8 @@ from azents.core.enums import (
     EventKind,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.external_channel_file import add_external_channel_file_locators
 from azents.core.inference_profile import (
@@ -69,8 +69,14 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import ExternalChannelInvocationProjectionItem
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.input_buffer import InputBufferRepository
-from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import (
+    ExternalChannelInvocationMailboxPayload,
+    MailboxEnvelopePayload,
+    MailboxItem,
+    MailboxItemCreate,
+    MailboxPresentationItem,
+)
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.services.session_resource_authority import SessionResourceAuthority
@@ -87,12 +93,12 @@ EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY = (
 
 
 @dataclasses.dataclass(frozen=True)
-class InputBufferEnqueue:
+class MailboxEnqueue:
     """Input buffer enqueue request."""
 
     session_id: str
-    kind: InputBufferKind
-    scheduling_mode: InputBufferSchedulingMode
+    kind: MailboxItemKind
+    scheduling_mode: MailboxSchedulingMode
     requested_model_target_label: str | None
     requested_reasoning_effort: ModelReasoningEffort | None
     sender_user_id: str | None
@@ -102,13 +108,14 @@ class InputBufferEnqueue:
     attachments: list[str]
     file_parts: list[FileOutputPart]
     action: dict[str, JSONValue] | None = None
+    payload: MailboxEnvelopePayload | None = None
 
 
 @dataclasses.dataclass(frozen=True)
-class InputBufferEnqueueResult:
+class MailboxAdmissionResult:
     """Input buffer enqueue result."""
 
-    input_buffer: InputBuffer
+    mailbox_item: MailboxItem
     created: bool
 
 
@@ -116,22 +123,22 @@ class InputBufferEnqueueResult:
 class PendingInputInferenceProfile:
     """Inference requirements projected from the next pending input."""
 
-    input_buffer_id: str | None
+    mailbox_item_id: str | None
     exists: bool
     requires_inference: bool
     requested_inference_profile: RequestedInferenceProfile | None
 
 
-class InputBufferPreparationStaleError(RuntimeError):
+class MailboxPreparationStaleError(RuntimeError):
     """The FIFO head changed after its preparation snapshot was read."""
 
 
-class InputBufferOwnerGenerationStaleError(RuntimeError):
+class MailboxOwnerGenerationStaleError(RuntimeError):
     """The Session owner generation changed before FIFO promotion."""
 
 
 class TurnEffect(enum.StrEnum):
-    """Effect of one prepared InputBuffer on the next model turn."""
+    """Effect of one prepared MailboxItem on the next model turn."""
 
     ELIGIBLE = "eligible"
     NEUTRAL = "neutral"
@@ -155,14 +162,14 @@ def fold_turn_eligibility(eligible: bool, effect: TurnEffect) -> bool:
 class OperationActionInput:
     """Durably claimed buffer-only operation action awaiting external execution."""
 
-    buffer: InputBuffer
+    buffer: MailboxItem
     action: CreateGitWorktreeAction | CleanupOrphanGitWorktreesAction
     execution: ActionExecution | None
 
 
 @dataclasses.dataclass(frozen=True)
-class PromotedInputBuffers:
-    """Result of preparing one FIFO InputBuffer."""
+class PromotedMailboxItems:
+    """Result of preparing one FIFO MailboxItem."""
 
     turn_effect: TurnEffect
     operation_action: OperationActionInput | None
@@ -178,18 +185,19 @@ class PromotedInputBuffers:
 
 
 @dataclasses.dataclass(frozen=True)
-class _PromotedInputBuffer:
-    """Result of converting InputBuffer to model input and durable event kind."""
+class _PromotedMailboxItem:
+    """Result of converting MailboxItem to model input and durable event kind."""
 
-    buffer: InputBuffer
+    buffer: MailboxItem
     user_message: RunUserMessage | None
     event_kind: EventKind
     payload: dict[str, JSONValue]
     external_id: str
+    item_key: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
-class PreparedInputBufferFiles:
+class PreparedMailboxFiles:
     """Attachment metadata and creation-boundary FileParts prepared for promotion."""
 
     attachments: list[RuntimeAttachment]
@@ -198,7 +206,7 @@ class PreparedInputBufferFiles:
 
 
 @dataclasses.dataclass(frozen=True)
-class InputBufferPreparationContext:
+class MailboxPreparationContext:
     """Shared context passed to one closed input-buffer processor."""
 
     session: AsyncSession
@@ -206,40 +214,38 @@ class InputBufferPreparationContext:
     active_run_id: str | None
     required_inference_profile: RequestedInferenceProfile | None
     prepared_inference_state: SessionInferenceState | None
-    prepared_files: PreparedInputBufferFiles
+    prepared_files: PreparedMailboxFiles
 
 
 @dataclasses.dataclass(frozen=True)
-class InputBufferPreparationOutcome:
+class MailboxPreparationOutcome:
     """Semantic events and turn effect produced by one processor."""
 
-    promoted: list[_PromotedInputBuffer]
+    promoted: list[_PromotedMailboxItem]
     turn_effect: TurnEffect
     operation_action: OperationActionInput | None
 
 
-class InputBufferProcessor(Protocol):
-    """Prepare one concrete InputBuffer kind."""
+class MailboxProcessor(Protocol):
+    """Prepare one concrete MailboxItem kind."""
 
     async def process(
         self,
-        context: InputBufferPreparationContext,
-        buffer: InputBuffer,
-    ) -> InputBufferPreparationOutcome:
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
         """Prepare one FIFO buffer inside the caller transaction."""
         ...
 
 
 @dataclasses.dataclass(frozen=True)
-class InputBufferService:
+class MailboxService:
     """Own session-bound input buffer reads, writes, and promotion."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
-    input_buffer_repository: Annotated[
-        InputBufferRepository, Depends(InputBufferRepository)
-    ]
+    mailbox_item_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     agent_session_repository: Annotated[
@@ -264,12 +270,12 @@ class InputBufferService:
     async def enqueue(
         self,
         session: AsyncSession,
-        input: InputBufferEnqueue,
-    ) -> InputBufferEnqueueResult:
+        input: MailboxEnqueue,
+    ) -> MailboxAdmissionResult:
         """Create one pending input buffer without deciding wake semantics."""
         existing = None
         if input.idempotency_key is not None:
-            existing = await self.input_buffer_repository.get_by_idempotency_key(
+            existing = await self.mailbox_item_repository.get_by_idempotency_key(
                 session,
                 session_id=input.session_id,
                 kind=input.kind,
@@ -277,7 +283,7 @@ class InputBufferService:
             )
         if existing is None:
             created = True
-            create = InputBufferCreate(
+            create = MailboxItemCreate(
                 session_id=input.session_id,
                 kind=input.kind,
                 scheduling_mode=input.scheduling_mode,
@@ -290,49 +296,50 @@ class InputBufferService:
                 action=input.action,
                 attachments=input.attachments,
                 file_parts=input.file_parts,
+                payload=input.payload,
             )
             if input.idempotency_key is None:
-                input_buffer = await self.input_buffer_repository.create(
+                mailbox_item = await self.mailbox_item_repository.create(
                     session,
                     create,
                 )
             else:
-                input_buffer = await self.input_buffer_repository.create_idempotent(
+                mailbox_item = await self.mailbox_item_repository.create_idempotent(
                     session,
                     create,
                     idempotency_key=input.idempotency_key,
                 )
         else:
             created = False
-            input_buffer = existing
-        if input_buffer.scheduling_mode != input.scheduling_mode:
+            mailbox_item = existing
+        if mailbox_item.scheduling_mode != input.scheduling_mode:
             raise ValueError(
                 "Input idempotency key already used for another scheduling mode"
             )
         if (
-            input_buffer.requested_model_target_label
+            mailbox_item.requested_model_target_label
             != input.requested_model_target_label
-            or input_buffer.requested_reasoning_effort
+            or mailbox_item.requested_reasoning_effort
             != input.requested_reasoning_effort
         ):
             raise ValueError(
                 "Input idempotency key already used for another inference profile"
             )
-        return InputBufferEnqueueResult(input_buffer=input_buffer, created=created)
+        return MailboxAdmissionResult(mailbox_item=mailbox_item, created=created)
 
     async def enqueue_many(
         self,
         session: AsyncSession,
-        inputs: Sequence[InputBufferEnqueue],
-    ) -> list[InputBufferEnqueueResult]:
+        inputs: Sequence[MailboxEnqueue],
+    ) -> list[MailboxAdmissionResult]:
         """Create pending input buffers without deciding wake semantics."""
         results = [await self.enqueue(session, input) for input in inputs]
         return results
 
     async def enqueue_many_in_transaction(
         self,
-        inputs: Sequence[InputBufferEnqueue],
-    ) -> list[InputBufferEnqueueResult]:
+        inputs: Sequence[MailboxEnqueue],
+    ) -> list[MailboxAdmissionResult]:
         """Create pending inputs in one transaction."""
         async with self.session_manager() as session:
             return await self.enqueue_many(session, inputs)
@@ -341,9 +348,9 @@ class InputBufferService:
         self,
         session: AsyncSession,
         session_id: str,
-    ) -> list[InputBuffer]:
+    ) -> list[MailboxItem]:
         """Fetch pending input buffers for a session."""
-        return await self.input_buffer_repository.list_by_session_id(
+        return await self.mailbox_item_repository.list_by_session_id(
             session,
             session_id,
         )
@@ -353,9 +360,9 @@ class InputBufferService:
         session: AsyncSession,
         *,
         buffer_id: str,
-    ) -> InputBuffer | None:
-        """Fetch a pending InputBuffer by its durable acceptance identity."""
-        return await self.input_buffer_repository.get_by_id(session, buffer_id)
+    ) -> MailboxItem | None:
+        """Fetch a pending MailboxItem by its durable acceptance identity."""
+        return await self.mailbox_item_repository.get_by_id(session, buffer_id)
 
     async def delete_by_session_and_id(
         self,
@@ -365,7 +372,7 @@ class InputBufferService:
         buffer_id: str,
     ) -> bool:
         """Delete one pending input buffer by session and ID."""
-        return await self.input_buffer_repository.delete_by_session_and_id(
+        return await self.mailbox_item_repository.delete_by_session_and_id(
             session,
             session_id,
             buffer_id,
@@ -377,7 +384,7 @@ class InputBufferService:
         session_id: str,
     ) -> int:
         """Delete all pending input buffers for a session."""
-        return await self.input_buffer_repository.delete_by_session_id(
+        return await self.mailbox_item_repository.delete_by_session_id(
             session,
             session_id,
         )
@@ -390,7 +397,7 @@ class InputBufferService:
         to_session_id: str,
     ) -> int:
         """Move pending input buffers between sessions."""
-        return await self.input_buffer_repository.move_by_session_id(
+        return await self.mailbox_item_repository.move_by_session_id(
             session,
             from_session_id=from_session_id,
             to_session_id=to_session_id,
@@ -402,13 +409,13 @@ class InputBufferService:
     ) -> PendingInputInferenceProfile:
         """Read the next pending input profile without consuming the buffer."""
         async with self.session_manager() as session:
-            pending = await self.input_buffer_repository.list_for_flush(
+            pending = await self.mailbox_item_repository.list_for_flush(
                 session,
                 session_id,
                 limit=1,
             )
         return PendingInputInferenceProfile(
-            input_buffer_id=pending[0].id if pending else None,
+            mailbox_item_id=pending[0].id if pending else None,
             exists=bool(pending),
             requires_inference=(
                 _buffer_requires_inference(pending[0]) if pending else False
@@ -418,36 +425,36 @@ class InputBufferService:
             ),
         )
 
-    async def has_pending_session_input_buffers(self, session_id: str) -> bool:
-        """Check whether session still has unflushed InputBuffer."""
+    async def has_pending_session_mailbox_items(self, session_id: str) -> bool:
+        """Check whether session still has unflushed MailboxItem."""
         async with self.session_manager() as session:
-            pending = await self.input_buffer_repository.list_for_flush(
+            pending = await self.mailbox_item_repository.list_for_flush(
                 session,
                 session_id,
                 limit=1,
             )
         return bool(pending)
 
-    async def has_pending_wake_session_input_buffers(self, session_id: str) -> bool:
+    async def has_pending_wake_session_mailbox_items(self, session_id: str) -> bool:
         """Check whether pending input can start or resume an idle session."""
         async with self.session_manager() as session:
-            repository = self.input_buffer_repository
+            repository = self.mailbox_item_repository
             return await repository.has_by_session_id_and_scheduling_mode(
                 session,
                 session_id=session_id,
-                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             )
 
     async def has_pending_agent_messages(self, session_id: str) -> bool:
         """Check whether the session mailbox has pending agent input."""
         async with self.session_manager() as session:
-            return await self.input_buffer_repository.has_by_session_id_and_kind(
+            return await self.mailbox_item_repository.has_by_session_id_and_kind(
                 session,
                 session_id=session_id,
-                kind=InputBufferKind.AGENT_MESSAGE,
+                kind=MailboxItemKind.AGENT_MESSAGE,
             )
 
-    async def flush_session_input_buffers(
+    async def flush_session_mailbox_items(
         self,
         *,
         session_id: str,
@@ -460,11 +467,11 @@ class InputBufferService:
         active_run_id: str | None,
         limit: int | None = None,
         include_action_messages: bool = True,
-    ) -> PromotedInputBuffers:
+    ) -> PromotedMailboxItems:
         """Flush pending buffers of session in claim, append, delete order."""
         del model
         del limit
-        prepared_files = await self._prepare_input_buffer_attachments(
+        prepared_files = await self._prepare_mailbox_item_attachments(
             session_id=session_id,
             expected_buffer_id=expected_buffer_id,
             include_action_messages=include_action_messages,
@@ -482,21 +489,21 @@ class InputBufferService:
             if agent_session is None:
                 raise ValueError("AgentSession not found")
             if agent_session.owner_generation != owner_generation:
-                raise InputBufferOwnerGenerationStaleError(
+                raise MailboxOwnerGenerationStaleError(
                     "Session owner generation changed before input promotion"
                 )
-            oldest = await self.input_buffer_repository.lock_oldest_by_session_id(
+            oldest = await self.mailbox_item_repository.lock_oldest_by_session_id(
                 session,
                 session_id,
             )
             actual_buffer_id = oldest.id if oldest is not None else None
             if actual_buffer_id != expected_buffer_id:
-                raise InputBufferPreparationStaleError(
+                raise MailboxPreparationStaleError(
                     "Input buffer FIFO head changed during preparation"
                 )
             claimed = [oldest] if oldest is not None else []
             if not claimed:
-                return PromotedInputBuffers(
+                return PromotedMailboxItems(
                     turn_effect=TurnEffect.NEUTRAL,
                     operation_action=None,
                     requested_inference_profile=None,
@@ -539,7 +546,7 @@ class InputBufferService:
                     ActionExecutionCreate(
                         id=None,
                         session_id=session_id,
-                        input_buffer_id=operation_action.buffer.id,
+                        mailbox_item_id=operation_action.buffer.id,
                         sender_user_id=operation_action.buffer.sender_user_id,
                         action_type=operation_action.action.type,
                         action=_JSON_OBJECT_ADAPTER.validate_python(
@@ -553,7 +560,7 @@ class InputBufferService:
                     operation_action,
                     execution=execution,
                 )
-            event_inserted = await self._append_input_buffer_events(
+            event_inserted = await self._append_mailbox_item_events(
                 session,
                 session_id,
                 promoted,
@@ -610,7 +617,7 @@ class InputBufferService:
             buffer_ids = list(dict.fromkeys(item.buffer.id for item in promoted))
             if operation_action is not None:
                 buffer_ids.append(operation_action.buffer.id)
-            deleted_count = await self.input_buffer_repository.delete_claimed_by_ids(
+            deleted_count = await self.mailbox_item_repository.delete_claimed_by_ids(
                 session,
                 session_id,
                 buffer_ids,
@@ -625,7 +632,7 @@ class InputBufferService:
                     },
                 )
 
-        return PromotedInputBuffers(
+        return PromotedMailboxItems(
             turn_effect=outcome.turn_effect,
             operation_action=operation_action,
             requested_inference_profile=(
@@ -648,7 +655,7 @@ class InputBufferService:
         session: AsyncSession,
         *,
         session_id: str,
-        promoted: list[_PromotedInputBuffer],
+        promoted: list[_PromotedMailboxItem],
     ) -> list[str]:
         """Advance source cursors for terminal results consumed by the model."""
         result_payloads: list[AgentMessagePayload] = []
@@ -703,7 +710,7 @@ class InputBufferService:
                 changed_ids.append(updated.id)
         return list(dict.fromkeys(changed_ids))
 
-    async def _prepare_input_buffer_attachments(
+    async def _prepare_mailbox_item_attachments(
         self,
         *,
         session_id: str,
@@ -711,14 +718,14 @@ class InputBufferService:
         include_action_messages: bool,
         owner_generation: int,
         active_run_id: str | None,
-    ) -> PreparedInputBufferFiles:
+    ) -> PreparedMailboxFiles:
         """Resolve the FIFO head attachments without holding a database session."""
         async with self.session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
             )
-            pending = await self.input_buffer_repository.list_for_flush(
+            pending = await self.mailbox_item_repository.list_for_flush(
                 session,
                 session_id,
                 limit=1,
@@ -728,40 +735,40 @@ class InputBufferService:
         buffer = pending[0] if pending else None
         actual_buffer_id = buffer.id if buffer is not None else None
         if actual_buffer_id != expected_buffer_id:
-            raise InputBufferPreparationStaleError(
+            raise MailboxPreparationStaleError(
                 "Input buffer FIFO head changed during preparation"
             )
         if buffer is None:
-            return PreparedInputBufferFiles(
+            return PreparedMailboxFiles(
                 attachments=[],
                 file_parts=[],
                 created_model_file_ids=[],
             )
 
-        file_parts = list(buffer.file_parts)
+        file_parts = list(buffer.presentation.file_parts)
         if (
-            buffer.kind is InputBufferKind.ACTION_MESSAGE
+            buffer.kind is MailboxItemKind.ACTION_MESSAGE
             and not include_action_messages
         ):
-            return PreparedInputBufferFiles(
+            return PreparedMailboxFiles(
                 attachments=[],
                 file_parts=file_parts,
                 created_model_file_ids=[],
             )
         if file_parts:
-            return PreparedInputBufferFiles(
+            return PreparedMailboxFiles(
                 attachments=[],
                 file_parts=file_parts,
                 created_model_file_ids=[],
             )
-        if not buffer.attachments:
-            return PreparedInputBufferFiles(
+        if not buffer.presentation.attachments:
+            return PreparedMailboxFiles(
                 attachments=[],
                 file_parts=file_parts,
                 created_model_file_ids=[],
             )
         if active_run_id is None:
-            raise InputBufferPreparationStaleError(
+            raise MailboxPreparationStaleError(
                 "Attachment materialization requires an active AgentRun"
             )
         async with self.session_manager() as session:
@@ -787,7 +794,7 @@ class InputBufferService:
             or current_agent_session.status is not AgentSessionStatus.ACTIVE
             or current_agent_session.owner_generation != owner_generation
         ):
-            raise InputBufferPreparationStaleError(
+            raise MailboxPreparationStaleError(
                 "Canonical resource authority changed before attachment materialization"
             )
         authority = SessionResourceAuthority(
@@ -800,13 +807,13 @@ class InputBufferService:
             owner_generation=owner_generation,
         )
         materialized = await materialize_admitted_input_exchange_file_attachments(
-            buffer.attachments,
+            buffer.presentation.attachments,
             authority=authority,
             exchange_file_service=self.exchange_file_service,
             model_file_service=self.model_file_service,
         )
         file_parts.extend(materialized.file_parts)
-        return PreparedInputBufferFiles(
+        return PreparedMailboxFiles(
             attachments=materialized.attachments,
             file_parts=file_parts,
             created_model_file_ids=[
@@ -817,7 +824,7 @@ class InputBufferService:
     @asynccontextmanager
     async def _discard_prepared_model_files_on_failure(
         self,
-        prepared_files: PreparedInputBufferFiles,
+        prepared_files: PreparedMailboxFiles,
     ) -> AsyncIterator[None]:
         """Discard newly created ModelFiles if FIFO promotion fails."""
         try:
@@ -858,27 +865,27 @@ class InputBufferService:
         session: AsyncSession,
         *,
         session_id: str,
-        claimed: list[InputBuffer],
+        claimed: list[MailboxItem],
         required_inference_profile: RequestedInferenceProfile | None,
         prepared_inference_state: SessionInferenceState | None,
-        prepared_files: PreparedInputBufferFiles,
+        prepared_files: PreparedMailboxFiles,
         profile_resolution_failure: str | None,
         include_action_messages: bool,
         active_run_id: str | None,
-    ) -> InputBufferPreparationOutcome:
+    ) -> MailboxPreparationOutcome:
         """Dispatch exactly one FIFO head to the closed processor registry."""
         if not claimed:
-            return InputBufferPreparationOutcome(
+            return MailboxPreparationOutcome(
                 promoted=[],
                 turn_effect=TurnEffect.NEUTRAL,
                 operation_action=None,
             )
         buffer = claimed[0]
         if (
-            buffer.kind == InputBufferKind.ACTION_MESSAGE
+            buffer.kind == MailboxItemKind.ACTION_MESSAGE
             and not include_action_messages
         ):
-            return InputBufferPreparationOutcome(
+            return MailboxPreparationOutcome(
                 promoted=[],
                 turn_effect=TurnEffect.NEUTRAL,
                 operation_action=None,
@@ -891,7 +898,7 @@ class InputBufferService:
                 [_system_error_promoted_buffer(buffer, profile_resolution_failure)],
                 TurnEffect.FAILED,
             )
-        context = InputBufferPreparationContext(
+        context = MailboxPreparationContext(
             session=session,
             session_id=session_id,
             active_run_id=active_run_id,
@@ -902,30 +909,32 @@ class InputBufferService:
         processor = self._processor_for(buffer)
         return await processor.process(context, buffer)
 
-    def _processor_for(self, buffer: InputBuffer) -> InputBufferProcessor:
+    def _processor_for(self, buffer: MailboxItem) -> MailboxProcessor:
         """Resolve one Buffer through the explicit closed processor registry."""
         match buffer.kind:
-            case InputBufferKind.USER_MESSAGE:
-                return _UserMessageInputBufferProcessor(self)
-            case InputBufferKind.GOAL_CONTINUATION:
-                return _GoalContinuationInputBufferProcessor(self)
-            case InputBufferKind.AGENT_MESSAGE:
-                return _AgentMessageInputBufferProcessor(self)
-            case InputBufferKind.EXTERNAL_CHANNEL_INVOCATION:
-                return ExternalChannelInvocationInputBufferProcessor(self)
-            case InputBufferKind.ACTION_MESSAGE:
-                if buffer.action is None:
+            case MailboxItemKind.USER_MESSAGE:
+                return _UserMessageMailboxProcessor(self)
+            case MailboxItemKind.GOAL_CONTINUATION:
+                return _GoalContinuationMailboxProcessor(self)
+            case MailboxItemKind.AGENT_MESSAGE:
+                return _AgentMessageMailboxProcessor(self)
+            case MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
+                return ExternalChannelInvocationMailboxProcessor(self)
+            case MailboxItemKind.ACTION_MESSAGE:
+                if buffer.presentation.action is None:
                     raise ValueError(
                         "Action message input buffer requires action payload"
                     )
-                action = _CHAT_ACTION_ADAPTER.validate_python(buffer.action)
+                action = _CHAT_ACTION_ADAPTER.validate_python(
+                    buffer.presentation.action
+                )
                 match action:
                     case GoalAction():
-                        return _GoalActionInputBufferProcessor(self)
+                        return _GoalActionMailboxProcessor(self)
                     case SkillAction():
-                        return _SkillActionInputBufferProcessor(self, action)
+                        return _SkillActionMailboxProcessor(self, action)
                     case CreateGitWorktreeAction() | CleanupOrphanGitWorktreesAction():
-                        return _OperationActionInputBufferProcessor(action)
+                        return _OperationActionMailboxProcessor(action)
                     case _:
                         assert_never(action)
             case _:
@@ -936,12 +945,12 @@ class InputBufferService:
         session: AsyncSession,
         *,
         session_id: str,
-        buffer: InputBuffer,
+        buffer: MailboxItem,
         prepared_inference_state: SessionInferenceState | None,
-        prepared_files: PreparedInputBufferFiles,
-    ) -> list[_PromotedInputBuffer]:
+        prepared_files: PreparedMailboxFiles,
+    ) -> list[_PromotedMailboxItem]:
         """Apply Goal create side effect for one action_message buffer."""
-        objective = buffer.content.strip()
+        objective = buffer.presentation.content.strip()
         if not objective:
             return [
                 _system_error_promoted_buffer(buffer, "Goal objective is required.")
@@ -983,14 +992,14 @@ class InputBufferService:
             prepared_files=prepared_files,
         )
         return [
-            _PromotedInputBuffer(
+            _PromotedMailboxItem(
                 buffer=buffer,
                 user_message=None,
                 event_kind=EventKind.GOAL_UPDATED,
                 payload=_goal_updated_payload(snapshot, action="create"),
                 external_id=f"{buffer.id}:goal_updated",
             ),
-            _PromotedInputBuffer(
+            _PromotedMailboxItem(
                 buffer=buffer,
                 user_message=user_message,
                 event_kind=EventKind.USER_MESSAGE,
@@ -1004,12 +1013,12 @@ class InputBufferService:
         session: AsyncSession,
         *,
         session_id: str,
-        buffer: InputBuffer,
+        buffer: MailboxItem,
         action: SkillAction,
         active_run_id: str | None,
         prepared_inference_state: SessionInferenceState | None,
-        prepared_files: PreparedInputBufferFiles,
-    ) -> list[_PromotedInputBuffer]:
+        prepared_files: PreparedMailboxFiles,
+    ) -> list[_PromotedMailboxItem]:
         """Create durable reminder for one Skill action_message buffer."""
         agent_session = await self.agent_session_repository.get_by_id(
             session,
@@ -1056,9 +1065,11 @@ class InputBufferService:
                     "Selected Skill is not available in the active projection.",
                 )
             ]
-        loaded_payload = _skill_loaded_payload(item, user_message=buffer.content)
+        loaded_payload = _skill_loaded_payload(
+            item, user_message=buffer.presentation.content
+        )
         promoted = [
-            _PromotedInputBuffer(
+            _PromotedMailboxItem(
                 buffer=buffer,
                 user_message=None,
                 event_kind=EventKind.SKILL_LOADED,
@@ -1068,7 +1079,7 @@ class InputBufferService:
                 external_id=f"{buffer.id}:skill_loaded",
             )
         ]
-        if buffer.content.strip():
+        if buffer.presentation.content.strip():
             user_message = self.buffer_to_user_message(
                 buffer,
                 external_id=f"{buffer.id}:user_message",
@@ -1077,7 +1088,7 @@ class InputBufferService:
                 prepared_files=prepared_files,
             )
             promoted.append(
-                _PromotedInputBuffer(
+                _PromotedMailboxItem(
                     buffer=buffer,
                     user_message=user_message,
                     event_kind=EventKind.USER_MESSAGE,
@@ -1089,14 +1100,14 @@ class InputBufferService:
 
     @staticmethod
     def buffer_to_user_message(
-        buffer: InputBuffer,
+        buffer: MailboxItem,
         *,
         external_id: str | None = None,
         fallback_profile: RequestedInferenceProfile | None,
         prepared_inference_state: SessionInferenceState | None,
-        prepared_files: PreparedInputBufferFiles,
+        prepared_files: PreparedMailboxFiles,
     ) -> RunUserMessage:
-        """Convert a prepared InputBuffer snapshot to a run user message."""
+        """Convert a prepared MailboxItem snapshot to a run user message."""
         requested_profile = _requested_inference_profile(buffer) or fallback_profile
         if prepared_inference_state is not None:
             applied_profile = prepared_inference_state.applied_profile
@@ -1110,12 +1121,14 @@ class InputBufferService:
             applied_profile = None
         user_message = make_run_user_message(
             sender_user_id=buffer.sender_user_id,
-            content=buffer.content,
-            metadata=buffer.metadata,
+            content=buffer.presentation.content,
+            metadata={
+                key: str(value) for key, value in buffer.presentation.metadata.items()
+            },
             attachments=prepared_files.attachments,
             file_parts=prepared_files.file_parts,
             external_id=external_id or buffer.id,
-            attachment_source="input_buffer",
+            attachment_source="mailbox_item",
             requested_inference_profile=requested_profile,
         )
         return dataclasses.replace(
@@ -1125,13 +1138,13 @@ class InputBufferService:
             ),
         )
 
-    async def _append_input_buffer_events(
+    async def _append_mailbox_item_events(
         self,
         session: AsyncSession,
         session_id: str,
-        promoted: list[_PromotedInputBuffer],
+        promoted: list[_PromotedMailboxItem],
     ) -> list[Event]:
-        """Append InputBuffer event input to transcript."""
+        """Append MailboxItem event input to transcript."""
         inserted: list[Event] = []
         for item in promoted:
             existing = await self.event_transcript_repository.get_by_external_id(
@@ -1147,7 +1160,13 @@ class InputBufferService:
                     EventCreate(
                         session_id=session_id,
                         kind=item.event_kind,
-                        payload=item.payload,
+                        payload={
+                            **item.payload,
+                            "mailbox_item_id": item.buffer.id,
+                            "mailbox_item_key": (
+                                item.item_key or item.buffer.presentation.item_key
+                            ),
+                        },
                         external_id=item.external_id,
                     ),
                 )
@@ -1156,16 +1175,16 @@ class InputBufferService:
 
 
 @dataclasses.dataclass(frozen=True)
-class _UserMessageInputBufferProcessor:
+class _UserMessageMailboxProcessor:
     """Prepare a user message as one durable semantic event."""
 
-    service: InputBufferService
+    service: MailboxService
 
     async def process(
         self,
-        context: InputBufferPreparationContext,
-        buffer: InputBuffer,
-    ) -> InputBufferPreparationOutcome:
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
         user_message = self.service.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:user_message",
@@ -1175,7 +1194,7 @@ class _UserMessageInputBufferProcessor:
         )
         return _preparation_outcome(
             [
-                _PromotedInputBuffer(
+                _PromotedMailboxItem(
                     buffer=buffer,
                     user_message=user_message,
                     event_kind=EventKind.USER_MESSAGE,
@@ -1188,16 +1207,16 @@ class _UserMessageInputBufferProcessor:
 
 
 @dataclasses.dataclass(frozen=True)
-class _GoalContinuationInputBufferProcessor:
+class _GoalContinuationMailboxProcessor:
     """Prepare a Goal continuation event."""
 
-    service: InputBufferService
+    service: MailboxService
 
     async def process(
         self,
-        context: InputBufferPreparationContext,
-        buffer: InputBuffer,
-    ) -> InputBufferPreparationOutcome:
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
         user_message = self.service.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:goal_continuation",
@@ -1207,7 +1226,7 @@ class _GoalContinuationInputBufferProcessor:
         )
         return _preparation_outcome(
             [
-                _PromotedInputBuffer(
+                _PromotedMailboxItem(
                     buffer=buffer,
                     user_message=user_message,
                     event_kind=EventKind.GOAL_CONTINUATION,
@@ -1220,16 +1239,16 @@ class _GoalContinuationInputBufferProcessor:
 
 
 @dataclasses.dataclass(frozen=True)
-class _AgentMessageInputBufferProcessor:
+class _AgentMessageMailboxProcessor:
     """Prepare one inter-agent mailbox message."""
 
-    service: InputBufferService
+    service: MailboxService
 
     async def process(
         self,
-        context: InputBufferPreparationContext,
-        buffer: InputBuffer,
-    ) -> InputBufferPreparationOutcome:
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
         user_message = self.service.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:agent_message",
@@ -1239,7 +1258,7 @@ class _AgentMessageInputBufferProcessor:
         )
         return _preparation_outcome(
             [
-                _PromotedInputBuffer(
+                _PromotedMailboxItem(
                     buffer=buffer,
                     user_message=user_message,
                     event_kind=EventKind.AGENT_MESSAGE,
@@ -1253,89 +1272,95 @@ class _AgentMessageInputBufferProcessor:
         )
 
 
+def build_external_channel_mailbox_payload(
+    items: Sequence[ExternalChannelInvocationProjectionItem],
+) -> ExternalChannelInvocationMailboxPayload:
+    """Materialize immutable External Channel message snapshots at admission."""
+    if not items:
+        raise ValueError("External invocation batch has no projection items.")
+    ordered = sorted(items, key=lambda item: item.sequence)
+    if [item.sequence for item in ordered] != list(range(len(ordered))):
+        raise ValueError("External invocation batch sequence is not contiguous.")
+    embedded: list[MailboxPresentationItem] = []
+    for item in ordered:
+        if not item.provider_tenant_id:
+            raise ValueError("External invocation is missing provider tenant ID.")
+        payload = ExternalChannelMessagePayload(
+            provider=item.provider,
+            provider_tenant_id=item.provider_tenant_id,
+            resource_id=item.resource_id,
+            resource_label=_external_resource_label(item),
+            resource_type=item.resource_type,
+            binding_id=item.binding_id,
+            invocation_batch_id=item.batch_id,
+            external_message_id=item.message_id,
+            revision_id=item.revision_id,
+            revision_kind=item.revision_kind,
+            projection_root_id=f"external-channel:{item.binding_id}:{item.message_id}",
+            provider_message_key=item.provider_message_key,
+            provider_position=item.provider_position,
+            principal_id=item.principal_id,
+            provider_user_id=item.provider_user_id,
+            sender_display_name=item.sender_display_name,
+            author_type=item.author_type,
+            authorization=(
+                "authorized_invocation"
+                if item.message_id == item.trigger_message_id
+                else "context_only"
+            ),
+            lifecycle=_external_message_lifecycle(item.revision_kind),
+            body=item.revision_body,
+            attachment_metadata=add_external_channel_file_locators(
+                item.attachment_metadata or {},
+                binding_id=item.binding_id,
+            ),
+            reference_mappings=_external_reference_mappings(item.reference_mappings),
+            provider_created_at=item.provider_created_at,
+            provider_updated_at=item.provider_updated_at,
+            original_url=item.original_url,
+            truncated_context_message_count=item.truncation_message_count,
+            truncated_context_size=item.truncation_size,
+            correction_of_revision_id=item.correction_of_revision_id,
+        )
+        embedded.append(
+            MailboxPresentationItem(
+                item_key=f"external_channel:{item.sequence}",
+                presentation_kind="external_channel_message",
+                content=item.revision_body or "",
+                metadata={"external_channel_message": payload.model_dump(mode="json")},
+            )
+        )
+    return ExternalChannelInvocationMailboxPayload(
+        type=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION.value,
+        items=embedded,
+    )
+
+
 @dataclasses.dataclass(frozen=True)
-class ExternalChannelInvocationInputBufferProcessor:
+class ExternalChannelInvocationMailboxProcessor:
     """Prepare one durable external invocation batch as contiguous events."""
 
-    service: InputBufferService
+    service: MailboxService
 
     async def process(
         self,
-        context: InputBufferPreparationContext,
-        buffer: InputBuffer,
-    ) -> InputBufferPreparationOutcome:
-        batch_id = buffer.metadata.get(
-            EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY
-        )
-        if not batch_id:
-            raise ValueError(
-                "External invocation InputBuffer requires an invocation batch ID."
-            )
-        repository = self.service.external_channel_repository
-        items = await repository.list_invocation_projection_items(
-            context.session,
-            batch_id=batch_id,
-        )
-        if not items:
-            raise ValueError("External invocation batch has no projection items.")
-        if any(item.batch_id != batch_id for item in items):
-            raise ValueError("External invocation batch projection is inconsistent.")
-        if [item.sequence for item in items] != list(range(len(items))):
-            raise ValueError("External invocation batch sequence is not contiguous.")
-
-        promoted: list[_PromotedInputBuffer] = []
-        for item in items:
-            provider_tenant_id = item.provider_tenant_id
-            if not provider_tenant_id:
-                raise ValueError("External invocation is missing provider tenant ID.")
-            resource_label = _external_resource_label(item)
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
+        promoted: list[_PromotedMailboxItem] = []
+        if not isinstance(buffer.payload, ExternalChannelInvocationMailboxPayload):
+            raise ValueError("External invocation MailboxItem payload is malformed.")
+        for embedded in buffer.payload.items:
+            raw_payload = embedded.metadata.get("external_channel_message")
+            if not isinstance(raw_payload, dict):
+                raise ValueError("External invocation payload item is malformed.")
+            payload = ExternalChannelMessagePayload.model_validate(raw_payload)
             external_id = (
-                f"external-channel:{item.binding_id}:"
-                f"{item.message_id}:{item.revision_id}"
-            )
-            payload = ExternalChannelMessagePayload(
-                provider=item.provider,
-                provider_tenant_id=provider_tenant_id,
-                resource_id=item.resource_id,
-                resource_label=resource_label,
-                resource_type=item.resource_type,
-                binding_id=item.binding_id,
-                invocation_batch_id=item.batch_id,
-                external_message_id=item.message_id,
-                revision_id=item.revision_id,
-                revision_kind=item.revision_kind,
-                projection_root_id=(
-                    f"external-channel:{item.binding_id}:{item.message_id}"
-                ),
-                provider_message_key=item.provider_message_key,
-                provider_position=item.provider_position,
-                principal_id=item.principal_id,
-                provider_user_id=item.provider_user_id,
-                sender_display_name=item.sender_display_name,
-                author_type=item.author_type,
-                authorization=(
-                    "authorized_invocation"
-                    if item.message_id == item.trigger_message_id
-                    else "context_only"
-                ),
-                lifecycle=_external_message_lifecycle(item.revision_kind),
-                body=item.revision_body,
-                attachment_metadata=add_external_channel_file_locators(
-                    item.attachment_metadata or {},
-                    binding_id=item.binding_id,
-                ),
-                reference_mappings=_external_reference_mappings(
-                    item.reference_mappings
-                ),
-                provider_created_at=item.provider_created_at,
-                provider_updated_at=item.provider_updated_at,
-                original_url=item.original_url,
-                truncated_context_message_count=item.truncation_message_count,
-                truncated_context_size=item.truncation_size,
-                correction_of_revision_id=item.correction_of_revision_id,
+                f"external-channel:{payload.binding_id}:"
+                f"{payload.external_message_id}:{payload.revision_id}"
             )
             promoted.append(
-                _PromotedInputBuffer(
+                _PromotedMailboxItem(
                     buffer=buffer,
                     user_message=None,
                     event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
@@ -1343,22 +1368,23 @@ class ExternalChannelInvocationInputBufferProcessor:
                         payload.model_dump(mode="json")
                     ),
                     external_id=external_id,
+                    item_key=embedded.item_key,
                 )
             )
         return _preparation_outcome(promoted, TurnEffect.ELIGIBLE)
 
 
 @dataclasses.dataclass(frozen=True)
-class _GoalActionInputBufferProcessor:
+class _GoalActionMailboxProcessor:
     """Prepare a closed Goal action."""
 
-    service: InputBufferService
+    service: MailboxService
 
     async def process(
         self,
-        context: InputBufferPreparationContext,
-        buffer: InputBuffer,
-    ) -> InputBufferPreparationOutcome:
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
         promoted = await self.service.promote_goal_action(
             context.session,
             session_id=context.session_id,
@@ -1370,17 +1396,17 @@ class _GoalActionInputBufferProcessor:
 
 
 @dataclasses.dataclass(frozen=True)
-class _SkillActionInputBufferProcessor:
+class _SkillActionMailboxProcessor:
     """Prepare a closed Skill action."""
 
-    service: InputBufferService
+    service: MailboxService
     action: SkillAction
 
     async def process(
         self,
-        context: InputBufferPreparationContext,
-        buffer: InputBuffer,
-    ) -> InputBufferPreparationOutcome:
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
         promoted = await self.service.promote_skill_action(
             context.session,
             session_id=context.session_id,
@@ -1394,18 +1420,18 @@ class _SkillActionInputBufferProcessor:
 
 
 @dataclasses.dataclass(frozen=True)
-class _OperationActionInputBufferProcessor:
+class _OperationActionMailboxProcessor:
     """Preserve an operation action boundary until durable claims replace it."""
 
     action: CreateGitWorktreeAction | CleanupOrphanGitWorktreesAction
 
     async def process(
         self,
-        context: InputBufferPreparationContext,
-        buffer: InputBuffer,
-    ) -> InputBufferPreparationOutcome:
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
         del context
-        return InputBufferPreparationOutcome(
+        return MailboxPreparationOutcome(
             promoted=[],
             turn_effect=TurnEffect.NEUTRAL,
             operation_action=OperationActionInput(
@@ -1417,11 +1443,11 @@ class _OperationActionInputBufferProcessor:
 
 
 def _preparation_outcome(
-    promoted: list[_PromotedInputBuffer],
+    promoted: list[_PromotedMailboxItem],
     turn_effect: TurnEffect,
-) -> InputBufferPreparationOutcome:
+) -> MailboxPreparationOutcome:
     """Build one immutable processor result."""
-    return InputBufferPreparationOutcome(
+    return MailboxPreparationOutcome(
         promoted=promoted,
         turn_effect=turn_effect,
         operation_action=None,
@@ -1438,7 +1464,7 @@ class _GoalActionError(Exception):
 
 
 def _turn_effect_for_promoted(
-    promoted: Sequence[_PromotedInputBuffer],
+    promoted: Sequence[_PromotedMailboxItem],
 ) -> TurnEffect:
     """Derive the fold effect from one processor result."""
     if any(item.event_kind is EventKind.SYSTEM_ERROR for item in promoted):
@@ -1504,27 +1530,27 @@ def _external_message_lifecycle(
             assert_never(revision_kind)
 
 
-def _buffer_requires_inference(buffer: InputBuffer) -> bool:
+def _buffer_requires_inference(buffer: MailboxItem) -> bool:
     """Return whether preparing the buffer needs a resolved inference state."""
     match buffer.kind:
         case (
-            InputBufferKind.USER_MESSAGE
-            | InputBufferKind.GOAL_CONTINUATION
-            | InputBufferKind.AGENT_MESSAGE
-            | InputBufferKind.EXTERNAL_CHANNEL_INVOCATION
+            MailboxItemKind.USER_MESSAGE
+            | MailboxItemKind.GOAL_CONTINUATION
+            | MailboxItemKind.AGENT_MESSAGE
+            | MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION
         ):
             return True
-        case InputBufferKind.ACTION_MESSAGE:
-            if buffer.action is None:
+        case MailboxItemKind.ACTION_MESSAGE:
+            if buffer.presentation.action is None:
                 raise ValueError("Action message input buffer requires action payload")
-            action = _CHAT_ACTION_ADAPTER.validate_python(buffer.action)
+            action = _CHAT_ACTION_ADAPTER.validate_python(buffer.presentation.action)
             return isinstance(action, GoalAction | SkillAction)
         case _:
             assert_never(buffer.kind)
 
 
 def _requested_inference_profile(
-    buffer: InputBuffer,
+    buffer: MailboxItem,
 ) -> RequestedInferenceProfile | None:
     """Build typed requested profile from one durable buffer."""
     if buffer.requested_model_target_label is None:
@@ -1557,15 +1583,19 @@ def _user_message_payload_json(
     return payload
 
 
-def _agent_message_payload(buffer: InputBuffer) -> AgentMessagePayload:
+def _agent_message_payload(buffer: MailboxItem) -> AgentMessagePayload:
     """Build agent_message payload from mailbox input buffer metadata."""
     payload: dict[str, object] = {
-        "message_kind": buffer.metadata["message_kind"],
-        "source_session_agent_id": buffer.metadata["source_session_agent_id"],
-        "source_path": buffer.metadata["source_path"],
-        "target_session_agent_id": buffer.metadata["target_session_agent_id"],
-        "target_path": buffer.metadata["target_path"],
-        "content": buffer.content,
+        "message_kind": buffer.presentation.metadata["message_kind"],
+        "source_session_agent_id": buffer.presentation.metadata[
+            "source_session_agent_id"
+        ],
+        "source_path": buffer.presentation.metadata["source_path"],
+        "target_session_agent_id": buffer.presentation.metadata[
+            "target_session_agent_id"
+        ],
+        "target_path": buffer.presentation.metadata["target_path"],
+        "content": buffer.presentation.content,
     }
     for key in (
         "source_run_id",
@@ -1573,23 +1603,23 @@ def _agent_message_payload(buffer: InputBuffer) -> AgentMessagePayload:
         "run_status",
         "source_terminal_result_event_id",
     ):
-        value = buffer.metadata.get(key)
+        value = buffer.presentation.metadata.get(key)
         if value is not None:
             payload[key] = value
     return _AGENT_MESSAGE_ADAPTER.validate_python(payload)
 
 
 def _system_error_promoted_buffer(
-    buffer: InputBuffer,
+    buffer: MailboxItem,
     content: str,
-) -> _PromotedInputBuffer:
+) -> _PromotedMailboxItem:
     """Create a promoted system_error for one handled preparation failure."""
     payload = SystemErrorPayload(
         content=content,
         severity="error",
         recoverable=True,
     )
-    return _PromotedInputBuffer(
+    return _PromotedMailboxItem(
         buffer=buffer,
         user_message=None,
         event_kind=EventKind.SYSTEM_ERROR,

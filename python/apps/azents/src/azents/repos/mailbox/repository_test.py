@@ -1,4 +1,4 @@
-"""InputBufferRepository tests."""
+"""MailboxRepository tests."""
 
 import pytest
 import sqlalchemy as sa
@@ -7,9 +7,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    InputBufferKind,
-    InputBufferSchedulingMode,
     LLMProvider,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
@@ -24,15 +24,15 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
-from . import InputBufferRepository
-from .data import InputBufferCreate
+from . import MailboxRepository
+from .data import MailboxItemCreate
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
-        session, WorkspaceCreate(name="InputBuffer test", handle=handle)
+        session, WorkspaceCreate(name="MailboxItem test", handle=handle)
     )
     assert isinstance(result, Success)
     workspace_id = await repo.resolve_id(session, handle)
@@ -61,7 +61,7 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
 
     agent = RDBAgent(
         workspace_id=workspace_id,
-        name="InputBuffer test agent",
+        name="MailboxItem test agent",
         model_selection=make_test_model_selection_dict(
             integration_id=integration.id,
             provider=LLMProvider.ANTHROPIC,
@@ -84,7 +84,7 @@ async def _create_agent_session(
     handle: str,
     slug: str,
 ) -> tuple[str, str, str]:
-    """Create AgentSession fixture satisfying InputBuffer FK."""
+    """Create AgentSession fixture satisfying MailboxItem FK."""
     workspace_id = await _create_workspace(session, handle)
     user_id = await _create_user(session, f"{handle}@example.com")
     agent_id = await _create_agent(session, workspace_id, slug)
@@ -102,12 +102,12 @@ def _create_payload(
     session_id: str,
     user_id: str,
     content: str,
-) -> InputBufferCreate:
-    """Make InputBuffer create payload."""
-    return InputBufferCreate(
+) -> MailboxItemCreate:
+    """Make MailboxItem create payload."""
+    return MailboxItemCreate(
         session_id=session_id,
-        kind=InputBufferKind.USER_MESSAGE,
-        scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+        kind=MailboxItemKind.USER_MESSAGE,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         requested_model_target_label="Quality",
         requested_reasoning_effort=ModelReasoningEffort.HIGH,
         sender_user_id=user_id,
@@ -120,8 +120,8 @@ def _create_payload(
     )
 
 
-class TestInputBufferRepository:
-    """InputBufferRepository tests."""
+class TestMailboxRepository:
+    """MailboxRepository tests."""
 
     async def test_create_round_trips_jsonb_fields(
         self,
@@ -133,7 +133,7 @@ class TestInputBufferRepository:
             handle="input-buffer-create",
             slug="input-buffer-create",
         )
-        repo = InputBufferRepository()
+        repo = MailboxRepository()
 
         created = await repo.create(
             rdb_session,
@@ -146,8 +146,8 @@ class TestInputBufferRepository:
 
         assert len(created.id) == 32
         assert created.session_id == session_id
-        assert created.kind == InputBufferKind.USER_MESSAGE
-        assert created.scheduling_mode == InputBufferSchedulingMode.WAKE_SESSION
+        assert created.kind == MailboxItemKind.USER_MESSAGE
+        assert created.scheduling_mode == MailboxSchedulingMode.WAKE_SESSION
         assert created.requested_model_target_label == "Quality"
         assert created.requested_reasoning_effort == ModelReasoningEffort.HIGH
         assert created.sender_user_id == user_id
@@ -170,7 +170,7 @@ class TestInputBufferRepository:
             handle="input-buffer-pending-query",
             slug="input-buffer-pending-query",
         )
-        repo = InputBufferRepository()
+        repo = MailboxRepository()
         wake_payload = _create_payload(
             session_id=session_id,
             user_id=user_id,
@@ -178,8 +178,8 @@ class TestInputBufferRepository:
         )
         queue_only_payload = wake_payload.model_copy(
             update={
-                "kind": InputBufferKind.AGENT_MESSAGE,
-                "scheduling_mode": InputBufferSchedulingMode.QUEUE_ONLY,
+                "kind": MailboxItemKind.AGENT_MESSAGE,
+                "scheduling_mode": MailboxSchedulingMode.QUEUE_ONLY,
                 "sender_user_id": None,
                 "content": "queue only",
             }
@@ -189,22 +189,22 @@ class TestInputBufferRepository:
         assert await repo.has_by_session_id_and_scheduling_mode(
             rdb_session,
             session_id=session_id,
-            scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+            scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
         )
         assert not await repo.has_by_session_id_and_scheduling_mode(
             rdb_session,
             session_id=session_id,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         )
         assert await repo.has_by_session_id_and_kind(
             rdb_session,
             session_id=session_id,
-            kind=InputBufferKind.AGENT_MESSAGE,
+            kind=MailboxItemKind.AGENT_MESSAGE,
         )
         assert not await repo.has_by_session_id_and_kind(
             rdb_session,
             session_id=session_id,
-            kind=InputBufferKind.USER_MESSAGE,
+            kind=MailboxItemKind.USER_MESSAGE,
         )
 
     async def test_list_and_flush_order_by_buffer_id(
@@ -222,7 +222,7 @@ class TestInputBufferRepository:
             handle="input-buffer-list-other",
             slug="input-buffer-list-other",
         )
-        repo = InputBufferRepository()
+        repo = MailboxRepository()
         second = await repo.create(
             rdb_session,
             _create_payload(
@@ -270,7 +270,7 @@ class TestInputBufferRepository:
             handle="input-buffer-delete-other",
             slug="input-buffer-delete-other",
         )
-        repo = InputBufferRepository()
+        repo = MailboxRepository()
         created = await repo.create(
             rdb_session,
             _create_payload(
@@ -316,7 +316,7 @@ class TestInputBufferRepository:
             handle="input-buffer-claim-other",
             slug="input-buffer-claim-other",
         )
-        repo = InputBufferRepository()
+        repo = MailboxRepository()
         second = await repo.create(
             rdb_session,
             _create_payload(
@@ -366,7 +366,7 @@ class TestInputBufferRepository:
             handle="input-buffer-cascade",
             slug="input-buffer-cascade",
         )
-        repo = InputBufferRepository()
+        repo = MailboxRepository()
         created = await repo.create(
             rdb_session,
             _create_payload(
@@ -417,7 +417,7 @@ class TestInputBufferRepository:
             handle="input-buffer-move-other",
             slug="input-buffer-move-other",
         )
-        repo = InputBufferRepository()
+        repo = MailboxRepository()
         moved_buffer = await repo.create(
             rdb_session,
             _create_payload(

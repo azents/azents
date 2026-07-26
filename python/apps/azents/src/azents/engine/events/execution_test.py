@@ -170,7 +170,7 @@ class _RunRepo:
             parent_agent_run_id=None,
             active_tool_calls=list(self.active_tool_calls),
             parent_result_delivery_state=None,
-            parent_result_input_buffer_id=None,
+            parent_result_mailbox_item_id=None,
             parent_result_enqueued_at=None,
             created_at=datetime.datetime.now(datetime.UTC),
             started_at=datetime.datetime.now(datetime.UTC),

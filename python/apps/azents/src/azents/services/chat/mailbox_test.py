@@ -1,4 +1,4 @@
-"""ChatSessionService InputBuffer tests."""
+"""ChatSessionService MailboxItem tests."""
 
 import datetime
 from collections.abc import AsyncGenerator
@@ -13,9 +13,9 @@ from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
     AgentSessionRunState,
-    InputBufferKind,
-    InputBufferSchedulingMode,
     LLMProvider,
+    MailboxItemKind,
+    MailboxSchedulingMode,
     WorkspaceUserRole,
 )
 from azents.core.inference_profile import SessionInferenceState
@@ -41,8 +41,8 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.input_buffer import InputBufferRepository
-from azents.repos.input_buffer.data import InputBufferCreate
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -54,7 +54,7 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.input_buffer import InputBufferService
+from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
@@ -179,9 +179,9 @@ def _service(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
-    input_buffer_service = InputBufferService(
+    mailbox_item_service = MailboxService(
         session_manager=rdb_session_manager,
-        input_buffer_repository=InputBufferRepository(),
+        mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=cast(ModelFileService, object()),
         agent_session_repository=AgentSessionRepository(),
@@ -210,7 +210,7 @@ def _service(
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-        input_buffer_service=input_buffer_service,
+        mailbox_item_service=mailbox_item_service,
         session_git_worktree_service=cast(SessionGitWorktreeService, object()),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
         external_channel_lifecycle_service=cast(
@@ -234,7 +234,7 @@ async def _create_session_with_buffer(
     handle: str,
     slug: str,
 ) -> tuple[str, str, str]:
-    """Create accessible AgentSession and InputBuffer."""
+    """Create accessible AgentSession and MailboxItem."""
     workspace_id = await _create_workspace(session, handle)
     user_id = await _create_user(session, f"{handle}@example.com")
     await _add_workspace_user(session, workspace_id=workspace_id, user_id=user_id)
@@ -245,12 +245,12 @@ async def _create_session_with_buffer(
             session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
         )
     ).session
-    input_buffer = await InputBufferRepository().create(
+    mailbox_item = await MailboxRepository().create(
         session,
-        InputBufferCreate(
+        MailboxItemCreate(
             session_id=agent_session.id,
-            kind=InputBufferKind.USER_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.USER_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label="main",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             sender_user_id=user_id,
@@ -262,11 +262,11 @@ async def _create_session_with_buffer(
             file_parts=[],
         ),
     )
-    return agent_session.id, user_id, input_buffer.id
+    return agent_session.id, user_id, mailbox_item.id
 
 
-class TestChatSessionInputBuffer:
-    """ChatSessionService InputBuffer behavior tests."""
+class TestChatSessionMailboxItem:
+    """ChatSessionService MailboxItem behavior tests."""
 
     async def test_list_live_events_includes_pending_buffers(
         self,
@@ -286,8 +286,8 @@ class TestChatSessionInputBuffer:
         )
 
         assert isinstance(result, Success)
-        assert [event.id for event in result.value.input_buffer_events] == [buffer_id]
-        payload = result.value.input_buffer_events[0].payload
+        assert [event.id for event in result.value.mailbox_item_events] == [buffer_id]
+        payload = result.value.mailbox_item_events[0].payload
         assert isinstance(payload, UserMessagePayload)
         assert payload.applied_inference_profile is not None
         assert payload.applied_inference_profile.model_target_label == "main"
@@ -458,7 +458,7 @@ class TestChatSessionInputBuffer:
                 handle="chat-live-compacting-operation",
                 slug="chat-live-compacting-operation",
             )
-            await InputBufferRepository().delete_by_session_and_id(
+            await MailboxRepository().delete_by_session_and_id(
                 session,
                 session_id,
                 buffer_id,
@@ -502,7 +502,7 @@ class TestChatSessionInputBuffer:
         assert result.value.run.operation.status == "running"
         assert result.value.session_run_state == AgentSessionRunState.RUNNING
 
-    async def test_flushed_input_buffer_remains_in_message_history(
+    async def test_flushed_mailbox_item_remains_in_message_history(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
@@ -514,9 +514,9 @@ class TestChatSessionInputBuffer:
                 slug="chat-buffer-flushed-history",
             )
 
-        input_buffer_service = InputBufferService(
+        mailbox_item_service = MailboxService(
             session_manager=rdb_session_manager,
-            input_buffer_repository=InputBufferRepository(),
+            mailbox_item_repository=MailboxRepository(),
             exchange_file_service=_ExchangeFileService(),
             model_file_service=cast(ModelFileService, object()),
             agent_session_repository=AgentSessionRepository(),
@@ -526,7 +526,7 @@ class TestChatSessionInputBuffer:
             vfs_projection_service=None,
             external_channel_repository=ExternalChannelRepository(),
         )
-        promoted = await input_buffer_service.flush_session_input_buffers(
+        promoted = await mailbox_item_service.flush_session_mailbox_items(
             session_id=session_id,
             owner_generation=0,
             model="test-model",
@@ -552,7 +552,7 @@ class TestChatSessionInputBuffer:
         assert isinstance(event.payload, UserMessagePayload)
         assert event.payload.content == "pending input"
 
-    async def test_delete_input_buffer_is_idempotent(
+    async def test_delete_mailbox_item_is_idempotent(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
@@ -565,19 +565,19 @@ class TestChatSessionInputBuffer:
             )
 
         service = _service(rdb_session_manager)
-        first = await service.delete_input_buffer(
+        first = await service.delete_mailbox_item(
             session_id, buffer_id, user_id=user_id
         )
-        second = await service.delete_input_buffer(
+        second = await service.delete_mailbox_item(
             session_id, buffer_id, user_id=user_id
         )
 
         assert isinstance(first, Success)
         assert isinstance(second, Success)
         async with rdb_session_manager() as session:
-            assert await InputBufferRepository().get_by_id(session, buffer_id) is None
+            assert await MailboxRepository().get_by_id(session, buffer_id) is None
 
-    async def test_delete_input_buffer_checks_session_access(
+    async def test_delete_mailbox_item_checks_session_access(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
@@ -592,7 +592,7 @@ class TestChatSessionInputBuffer:
                 session, "chat-buffer-denied-other@example.com"
             )
 
-        result = await _service(rdb_session_manager).delete_input_buffer(
+        result = await _service(rdb_session_manager).delete_mailbox_item(
             session_id,
             buffer_id,
             user_id=other_user_id,

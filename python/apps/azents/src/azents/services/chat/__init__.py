@@ -20,8 +20,8 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentSessionTitleSource,
     EventKind,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.core.session_lifecycle import (
@@ -61,7 +61,7 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.services.mailbox import MailboxEnqueue, MailboxService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
@@ -96,7 +96,7 @@ from .data import (
     ChatLiveRunRetryState,
     ChatLiveRunState,
     ChatLiveStateSnapshot,
-    DeleteInputBufferError,
+    DeleteMailboxItemError,
     EnsureSessionError,
     InvalidGoalStatusTransition,
     InvalidSessionTitle,
@@ -126,7 +126,7 @@ from .data import (
 from .live_events import (
     LiveEventStore,
     active_tool_call_to_live_event,
-    input_buffer_to_live_event,
+    mailbox_item_to_live_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -340,7 +340,7 @@ class ChatSessionService:
         SessionWorkspaceProjectRepository,
         Depends(SessionWorkspaceProjectRepository),
     ]
-    input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
     session_git_worktree_service: Annotated[
         SessionGitWorktreeService,
         Depends(SessionGitWorktreeService),
@@ -926,12 +926,12 @@ class ChatSessionService:
                         source_project_path=source_project_path,
                         starting_ref=starting_ref,
                     )
-                    result = await self.input_buffer_service.enqueue(
+                    result = await self.mailbox_item_service.enqueue(
                         session,
-                        InputBufferEnqueue(
+                        MailboxEnqueue(
                             session_id=agent_session.id,
-                            kind=InputBufferKind.ACTION_MESSAGE,
-                            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                            kind=MailboxItemKind.ACTION_MESSAGE,
+                            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                             requested_model_target_label=None,
                             requested_reasoning_effort=None,
                             sender_user_id=user_id,
@@ -1377,13 +1377,13 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(SessionAccessDenied())
-            input_buffers = await self.input_buffer_service.list_by_session_id(
+            mailbox_items = await self.mailbox_item_service.list_by_session_id(
                 session, session_id
             )
-            input_buffer_events = [
+            mailbox_item_events = [
                 event
-                for input_buffer in input_buffers
-                if (event := input_buffer_to_live_event(input_buffer)) is not None
+                for mailbox_item in mailbox_items
+                if (event := mailbox_item_to_live_event(mailbox_item)) is not None
             ]
             run = await self.agent_run_repository.get_running_by_session_id(
                 session,
@@ -1493,7 +1493,7 @@ class ChatSessionService:
         return Success(
             ChatLiveStateSnapshot(
                 partial_history_events=partial_history_events,
-                input_buffer_events=input_buffer_events,
+                mailbox_item_events=mailbox_item_events,
                 run=live_run,
                 session_run_state=session_run_state,
                 todo=todo,
@@ -1679,17 +1679,17 @@ class ChatSessionService:
             )
         )
 
-    async def delete_input_buffer(
+    async def delete_mailbox_item(
         self,
         session_id: str,
         buffer_id: str,
         *,
         user_id: str,
-    ) -> Result[None, DeleteInputBufferError]:
-        """Delete Pending InputBuffer idempotently.
+    ) -> Result[None, DeleteMailboxItemError]:
+        """Delete Pending MailboxItem idempotently.
 
         :param session_id: Target session ID
-        :param buffer_id: InputBuffer ID to delete
+        :param buffer_id: MailboxItem ID to delete
         :param user_id: Requester user ID
         :return: None on success, error on failure
         """
@@ -1706,7 +1706,7 @@ class ChatSessionService:
                         assert_never(error)
 
         async with self.session_manager() as session:
-            await self.input_buffer_service.delete_by_session_and_id(
+            await self.mailbox_item_service.delete_by_session_and_id(
                 session,
                 session_id=session_id,
                 buffer_id=buffer_id,

@@ -180,7 +180,7 @@ def _candidate(
     has_pending_idle_continuation: bool = False,
     has_stop_request: bool = False,
     stop_request_complete: bool = True,
-    fifo_input_buffer_id: str | None = None,
+    fifo_mailbox_item_id: str | None = None,
 ) -> CutoverReplayCandidate:
     """Create one content-free durable work candidate."""
     return CutoverReplayCandidate(
@@ -188,9 +188,9 @@ def _candidate(
         owner_generation=3,
         run_state=AgentSessionRunState.RUNNING,
         wake_input_present=has_pending_input,
-        fifo_input_buffer_id=(
-            fifo_input_buffer_id
-            if fifo_input_buffer_id is not None
+        fifo_mailbox_item_id=(
+            fifo_mailbox_item_id
+            if fifo_mailbox_item_id is not None
             else ("input-1" if has_pending_input else None)
         ),
         pending_command_present=has_pending_command,
@@ -210,7 +210,7 @@ def _candidate(
 def _snapshot(
     session_id: str = "session-1",
     *,
-    fifo_input_buffer_id: str | None = "input-1",
+    fifo_mailbox_item_id: str | None = "input-1",
 ) -> CanonicalExecutionSnapshot:
     """Create a matching validated canonical snapshot."""
     return CanonicalExecutionSnapshot(
@@ -224,7 +224,7 @@ def _snapshot(
         session_agent_context_id="context-1",
         execution_mode=AgentSessionKind.ROOT,
         owner_generation=3,
-        fifo_input_buffer_id=fifo_input_buffer_id,
+        fifo_mailbox_item_id=fifo_mailbox_item_id,
         pending_command=None,
         recoverable_run_id=None,
         recoverable_run_status=AgentRunStatus.RUNNING,
@@ -330,8 +330,8 @@ async def test_preflight_rejects_stale_owner_without_broker_effect() -> None:
 async def test_preflight_accepts_older_queue_only_input_before_wake_input() -> None:
     """Wake presence and canonical all-input FIFO identity remain separate."""
     service, _repository, broker, broker_provider_calls = _service(
-        _candidate(fifo_input_buffer_id="queue-only-input"),
-        _snapshot(fifo_input_buffer_id="queue-only-input"),
+        _candidate(fifo_mailbox_item_id="queue-only-input"),
+        _snapshot(fifo_mailbox_item_id="queue-only-input"),
     )
 
     report = await service.preflight(batch_size=10, after_session_id=None)

@@ -36,11 +36,11 @@ class ActionExecutionService:
         self.session_manager = session_manager
         self.action_execution_repository = action_execution_repository
 
-    async def create_for_input_buffer(
+    async def create_for_mailbox_item(
         self,
         *,
         session_id: str,
-        input_buffer_id: str,
+        mailbox_item_id: str,
         sender_user_id: str | None,
         action_type: str,
         action: dict[str, JSONValue],
@@ -53,7 +53,7 @@ class ActionExecutionService:
                 ActionExecutionCreate(
                     id=None,
                     session_id=session_id,
-                    input_buffer_id=input_buffer_id,
+                    mailbox_item_id=mailbox_item_id,
                     sender_user_id=sender_user_id,
                     action_type=action_type,
                     action=action,
@@ -62,17 +62,17 @@ class ActionExecutionService:
                 ),
             )
 
-    async def get_projection_by_input_buffer_id(
+    async def get_projection_by_mailbox_item_id(
         self,
         *,
-        input_buffer_id: str,
+        mailbox_item_id: str,
     ) -> ActionExecutionProjection | None:
         """Fetch execution projection by input buffer identity."""
         async with self.session_manager() as session:
             repository = self.action_execution_repository
-            return await repository.get_projection_by_input_buffer_id(
+            return await repository.get_projection_by_mailbox_item_id(
                 session,
-                input_buffer_id=input_buffer_id,
+                mailbox_item_id=mailbox_item_id,
             )
 
     async def list_by_session_id(

@@ -13,7 +13,7 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.input_buffer import RDBInputBuffer
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.workspace import RDBWorkspace
@@ -115,9 +115,9 @@ class SessionExecutionRepository:
         await self._validate_parent_lineage(session, current, root)
 
         oldest_input = await session.scalar(
-            sa.select(RDBInputBuffer.id)
-            .where(RDBInputBuffer.session_id == session_id)
-            .order_by(RDBInputBuffer.id.asc())
+            sa.select(RDBMailboxItem.id)
+            .where(RDBMailboxItem.session_id == session_id)
+            .order_by(RDBMailboxItem.id.asc())
             .limit(1)
         )
         pending_command = self._pending_command(agent_session)
@@ -161,7 +161,7 @@ class SessionExecutionRepository:
             session_agent_context_id=context.id,
             execution_mode=agent_session.session_kind,
             owner_generation=owner_generation,
-            fifo_input_buffer_id=oldest_input,
+            fifo_mailbox_item_id=oldest_input,
             pending_command=pending_command,
             recoverable_run_id=(
                 recoverable_run.id if recoverable_run is not None else None
