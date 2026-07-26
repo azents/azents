@@ -10,8 +10,9 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -1038,8 +1039,8 @@ def azents_engine_worker_container(
             _remove_agent_runtime_containers(container_network.name)
 
 
-@pytest.fixture(scope="session")
-def azents_discord_gateway_worker_container(
+@pytest.fixture
+def azents_discord_gateway_worker_factory(
     container_network: Network,
     postgres_container: PostgresContainer,
     rustfs_container: DockerContainer,
@@ -1053,35 +1054,42 @@ def azents_discord_gateway_worker_container(
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
     discord_provider_fake_container: DockerContainer,
-) -> Generator[DockerContainer, None, None]:
-    """Run the dedicated Discord Gateway Worker against the deterministic fake."""
+) -> Callable[[], AbstractContextManager[DockerContainer]]:
+    """Return a starter for a Gateway Worker after durable setup is complete."""
     del azents_public_server_container, discord_provider_fake_container
-    base_container = (
-        DockerContainer(
-            image=azents_server_image,
-            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
-        )
-        .with_name(f"azents-discord-gateway-worker-{random_secret(4)}")
-        .with_network_aliases("azents-discord-gateway-worker")
-        .with_command(["./bin/discordgatewayworker.sh"])
-        .with_exposed_ports(8013)
-    )
-    container = _configure_azents_server_container(
-        base_container,
-        container_network,
-        postgres_container,
-        rustfs_access_key,
-        rustfs_secret_key,
-        s3_bucket_name,
-        auth_jwt_secret_key,
-        credential_encryption_key,
-        system_bootstrap_setup_token,
-    ).with_env("AZ_WORKER_HEALTH_PORT", "8013")
 
-    with container:
-        _wait_for_tcp_ready(container, 8013, "azents-discord-gateway-worker")
-        yield container
-        _log_server_output(container, "azents-discord-gateway-worker")
+    @contextmanager
+    def start() -> Generator[DockerContainer, None, None]:
+        base_container = (
+            DockerContainer(
+                image=azents_server_image,
+                docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+            )
+            .with_name(f"azents-discord-gateway-worker-{random_secret(4)}")
+            .with_network_aliases("azents-discord-gateway-worker")
+            .with_command(["./bin/discordgatewayworker.sh"])
+            .with_exposed_ports(8013)
+        )
+        container = _configure_azents_server_container(
+            base_container,
+            container_network,
+            postgres_container,
+            rustfs_access_key,
+            rustfs_secret_key,
+            s3_bucket_name,
+            auth_jwt_secret_key,
+            credential_encryption_key,
+            system_bootstrap_setup_token,
+        ).with_env("AZ_WORKER_HEALTH_PORT", "8013")
+
+        with container:
+            _wait_for_tcp_ready(container, 8013, "azents-discord-gateway-worker")
+            try:
+                yield container
+            finally:
+                _log_server_output(container, "azents-discord-gateway-worker")
+
+    return start
 
 
 @pytest.fixture(scope="session")
