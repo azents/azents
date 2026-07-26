@@ -165,6 +165,29 @@ class DeadlineClock:
         return _NOW if self.calls <= 2 else _NOW + timedelta(minutes=1)
 
 
+class DeadlineTransportFailureCoordinator(Coordinator):
+    """Fail both boundary cancellation RPCs after one live status."""
+
+    def __init__(self) -> None:
+        super().__init__([_status(4, phase=CoordinatorTransferPhase.READY)])
+        self.status_calls = 0
+
+    async def get_transfer_status(
+        self, request: CoordinatorGetTransferStatusRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append(("status", request))
+        self.status_calls += 1
+        if self.status_calls > 1:
+            raise OSError("Runtime coordinator status transport failed")
+        return self.statuses.pop(0)
+
+    async def cancel_transfer(
+        self, request: CoordinatorCancelTransferRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append(("cancel", request))
+        raise OSError("Runtime coordinator cancellation transport failed")
+
+
 class StrictStateCoordinator:
     """Exercise service cleanup handoff against the real state transition."""
 
@@ -649,6 +672,38 @@ async def test_deadline_keeps_expired_failure_after_boundary_cancellation_check(
         "dispatch",
         "status",
         "cancel",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deadline_preserves_expired_failure_when_boundary_transport_fails() -> (
+    None
+):
+    """Boundary coordinator transport failures do not mask an EXPIRED result."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    coordinator = DeadlineTransportFailureCoordinator()
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=DeadlineClock(),
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(ServerToRuntimeTransferError, match="deadline") as raised:
+        await service.transfer(_request(source))
+
+    assert raised.value.failure is CoordinatorTransferFailure.EXPIRED
+    assert [name for name, _ in coordinator.calls] == [
+        "admit",
+        "ready",
+        "dispatch",
+        "status",
+        "cancel",
+        "status",
     ]
 
 

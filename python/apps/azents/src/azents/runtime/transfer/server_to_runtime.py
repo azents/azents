@@ -350,7 +350,7 @@ class ServerToRuntimeTransferService:
                     else expected_revision,
                     request.deadline_at,
                 )
-            except ServerToRuntimeTransferError:
+            except Exception:
                 if error.failure is CoordinatorTransferFailure.EXPIRED:
                     raise error from None
                 raise
