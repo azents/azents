@@ -36,8 +36,8 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
 from azents.core.slack_external_channel_progress import (
@@ -116,10 +116,10 @@ from azents.services.external_channel.slack_events import (
     normalize_projected_slack_event,
     slack_message_reference_ids,
 )
-from azents.services.input_buffer import (
-    EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY,
-    InputBufferEnqueue,
-    InputBufferService,
+from azents.services.mailbox import (
+    MailboxEnqueue,
+    MailboxService,
+    build_external_channel_mailbox_payload,
 )
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
@@ -271,9 +271,9 @@ class ExternalChannelEventProcessorService:
         Depends(WorkspaceRepository),
     ]
     config: Annotated[Config, Depends(get_config)]
-    input_buffer_service: Annotated[
-        InputBufferService,
-        Depends(InputBufferService),
+    mailbox_item_service: Annotated[
+        MailboxService,
+        Depends(MailboxService),
     ]
     session_lifecycle: Annotated[
         SessionLifecycleService,
@@ -2964,8 +2964,8 @@ class ExternalChannelEventProcessorService:
         )
         if trigger is None:
             raise RuntimeError("External Channel invocation trigger disappeared.")
-        if existing is not None and existing.input_buffer_id is None:
-            existing, _ = await self._ensure_invocation_input_buffer(
+        if existing is not None and existing.mailbox_item_id is None:
+            existing, _ = await self._ensure_invocation_mailbox_item(
                 session,
                 binding=binding,
                 batch=existing,
@@ -3006,7 +3006,7 @@ class ExternalChannelEventProcessorService:
                 last_provider_position=pending[-1].provider_position,
                 truncation_message_count=binding.truncated_message_count,
                 truncation_size=binding.truncated_size,
-                input_buffer_id=None,
+                mailbox_item_id=None,
             ),
         )
         for sequence, item in enumerate(pending):
@@ -3019,7 +3019,7 @@ class ExternalChannelEventProcessorService:
                     provider_position=item.provider_position,
                 ),
             )
-        batch, _ = await self._ensure_invocation_input_buffer(
+        batch, _ = await self._ensure_invocation_mailbox_item(
             session,
             binding=binding,
             batch=batch,
@@ -3144,44 +3144,48 @@ class ExternalChannelEventProcessorService:
             await session.commit()
         return binding is not None
 
-    async def _ensure_invocation_input_buffer(
+    async def _ensure_invocation_mailbox_item(
         self,
         session: AsyncSession,
         *,
         binding: ExternalChannelBinding,
         batch: ExternalChannelInvocationBatch,
     ) -> tuple[ExternalChannelInvocationBatch, bool]:
-        """Create and link one idempotent wake-producing batch InputBuffer."""
+        """Create and link one idempotent wake-producing batch MailboxItem."""
         locked = await self.repository.lock_invocation_batch(
             session,
             batch_id=batch.id,
         )
         if locked is None:
             raise RuntimeError("External Channel invocation batch disappeared.")
-        if locked.input_buffer_id is not None:
+        if locked.mailbox_item_id is not None:
             return locked, False
-        metadata = {EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY: batch.id}
-        enqueue = await self.input_buffer_service.enqueue(
+        projection_items = await self.repository.list_invocation_projection_items(
             session,
-            InputBufferEnqueue(
+            batch_id=batch.id,
+        )
+        enqueue = await self.mailbox_item_service.enqueue(
+            session,
+            MailboxEnqueue(
                 session_id=binding.agent_session_id,
-                kind=InputBufferKind.EXTERNAL_CHANNEL_INVOCATION,
-                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=None,
                 content="",
                 idempotency_key=f"external-channel-invocation:{batch.id}",
-                metadata=metadata,
+                metadata={},
                 attachments=[],
                 file_parts=[],
                 action=None,
+                payload=build_external_channel_mailbox_payload(projection_items),
             ),
         )
-        linked = await self.repository.link_invocation_batch_input_buffer(
+        linked = await self.repository.link_invocation_batch_mailbox_item(
             session,
             batch_id=batch.id,
-            input_buffer_id=enqueue.input_buffer.id,
+            mailbox_item_id=enqueue.mailbox_item.id,
         )
         if linked is None:
             raise RuntimeError("External Channel invocation batch disappeared.")

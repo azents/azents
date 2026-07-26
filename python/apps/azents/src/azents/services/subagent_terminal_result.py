@@ -202,7 +202,7 @@ class SubagentTerminalResultService:
             )
             if target is None:
                 raise ValueError("Direct parent SessionAgent not found")
-            input_buffer = await self.agent_mailbox_service.enqueue_terminal_result(
+            mailbox_item = await self.agent_mailbox_service.enqueue_terminal_result(
                 session,
                 source=source,
                 target=target,
@@ -212,7 +212,7 @@ class SubagentTerminalResultService:
             finalized = await self.agent_run_repository.mark_parent_result_enqueued(
                 session,
                 run_id=run.id,
-                input_buffer_id=input_buffer.id,
+                mailbox_item_id=mailbox_item.id,
                 enqueued_at=datetime.datetime.now(datetime.UTC),
             )
             return (

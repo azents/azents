@@ -13,8 +13,8 @@ from azents.core.enums import (
     AgentRunParentResultDeliveryState,
     AgentRunPhase,
     AgentRunStatus,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
     SessionAgentKind,
 )
 from azents.engine.events.types import AgentRunState
@@ -22,7 +22,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import SessionAgent
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.subagent_terminal_result import SubagentTerminalResultService
 
@@ -86,7 +86,7 @@ def _run(
         terminal_result_event_id="event-2",
         terminal_result_message=message,
         parent_result_delivery_state=None,
-        parent_result_input_buffer_id=None,
+        parent_result_mailbox_item_id=None,
         parent_result_enqueued_at=None,
         stop_requested_at=None,
         created_at=_NOW,
@@ -103,13 +103,13 @@ class _Store:
     agents_by_session_id: dict[str, SessionAgent]
     agents_by_id: dict[str, SessionAgent]
     descendants_by_id: dict[str, list[SessionAgent]] = field(default_factory=dict)
-    committed_buffers: list[InputBuffer] = field(default_factory=list)
+    committed_buffers: list[MailboxItem] = field(default_factory=list)
     rollback_count: int = 0
 
 
 @dataclass
 class _Transaction:
-    pending_buffers: list[InputBuffer] = field(default_factory=list)
+    pending_buffers: list[MailboxItem] = field(default_factory=list)
     pending_runs: dict[str, AgentRunState] = field(default_factory=dict)
 
 
@@ -183,7 +183,7 @@ class _AgentRunRepository:
         session: AsyncSession,
         *,
         run_id: str,
-        input_buffer_id: str,
+        mailbox_item_id: str,
         enqueued_at: datetime.datetime,
     ) -> AgentRunState:
         if self.fail_finalize:
@@ -195,7 +195,7 @@ class _AgentRunRepository:
                 "parent_result_delivery_state": (
                     AgentRunParentResultDeliveryState.ENQUEUED
                 ),
-                "parent_result_input_buffer_id": input_buffer_id,
+                "parent_result_mailbox_item_id": mailbox_item_id,
                 "parent_result_enqueued_at": enqueued_at,
             }
         )
@@ -254,14 +254,14 @@ class _AgentMailboxService:
         target: SessionAgent,
         run: AgentRunState,
         content: str,
-    ) -> InputBuffer:
+    ) -> MailboxItem:
         transaction = cast(_Transaction, session)
         self.attempts.append((source.id, target.id, run.id, content))
-        buffer = InputBuffer(
+        buffer = MailboxItem(
             id=f"buffer-{len(self.attempts)}",
             session_id=target.agent_session_id,
-            kind=InputBufferKind.AGENT_MESSAGE,
-            scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+            kind=MailboxItemKind.AGENT_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=None,
@@ -365,13 +365,13 @@ async def test_delivers_every_terminal_status_to_direct_parent(
     ]
     [buffer] = store.committed_buffers
     assert buffer.session_id == "root-session"
-    assert buffer.scheduling_mode is InputBufferSchedulingMode.QUEUE_ONLY
+    assert buffer.scheduling_mode is MailboxSchedulingMode.QUEUE_ONLY
     finalized = store.runs[_RUN_ID]
     assert (
         finalized.parent_result_delivery_state
         is AgentRunParentResultDeliveryState.ENQUEUED
     )
-    assert finalized.parent_result_input_buffer_id == buffer.id
+    assert finalized.parent_result_mailbox_item_id == buffer.id
     assert finalized.parent_result_enqueued_at is not None
 
 

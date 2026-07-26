@@ -104,7 +104,7 @@ from azents.repos.external_channel.lifecycle import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import ChannelDeliveryTarget
-from azents.repos.input_buffer import InputBufferRepository
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -133,7 +133,7 @@ from azents.services.external_channel.slack_events import (
     SlackNormalizedMessage,
     normalize_slack_event,
 )
-from azents.services.input_buffer import InputBufferService
+from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
@@ -646,9 +646,9 @@ def _service(
         root_agent_session_creation_service=_root_session_creation_service(),
         workspace_repository=WorkspaceRepository(),
         config=Config.model_construct(web_url="https://azents.example"),
-        input_buffer_service=InputBufferService(
+        mailbox_item_service=MailboxService(
             session_manager=session_manager,
-            input_buffer_repository=InputBufferRepository(),
+            mailbox_item_repository=MailboxRepository(),
             exchange_file_service=cast(ExchangeFileService, MagicMock()),
             model_file_service=cast(ModelFileService, MagicMock()),
             agent_session_repository=AgentSessionRepository(),
@@ -781,7 +781,7 @@ def _access_service(
             if root_service is None
             else cast(RootAgentSessionCreationService, root_service)
         ),
-        input_buffer_service=cast(InputBufferService, MagicMock()),
+        mailbox_item_service=cast(MailboxService, MagicMock()),
         session_lifecycle=cast(SessionLifecycleService, MagicMock()),
     )
 
@@ -1884,9 +1884,9 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
         root_agent_session_creation_service=_root_session_creation_service(),
-        input_buffer_service=InputBufferService(
+        mailbox_item_service=MailboxService(
             session_manager=rdb_session_manager,
-            input_buffer_repository=InputBufferRepository(),
+            mailbox_item_repository=MailboxRepository(),
             exchange_file_service=cast(ExchangeFileService, MagicMock()),
             model_file_service=cast(ModelFileService, MagicMock()),
             agent_session_repository=AgentSessionRepository(),
@@ -2801,7 +2801,7 @@ async def test_pending_allow_requires_routable_connection(
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
         root_agent_session_creation_service=_root_session_creation_service(),
-        input_buffer_service=cast(InputBufferService, MagicMock()),
+        mailbox_item_service=cast(MailboxService, MagicMock()),
         session_lifecycle=cast(SessionLifecycleService, MagicMock()),
     )
     with pytest.raises(

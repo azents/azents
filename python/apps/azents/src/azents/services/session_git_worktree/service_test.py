@@ -54,7 +54,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.input_buffer import InputBufferRepository
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -85,7 +85,7 @@ from azents.runtime.control_protocol.runner_operations import (
 from azents.services.agent_project_catalog import AgentProjectCatalogService
 from azents.services.agent_session_input import AgentSessionInputService
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.input_buffer import InputBufferService
+from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
@@ -666,9 +666,9 @@ def _input_service(
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         exchange_file_service=_ExchangeFileService(),
-        input_buffer_service=InputBufferService(
+        mailbox_item_service=MailboxService(
             session_manager=session_manager,
-            input_buffer_repository=InputBufferRepository(),
+            mailbox_item_repository=MailboxRepository(),
             exchange_file_service=_ExchangeFileService(),
             model_file_service=cast(ModelFileService, object()),
             agent_session_repository=AgentSessionRepository(),
@@ -691,15 +691,15 @@ async def _execute_first_setup_action(
 ) -> str:
     """Promote and execute the first pending setup action."""
     async with rdb_session_manager() as session:
-        pending = await InputBufferRepository().list_for_flush(
+        pending = await MailboxRepository().list_for_flush(
             session,
             session_id,
             limit=1,
         )
     expected_buffer_id = pending[0].id
-    promoted = await InputBufferService(
+    promoted = await MailboxService(
         session_manager=rdb_session_manager,
-        input_buffer_repository=InputBufferRepository(),
+        mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=cast(ModelFileService, object()),
         agent_session_repository=AgentSessionRepository(),
@@ -708,7 +708,7 @@ async def _execute_first_setup_action(
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
         external_channel_repository=ExternalChannelRepository(),
-    ).flush_session_input_buffers(
+    ).flush_session_mailbox_items(
         session_id=session_id,
         owner_generation=0,
         model=None,
@@ -819,7 +819,7 @@ class TestSessionGitWorktreeService:
                     sender_user_id=None,
                     id=None,
                     session_id=agent_session.id,
-                    input_buffer_id="01900000000070008000000000000002",
+                    mailbox_item_id="01900000000070008000000000000002",
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
@@ -849,9 +849,9 @@ class TestSessionGitWorktreeService:
                 session_id=agent_session.id,
             )
             projection = (
-                await ActionExecutionRepository().get_projection_by_input_buffer_id(
+                await ActionExecutionRepository().get_projection_by_mailbox_item_id(
                     session,
-                    input_buffer_id=execution.input_buffer_id,
+                    mailbox_item_id=execution.mailbox_item_id,
                 )
             )
             events = await EventTranscriptRepository().list_recent_by_session_id(
@@ -1018,7 +1018,7 @@ class TestSessionGitWorktreeService:
                     sender_user_id=None,
                     id=None,
                     session_id=agent_session.id,
-                    input_buffer_id="01900000000070008000000000000003",
+                    mailbox_item_id="01900000000070008000000000000003",
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
@@ -1137,7 +1137,7 @@ class TestSessionGitWorktreeService:
                     sender_user_id=None,
                     id=None,
                     session_id=agent_session.id,
-                    input_buffer_id="01900000000070008000000000000004",
+                    mailbox_item_id="01900000000070008000000000000004",
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
@@ -1318,7 +1318,7 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
-        input_buffer_id = await _execute_first_setup_action(
+        mailbox_item_id = await _execute_first_setup_action(
             rdb_session_manager,
             worktree_service,
             agent_id=agent_id,
@@ -1326,12 +1326,12 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             projection = (
-                await ActionExecutionRepository().get_projection_by_input_buffer_id(
+                await ActionExecutionRepository().get_projection_by_mailbox_item_id(
                     session,
-                    input_buffer_id=input_buffer_id,
+                    mailbox_item_id=mailbox_item_id,
                 )
             )
-            buffers = await InputBufferRepository().list_by_session_id(
+            buffers = await MailboxRepository().list_by_session_id(
                 session,
                 result.value.agent_session.id,
             )
@@ -1482,7 +1482,7 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
-        input_buffer_id = await _execute_first_setup_action(
+        mailbox_item_id = await _execute_first_setup_action(
             rdb_session_manager,
             worktree_service,
             agent_id=agent_id,
@@ -1490,9 +1490,9 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             projection = (
-                await ActionExecutionRepository().get_projection_by_input_buffer_id(
+                await ActionExecutionRepository().get_projection_by_mailbox_item_id(
                     session,
-                    input_buffer_id=input_buffer_id,
+                    mailbox_item_id=mailbox_item_id,
                 )
             )
             events = await EventTranscriptRepository().list_recent_by_session_id(
@@ -1548,7 +1548,7 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
-        input_buffer_id = await _execute_first_setup_action(
+        mailbox_item_id = await _execute_first_setup_action(
             rdb_session_manager,
             worktree_service,
             agent_id=agent_id,
@@ -1556,9 +1556,9 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             projection = (
-                await ActionExecutionRepository().get_projection_by_input_buffer_id(
+                await ActionExecutionRepository().get_projection_by_mailbox_item_id(
                     session,
-                    input_buffer_id=input_buffer_id,
+                    mailbox_item_id=mailbox_item_id,
                 )
             )
             events = await EventTranscriptRepository().list_recent_by_session_id(

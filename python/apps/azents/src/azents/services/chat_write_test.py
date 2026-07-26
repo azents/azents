@@ -18,8 +18,8 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     EventKind,
-    InputBufferKind,
     LLMProvider,
+    MailboxItemKind,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
@@ -36,8 +36,8 @@ from azents.engine.run.failure import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import JSONValue, RDBEvent
-from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
@@ -51,8 +51,8 @@ from azents.repos.chat_write_request.data import (
     ChatWriteRequestCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.input_buffer import InputBufferRepository
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import MailboxItem
 from azents.repos.message import MessageRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -64,7 +64,7 @@ from azents.services.exchange_file import (
     ExchangeFileInputClaimError,
     ExchangeFileService,
 )
-from azents.services.input_buffer import InputBufferService
+from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
@@ -186,9 +186,9 @@ def _service(
     *,
     workspace_user_repository: WorkspaceUserRepository | None = None,
 ) -> ChatWriteService:
-    input_buffer_service = InputBufferService(
+    mailbox_item_service = MailboxService(
         session_manager=rdb_session_manager,
-        input_buffer_repository=InputBufferRepository(),
+        mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=cast(ModelFileService, object()),
         agent_session_repository=AgentSessionRepository(),
@@ -209,7 +209,7 @@ def _service(
         chat_write_request_repository=ChatWriteRequestRepository(),
         message_repository=MessageRepository(),
         exchange_file_service=_ExchangeFileService(),
-        input_buffer_service=input_buffer_service,
+        mailbox_item_service=mailbox_item_service,
         session_manager=rdb_session_manager,
     )
 
@@ -448,14 +448,14 @@ class _ControlWriteRequestRepository:
         return self.existing
 
 
-class _ControlInputBufferService:
+class _ControlMailboxService:
     """Fail if a replay reaches mutable pending-input inspection."""
 
     async def list_by_session_id(
         self,
         db_session: AsyncSession,
         session_id: str,
-    ) -> list[InputBuffer]:
+    ) -> list[MailboxItem]:
         del db_session, session_id
         raise AssertionError("Mutable pending-input state was inspected before replay")
 
@@ -487,7 +487,7 @@ def _control_service(
         chat_write_request_repository=cast(ChatWriteRequestRepository, writes),
         message_repository=cast(MessageRepository, object()),
         exchange_file_service=cast(ExchangeFileService, object()),
-        input_buffer_service=cast(InputBufferService, _ControlInputBufferService()),
+        mailbox_item_service=cast(MailboxService, _ControlMailboxService()),
         session_manager=_session_manager_double,
     )
     return service, workspace_users, writes, sessions
@@ -687,7 +687,7 @@ class TestChatWriteService:
         assert command.request.created is False
         assert command.command_id is None
         assert edit.request.created is False
-        assert edit.input_buffer is None
+        assert edit.mailbox_item is None
         assert retry.request.created is False
         assert retry.failed_event_id == "failed-event-1"
         assert command_users.calls == edit_users.calls == retry_users.calls == 1
@@ -738,7 +738,7 @@ class TestChatWriteService:
             chat_write_request_repository=cast(ChatWriteRequestRepository, object()),
             message_repository=cast(MessageRepository, object()),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=cast(InputBufferService, object()),
+            mailbox_item_service=cast(MailboxService, object()),
             session_manager=_session_manager_double,
         )
 
@@ -775,9 +775,9 @@ class TestChatWriteService:
             ),
             message_repository=MessageRepository(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=InputBufferService(
+            mailbox_item_service=MailboxService(
                 session_manager=rdb_session_manager,
-                input_buffer_repository=InputBufferRepository(),
+                mailbox_item_repository=MailboxRepository(),
                 exchange_file_service=_ExchangeFileService(),
                 model_file_service=cast(ModelFileService, object()),
                 agent_session_repository=AgentSessionRepository(),
@@ -935,12 +935,12 @@ class TestChatWriteService:
             payload={"message": "edited"},
         )
 
-        assert result.input_buffer is not None
-        assert result.input_buffer.kind == InputBufferKind.USER_MESSAGE
-        assert result.input_buffer.content == "edited"
-        assert result.input_buffer.requested_model_target_label == "Primary"
+        assert result.mailbox_item is not None
+        assert result.mailbox_item.kind == MailboxItemKind.USER_MESSAGE
+        assert result.mailbox_item.content == "edited"
+        assert result.mailbox_item.requested_model_target_label == "Primary"
         assert (
-            result.input_buffer.requested_reasoning_effort == ModelReasoningEffort.HIGH
+            result.mailbox_item.requested_reasoning_effort == ModelReasoningEffort.HIGH
         )
         async with rdb_session_manager() as session:
             rows = (
@@ -952,12 +952,17 @@ class TestChatWriteService:
             assert reverted_by_id == {target.id: True, later.id: True}
             buffers = (
                 await session.execute(
-                    sa.select(RDBInputBuffer).where(
-                        RDBInputBuffer.session_id == agent_session.id
+                    sa.select(RDBMailboxItem).where(
+                        RDBMailboxItem.session_id == agent_session.id
                     )
                 )
             ).scalars()
-            assert [buffer.content for buffer in buffers] == ["edited"]
+            assert [
+                cast(dict[str, object], cast(list[object], buffer.payload["items"])[0])[
+                    "content"
+                ]
+                for buffer in buffers
+            ] == ["edited"]
             session_after = await AgentSessionRepository().get_by_id(
                 session,
                 agent_session.id,

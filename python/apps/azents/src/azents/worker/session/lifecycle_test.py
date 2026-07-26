@@ -12,14 +12,14 @@ from azents.broker.types import SessionBroker
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
-    InputBufferSchedulingMode,
+    MailboxSchedulingMode,
 )
 from azents.engine.events.types import AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.input_buffer import InputBufferRepository
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution.data import PendingCommandSnapshot
 from azents.worker.session.lifecycle import SessionLifecycleService
 
@@ -136,12 +136,12 @@ class _AgentSessionRepository:
         self.idle_session_ids.append(runtime_id)
 
 
-class _InputBufferRepository:
-    """InputBufferRepository test double."""
+class _MailboxRepository:
+    """MailboxRepository test double."""
 
     def __init__(
         self,
-        pending_scheduling_modes: set[InputBufferSchedulingMode],
+        pending_scheduling_modes: set[MailboxSchedulingMode],
     ) -> None:
         self.pending_scheduling_modes = pending_scheduling_modes
 
@@ -150,7 +150,7 @@ class _InputBufferRepository:
         session: AsyncSession,
         *,
         session_id: str,
-        scheduling_mode: InputBufferSchedulingMode,
+        scheduling_mode: MailboxSchedulingMode,
     ) -> bool:
         """Return whether the requested scheduling mode is pending."""
         del session, session_id
@@ -265,7 +265,7 @@ def _running_run() -> AgentRunState:
         parent_agent_run_id=None,
         active_tool_calls=[],
         parent_result_delivery_state=None,
-        parent_result_input_buffer_id=None,
+        parent_result_mailbox_item_id=None,
         parent_result_enqueued_at=None,
         created_at=now,
         started_at=now,
@@ -278,7 +278,7 @@ def _service(
     *,
     agent_run_repository: _AgentRunRepository,
     agent_session_repository: _AgentSessionRepository,
-    pending_scheduling_modes: set[InputBufferSchedulingMode],
+    pending_scheduling_modes: set[MailboxSchedulingMode],
 ) -> SessionLifecycleService:
     """Create SessionLifecycleService with test doubles."""
     return SessionLifecycleService(
@@ -289,9 +289,9 @@ def _service(
             agent_session_repository,
         ),
         agent_run_repository=cast(AgentRunRepository, agent_run_repository),
-        input_buffer_repository=cast(
-            InputBufferRepository,
-            _InputBufferRepository(pending_scheduling_modes),
+        mailbox_item_repository=cast(
+            MailboxRepository,
+            _MailboxRepository(pending_scheduling_modes),
         ),
     )
 
@@ -309,9 +309,9 @@ async def test_heartbeat_session_refreshes_db_and_active_owner_lease() -> None:
             agent_session_repository,
         ),
         agent_run_repository=cast(AgentRunRepository, _AgentRunRepository(None)),
-        input_buffer_repository=cast(
-            InputBufferRepository,
-            _InputBufferRepository(set()),
+        mailbox_item_repository=cast(
+            MailboxRepository,
+            _MailboxRepository(set()),
         ),
     )
 
@@ -348,7 +348,7 @@ async def test_mark_session_idle_rechecks_queue_under_session_lock() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=agent_session_repository,
-        pending_scheduling_modes={InputBufferSchedulingMode.WAKE_SESSION},
+        pending_scheduling_modes={MailboxSchedulingMode.WAKE_SESSION},
     )
 
     marked_idle = await service.mark_session_idle("session-001", owner_generation=0)
@@ -385,7 +385,7 @@ async def test_mark_session_idle_allows_queue_only_pending_input() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=agent_session_repository,
-        pending_scheduling_modes={InputBufferSchedulingMode.QUEUE_ONLY},
+        pending_scheduling_modes={MailboxSchedulingMode.QUEUE_ONLY},
     )
 
     marked_idle = await service.mark_session_idle("session-001", owner_generation=0)

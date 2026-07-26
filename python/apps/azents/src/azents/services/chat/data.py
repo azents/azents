@@ -87,7 +87,7 @@ class ChatLiveStateSnapshot:
     """Current chat live state taxonomy snapshot."""
 
     partial_history_events: list[Event]
-    input_buffer_events: list[Event]
+    mailbox_item_events: list[Event]
     run: ChatLiveRunState | None = None
     session_run_state: AgentSessionRunState = AgentSessionRunState.IDLE
     todo: TodoStateSnapshot | None = None
@@ -263,7 +263,7 @@ class InvalidSessionTitle:
 
 EnsureSessionError = AgentNotFound | NotWorkspaceMember | SessionAccessDenied
 SessionAccessError = SessionNotFound | SessionAccessDenied
-DeleteInputBufferError = SessionNotFound | SessionAccessDenied | SubagentSessionReadOnly
+DeleteMailboxItemError = SessionNotFound | SessionAccessDenied | SubagentSessionReadOnly
 AcknowledgeUnreadTerminalRunError = SessionNotFound | UnreadTerminalRunNotTerminal
 UpdateGoalError = (
     SessionNotFound

@@ -28,8 +28,8 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     EventKind,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
@@ -45,7 +45,7 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.agent_mailbox import AgentMailboxService
-from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.services.mailbox import MailboxEnqueue, MailboxService
 from azents.services.subagent_terminal_result import SubagentTerminalResultService
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -502,7 +502,7 @@ class _AgentRunRepository:
             terminal_result_event_id=None,
             terminal_result_message=None,
             parent_result_delivery_state=None,
-            parent_result_input_buffer_id=None,
+            parent_result_mailbox_item_id=None,
             parent_result_enqueued_at=None,
             created_at=_NOW,
             started_at=_NOW,
@@ -523,7 +523,7 @@ class _AgentRunRepository:
                 terminal_result_event_id="event".rjust(32, "0"),
                 terminal_result_message="child result",
                 parent_result_delivery_state=None,
-                parent_result_input_buffer_id=None,
+                parent_result_mailbox_item_id=None,
                 parent_result_enqueued_at=None,
                 created_at=_NOW,
                 started_at=_NOW,
@@ -600,30 +600,30 @@ class _EventTranscriptRepository:
         return object()
 
 
-class _InputBufferService:
-    """InputBufferService fake for subagent tool tests."""
+class _MailboxService:
+    """MailboxService fake for subagent tool tests."""
 
     def __init__(self) -> None:
         """Initialize fake state."""
-        self.enqueued: list[InputBufferEnqueue] = []
+        self.enqueued: list[MailboxEnqueue] = []
         self.pending_agent_message_session_ids: set[str] = set()
         self.pending_wake_session_ids: set[str] = set()
 
     async def enqueue(
         self,
         session: AsyncSession,
-        input: InputBufferEnqueue,
+        input: MailboxEnqueue,
     ) -> object:
         """Record enqueued mailbox input."""
         del session
         self.enqueued.append(input)
-        return SimpleNamespace(input_buffer=object())
+        return SimpleNamespace(mailbox_item=object())
 
     async def has_pending_agent_messages(self, session_id: str) -> bool:
         """Return test-controlled mailbox activity."""
         return session_id in self.pending_agent_message_session_ids
 
-    async def has_pending_wake_session_input_buffers(
+    async def has_pending_wake_session_mailbox_items(
         self,
         session_id: str,
     ) -> bool:
@@ -634,8 +634,8 @@ class _InputBufferService:
 class _SubagentTerminalResultService:
     """SubagentTerminalResultService fake for wait tests."""
 
-    def __init__(self, input_buffer_service: _InputBufferService) -> None:
-        self.input_buffer_service = input_buffer_service
+    def __init__(self, mailbox_item_service: _MailboxService) -> None:
+        self.mailbox_item_service = mailbox_item_service
         self.parent_repairs: list[tuple[str, str]] = []
         self.publish_mailbox_on_repair = False
 
@@ -648,7 +648,7 @@ class _SubagentTerminalResultService:
         """Record parent wait repair boundaries."""
         self.parent_repairs.append((parent_session_id, repair_source))
         if self.publish_mailbox_on_repair:
-            self.input_buffer_service.pending_agent_message_session_ids.add(
+            self.mailbox_item_service.pending_agent_message_session_ids.add(
                 parent_session_id
             )
 
@@ -668,14 +668,14 @@ class _Broker:
 async def _make_toolkit() -> tuple[
     SubagentToolkit,
     _AgentSessionRepository,
-    _InputBufferService,
+    _MailboxService,
     _Broker,
     _AgentRunRepository,
     list[SubagentTreeChanged],
 ]:
     """Create an initialized SubagentToolkit fixture."""
     agent_session_repository = _AgentSessionRepository()
-    input_buffer_service = _InputBufferService()
+    mailbox_item_service = _MailboxService()
     broker = _Broker()
     run_repository = _AgentRunRepository()
     agent = _agent()
@@ -693,16 +693,16 @@ async def _make_toolkit() -> tuple[
             EventTranscriptRepository, _EventTranscriptRepository()
         ),
         agent_mailbox_service=AgentMailboxService(
-            input_buffer_service=cast(InputBufferService, input_buffer_service),
+            mailbox_item_service=cast(MailboxService, mailbox_item_service),
             agent_session_repository=cast(
                 AgentSessionRepository,
                 agent_session_repository,
             ),
         ),
-        input_buffer_service=cast(InputBufferService, input_buffer_service),
+        mailbox_item_service=cast(MailboxService, mailbox_item_service),
         subagent_terminal_result_service=cast(
             SubagentTerminalResultService,
-            _SubagentTerminalResultService(input_buffer_service),
+            _SubagentTerminalResultService(mailbox_item_service),
         ),
         broker=cast(SessionBroker, broker),
         agent_repository=cast(AgentRepository, agent_repository),
@@ -722,7 +722,7 @@ async def _make_toolkit() -> tuple[
     return (
         toolkit,
         agent_session_repository,
-        input_buffer_service,
+        mailbox_item_service,
         broker,
         run_repository,
         published_events,
@@ -996,7 +996,7 @@ async def test_send_message_is_queue_only() -> None:
         "agent_name": "child",
         "agent_path": "/root/child",
     }
-    assert input_service.enqueued[0].kind == InputBufferKind.AGENT_MESSAGE
+    assert input_service.enqueued[0].kind == MailboxItemKind.AGENT_MESSAGE
     assert input_service.enqueued[0].metadata["message_kind"] == "send_message"
     assert input_service.enqueued[0].content == "note"
     assert input_service.enqueued[0].sender_user_id is None
@@ -1067,7 +1067,7 @@ async def test_followup_task_wakes_target_child() -> None:
         "agent_name": "child",
         "agent_path": "/root/child",
     }
-    assert input_service.enqueued[0].kind == InputBufferKind.AGENT_MESSAGE
+    assert input_service.enqueued[0].kind == MailboxItemKind.AGENT_MESSAGE
     assert input_service.enqueued[0].metadata["message_kind"] == "followup_task"
     assert input_service.enqueued[0].content == "work"
     assert input_service.enqueued[0].sender_user_id is None
@@ -1536,8 +1536,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         (child.agent_session_id, repo.sessions["root-session"].inference_state)
     ]
     assert (
-        input_service.enqueued[0].scheduling_mode
-        == InputBufferSchedulingMode.WAKE_SESSION
+        input_service.enqueued[0].scheduling_mode == MailboxSchedulingMode.WAKE_SESSION
     )
     assert input_service.enqueued[0].metadata["message_kind"] == "spawn_agent"
     assert input_service.enqueued[0].content == "Review it"
@@ -1978,7 +1977,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
         terminal_result_event_id=None,
         terminal_result_message=None,
         parent_result_delivery_state=None,
-        parent_result_input_buffer_id=None,
+        parent_result_mailbox_item_id=None,
         parent_result_enqueued_at=None,
         created_at=_NOW,
         started_at=_NOW,

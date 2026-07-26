@@ -44,7 +44,7 @@ def _row(session_id: str) -> SimpleNamespace:
         owner_generation=3,
         run_state=AgentSessionRunState.RUNNING,
         wake_input_present=True,
-        fifo_input_buffer_id="input-1",
+        fifo_mailbox_item_id="input-1",
         pending_command_present=False,
         pending_command_id=None,
         pending_command_complete=True,
@@ -79,7 +79,7 @@ async def test_candidate_batch_uses_cursor_and_limit_without_content_tables() ->
         )
     )
     assert "LIMIT 2" in compiled
-    assert "input_buffers" in compiled
+    assert "mailbox_items" in compiled
     assert "scheduling_mode = 'wake_session'" in compiled
     assert "agent_runs" in compiled
     assert "events" not in compiled

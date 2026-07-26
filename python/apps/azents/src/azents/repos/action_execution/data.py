@@ -13,7 +13,7 @@ class ActionExecution(BaseModel):
 
     id: str = Field(description="Action execution ID")
     session_id: str = Field(description="AgentSession ID")
-    input_buffer_id: str = Field(description="Durable source input buffer ID")
+    mailbox_item_id: str = Field(description="Durable source input buffer ID")
     sender_user_id: str | None = Field(
         description="Human sender User ID, or null when unavailable",
     )
@@ -42,7 +42,7 @@ class ActionExecutionCreate(BaseModel):
 
     id: str | None = Field(description="Optional action execution ID")
     session_id: str = Field(description="AgentSession ID")
-    input_buffer_id: str = Field(description="Durable source input buffer ID")
+    mailbox_item_id: str = Field(description="Durable source input buffer ID")
     sender_user_id: str | None = Field(
         description="Human sender User ID, or null when unavailable",
     )

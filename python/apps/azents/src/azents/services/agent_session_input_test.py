@@ -20,8 +20,8 @@ from azents.core.enums import (
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
-    InputBufferSchedulingMode,
     LLMProvider,
+    MailboxSchedulingMode,
     WorkspaceUserRole,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
@@ -53,8 +53,8 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.input_buffer import InputBufferRepository
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import MailboxItem
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
@@ -80,10 +80,10 @@ from .agent_session_input import (
     AgentSessionInputService,
     AgentSessionInputSubagentReadOnly,
 )
-from .input_buffer import (
-    InputBufferEnqueue,
-    InputBufferEnqueueResult,
-    InputBufferService,
+from .mailbox import (
+    MailboxAdmissionResult,
+    MailboxEnqueue,
+    MailboxService,
 )
 
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
@@ -209,24 +209,24 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         self.calls.append("mark_running_for_input_wakeup")
 
 
-class _InputBufferServiceDouble(InputBufferService):
-    """InputBufferService double for tests."""
+class _MailboxServiceDouble(MailboxService):
+    """MailboxService double for tests."""
 
     def __init__(self, calls: list[str]) -> None:
         self.calls = calls
-        self.enqueued: InputBufferEnqueue | None = None
+        self.enqueued: MailboxEnqueue | None = None
         self.moved: tuple[str, str] | None = None
 
     async def enqueue(
         self,
         session: AsyncSession,
-        input: InputBufferEnqueue,
-    ) -> InputBufferEnqueueResult:
-        """Record InputBuffer creation."""
+        input: MailboxEnqueue,
+    ) -> MailboxAdmissionResult:
+        """Record MailboxItem creation."""
         del session
-        self.calls.append("enqueue_input_buffer")
+        self.calls.append("enqueue_mailbox_item")
         self.enqueued = input
-        input_buffer = InputBuffer(
+        mailbox_item = MailboxItem(
             id="buffer-1",
             session_id=input.session_id,
             kind=input.kind,
@@ -241,7 +241,7 @@ class _InputBufferServiceDouble(InputBufferService):
             file_parts=input.file_parts,
             created_at=datetime.datetime.now(datetime.UTC),
         )
-        return InputBufferEnqueueResult(input_buffer=input_buffer, created=True)
+        return MailboxAdmissionResult(mailbox_item=mailbox_item, created=True)
 
     async def move_by_session_id(
         self,
@@ -250,9 +250,9 @@ class _InputBufferServiceDouble(InputBufferService):
         from_session_id: str,
         to_session_id: str,
     ) -> int:
-        """Record InputBuffer move request."""
+        """Record MailboxItem move request."""
         del session
-        self.calls.append("move_input_buffer")
+        self.calls.append("move_mailbox_item")
         self.moved = (from_session_id, to_session_id)
         return 1
 
@@ -303,13 +303,13 @@ def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
     )
 
 
-def _input_buffer_service(
+def _mailbox_item_service(
     rdb_session_manager: SessionManager[AsyncSession],
-) -> InputBufferService:
-    """Create InputBufferService for integration tests."""
-    return InputBufferService(
+) -> MailboxService:
+    """Create MailboxService for integration tests."""
+    return MailboxService(
         session_manager=rdb_session_manager,
-        input_buffer_repository=InputBufferRepository(),
+        mailbox_item_repository=MailboxRepository(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=cast(ModelFileService, object()),
         agent_session_repository=AgentSessionRepository(),
@@ -451,7 +451,7 @@ class TestAgentSessionInputService:
         calls: list[str] = []
         runtime_repository = _RuntimeRepositoryDouble(calls)
         session_repository = _AgentSessionRepositoryDouble(calls)
-        input_buffer_service = _InputBufferServiceDouble(calls)
+        mailbox_item_service = _MailboxServiceDouble(calls)
         service = AgentSessionInputService(
             agent_repository=_ActiveAgentRepositoryDouble(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -464,7 +464,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=_WorkspaceUserRepositoryDouble(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=input_buffer_service,
+            mailbox_item_service=mailbox_item_service,
             session_manager=rdb_session_manager,
         )
 
@@ -486,21 +486,21 @@ class TestAgentSessionInputService:
         value = result.value
         assert value.agent_runtime_id == "runtime-1"
         assert value.agent_session_id == "session-1"
-        assert value.input_buffer is not None
-        assert value.input_buffer.id == "buffer-1"
+        assert value.mailbox_item is not None
+        assert value.mailbox_item.id == "buffer-1"
         assert calls == [
             "get_by_id",
             "ensure_for_agent",
-            "enqueue_input_buffer",
+            "enqueue_mailbox_item",
             "mark_running_for_input_wakeup",
         ]
-        assert input_buffer_service.enqueued is not None
-        assert input_buffer_service.enqueued.session_id == "session-1"
+        assert mailbox_item_service.enqueued is not None
+        assert mailbox_item_service.enqueued.session_id == "session-1"
         assert (
-            input_buffer_service.enqueued.scheduling_mode
-            == InputBufferSchedulingMode.WAKE_SESSION
+            mailbox_item_service.enqueued.scheduling_mode
+            == MailboxSchedulingMode.WAKE_SESSION
         )
-        assert input_buffer_service.enqueued.content == "restore me"
+        assert mailbox_item_service.enqueued.content == "restore me"
 
     async def test_attachment_claim_failure_rolls_back_buffer_acceptance(self) -> None:
         """A cross-root claim conflict cannot leave a pending input behind."""
@@ -511,7 +511,7 @@ class TestAgentSessionInputService:
         async def session_manager() -> AsyncGenerator[AsyncSession, None]:
             yield db_session
 
-        input_buffer_service = _InputBufferServiceDouble(calls)
+        mailbox_item_service = _MailboxServiceDouble(calls)
         service = AgentSessionInputService(
             agent_repository=_ActiveAgentRepositoryDouble(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -524,7 +524,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=_WorkspaceUserRepositoryDouble(),
             exchange_file_service=_RejectingExchangeFileService(),
-            input_buffer_service=input_buffer_service,
+            mailbox_item_service=mailbox_item_service,
             session_manager=session_manager,
         )
 
@@ -548,9 +548,9 @@ class TestAgentSessionInputService:
         assert calls == [
             "get_by_id",
             "ensure_for_agent",
-            "enqueue_input_buffer",
+            "enqueue_mailbox_item",
         ]
-        assert input_buffer_service.enqueued is not None
+        assert mailbox_item_service.enqueued is not None
 
     async def test_create_buffered_agent_input_rejects_subagent_before_wake(
         self,
@@ -562,7 +562,7 @@ class TestAgentSessionInputService:
             calls,
             session_kind=AgentSessionKind.SUBAGENT,
         )
-        input_buffer_service = _InputBufferServiceDouble(calls)
+        mailbox_item_service = _MailboxServiceDouble(calls)
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -575,7 +575,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=_WorkspaceUserRepositoryDouble(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=input_buffer_service,
+            mailbox_item_service=mailbox_item_service,
             session_manager=_session_manager_double,
         )
 
@@ -596,7 +596,7 @@ class TestAgentSessionInputService:
         assert isinstance(result, Failure)
         assert isinstance(result.error, AgentSessionInputSubagentReadOnly)
         assert calls == ["get_by_id"]
-        assert input_buffer_service.enqueued is None
+        assert mailbox_item_service.enqueued is None
 
     async def test_create_team_session_with_buffered_input_bootstraps_session(
         self,
@@ -639,7 +639,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
 
@@ -666,11 +666,11 @@ class TestAgentSessionInputService:
         created = result.value.agent_session
         assert created.agent_id == agent_id
         assert created.primary_kind is None
-        input_buffer = result.value.input_buffer
-        assert input_buffer is not None
-        assert input_buffer.session_id == created.id
-        assert input_buffer.content == "first draft message"
-        assert input_buffer.idempotency_key == "draft-client-1"
+        mailbox_item = result.value.mailbox_item
+        assert mailbox_item is not None
+        assert mailbox_item.session_id == created.id
+        assert mailbox_item.content == "first draft message"
+        assert mailbox_item.idempotency_key == "draft-client-1"
         async with rdb_session_manager() as session:
             sessions = await AgentSessionRepository().list_active_by_agent_id(
                 session,
@@ -743,7 +743,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
         message = InputMessage(
@@ -785,21 +785,21 @@ class TestAgentSessionInputService:
         assert second.value.created is False
         assert second.value.agent_session.id == first.value.agent_session.id
         assert (
-            second.value.accepted_input_buffer_id
-            == first.value.accepted_input_buffer_id
+            second.value.accepted_mailbox_item_id
+            == first.value.accepted_mailbox_item_id
         )
-        assert second.value.input_buffer is not None
+        assert second.value.mailbox_item is not None
         async with rdb_session_manager() as session:
             sessions = await AgentSessionRepository().list_active_by_agent_id(
                 session,
                 agent_id,
             )
-            buffers = await InputBufferRepository().list_by_session_id(
+            buffers = await MailboxRepository().list_by_session_id(
                 session,
                 first.value.agent_session.id,
             )
         assert len(sessions) == 2
-        assert [item.id for item in buffers] == [first.value.accepted_input_buffer_id]
+        assert [item.id for item in buffers] == [first.value.accepted_mailbox_item_id]
 
     async def test_new_session_retry_rejects_changed_payload(
         self,
@@ -838,7 +838,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
         message = InputMessage(
@@ -882,7 +882,7 @@ class TestAgentSessionInputService:
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """First-message claim failure removes the new Session and InputBuffer."""
+        """First-message claim failure removes the new Session and MailboxItem."""
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(
                 session,
@@ -922,7 +922,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_RejectingExchangeFileService(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
 
@@ -949,7 +949,7 @@ class TestAgentSessionInputService:
                 session,
                 agent_id,
             )
-            primary_buffers = await InputBufferRepository().list_by_session_id(
+            primary_buffers = await MailboxRepository().list_by_session_id(
                 session,
                 primary.id,
             )
@@ -995,7 +995,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
 
@@ -1017,7 +1017,7 @@ class TestAgentSessionInputService:
         assert isinstance(result.error, AgentSessionInputInactiveSession)
 
         async with rdb_session_manager() as session:
-            old_buffers = await InputBufferRepository().list_by_session_id(
+            old_buffers = await MailboxRepository().list_by_session_id(
                 session, old_session.id
             )
         assert old_buffers == []
@@ -1064,7 +1064,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
 
@@ -1085,7 +1085,7 @@ class TestAgentSessionInputService:
         assert isinstance(result, Failure)
         assert isinstance(result.error, AgentSessionInputSubagentReadOnly)
         async with rdb_session_manager() as session:
-            buffers = await InputBufferRepository().list_by_session_id(
+            buffers = await MailboxRepository().list_by_session_id(
                 session,
                 child_agent.agent_session_id,
             )
@@ -1128,7 +1128,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
 
@@ -1224,7 +1224,7 @@ class TestAgentSessionInputService:
                 session_workspace_project_repository=SessionWorkspaceProjectRepository(),
                 workspace_user_repository=WorkspaceUserRepository(),
                 exchange_file_service=_ExchangeFileService(),
-                input_buffer_service=_input_buffer_service(session_manager),
+                mailbox_item_service=_mailbox_item_service(session_manager),
                 session_manager=session_manager,
             )
 
@@ -1267,7 +1267,7 @@ class TestAgentSessionInputService:
             assert isinstance(result, Failure)
             assert isinstance(result.error, AgentSessionInputInactiveSession)
             async with session_manager() as session:
-                buffers = await InputBufferRepository().list_by_session_id(
+                buffers = await MailboxRepository().list_by_session_id(
                     session,
                     agent_session.id,
                 )
@@ -1289,7 +1289,7 @@ class TestAgentSessionInputService:
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Same client_request_id returns same InputBuffer."""
+        """Same client_request_id returns same MailboxItem."""
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(session, "buffered-chat-idempotent")
             user_id = await _create_user(session, "buffered-idempotent@example.com")
@@ -1322,7 +1322,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
 
@@ -1359,16 +1359,16 @@ class TestAgentSessionInputService:
         assert isinstance(second, Success)
         first_value = first.value
         second_value = second.value
-        assert first_value.input_buffer is not None
-        assert second_value.input_buffer is not None
-        assert second_value.accepted_input_buffer_id == first_value.input_buffer.id
-        assert second_value.input_buffer.id == first_value.input_buffer.id
+        assert first_value.mailbox_item is not None
+        assert second_value.mailbox_item is not None
+        assert second_value.accepted_mailbox_item_id == first_value.mailbox_item.id
+        assert second_value.mailbox_item.id == first_value.mailbox_item.id
         assert second_value.created is False
         async with rdb_session_manager() as session:
-            buffers = await InputBufferRepository().list_by_session_id(
+            buffers = await MailboxRepository().list_by_session_id(
                 session, agent_session.id
             )
-        assert [buffer.id for buffer in buffers] == [first_value.input_buffer.id]
+        assert [buffer.id for buffer in buffers] == [first_value.mailbox_item.id]
 
     async def test_buffered_input_idempotency_is_scoped_to_requester(
         self,
@@ -1423,7 +1423,7 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             exchange_file_service=_ExchangeFileService(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
 
@@ -1461,15 +1461,15 @@ class TestAgentSessionInputService:
 
         assert isinstance(first, Success)
         assert isinstance(second, Success)
-        assert first.value.input_buffer is not None
-        assert second.value.input_buffer is not None
+        assert first.value.mailbox_item is not None
+        assert second.value.mailbox_item is not None
         assert (
-            first.value.accepted_input_buffer_id
-            != second.value.accepted_input_buffer_id
+            first.value.accepted_mailbox_item_id
+            != second.value.accepted_mailbox_item_id
         )
 
         async with rdb_session_manager() as session:
-            buffers = await InputBufferRepository().list_by_session_id(
+            buffers = await MailboxRepository().list_by_session_id(
                 session,
                 agent_session.id,
             )
@@ -1478,12 +1478,12 @@ class TestAgentSessionInputService:
             (buffer.id, buffer.sender_user_id, buffer.content) for buffer in buffers
         } == {
             (
-                first.value.accepted_input_buffer_id,
+                first.value.accepted_mailbox_item_id,
                 first_user_id,
                 first_message.text,
             ),
             (
-                second.value.accepted_input_buffer_id,
+                second.value.accepted_mailbox_item_id,
                 second_user_id,
                 second_message.text,
             ),
@@ -1501,17 +1501,17 @@ class TestAgentSessionInputService:
         )
         assert isinstance(first_retry, Success)
         assert first_retry.value.created is False
-        assert first_retry.value.input_buffer is not None
+        assert first_retry.value.mailbox_item is not None
         assert (
-            first_retry.value.accepted_input_buffer_id
-            == first.value.accepted_input_buffer_id
+            first_retry.value.accepted_mailbox_item_id
+            == first.value.accepted_mailbox_item_id
         )
 
         async with rdb_session_manager() as session:
-            deleted = await InputBufferRepository().delete_by_session_and_id(
+            deleted = await MailboxRepository().delete_by_session_and_id(
                 session,
                 agent_session.id,
-                first.value.accepted_input_buffer_id,
+                first.value.accepted_mailbox_item_id,
             )
         assert deleted
 
@@ -1527,8 +1527,8 @@ class TestAgentSessionInputService:
 
         assert isinstance(first_post_promotion_retry, Success)
         assert first_post_promotion_retry.value.created is False
-        assert first_post_promotion_retry.value.input_buffer is None
+        assert first_post_promotion_retry.value.mailbox_item is None
         assert (
-            first_post_promotion_retry.value.accepted_input_buffer_id
-            == first.value.accepted_input_buffer_id
+            first_post_promotion_retry.value.accepted_mailbox_item_id
+            == first.value.accepted_mailbox_item_id
         )

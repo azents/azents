@@ -1728,9 +1728,9 @@ class SessionGitWorktreeService:
         """Publish the current action execution projection when requested."""
         async with self.session_manager() as session:
             repository = self.action_execution_repository
-            projection = await repository.get_projection_by_input_buffer_id(
+            projection = await repository.get_projection_by_mailbox_item_id(
                 session,
-                input_buffer_id=execution.input_buffer_id,
+                mailbox_item_id=execution.mailbox_item_id,
             )
             if projection is None:
                 raise RuntimeError("ActionExecution projection is missing")

@@ -8,7 +8,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.enums import InputBufferKind, InputBufferSchedulingMode
+from azents.core.enums import MailboxItemKind, MailboxSchedulingMode
 from azents.engine.hooks.dispatcher import (
     RuntimeHookDispatcher,
     RuntimeHookProviderRef,
@@ -23,9 +23,9 @@ from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.input_buffer import InputBufferRepository
-from azents.services.chat.live_events import input_buffer_to_live_event
-from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.repos.mailbox import MailboxRepository
+from azents.services.chat.live_events import mailbox_item_to_live_event
+from azents.services.mailbox import MailboxEnqueue, MailboxService
 from azents.worker.deps import get_worker_broker
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.session.execution_snapshot import (
@@ -38,7 +38,7 @@ from azents.worker.session.execution_snapshot import (
 class IdleContinuationService:
     """Store idle hook continuations as pending session input."""
 
-    input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
@@ -47,9 +47,9 @@ class IdleContinuationService:
         AgentRunRepository,
         Depends(AgentRunRepository),
     ]
-    input_buffer_repository: Annotated[
-        InputBufferRepository,
-        Depends(InputBufferRepository),
+    mailbox_item_repository: Annotated[
+        MailboxRepository,
+        Depends(MailboxRepository),
     ]
     event_publisher: Annotated[WorkerEventPublisher, Depends(WorkerEventPublisher)]
     broker: Annotated[SessionBroker, Depends(get_worker_broker)]
@@ -101,7 +101,7 @@ class IdleContinuationService:
                 )
             ) is False:
                 return False
-            enqueue_results = await self.input_buffer_service.enqueue_many(
+            enqueue_results = await self.mailbox_item_service.enqueue_many(
                 session,
                 continuation_inputs,
             )
@@ -118,7 +118,7 @@ class IdleContinuationService:
         for enqueue_result in enqueue_results:
             if not enqueue_result.created:
                 continue
-            event = input_buffer_to_live_event(enqueue_result.input_buffer)
+            event = mailbox_item_to_live_event(enqueue_result.mailbox_item)
             if event is not None:
                 await self.event_publisher.dispatch_event(
                     snapshot.session_id,
@@ -169,12 +169,12 @@ class IdleContinuationService:
             return False
         if locked.pending_command_id is not None:
             return False
-        input_buffer_repository = self.input_buffer_repository
+        mailbox_item_repository = self.mailbox_item_repository
         pending_wake_input = (
-            await input_buffer_repository.has_by_session_id_and_scheduling_mode(
+            await mailbox_item_repository.has_by_session_id_and_scheduling_mode(
                 session,
                 session_id=session_id,
-                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             )
         )
         if pending_wake_input:
@@ -192,15 +192,15 @@ class IdleContinuationService:
         session_id: str,
         run_id: str,
         continuation: SessionContinuationInput,
-    ) -> InputBufferEnqueue:
+    ) -> MailboxEnqueue:
         """Convert one hook continuation to pending input."""
         metadata: dict[str, JSONValue] = dict(continuation.metadata)
         if continuation.hook_provider_slug is not None:
             metadata["provider_slug"] = continuation.hook_provider_slug
-        return InputBufferEnqueue(
+        return MailboxEnqueue(
             session_id=session_id,
-            kind=InputBufferKind.GOAL_CONTINUATION,
-            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            kind=MailboxItemKind.GOAL_CONTINUATION,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=None,

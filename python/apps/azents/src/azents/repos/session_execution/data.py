@@ -31,7 +31,7 @@ class CanonicalExecutionSnapshot:
     session_agent_context_id: str
     execution_mode: AgentSessionKind
     owner_generation: int
-    fifo_input_buffer_id: str | None
+    fifo_mailbox_item_id: str | None
     pending_command: PendingCommandSnapshot | None
     recoverable_run_id: str | None
     recoverable_run_status: AgentRunStatus | None

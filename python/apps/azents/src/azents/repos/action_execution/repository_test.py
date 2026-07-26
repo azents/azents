@@ -111,7 +111,7 @@ class TestActionExecutionRepository:
     ) -> None:
         """Execution state and progress events are keyed by action_message event."""
         session_id = await _create_agent_session(rdb_session, "action-exec-create")
-        input_buffer_id = "01900000000070008000000000000001"
+        mailbox_item_id = "01900000000070008000000000000001"
         action = CreateGitWorktreeAction(
             source_project_path="/workspace/agent/repo",
             starting_ref="main",
@@ -124,7 +124,7 @@ class TestActionExecutionRepository:
                 sender_user_id=None,
                 id=None,
                 session_id=session_id,
-                input_buffer_id=input_buffer_id,
+                mailbox_item_id=mailbox_item_id,
                 action_type="create_git_worktree",
                 action=action,
                 status=ActionExecutionStatus.PENDING,
@@ -137,7 +137,7 @@ class TestActionExecutionRepository:
                 sender_user_id=None,
                 id=None,
                 session_id=session_id,
-                input_buffer_id=input_buffer_id,
+                mailbox_item_id=mailbox_item_id,
                 action_type="create_git_worktree",
                 action=action,
                 status=ActionExecutionStatus.PENDING,
@@ -175,13 +175,13 @@ class TestActionExecutionRepository:
         )
 
         assert same_execution.id == execution.id
-        assert execution.input_buffer_id == input_buffer_id
+        assert execution.mailbox_item_id == mailbox_item_id
         assert marked.status is ActionExecutionStatus.RUNNING
         assert started.sequence == 1
         assert completed.sequence == 2
-        projection = await repo.get_projection_by_input_buffer_id(
+        projection = await repo.get_projection_by_mailbox_item_id(
             rdb_session,
-            input_buffer_id=input_buffer_id,
+            mailbox_item_id=mailbox_item_id,
         )
         assert projection is not None
         assert projection.execution.id == execution.id

@@ -1,47 +1,57 @@
-"""InputBuffer repository."""
+"""MailboxItem repository."""
 
 from collections.abc import Sequence
 from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
+from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import InputBufferKind, InputBufferSchedulingMode
-from azents.engine.events.types import FileOutputPart
+from azents.core.enums import MailboxItemKind, MailboxSchedulingMode
 from azents.rdb.models.event import JSONValue
-from azents.rdb.models.input_buffer import RDBInputBuffer
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 
-from .data import InputBuffer, InputBufferCreate
+from .data import (
+    MailboxEnvelopePayload,
+    MailboxItem,
+    MailboxItemCreate,
+    mailbox_payload_from_fields,
+)
+
+_MAILBOX_PAYLOAD_ADAPTER = TypeAdapter(MailboxEnvelopePayload)
 
 
-class InputBufferRepository:
-    """InputBuffer CRUD repository."""
+class MailboxRepository:
+    """MailboxItem CRUD repository."""
 
     async def create(
         self,
         session: AsyncSession,
-        create: InputBufferCreate,
-    ) -> InputBuffer:
-        """Create InputBuffer row."""
-        rdb = RDBInputBuffer(
+        create: MailboxItemCreate,
+    ) -> MailboxItem:
+        """Create MailboxItem row."""
+        rdb = RDBMailboxItem(
             session_id=create.session_id,
             kind=create.kind,
             scheduling_mode=create.scheduling_mode,
             requested_model_target_label=create.requested_model_target_label,
             requested_reasoning_effort=create.requested_reasoning_effort,
             sender_user_id=create.sender_user_id,
-            content=create.content,
             idempotency_key=create.idempotency_key,
-            metadata_=create.metadata,
-            action=cast("dict[str, object] | None", create.action),
-            attachments=create.attachments,
-            file_parts=[
-                part.model_dump(mode="json", exclude_none=True)
-                for part in create.file_parts
-            ],
+            payload=(
+                create.payload
+                or mailbox_payload_from_fields(
+                    kind=create.kind,
+                    content=create.content,
+                    metadata=create.metadata,
+                    action=create.action,
+                    attachments=create.attachments,
+                    file_parts=create.file_parts,
+                )
+            ).model_dump(mode="json"),
         )
         session.add(rdb)
         await session.flush()
@@ -50,13 +60,13 @@ class InputBufferRepository:
     async def create_idempotent(
         self,
         session: AsyncSession,
-        create: InputBufferCreate,
+        create: MailboxItemCreate,
         *,
         idempotency_key: str,
-    ) -> InputBuffer:
-        """Atomically upsert InputBuffer by source idempotency key."""
+    ) -> MailboxItem:
+        """Atomically upsert MailboxItem by source idempotency key."""
         stmt = (
-            pg_insert(RDBInputBuffer)
+            pg_insert(RDBMailboxItem)
             .values(
                 id=uuid7().hex,
                 session_id=create.session_id,
@@ -65,25 +75,28 @@ class InputBufferRepository:
                 requested_model_target_label=create.requested_model_target_label,
                 requested_reasoning_effort=create.requested_reasoning_effort,
                 sender_user_id=create.sender_user_id,
-                content=create.content,
                 idempotency_key=idempotency_key,
-                metadata_=create.metadata,
-                action=cast("dict[str, object] | None", create.action),
-                attachments=create.attachments,
-                file_parts=[
-                    part.model_dump(mode="json", exclude_none=True)
-                    for part in create.file_parts
-                ],
+                payload=(
+                    create.payload
+                    or mailbox_payload_from_fields(
+                        kind=create.kind,
+                        content=create.content,
+                        metadata=create.metadata,
+                        action=create.action,
+                        attachments=create.attachments,
+                        file_parts=create.file_parts,
+                    )
+                ).model_dump(mode="json"),
             )
             .on_conflict_do_nothing(
                 index_elements=[
-                    RDBInputBuffer.session_id,
-                    RDBInputBuffer.kind,
-                    RDBInputBuffer.idempotency_key,
+                    RDBMailboxItem.session_id,
+                    RDBMailboxItem.kind,
+                    RDBMailboxItem.idempotency_key,
                 ],
-                index_where=RDBInputBuffer.idempotency_key.is_not(None),
+                index_where=RDBMailboxItem.idempotency_key.is_not(None),
             )
-            .returning(RDBInputBuffer)
+            .returning(RDBMailboxItem)
         )
         result = await session.execute(stmt)
         rdb = result.scalar_one_or_none()
@@ -104,15 +117,15 @@ class InputBufferRepository:
         session: AsyncSession,
         *,
         session_id: str,
-        kind: InputBufferKind,
+        kind: MailboxItemKind,
         idempotency_key: str,
-    ) -> InputBuffer | None:
-        """Fetch idempotent InputBuffer by source idempotency key."""
+    ) -> MailboxItem | None:
+        """Fetch idempotent MailboxItem by source idempotency key."""
         result = await session.execute(
-            sa.select(RDBInputBuffer).where(
-                RDBInputBuffer.session_id == session_id,
-                RDBInputBuffer.kind == kind,
-                RDBInputBuffer.idempotency_key == idempotency_key,
+            sa.select(RDBMailboxItem).where(
+                RDBMailboxItem.session_id == session_id,
+                RDBMailboxItem.kind == kind,
+                RDBMailboxItem.idempotency_key == idempotency_key,
             )
         )
         rdb = result.scalar_one_or_none()
@@ -124,12 +137,12 @@ class InputBufferRepository:
         self,
         session: AsyncSession,
         session_id: str,
-    ) -> list[InputBuffer]:
+    ) -> list[MailboxItem]:
         """Fetch pending input buffers of session in accepted order."""
         result = await session.execute(
-            sa.select(RDBInputBuffer)
-            .where(RDBInputBuffer.session_id == session_id)
-            .order_by(RDBInputBuffer.id.asc())
+            sa.select(RDBMailboxItem)
+            .where(RDBMailboxItem.session_id == session_id)
+            .order_by(RDBMailboxItem.id.asc())
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
@@ -138,14 +151,14 @@ class InputBufferRepository:
         session: AsyncSession,
         *,
         session_id: str,
-        scheduling_mode: InputBufferSchedulingMode,
+        scheduling_mode: MailboxSchedulingMode,
     ) -> bool:
         """Return whether the session has input with the scheduling mode."""
         result = await session.scalar(
             sa.select(
                 sa.exists().where(
-                    RDBInputBuffer.session_id == session_id,
-                    RDBInputBuffer.scheduling_mode == scheduling_mode,
+                    RDBMailboxItem.session_id == session_id,
+                    RDBMailboxItem.scheduling_mode == scheduling_mode,
                 )
             )
         )
@@ -156,14 +169,14 @@ class InputBufferRepository:
         session: AsyncSession,
         *,
         session_id: str,
-        kind: InputBufferKind,
+        kind: MailboxItemKind,
     ) -> bool:
         """Return whether the session has input with the payload kind."""
         result = await session.scalar(
             sa.select(
                 sa.exists().where(
-                    RDBInputBuffer.session_id == session_id,
-                    RDBInputBuffer.kind == kind,
+                    RDBMailboxItem.session_id == session_id,
+                    RDBMailboxItem.kind == kind,
                 )
             )
         )
@@ -175,12 +188,12 @@ class InputBufferRepository:
         session_id: str,
         *,
         limit: int | None = None,
-    ) -> list[InputBuffer]:
+    ) -> list[MailboxItem]:
         """Fetch ordered pending list for Phase 3 flush."""
         query = (
-            sa.select(RDBInputBuffer)
-            .where(RDBInputBuffer.session_id == session_id)
-            .order_by(RDBInputBuffer.id.asc())
+            sa.select(RDBMailboxItem)
+            .where(RDBMailboxItem.session_id == session_id)
+            .order_by(RDBMailboxItem.id.asc())
         )
         if limit is not None:
             query = query.limit(limit)
@@ -191,12 +204,12 @@ class InputBufferRepository:
         self,
         session: AsyncSession,
         session_id: str,
-    ) -> InputBuffer | None:
-        """Lock and return the oldest accepted InputBuffer for a Session."""
+    ) -> MailboxItem | None:
+        """Lock and return the oldest accepted MailboxItem for a Session."""
         result = await session.execute(
-            sa.select(RDBInputBuffer)
-            .where(RDBInputBuffer.session_id == session_id)
-            .order_by(RDBInputBuffer.id.asc())
+            sa.select(RDBMailboxItem)
+            .where(RDBMailboxItem.session_id == session_id)
+            .order_by(RDBMailboxItem.id.asc())
             .limit(1)
             .with_for_update()
         )
@@ -209,15 +222,15 @@ class InputBufferRepository:
         session_id: str,
         buffer_ids: Sequence[str],
     ) -> int:
-        """Delete claimed InputBuffer rows inside session scope."""
+        """Delete claimed MailboxItem rows inside session scope."""
         if not buffer_ids:
             return 0
         result = cast(
             CursorResult[Any],
             await session.execute(
-                sa.delete(RDBInputBuffer).where(
-                    RDBInputBuffer.session_id == session_id,
-                    RDBInputBuffer.id.in_(buffer_ids),
+                sa.delete(RDBMailboxItem).where(
+                    RDBMailboxItem.session_id == session_id,
+                    RDBMailboxItem.id.in_(buffer_ids),
                 )
             ),
         )
@@ -228,9 +241,9 @@ class InputBufferRepository:
         self,
         session: AsyncSession,
         buffer_id: str,
-    ) -> InputBuffer | None:
-        """Fetch InputBuffer by ID."""
-        rdb = await session.get(RDBInputBuffer, buffer_id)
+    ) -> MailboxItem | None:
+        """Fetch MailboxItem by ID."""
+        rdb = await session.get(RDBMailboxItem, buffer_id)
         if rdb is None:
             return None
         return self._build(rdb)
@@ -241,13 +254,13 @@ class InputBufferRepository:
         session_id: str,
         buffer_id: str,
     ) -> bool:
-        """Delete InputBuffer whose session and ID match."""
+        """Delete MailboxItem whose session and ID match."""
         result = cast(
             CursorResult[Any],
             await session.execute(
-                sa.delete(RDBInputBuffer).where(
-                    RDBInputBuffer.session_id == session_id,
-                    RDBInputBuffer.id == buffer_id,
+                sa.delete(RDBMailboxItem).where(
+                    RDBMailboxItem.session_id == session_id,
+                    RDBMailboxItem.id == buffer_id,
                 )
             ),
         )
@@ -259,11 +272,11 @@ class InputBufferRepository:
         session: AsyncSession,
         session_id: str,
     ) -> int:
-        """Delete all InputBuffers for session."""
+        """Delete all MailboxItems for session."""
         result = cast(
             CursorResult[Any],
             await session.execute(
-                sa.delete(RDBInputBuffer).where(RDBInputBuffer.session_id == session_id)
+                sa.delete(RDBMailboxItem).where(RDBMailboxItem.session_id == session_id)
             ),
         )
         await session.flush()
@@ -276,13 +289,13 @@ class InputBufferRepository:
         from_session_id: str,
         to_session_id: str,
     ) -> int:
-        """Transfer pending InputBuffer rows to continuation session."""
+        """Transfer pending MailboxItem rows to continuation session."""
         result = cast(
             CursorResult[Any],
             await session.execute(
-                sa.update(RDBInputBuffer)
+                sa.update(RDBMailboxItem)
                 .where(
-                    RDBInputBuffer.session_id == from_session_id,
+                    RDBMailboxItem.session_id == from_session_id,
                 )
                 .values(session_id=to_session_id)
             ),
@@ -290,9 +303,11 @@ class InputBufferRepository:
         await session.flush()
         return result.rowcount or 0
 
-    def _build(self, rdb: RDBInputBuffer) -> InputBuffer:
+    def _build(self, rdb: RDBMailboxItem) -> MailboxItem:
         """Convert RDB model to domain model."""
-        return InputBuffer(
+        payload = _MAILBOX_PAYLOAD_ADAPTER.validate_python(rdb.payload)
+        presentation = payload.items[0]
+        return MailboxItem(
             id=rdb.id,
             session_id=rdb.session_id,
             kind=rdb.kind,
@@ -300,11 +315,12 @@ class InputBufferRepository:
             requested_model_target_label=rdb.requested_model_target_label,
             requested_reasoning_effort=rdb.requested_reasoning_effort,
             sender_user_id=rdb.sender_user_id,
-            content=rdb.content,
+            content=presentation.content,
             idempotency_key=rdb.idempotency_key,
-            metadata={str(k): str(v) for k, v in rdb.metadata_.items()},
-            action=cast("dict[str, JSONValue] | None", rdb.action),
-            attachments=[str(uri) for uri in rdb.attachments],
-            file_parts=[FileOutputPart.model_validate(part) for part in rdb.file_parts],
+            metadata={str(k): str(v) for k, v in presentation.metadata.items()},
+            action=cast("dict[str, JSONValue] | None", presentation.action),
+            attachments=[str(uri) for uri in presentation.attachments],
+            file_parts=presentation.file_parts,
+            payload=payload,
             created_at=rdb.created_at,
         )

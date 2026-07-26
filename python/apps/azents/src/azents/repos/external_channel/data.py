@@ -570,7 +570,7 @@ class ExternalChannelInvocationBatch(_Record):
     last_provider_position: str
     truncation_message_count: int
     truncation_size: int
-    input_buffer_id: str | None
+    mailbox_item_id: str | None
     created_at: datetime.datetime
 
 
@@ -583,7 +583,7 @@ class ExternalChannelInvocationBatchCreate(_Record):
     last_provider_position: str
     truncation_message_count: int
     truncation_size: int
-    input_buffer_id: str | None
+    mailbox_item_id: str | None
 
 
 class ExternalChannelInvocationBatchItem(_Record):

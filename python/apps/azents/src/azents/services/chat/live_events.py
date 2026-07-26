@@ -10,7 +10,7 @@ from pydantic import TypeAdapter
 
 from azents.core.config import Config
 from azents.core.deps import get_appctx
-from azents.core.enums import EventKind, InputBufferKind
+from azents.core.enums import EventKind, MailboxItemKind
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
@@ -35,7 +35,7 @@ from azents.engine.events.types import (
     UserContentPart,
     UserMessagePayload,
 )
-from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.mailbox.data import MailboxItem
 from azents.utils.appctx import AppContext
 
 _LIVE_EVENT_TTL_SECONDS = 300
@@ -275,39 +275,45 @@ def active_tool_call_to_live_event(
     )
 
 
-def _input_buffer_requested_profile(
-    input_buffer: InputBuffer,
+def _mailbox_item_requested_profile(
+    mailbox_item: MailboxItem,
 ) -> RequestedInferenceProfile | None:
     """Build the requested profile exposed by a pending input buffer."""
-    if input_buffer.requested_model_target_label is None:
+    if mailbox_item.requested_model_target_label is None:
         return None
     return RequestedInferenceProfile(
-        model_target_label=input_buffer.requested_model_target_label,
-        reasoning_effort=input_buffer.requested_reasoning_effort,
+        model_target_label=mailbox_item.requested_model_target_label,
+        reasoning_effort=mailbox_item.requested_reasoning_effort,
     )
 
 
-def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event | None:
-    """Convert InputBuffer to non-durable live event projection."""
-    if input_buffer.kind == InputBufferKind.EXTERNAL_CHANNEL_INVOCATION:
+def mailbox_item_to_live_event(mailbox_item: MailboxItem) -> Event | None:
+    """Convert MailboxItem to non-durable live event projection."""
+    if mailbox_item.kind == MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
         return None
-    if input_buffer.kind == InputBufferKind.ACTION_MESSAGE:
-        if input_buffer.action is None:
+    if mailbox_item.kind == MailboxItemKind.ACTION_MESSAGE:
+        if mailbox_item.presentation.action is None:
             raise ValueError("Action message input buffer requires action payload")
         payload = ActionMessagePayload(
-            sender_user_id=input_buffer.sender_user_id,
-            action=_chat_action_adapter.validate_python(input_buffer.action),
-            message=input_buffer.content,
-            requested_inference_profile=_input_buffer_requested_profile(input_buffer),
+            sender_user_id=mailbox_item.sender_user_id,
+            action=_chat_action_adapter.validate_python(
+                mailbox_item.presentation.action
+            ),
+            message=mailbox_item.presentation.content,
+            requested_inference_profile=_mailbox_item_requested_profile(mailbox_item),
         )
-    elif input_buffer.kind == InputBufferKind.AGENT_MESSAGE:
+    elif mailbox_item.kind == MailboxItemKind.AGENT_MESSAGE:
         message_payload: dict[str, object] = {
-            "message_kind": input_buffer.metadata["message_kind"],
-            "source_session_agent_id": input_buffer.metadata["source_session_agent_id"],
-            "source_path": input_buffer.metadata["source_path"],
-            "target_session_agent_id": input_buffer.metadata["target_session_agent_id"],
-            "target_path": input_buffer.metadata["target_path"],
-            "content": input_buffer.content,
+            "message_kind": mailbox_item.presentation.metadata["message_kind"],
+            "source_session_agent_id": mailbox_item.presentation.metadata[
+                "source_session_agent_id"
+            ],
+            "source_path": mailbox_item.presentation.metadata["source_path"],
+            "target_session_agent_id": mailbox_item.presentation.metadata[
+                "target_session_agent_id"
+            ],
+            "target_path": mailbox_item.presentation.metadata["target_path"],
+            "content": mailbox_item.presentation.content,
         }
         for key in (
             "source_run_id",
@@ -315,25 +321,27 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event | None:
             "run_status",
             "source_terminal_result_event_id",
         ):
-            value = input_buffer.metadata.get(key)
+            value = mailbox_item.presentation.metadata.get(key)
             if value is not None:
                 message_payload[key] = value
         payload = _agent_message_adapter.validate_python(message_payload)
     else:
         content: str | list[UserContentPart]
-        if input_buffer.file_parts:
+        if mailbox_item.presentation.file_parts:
             content = [
-                InputTextPart(text=input_buffer.content),
-                *input_buffer.file_parts,
+                InputTextPart(text=mailbox_item.presentation.content),
+                *mailbox_item.presentation.file_parts,
             ]
         else:
-            content = input_buffer.content
-        metadata = dict(input_buffer.metadata)
-        metadata["input_buffer_id"] = input_buffer.id
-        metadata["live_projection"] = "input_buffer"
-        requested_profile = _input_buffer_requested_profile(input_buffer)
+            content = mailbox_item.presentation.content
+        metadata = {
+            key: str(value) for key, value in mailbox_item.presentation.metadata.items()
+        }
+        metadata["mailbox_item_id"] = mailbox_item.id
+        metadata["live_projection"] = "mailbox_item"
+        requested_profile = _mailbox_item_requested_profile(mailbox_item)
         payload = UserMessagePayload(
-            sender_user_id=input_buffer.sender_user_id,
+            sender_user_id=mailbox_item.sender_user_id,
             content=content,
             attachments=[],
             metadata=metadata,
@@ -349,36 +357,36 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event | None:
             ),
         )
     return Event(
-        id=input_buffer.id,
-        session_id=input_buffer.session_id,
-        kind=_event_kind_for_input_buffer(input_buffer.kind),
+        id=mailbox_item.id,
+        session_id=mailbox_item.session_id,
+        kind=_event_kind_for_mailbox_item(mailbox_item.kind),
         payload=payload,
         model_order=0,
-        external_id=input_buffer.id,
+        external_id=mailbox_item.id,
         adapter=None,
         provider=None,
         model=None,
         native_format=None,
         schema_version="1",
-        created_at=input_buffer.created_at,
+        created_at=mailbox_item.created_at,
     )
 
 
-def _event_kind_for_input_buffer(kind: InputBufferKind) -> EventKind:
-    """Return live event kind corresponding to InputBuffer kind."""
+def _event_kind_for_mailbox_item(kind: MailboxItemKind) -> EventKind:
+    """Return live event kind corresponding to MailboxItem kind."""
     match kind:
-        case InputBufferKind.USER_MESSAGE:
+        case MailboxItemKind.USER_MESSAGE:
             return EventKind.USER_MESSAGE
-        case InputBufferKind.GOAL_CONTINUATION:
+        case MailboxItemKind.GOAL_CONTINUATION:
             return EventKind.GOAL_CONTINUATION
-        case InputBufferKind.ACTION_MESSAGE:
+        case MailboxItemKind.ACTION_MESSAGE:
             return EventKind.ACTION_MESSAGE
-        case InputBufferKind.AGENT_MESSAGE:
+        case MailboxItemKind.AGENT_MESSAGE:
             return EventKind.AGENT_MESSAGE
-        case InputBufferKind.EXTERNAL_CHANNEL_INVOCATION:
+        case MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
             return EventKind.EXTERNAL_CHANNEL_MESSAGE
         case _:
-            raise ValueError(f"Unsupported InputBuffer kind: {kind}")
+            raise ValueError(f"Unsupported MailboxItem kind: {kind}")
 
 
 class LiveEventStore(Protocol):

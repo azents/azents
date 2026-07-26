@@ -101,10 +101,10 @@ from azents.repos.llm_provider_integration import LLMProviderIntegrationReposito
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.input_buffer import (
-    InputBufferService,
+from azents.services.mailbox import (
+    MailboxService,
     PendingInputInferenceProfile,
-    PromotedInputBuffers,
+    PromotedMailboxItems,
     TurnEffect,
 )
 from azents.services.model_file import ModelFileService
@@ -581,8 +581,8 @@ class _AgentSessionRepository:
         return False
 
 
-class _InputBufferService:
-    """InputBufferService test double."""
+class _MailboxService:
+    """MailboxService test double."""
 
     async def peek_pending_inference_profile(
         self,
@@ -591,13 +591,13 @@ class _InputBufferService:
         """Return one implicit pending input by default."""
         del session_id
         return PendingInputInferenceProfile(
-            input_buffer_id="buffer-1",
+            mailbox_item_id="buffer-1",
             requires_inference=True,
             exists=True,
             requested_inference_profile=None,
         )
 
-    async def has_pending_session_input_buffers(self, session_id: str) -> bool:
+    async def has_pending_session_mailbox_items(self, session_id: str) -> bool:
         """Return no additional buffered input after execution."""
         del session_id
         return False
@@ -1193,7 +1193,7 @@ def _executor(
         ),
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
-        input_buffer_service=cast(InputBufferService, _InputBufferService()),
+        mailbox_item_service=cast(MailboxService, _MailboxService()),
         session_git_worktree_service=cast(
             SessionGitWorktreeService,
             session_git_worktree_service,
@@ -1334,7 +1334,7 @@ def _message(
         session_agent_context_id="context-001",
         execution_mode=AgentSessionKind.ROOT,
         owner_generation=owner_generation,
-        fifo_input_buffer_id=None,
+        fifo_mailbox_item_id=None,
         pending_command=(
             PendingCommandSnapshot(
                 id=pending_command.id,
@@ -1366,7 +1366,7 @@ def _action_execution(*, owner_generation: int = 1) -> ActionExecution:
     return ActionExecution(
         id="action-execution-001",
         session_id="session-001",
-        input_buffer_id="input-buffer-001",
+        mailbox_item_id="input-buffer-001",
         sender_user_id=None,
         action_type=action.type,
         action=action.model_dump(mode="json"),
@@ -2369,10 +2369,10 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
     executor = _executor(session_lifecycle=lifecycle)
     message = _message()
 
-    class PendingInputBufferService:
-        """InputBufferService double with pending follow-up work."""
+    class PendingMailboxService:
+        """MailboxService double with pending follow-up work."""
 
-        async def has_pending_session_input_buffers(self, session_id: str) -> bool:
+        async def has_pending_session_mailbox_items(self, session_id: str) -> bool:
             """Return pending follow-up work for the session."""
             assert session_id == message.session_id
             return True
@@ -2391,8 +2391,8 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         executor,
-        "input_buffer_service",
-        cast(InputBufferService, PendingInputBufferService()),
+        "mailbox_item_service",
+        cast(MailboxService, PendingMailboxService()),
     )
 
     context_invalidated = False
@@ -2433,13 +2433,13 @@ async def test_poll_run_inputs_rejects_fifo_head_changed_from_snapshot(
     executor = _executor()
     promoted = False
 
-    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
         nonlocal promoted
         del args, kwargs
         promoted = True
         raise AssertionError("A mismatched canonical head must not be promoted")
 
-    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
 
     with pytest.raises(CanonicalExecutionWorkDriftError):
         await executor.poll_run_inputs(
@@ -2449,7 +2449,7 @@ async def test_poll_run_inputs_rejects_fifo_head_changed_from_snapshot(
             required_inference_profile=None,
             active_run_id=None,
             owner_generation=1,
-            expected_input_buffer_id="snapshot-buffer",
+            expected_mailbox_item_id="snapshot-buffer",
             enforce_snapshot_head=True,
             tool_admission_barrier=ToolAdmissionBarrier(),
             initial_turn_eligible=False,
@@ -2469,13 +2469,13 @@ async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
     executor = _executor()
     profiles = [
         PendingInputInferenceProfile(
-            input_buffer_id="buffer-1",
+            mailbox_item_id="buffer-1",
             requires_inference=False,
             exists=True,
             requested_inference_profile=None,
         ),
         PendingInputInferenceProfile(
-            input_buffer_id="buffer-2",
+            mailbox_item_id="buffer-2",
             requires_inference=False,
             exists=True,
             requested_inference_profile=None,
@@ -2487,10 +2487,10 @@ async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
         del session_id
         return profiles.pop(0)
 
-    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
         del args
         expected_buffer_ids.append(cast(str | None, kwargs["expected_buffer_id"]))
-        return PromotedInputBuffers(
+        return PromotedMailboxItems(
             operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
@@ -2505,11 +2505,11 @@ async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
         )
 
     monkeypatch.setattr(
-        executor.input_buffer_service,
+        executor.mailbox_item_service,
         "peek_pending_inference_profile",
         peek,
     )
-    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
 
     with pytest.raises(CanonicalExecutionWorkDriftError):
         await executor.poll_run_inputs(
@@ -2519,7 +2519,7 @@ async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
             required_inference_profile=None,
             active_run_id=None,
             owner_generation=1,
-            expected_input_buffer_id="buffer-1",
+            expected_mailbox_item_id="buffer-1",
             enforce_snapshot_head=True,
             tool_admission_barrier=ToolAdmissionBarrier(),
             initial_turn_eligible=False,
@@ -2543,11 +2543,11 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         metadata={},
         attachments=[],
         external_id="buffer-user",
-        attachment_source="input_buffer",
+        attachment_source="mailbox_item",
         requested_inference_profile=None,
     )
     promoted_batches = [
-        PromotedInputBuffers(
+        PromotedMailboxItems(
             operation_action=None,
             turn_effect=TurnEffect.FAILED,
             requested_inference_profile=None,
@@ -2560,7 +2560,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             inserted_count=0,
             deduped_count=0,
         ),
-        PromotedInputBuffers(
+        PromotedMailboxItems(
             operation_action=None,
             turn_effect=TurnEffect.ELIGIBLE,
             requested_inference_profile=None,
@@ -2581,7 +2581,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             inserted_count=1,
             deduped_count=0,
         ),
-        PromotedInputBuffers(
+        PromotedMailboxItems(
             operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
@@ -2595,9 +2595,9 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             deduped_count=0,
         ),
     ]
-    processed_worktree_actions: list[object | None] = []
+    processed_operation_actions: list[object | None] = []
 
-    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
         del args, kwargs
         return promoted_batches.pop(0)
 
@@ -2606,14 +2606,14 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         **kwargs: object,
     ) -> OperationActionProcessResult:
         del args
-        processed_worktree_actions.append(kwargs["operation_action"])
+        processed_operation_actions.append(kwargs["operation_action"])
         return OperationActionProcessResult(context_invalidated=False)
 
     async def has_actionable_model_input(session_id: str) -> bool:
         del session_id
         return False
 
-    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
     monkeypatch.setattr(
         executor,
         "_process_operation_actions",
@@ -2632,7 +2632,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         required_inference_profile=None,
         active_run_id=None,
         owner_generation=1,
-        expected_input_buffer_id=None,
+        expected_mailbox_item_id=None,
         enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=False,
@@ -2645,7 +2645,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     assert result.has_actionable_work is True
     assert result.context_invalidated is False
     assert result.complete_run is False
-    assert processed_worktree_actions == [None, None]
+    assert processed_operation_actions == [None, None]
     assert promoted_batches == []
 
 
@@ -2671,7 +2671,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
     executor = _executor(agent_session_repository=session_repository)
     order: list[str] = []
     promoted_batches = [
-        PromotedInputBuffers(
+        PromotedMailboxItems(
             operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
@@ -2684,7 +2684,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
             inserted_count=1,
             deduped_count=0,
         ),
-        PromotedInputBuffers(
+        PromotedMailboxItems(
             operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
@@ -2699,7 +2699,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
         ),
     ]
 
-    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
         del args, kwargs
         result = promoted_batches.pop(0)
         order.append("promotion_committed")
@@ -2715,7 +2715,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
         if session_id == "child-session":
             raise RuntimeError("viewer unavailable")
 
-    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
     monkeypatch.setattr(
         executor,
         "_has_actionable_model_input",
@@ -2729,7 +2729,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
         required_inference_profile=None,
         active_run_id="run-1",
         owner_generation=1,
-        expected_input_buffer_id=None,
+        expected_mailbox_item_id=None,
         enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=True,
@@ -2754,7 +2754,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
     """A handled preparation failure completes the active run without retry."""
     executor = _executor()
     promoted_batches = [
-        PromotedInputBuffers(
+        PromotedMailboxItems(
             operation_action=None,
             turn_effect=TurnEffect.FAILED,
             requested_inference_profile=None,
@@ -2767,7 +2767,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
             inserted_count=1,
             deduped_count=0,
         ),
-        PromotedInputBuffers(
+        PromotedMailboxItems(
             operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
@@ -2782,7 +2782,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         ),
     ]
 
-    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
         del args, kwargs
         return promoted_batches.pop(0)
 
@@ -2790,7 +2790,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         del session_id
         return False
 
-    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
     monkeypatch.setattr(
         executor,
         "_has_actionable_model_input",
@@ -2804,7 +2804,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         required_inference_profile=None,
         active_run_id="run-1",
         owner_generation=1,
-        expected_input_buffer_id=None,
+        expected_mailbox_item_id=None,
         enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=False,
@@ -2904,7 +2904,7 @@ async def test_execute_preserves_actionable_transcript_eligibility(
     ) -> PendingInputInferenceProfile:
         del session_id
         return PendingInputInferenceProfile(
-            input_buffer_id="buffer-1" if pending_input_exists else None,
+            mailbox_item_id="buffer-1" if pending_input_exists else None,
             exists=pending_input_exists,
             requires_inference=False,
             requested_inference_profile=None,
@@ -2927,7 +2927,7 @@ async def test_execute_preserves_actionable_transcript_eligibility(
         )
 
     monkeypatch.setattr(
-        executor.input_buffer_service,
+        executor.mailbox_item_service,
         "peek_pending_inference_profile",
         peek_pending_input,
     )

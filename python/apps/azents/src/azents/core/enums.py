@@ -269,8 +269,8 @@ class ArchivedSessionPurgeParticipantPhase(enum.StrEnum):
     VERIFIED = "verified"
 
 
-class InputBufferKind(enum.StrEnum):
-    """InputBuffer payload kind."""
+class MailboxItemKind(enum.StrEnum):
+    """MailboxItem payload kind."""
 
     USER_MESSAGE = "user_message"
     GOAL_CONTINUATION = "goal_continuation"
@@ -279,7 +279,7 @@ class InputBufferKind(enum.StrEnum):
     EXTERNAL_CHANNEL_INVOCATION = "external_channel_invocation"
 
 
-class InputBufferSchedulingMode(enum.StrEnum):
+class MailboxSchedulingMode(enum.StrEnum):
     """Whether pending input can start or resume an idle session."""
 
     QUEUE_ONLY = "queue_only"

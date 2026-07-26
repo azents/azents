@@ -141,7 +141,7 @@ class RDBAgentRun(RDBModel):
             default=None,
         )
     )
-    parent_result_input_buffer_id: Mapped[str | None] = mapped_column(
+    parent_result_mailbox_item_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         nullable=True,
         default=None,

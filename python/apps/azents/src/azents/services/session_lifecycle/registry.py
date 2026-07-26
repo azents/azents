@@ -234,7 +234,7 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                         "test_session_lifecycle_conversation_data",
                     ),
                     _database_resource(
-                        "input_buffers",
+                        "mailbox_items",
                         SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
                         "test_session_lifecycle_conversation_data",
                     ),

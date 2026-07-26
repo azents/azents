@@ -57,10 +57,10 @@ from azents.repos.session_execution.data import (
     CanonicalExecutionSnapshot,
     PendingCommandSnapshot,
 )
-from azents.services.input_buffer import (
-    InputBufferService,
+from azents.services.mailbox import (
+    MailboxService,
     PendingInputInferenceProfile,
-    PromotedInputBuffers,
+    PromotedMailboxItems,
     TurnEffect,
 )
 from azents.services.subagent_terminal_result import SubagentTerminalResultService
@@ -120,10 +120,10 @@ class _SessionRunnerEventPublisher:
         await self.host.dispatch_event(session_id, event)
 
 
-class _InputBufferService:
-    """InputBufferService test double."""
+class _MailboxService:
+    """MailboxService test double."""
 
-    def __init__(self, promoted: PromotedInputBuffers) -> None:
+    def __init__(self, promoted: PromotedMailboxItems) -> None:
         self.promoted = promoted
         self.calls: list[tuple[str, str | None]] = []
         self.consumed = False
@@ -135,7 +135,7 @@ class _InputBufferService:
         """Project the configured result until it has been consumed."""
         del session_id
         return PendingInputInferenceProfile(
-            input_buffer_id=None if self.consumed else "buffer-1",
+            mailbox_item_id=None if self.consumed else "buffer-1",
             requires_inference=False,
             exists=not self.consumed,
             requested_inference_profile=(
@@ -143,7 +143,7 @@ class _InputBufferService:
             ),
         )
 
-    async def flush_session_input_buffers(
+    async def flush_session_mailbox_items(
         self,
         *,
         session_id: str,
@@ -156,7 +156,7 @@ class _InputBufferService:
         active_run_id: str | None,
         limit: int | None = None,
         include_action_messages: bool = True,
-    ) -> PromotedInputBuffers:
+    ) -> PromotedMailboxItems:
         """Store flush call arguments and return specified result."""
         del (
             owner_generation,
@@ -170,7 +170,7 @@ class _InputBufferService:
         )
         self.calls.append((session_id, model))
         if self.consumed:
-            return PromotedInputBuffers(
+            return PromotedMailboxItems(
                 operation_action=None,
                 turn_effect=TurnEffect.NEUTRAL,
                 requested_inference_profile=None,
@@ -436,17 +436,17 @@ class _RunExecutor:
         )
 
 
-class _PendingInputBufferService:
-    """InputBufferService test double."""
+class _PendingMailboxService:
+    """MailboxService test double."""
 
     def __init__(self, host: "_Host") -> None:
         self.host = host
 
-    async def has_pending_session_input_buffers(self, session_id: str) -> bool:
+    async def has_pending_session_mailbox_items(self, session_id: str) -> bool:
         """Return pending buffer existence specified by test."""
         return session_id in self.host.pending_input_session_ids
 
-    async def has_pending_wake_session_input_buffers(
+    async def has_pending_wake_session_mailbox_items(
         self,
         session_id: str,
     ) -> bool:
@@ -749,7 +749,7 @@ def _execution_snapshot(
         session_agent_context_id="context-001",
         execution_mode=AgentSessionKind.ROOT,
         owner_generation=owner_generation,
-        fifo_input_buffer_id=None,
+        fifo_mailbox_item_id=None,
         pending_command=pending_command,
         recoverable_run_id=None,
         recoverable_run_status=None,
@@ -842,9 +842,9 @@ def _make_session_runner(host: _Host) -> SessionRunner:
             AgentSessionRepository,
             _AgentSessionRepository(host),
         ),
-        input_buffer_service=cast(
-            InputBufferService,
-            _PendingInputBufferService(host),
+        mailbox_item_service=cast(
+            MailboxService,
+            _PendingMailboxService(host),
         ),
         subagent_terminal_result_service=cast(
             SubagentTerminalResultService,
@@ -1579,10 +1579,10 @@ async def test_dispatch_event_publishes_history_before_live_removal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
+async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """InputBuffer flush broadcasts history append and live removal actions."""
+    """MailboxItem flush broadcasts history append and live removal actions."""
     broadcast = _Broadcast()
     executor = object.__new__(RunExecutor)
     executor.broadcast = cast(WebSocketBroadcast, broadcast)
@@ -1602,7 +1602,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
         metadata={"source": "chat"},
         attachments=[],
         external_id="buffer-1",
-        attachment_source="input_buffer",
+        attachment_source="mailbox_item",
         requested_inference_profile=None,
     )
     event = Event(
@@ -1613,8 +1613,8 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
         external_id="buffer-1",
         created_at=datetime.now(timezone.utc),
     )
-    promotion = _InputBufferService(
-        PromotedInputBuffers(
+    promotion = _MailboxService(
+        PromotedMailboxItems(
             operation_action=None,
             turn_effect=TurnEffect.ELIGIBLE,
             requested_inference_profile=RequestedInferenceProfile(
@@ -1631,8 +1631,8 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
             deduped_count=0,
         )
     )
-    executor.input_buffer_service = cast(
-        InputBufferService,
+    executor.mailbox_item_service = cast(
+        MailboxService,
         promotion,
     )
 

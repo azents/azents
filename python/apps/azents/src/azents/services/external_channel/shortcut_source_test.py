@@ -240,7 +240,7 @@ async def test_shortcut_source_retry_reuses_admission_without_execution_effects(
             "access_request",
             "binding_create",
             "session",
-            "input_buffer",
+            "mailbox_item",
             "wake",
         )
     )

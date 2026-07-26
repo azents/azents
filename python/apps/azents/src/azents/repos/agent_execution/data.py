@@ -88,9 +88,9 @@ class AgentRunPatch(BaseModel):
         default=None,
         description="Finalized parent mailbox delivery state",
     )
-    parent_result_input_buffer_id: str | None = Field(
+    parent_result_mailbox_item_id: str | None = Field(
         default=None,
-        description="Delivered parent mailbox InputBuffer ID",
+        description="Delivered parent mailbox MailboxItem ID",
     )
     parent_result_enqueued_at: datetime.datetime | None = Field(
         default=None,

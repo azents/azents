@@ -17,8 +17,8 @@ from azents.core.enums import (
     ExternalChannelBindingStatus,
     ExternalChannelConversationAdmissionStatus,
     ExternalChannelResourceStatus,
-    InputBufferKind,
-    InputBufferSchedulingMode,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -37,10 +37,10 @@ from azents.repos.external_channel.data import (
     ExternalChannelInvocationBatchItemCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.input_buffer import (
-    EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY,
-    InputBufferEnqueue,
-    InputBufferService,
+from azents.services.mailbox import (
+    MailboxEnqueue,
+    MailboxService,
+    build_external_channel_mailbox_payload,
 )
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
@@ -115,9 +115,9 @@ class ExternalChannelAccessService:
         RootAgentSessionCreationService,
         Depends(RootAgentSessionCreationService),
     ]
-    input_buffer_service: Annotated[
-        InputBufferService,
-        Depends(InputBufferService),
+    mailbox_item_service: Annotated[
+        MailboxService,
+        Depends(MailboxService),
     ]
     session_lifecycle: Annotated[
         SessionLifecycleService,
@@ -411,7 +411,7 @@ class ExternalChannelAccessService:
             binding_id=binding.id,
             trigger_message_id=trigger_message_id,
         )
-        if existing is not None and existing.input_buffer_id is not None:
+        if existing is not None and existing.mailbox_item_id is not None:
             return True
         trigger = await self.repository.get_message(
             session,
@@ -441,7 +441,7 @@ class ExternalChannelAccessService:
                 last_provider_position=items[-1][1],
                 truncation_message_count=binding.truncated_message_count,
                 truncation_size=binding.truncated_size,
-                input_buffer_id=None,
+                mailbox_item_id=None,
             ),
         )
         for sequence, (revision_id, provider_position) in enumerate(items):
@@ -462,30 +462,33 @@ class ExternalChannelAccessService:
             raise ExternalChannelAccessDecisionError(
                 "The invocation batch disappeared during activation."
             )
-        if locked_batch.input_buffer_id is None:
-            enqueue = await self.input_buffer_service.enqueue(
+        if locked_batch.mailbox_item_id is None:
+            projection_items = await self.repository.list_invocation_projection_items(
                 session,
-                InputBufferEnqueue(
+                batch_id=batch.id,
+            )
+            enqueue = await self.mailbox_item_service.enqueue(
+                session,
+                MailboxEnqueue(
                     session_id=binding.agent_session_id,
-                    kind=InputBufferKind.EXTERNAL_CHANNEL_INVOCATION,
-                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                    kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     sender_user_id=None,
                     content="",
                     idempotency_key=f"external-channel-invocation:{batch.id}",
-                    metadata={
-                        EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY: batch.id
-                    },
+                    metadata={},
                     attachments=[],
                     file_parts=[],
                     action=None,
+                    payload=build_external_channel_mailbox_payload(projection_items),
                 ),
             )
-            await self.repository.link_invocation_batch_input_buffer(
+            await self.repository.link_invocation_batch_mailbox_item(
                 session,
                 batch_id=batch.id,
-                input_buffer_id=enqueue.input_buffer.id,
+                mailbox_item_id=enqueue.mailbox_item.id,
             )
         await self.repository.delete_pending_context_ids(
             session,
