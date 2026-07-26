@@ -20,6 +20,12 @@ service RuntimeTransferCoordinator {
       returns (TransferStatusResponse);
   rpc SettleTransfer(SettleTransferRequest) returns (TransferStatusResponse);
   rpc RecordCleanup(RecordCleanupRequest) returns (TransferStatusResponse);
+  rpc RegisterPreparationCleanup(RegisterPreparationCleanupRequest)
+      returns (TransferStatusResponse);
+  rpc PromotePreparationCleanup(PromotePreparationCleanupRequest)
+      returns (TransferStatusResponse);
+  rpc ClearPreparationCleanup(ClearPreparationCleanupRequest)
+      returns (TransferStatusResponse);
   rpc GetTransferStatus(GetTransferStatusRequest)
       returns (TransferStatusResponse);
 }
@@ -69,6 +75,13 @@ enum CoordinatorCleanupStatus {
   COORDINATOR_CLEANUP_STATUS_PENDING = 2;
   COORDINATOR_CLEANUP_STATUS_COMPLETE = 3;
   COORDINATOR_CLEANUP_STATUS_RETRYABLE_FAILURE = 4;
+}
+
+enum CoordinatorPreparationCleanupState {
+  COORDINATOR_PREPARATION_CLEANUP_STATE_UNSPECIFIED = 0;
+  COORDINATOR_PREPARATION_CLEANUP_STATE_NOT_REQUIRED = 1;
+  COORDINATOR_PREPARATION_CLEANUP_STATE_MULTIPART_PENDING = 2;
+  COORDINATOR_PREPARATION_CLEANUP_STATE_COMPLETED_OBJECT_PENDING = 3;
 }
 
 enum CoordinatorCancellationReason {
@@ -127,6 +140,7 @@ message CoordinatorTransferStatus {
   CoordinatorTransferFailure failure = 12;
   CoordinatorCleanupStatus cleanup_status = 13;
   bool cancellation_requested = 14;
+  CoordinatorPreparationCleanupState preparation_cleanup_state = 15;
 }
 
 message AdmitTransferRequest {
@@ -210,6 +224,24 @@ message RecordCleanupRequest {
   CoordinatorTransferIdentity identity = 1;
   uint64 expected_revision = 2;
   CoordinatorCleanupStatus cleanup_status = 3;
+}
+
+message RegisterPreparationCleanupRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  OpaqueObjectHandle preparation_object_handle = 3;
+  OpaqueObjectHandle multipart_cleanup_handle = 4;
+}
+
+message PromotePreparationCleanupRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  OpaqueObjectHandle preparation_object_handle = 3;
+}
+
+message ClearPreparationCleanupRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
 }
 
 message GetTransferStatusRequest {

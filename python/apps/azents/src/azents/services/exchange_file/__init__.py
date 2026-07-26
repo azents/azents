@@ -96,6 +96,13 @@ class ExchangeFileDownload:
 
 
 @dataclasses.dataclass(frozen=True)
+class ExchangeFileTransferSource:
+    """Authorized Exchange metadata for a trusted Runtime transfer."""
+
+    file: ExchangeFile
+
+
+@dataclasses.dataclass(frozen=True)
 class ExchangeFileWithPreview:
     """Preview thumbnail linked to Exchange file to delete."""
 
@@ -520,6 +527,32 @@ class ExchangeFileService:
             if not await self._has_valid_resource_authority(session, authority):
                 return Failure(FileAccessDenied())
         return Success(ExchangeFileDownload(file=file, body=body))
+
+    async def resolve_transfer_source_for_authority(
+        self,
+        *,
+        uri: str,
+        authority: SessionResourceAuthority,
+    ) -> Result[ExchangeFileTransferSource, ExchangeFileError]:
+        """Resolve authorized Exchange metadata without reading object bytes."""
+        object_key = exchange_object_key_from_uri(uri)
+        if object_key is None:
+            return Failure(FileNotFound())
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(FileAccessDenied())
+            file = await self.exchange_file_repository.get_by_object_key_for_agent(
+                session,
+                object_key=object_key,
+                agent_id=authority.agent_id,
+            )
+        if file is None:
+            return Failure(FileNotFound())
+        if file.retention_root_session_id != authority.root_session_id:
+            return Failure(FileAccessDenied())
+        if file.status == ExchangeFileStatus.EXPIRED:
+            return Failure(FileExpired())
+        return Success(ExchangeFileTransferSource(file=file))
 
     async def validate_resource_authority(
         self,

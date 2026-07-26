@@ -40,6 +40,15 @@ COORDINATOR_OPERATION_ACKNOWLEDGE_CONSUMER = (
 COORDINATOR_OPERATION_ABANDON_CONSUMER = "RuntimeTransferCoordinator/AbandonConsumer"
 COORDINATOR_OPERATION_SETTLE_TRANSFER = "RuntimeTransferCoordinator/SettleTransfer"
 COORDINATOR_OPERATION_RECORD_CLEANUP = "RuntimeTransferCoordinator/RecordCleanup"
+COORDINATOR_OPERATION_REGISTER_PREPARATION_CLEANUP = (
+    "RuntimeTransferCoordinator/RegisterPreparationCleanup"
+)
+COORDINATOR_OPERATION_PROMOTE_PREPARATION_CLEANUP = (
+    "RuntimeTransferCoordinator/PromotePreparationCleanup"
+)
+COORDINATOR_OPERATION_CLEAR_PREPARATION_CLEANUP = (
+    "RuntimeTransferCoordinator/ClearPreparationCleanup"
+)
 COORDINATOR_OPERATION_GET_TRANSFER_STATUS = (
     "RuntimeTransferCoordinator/GetTransferStatus"
 )
@@ -95,6 +104,14 @@ class CoordinatorCleanupStatus(StrEnum):
     PENDING = "pending"
     COMPLETE = "complete"
     RETRYABLE_FAILURE = "retryable_failure"
+
+
+class CoordinatorPreparationCleanupState(StrEnum):
+    """Trusted source-preparation cleanup responsibility."""
+
+    NOT_REQUIRED = "not_required"
+    MULTIPART_PENDING = "multipart_pending"
+    COMPLETED_OBJECT_PENDING = "completed_object_pending"
 
 
 class CoordinatorCancellationReason(StrEnum):
@@ -174,6 +191,7 @@ class CoordinatorTransferStatus:
     failure: CoordinatorTransferFailure | None
     cleanup_status: CoordinatorCleanupStatus
     cancellation_requested: bool
+    preparation_cleanup_state: CoordinatorPreparationCleanupState
 
 
 @dataclass(frozen=True)
@@ -340,6 +358,45 @@ class CoordinatorRecordCleanupRequest:
 
 
 @dataclass(frozen=True)
+class CoordinatorRegisterPreparationCleanupRequest:
+    """Values for durable source-preparation multipart cleanup registration."""
+
+    identity: CoordinatorTransferIdentity
+    expected_revision: int
+    preparation_object_handle: CoordinatorOpaqueObjectHandle
+    multipart_cleanup_handle: CoordinatorOpaqueObjectHandle
+
+    def __post_init__(self) -> None:
+        """Validate one exact preparation cleanup registration."""
+        _positive(self.expected_revision, "expected_revision")
+
+
+@dataclass(frozen=True)
+class CoordinatorPromotePreparationCleanupRequest:
+    """Values for retaining completed preparation-object deletion authority."""
+
+    identity: CoordinatorTransferIdentity
+    expected_revision: int
+    preparation_object_handle: CoordinatorOpaqueObjectHandle
+
+    def __post_init__(self) -> None:
+        """Validate one exact preparation cleanup promotion."""
+        _positive(self.expected_revision, "expected_revision")
+
+
+@dataclass(frozen=True)
+class CoordinatorClearPreparationCleanupRequest:
+    """Values for clearing exact completed source-preparation cleanup."""
+
+    identity: CoordinatorTransferIdentity
+    expected_revision: int
+
+    def __post_init__(self) -> None:
+        """Validate one exact preparation cleanup clear."""
+        _positive(self.expected_revision, "expected_revision")
+
+
+@dataclass(frozen=True)
 class CoordinatorGetTransferStatusRequest:
     """Values for reading a trusted transfer status projection."""
 
@@ -393,6 +450,9 @@ class RuntimeTransferCoordinatorStub(Protocol):
     AbandonConsumer: CoordinatorUnaryUnaryCall
     SettleTransfer: CoordinatorUnaryUnaryCall
     RecordCleanup: CoordinatorUnaryUnaryCall
+    RegisterPreparationCleanup: CoordinatorUnaryUnaryCall
+    PromotePreparationCleanup: CoordinatorUnaryUnaryCall
+    ClearPreparationCleanup: CoordinatorUnaryUnaryCall
     GetTransferStatus: CoordinatorUnaryUnaryCall
 
 
@@ -651,6 +711,51 @@ class GrpcRuntimeTransferCoordinatorClient:
         )
         return transfer_status_response_from_message(response)
 
+    async def register_preparation_cleanup(
+        self,
+        request: CoordinatorRegisterPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        """Register preparation multipart cleanup before provider body streaming."""
+        message = register_preparation_cleanup_request_to_message(request)
+        response = await self._stub.RegisterPreparationCleanup(
+            message,
+            metadata=await self._metadata(
+                COORDINATOR_OPERATION_REGISTER_PREPARATION_CLEANUP,
+                message,
+            ),
+        )
+        return transfer_status_response_from_message(response)
+
+    async def promote_preparation_cleanup(
+        self,
+        request: CoordinatorPromotePreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        """Promote preparation cleanup from abort to object deletion."""
+        message = promote_preparation_cleanup_request_to_message(request)
+        response = await self._stub.PromotePreparationCleanup(
+            message,
+            metadata=await self._metadata(
+                COORDINATOR_OPERATION_PROMOTE_PREPARATION_CLEANUP,
+                message,
+            ),
+        )
+        return transfer_status_response_from_message(response)
+
+    async def clear_preparation_cleanup(
+        self,
+        request: CoordinatorClearPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        """Clear exact preparation cleanup evidence after trusted cleanup."""
+        message = clear_preparation_cleanup_request_to_message(request)
+        response = await self._stub.ClearPreparationCleanup(
+            message,
+            metadata=await self._metadata(
+                COORDINATOR_OPERATION_CLEAR_PREPARATION_CLEANUP,
+                message,
+            ),
+        )
+        return transfer_status_response_from_message(response)
+
     async def get_transfer_status(
         self,
         request: CoordinatorGetTransferStatusRequest,
@@ -877,6 +982,9 @@ def transfer_status_from_message(
         ),
         cleanup_status=_CLEANUP_STATUS_FROM_PROTO[message.cleanup_status],
         cancellation_requested=message.cancellation_requested,
+        preparation_cleanup_state=_PREPARATION_CLEANUP_STATE_FROM_PROTO[
+            message.preparation_cleanup_state
+        ],
     )
 
 
@@ -1022,6 +1130,48 @@ def record_cleanup_request_to_message(
     message = runtime_transfer_coordinator_pb2.RecordCleanupRequest(
         expected_revision=value.expected_revision,
         cleanup_status=_CLEANUP_STATUS_TO_PROTO[value.cleanup_status],
+    )
+    message.identity.CopyFrom(coordinator_identity_to_message(value.identity))
+    return message
+
+
+def register_preparation_cleanup_request_to_message(
+    value: CoordinatorRegisterPreparationCleanupRequest,
+) -> runtime_transfer_coordinator_pb2.RegisterPreparationCleanupRequest:
+    """Map preparation multipart cleanup registration values to protobuf."""
+    message = runtime_transfer_coordinator_pb2.RegisterPreparationCleanupRequest(
+        expected_revision=value.expected_revision,
+        preparation_object_handle=opaque_object_handle_to_message(
+            value.preparation_object_handle
+        ),
+        multipart_cleanup_handle=opaque_object_handle_to_message(
+            value.multipart_cleanup_handle
+        ),
+    )
+    message.identity.CopyFrom(coordinator_identity_to_message(value.identity))
+    return message
+
+
+def promote_preparation_cleanup_request_to_message(
+    value: CoordinatorPromotePreparationCleanupRequest,
+) -> runtime_transfer_coordinator_pb2.PromotePreparationCleanupRequest:
+    """Map preparation cleanup promotion values to protobuf."""
+    message = runtime_transfer_coordinator_pb2.PromotePreparationCleanupRequest(
+        expected_revision=value.expected_revision,
+        preparation_object_handle=opaque_object_handle_to_message(
+            value.preparation_object_handle
+        ),
+    )
+    message.identity.CopyFrom(coordinator_identity_to_message(value.identity))
+    return message
+
+
+def clear_preparation_cleanup_request_to_message(
+    value: CoordinatorClearPreparationCleanupRequest,
+) -> runtime_transfer_coordinator_pb2.ClearPreparationCleanupRequest:
+    """Map preparation cleanup clear values to protobuf."""
+    message = runtime_transfer_coordinator_pb2.ClearPreparationCleanupRequest(
+        expected_revision=value.expected_revision,
     )
     message.identity.CopyFrom(coordinator_identity_to_message(value.identity))
     return message
@@ -1228,6 +1378,20 @@ _CLEANUP_STATUS_TO_PROTO = {
 }
 _CLEANUP_STATUS_FROM_PROTO = {
     value: key for key, value in _CLEANUP_STATUS_TO_PROTO.items()
+}
+_PREPARATION_CLEANUP_STATE_TO_PROTO = {
+    CoordinatorPreparationCleanupState.NOT_REQUIRED: (
+        runtime_transfer_coordinator_pb2.COORDINATOR_PREPARATION_CLEANUP_STATE_NOT_REQUIRED
+    ),
+    CoordinatorPreparationCleanupState.MULTIPART_PENDING: (
+        runtime_transfer_coordinator_pb2.COORDINATOR_PREPARATION_CLEANUP_STATE_MULTIPART_PENDING
+    ),
+    CoordinatorPreparationCleanupState.COMPLETED_OBJECT_PENDING: (
+        runtime_transfer_coordinator_pb2.COORDINATOR_PREPARATION_CLEANUP_STATE_COMPLETED_OBJECT_PENDING
+    ),
+}
+_PREPARATION_CLEANUP_STATE_FROM_PROTO = {
+    value: key for key, value in _PREPARATION_CLEANUP_STATE_TO_PROTO.items()
 }
 _CANCELLATION_REASON_TO_PROTO = {
     CoordinatorCancellationReason.CALLER: (

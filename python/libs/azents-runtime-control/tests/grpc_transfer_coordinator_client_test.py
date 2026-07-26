@@ -376,4 +376,7 @@ def _status_message() -> runtime_transfer_coordinator_pb2.CoordinatorTransferSta
         cleanup_status=(
             runtime_transfer_coordinator_pb2.COORDINATOR_CLEANUP_STATUS_NOT_REQUIRED
         ),
+        preparation_cleanup_state=(
+            runtime_transfer_coordinator_pb2.COORDINATOR_PREPARATION_CLEANUP_STATE_NOT_REQUIRED
+        ),
     )
