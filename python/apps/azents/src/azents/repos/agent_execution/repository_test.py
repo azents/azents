@@ -127,6 +127,13 @@ def _agent_session_repository() -> AgentSessionRepository:
     return AgentSessionRepository()
 
 
+async def _noop_terminal_finalization(
+    _session: AsyncSession,
+    _run_ids: list[str],
+) -> None:
+    """Satisfy the atomic replacement finalization boundary in fixture tests."""
+
+
 def test_validate_event_payload_accepts_action_message() -> None:
     """Action message is a first-class persisted event payload."""
     payload = ActionMessagePayload(
@@ -1084,6 +1091,94 @@ class TestEventExecutionRepositories:
             is None
         )
 
+    async def test_create_replacement_requires_terminal_finalization_callback(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Replacing a running Run fails closed without finalization."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-create-finalization",
+        )
+        session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repository = AgentRunRepository()
+        running = await repository.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+
+        with pytest.raises(ValueError, match="terminal finalization"):
+            await repository.create(
+                rdb_session,
+                AgentRunCreate(
+                    session_id=session.id,
+                    parent_agent_run_id=None,
+                ),
+            )
+
+        current = await repository.get_by_id(rdb_session, running.id)
+        assert current is not None
+        assert current.status is AgentRunStatus.RUNNING
+
+    async def test_create_replacement_invokes_terminal_finalization_callback(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Replacement passes every canceled Run to the same transaction callback."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-create-callback",
+        )
+        session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repository = AgentRunRepository()
+        running = await repository.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        finalized_ids: list[str] = []
+
+        async def finalize(
+            _session: AsyncSession,
+            run_ids: list[str],
+        ) -> object:
+            finalized_ids.extend(run_ids)
+            return object()
+
+        replacement = await repository.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=session.id,
+                parent_agent_run_id=None,
+            ),
+            terminal_finalization=finalize,
+        )
+
+        canceled = await repository.get_by_id(rdb_session, running.id)
+        assert canceled is not None
+        assert canceled.status is AgentRunStatus.CANCELLED
+        assert finalized_ids == [running.id]
+        assert replacement.status is AgentRunStatus.RUNNING
+
     async def test_failed_run_lookup_by_terminal_result_event(
         self,
         rdb_session: AsyncSession,
@@ -1381,6 +1476,7 @@ class TestEventExecutionRepositories:
                 session_id=event_session.id,
                 parent_agent_run_id=None,
             ),
+            terminal_finalization=_noop_terminal_finalization,
         )
 
         closed = await repo.get_by_id(rdb_session, stale.id)
@@ -1581,6 +1677,7 @@ class TestEventExecutionRepositories:
                 session_id=first_session.id,
                 parent_agent_run_id=None,
             ),
+            terminal_finalization=_noop_terminal_finalization,
         )
         other = await repo.create(
             rdb_session,

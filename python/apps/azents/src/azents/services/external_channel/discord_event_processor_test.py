@@ -40,7 +40,7 @@ from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackNormalizedMessage,
 )
-from azents.services.input_buffer import InputBufferService
+from azents.services.mailbox import MailboxService
 from azents.services.root_agent_session_creation import RootAgentSessionCreationService
 from azents.worker.session.lifecycle import SessionLifecycleService
 
@@ -116,7 +116,7 @@ class _Processor(ExternalChannelEventProcessorService):
             ),
             workspace_repository=MagicMock(),
             config=MagicMock(),
-            input_buffer_service=cast(InputBufferService, MagicMock()),
+            mailbox_item_service=cast(MailboxService, MagicMock()),
             session_lifecycle=cast(SessionLifecycleService, MagicMock()),
         )
         self.persisted: list[dict[str, object]] = []

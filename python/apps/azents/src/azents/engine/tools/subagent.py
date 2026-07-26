@@ -59,7 +59,6 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.mailbox import MailboxService
-from azents.services.subagent_terminal_result import SubagentTerminalResultService
 
 _ROOT_AGENT_USAGE_HINT_TEXT = """You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
@@ -216,7 +215,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         event_transcript_repository: EventTranscriptRepository,
         agent_mailbox_service: AgentMailboxService,
         mailbox_item_service: MailboxService,
-        subagent_terminal_result_service: SubagentTerminalResultService,
         broker: SessionBroker,
         agent_repository: AgentRepository,
         agent: Agent,
@@ -228,7 +226,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.event_transcript_repository = event_transcript_repository
         self.agent_mailbox_service = agent_mailbox_service
         self.mailbox_item_service = mailbox_item_service
-        self.subagent_terminal_result_service = subagent_terminal_result_service
         self.broker = broker
         self.agent_repository = agent_repository
         self.agent = agent
@@ -656,22 +653,13 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     async def _wait_agent(self, timeout_seconds: int) -> str:
         """Poll mailbox activity with descendant-idle fallback."""
-        current_session_id = self._current_session_id()
         deadline = time.monotonic() + timeout_seconds
         while True:
-            await self.subagent_terminal_result_service.deliver_pending_for_parent_children(
-                current_session_id,
-                repair_source="parent_wait",
-            )
             observation = await self._observe_wait_state()
             immediate = self._wait_observation_result(observation)
             if immediate is not None:
                 if observation.mailbox_updated or observation.descendant_count == 0:
                     return immediate
-                await self.subagent_terminal_result_service.deliver_pending_for_parent_children(
-                    current_session_id,
-                    repair_source="parent_wait",
-                )
                 final = await self._observe_wait_state()
                 final_result = self._wait_observation_result(final)
                 if final_result is not None:
@@ -680,10 +668,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                await self.subagent_terminal_result_service.deliver_pending_for_parent_children(
-                    current_session_id,
-                    repair_source="parent_wait",
-                )
                 final = await self._observe_wait_state()
                 final_result = self._wait_observation_result(final)
                 if final_result is not None:
@@ -1117,12 +1101,6 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
             event_transcript_repository=EventTranscriptRepository(),
             agent_mailbox_service=agent_mailbox_service,
             mailbox_item_service=self.mailbox_item_service,
-            subagent_terminal_result_service=SubagentTerminalResultService(
-                session_manager=self.session_manager,
-                agent_run_repository=agent_run_repository,
-                agent_session_repository=agent_session_repository,
-                agent_mailbox_service=agent_mailbox_service,
-            ),
             broker=self.broker,
             agent_repository=self.agent_repository,
             agent=agent,

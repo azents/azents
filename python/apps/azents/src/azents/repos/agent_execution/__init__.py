@@ -1,7 +1,7 @@
 """Event agent execution repository."""
 
 import datetime
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -437,19 +437,43 @@ class AgentRunRepository:
         self,
         session: AsyncSession,
         create: AgentRunCreate,
+        *,
+        terminal_finalization: Callable[[AsyncSession, list[str]], Awaitable[object]]
+        | None = None,
     ) -> AgentRunState:
-        """Create Agent run row."""
+        """Create Agent run row and finalize replaced runs when requested."""
+        existing_running = await session.scalar(
+            sa.select(RDBAgentRun.id)
+            .where(
+                RDBAgentRun.session_id == create.session_id,
+                RDBAgentRun.status == AgentRunStatus.RUNNING,
+            )
+            .with_for_update()
+            .limit(1)
+        )
+        if existing_running is not None and terminal_finalization is None:
+            raise ValueError(
+                "Creating a Run with existing RUNNING rows requires "
+                "terminal finalization"
+            )
         if create.status == AgentRunStatus.RUNNING:
             await self._lock_session_for_run_activation(
                 session,
                 session_id=create.session_id,
             )
-        await self.mark_session_running_terminal(
-            session,
-            session_id=create.session_id,
-            status=AgentRunStatus.CANCELLED,
-            ended_at=datetime.datetime.now(datetime.UTC),
-        )
+        if existing_running is not None:
+            transitioned_runs = await self.mark_session_running_terminal(
+                session,
+                session_id=create.session_id,
+                status=AgentRunStatus.CANCELLED,
+                ended_at=datetime.datetime.now(datetime.UTC),
+            )
+            if transitioned_runs:
+                assert terminal_finalization is not None
+                await terminal_finalization(
+                    session,
+                    [run.id for run in transitioned_runs],
+                )
         run_index = create.run_index
         if run_index is None:
             max_run_index = await session.scalar(
@@ -681,31 +705,36 @@ class AgentRunRepository:
         session_id: str,
         status: AgentRunStatus,
         ended_at: datetime.datetime,
-    ) -> None:
-        """Close remaining running Run projections and mark the latest unread."""
+    ) -> list[AgentRunState]:
+        """Close remaining running Run projections and return every transition."""
         if status not in _TERMINAL_RUN_STATUSES:
             raise ValueError("AgentRun terminal status is required")
         result = await session.execute(
-            sa.update(RDBAgentRun)
+            sa.select(RDBAgentRun)
             .where(
                 RDBAgentRun.session_id == session_id,
                 RDBAgentRun.status == AgentRunStatus.RUNNING,
             )
-            .values(
-                status=status,
-                phase=AgentRunPhase.IDLE,
-                active_tool_calls=[],
-                model_call_started_at=None,
-                retry_state=None,
-                ended_at=ended_at,
-            )
-            .returning(RDBAgentRun)
+            .order_by(RDBAgentRun.run_index.asc())
+            .with_for_update()
         )
-        transitioned_runs = list(result.scalars())
-        if transitioned_runs:
-            latest_run = max(transitioned_runs, key=lambda run: run.run_index)
-            await self._upsert_unread_terminal_run(session, latest_run)
+        transitioned_rdbs: list[RDBAgentRun] = []
+        for rdb in result.scalars():
+            self._apply_terminal_values(
+                rdb,
+                status=status,
+                ended_at=ended_at,
+                last_completed_event_id=None,
+                terminal_result_event_id=None,
+                terminal_result_message=None,
+            )
+            await self._upsert_unread_terminal_run(session, rdb)
+            transitioned_rdbs.append(rdb)
         await session.flush()
+        for rdb in transitioned_rdbs:
+            await session.refresh(rdb)
+        transitioned_runs = [self._build(rdb) for rdb in transitioned_rdbs]
+        return transitioned_runs
 
     async def next_run_index(
         self,
@@ -883,6 +912,27 @@ class AgentRunRepository:
         rdb.parent_result_delivery_state = AgentRunParentResultDeliveryState.ENQUEUED
         rdb.parent_result_mailbox_item_id = mailbox_item_id
         rdb.parent_result_enqueued_at = enqueued_at
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
+    async def mark_parent_result_suppressed(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        finalized_at: datetime.datetime,
+    ) -> AgentRunState:
+        """Finalize an ineligible terminal Run without a parent mailbox item."""
+        rdb = await session.get(RDBAgentRun, run_id)
+        if rdb is None:
+            raise ValueError("AgentRun not found")
+        if rdb.parent_result_delivery_state is not None:
+            return self._build(rdb)
+        if rdb.status not in _TERMINAL_RUN_STATUSES:
+            raise ValueError("AgentRun is not terminal")
+        rdb.parent_result_delivery_state = AgentRunParentResultDeliveryState.SUPPRESSED
+        rdb.parent_result_enqueued_at = finalized_at
         await session.flush()
         await session.refresh(rdb)
         return self._build(rdb)

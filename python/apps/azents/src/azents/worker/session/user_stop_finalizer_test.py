@@ -253,6 +253,29 @@ class _SessionLifecycle:
         del session, session_id
         self._assert_owner_generation(owner_generation)
 
+    async def mark_agent_run_terminal_if_running(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+        run_id: str,
+        status: AgentRunStatus,
+    ) -> None:
+        """Delegate terminal persistence through the lifecycle boundary."""
+        self._assert_owner_generation(owner_generation)
+        run = await self.run_repository.get_by_id(
+            cast(AsyncSession, object()),
+            run_id,
+        )
+        if run is not None and run.session_id != session_id:
+            raise ValueError("AgentRun session mismatch")
+        await self.run_repository.mark_terminal_if_running(
+            cast(AsyncSession, object()),
+            run_id,
+            status,
+            ended_at=datetime.now(UTC),
+        )
+
 
 class _LiveEventStore:
     """RedisLiveEventStore test double."""

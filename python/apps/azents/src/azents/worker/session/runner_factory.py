@@ -14,7 +14,6 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.services.mailbox import MailboxService
-from azents.services.subagent_terminal_result import SubagentTerminalResultService
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.deps import get_worker_config
 from azents.worker.events.publisher import WorkerEventPublisher
@@ -45,9 +44,6 @@ class SessionRunnerFactory:
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
-    subagent_terminal_result_service: Annotated[
-        SubagentTerminalResultService, Depends(SubagentTerminalResultService)
-    ]
     idle_continuation_service: Annotated[
         IdleContinuationService, Depends(IdleContinuationService)
     ]
@@ -65,7 +61,6 @@ class SessionRunnerFactory:
             session_manager=self.session_manager,
             agent_session_repository=self.agent_session_repository,
             mailbox_item_service=self.mailbox_item_service,
-            subagent_terminal_result_service=self.subagent_terminal_result_service,
             idle_continuation_service=self.idle_continuation_service,
             user_stop_finalizer=self.user_stop_finalizer,
             run_executor=self.run_executor,

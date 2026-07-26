@@ -25,6 +25,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution.data import PendingCommandSnapshot
+from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 from azents.worker.deps import get_worker_broker
 from azents.worker.session.execution_snapshot import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -48,6 +49,10 @@ class SessionLifecycleService:
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     mailbox_item_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
+    terminal_finalization_coordinator: Annotated[
+        TerminalRunFinalizationCoordinator,
+        Depends(TerminalRunFinalizationCoordinator),
+    ]
 
     async def claim_owner_generation(self, session_id: str) -> int:
         """Claim the next durable generation after Redis ownership acquisition."""
@@ -461,6 +466,10 @@ class SessionLifecycleService:
                 AgentRunStatus.CANCELLED,
                 ended_at=datetime.datetime.now(datetime.UTC),
             )
+            await self.terminal_finalization_coordinator.finalize_run_in_session(
+                db_session,
+                run_id=run_id,
+            )
             await db_session.commit()
             return cancelled
 
@@ -523,17 +532,29 @@ class SessionLifecycleService:
         self,
         session_id: str,
         *,
+        owner_generation: int,
         status: AgentRunStatus,
     ) -> None:
-        """Close remaining running AgentRun projections when session is idle."""
-        await self.run_short_db(
-            lambda db: self.agent_run_repository.mark_session_running_terminal(
-                db,
+        """Close remaining AgentRun projections and finalize parent delivery."""
+
+        async def mark_terminal(db_session: AsyncSession) -> None:
+            await self._lock_owned_session(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
+            runs = await self.agent_run_repository.mark_session_running_terminal(
+                db_session,
                 session_id=session_id,
                 status=status,
                 ended_at=datetime.datetime.now(datetime.UTC),
-            ),
-        )
+            )
+            await self.terminal_finalization_coordinator.finalize_runs_in_session(
+                db_session,
+                run_ids=[run.id for run in runs],
+            )
+
+        await self.run_short_db(mark_terminal)
 
     async def mark_agent_run_terminal_if_running(
         self,
@@ -559,6 +580,10 @@ class SessionLifecycleService:
                 run_id,
                 status,
                 ended_at=datetime.datetime.now(datetime.UTC),
+            )
+            await self.terminal_finalization_coordinator.finalize_run_in_session(
+                db_session,
+                run_id=run_id,
             )
 
         await self.run_short_db(mark_terminal)

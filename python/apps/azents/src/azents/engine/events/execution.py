@@ -60,6 +60,7 @@ from azents.repos.agent_execution import (
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import ChannelActionCommit
+from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 
 logger = logging.getLogger(__name__)
 
@@ -337,6 +338,8 @@ class AgentRunExecution[
         run_repo: RunStateRepository | None = None,
         transcript_repo: TranscriptRepository | None = None,
         session_repo: SessionHeadRepository | None = None,
+        terminal_finalization_coordinator: TerminalRunFinalizationCoordinator
+        | None = None,
         system_prompt_snapshot_repo: SystemPromptSnapshotRepositoryProtocol
         | None = None,
     ) -> None:
@@ -361,6 +364,7 @@ class AgentRunExecution[
         self.run_repo = run_repo or AgentRunRepository()
         self.transcript_repo = transcript_repo or EventTranscriptRepository()
         self.session_repo = session_repo
+        self.terminal_finalization_coordinator = terminal_finalization_coordinator
         self.system_prompt_snapshot_repo = system_prompt_snapshot_repo
 
     async def run(
@@ -1403,6 +1407,11 @@ class AgentRunExecution[
             terminal_result_event_id=terminal_result_event_id,
             terminal_result_message=terminal_result_message,
         )
+        if self.terminal_finalization_coordinator is not None:
+            await self.terminal_finalization_coordinator.finalize_run_in_session(
+                session,
+                run_id=run_id,
+            )
         if self.model_file_pin_repo is not None:
             await self.model_file_pin_repo.release_run(session, run_id=run_id)
 

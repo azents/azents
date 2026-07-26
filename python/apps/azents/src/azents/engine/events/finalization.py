@@ -17,6 +17,7 @@ from azents.engine.run.failure import (
 )
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 
 
 @dataclasses.dataclass(frozen=True)
@@ -33,6 +34,10 @@ class FailedRunEventStore:
 
     transcript_repo: Annotated[TranscriptRepository, Depends(EventTranscriptRepository)]
     run_repo: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    terminal_finalization_coordinator: Annotated[
+        TerminalRunFinalizationCoordinator,
+        Depends(TerminalRunFinalizationCoordinator),
+    ]
 
     async def append_terminal_failed_run(
         self,
@@ -86,5 +91,9 @@ class FailedRunEventStore:
             last_completed_event_id=run_marker.id,
             terminal_result_event_id=error_event.id,
             terminal_result_message=user_message,
+        )
+        await self.terminal_finalization_coordinator.finalize_run_in_session(
+            session,
+            run_id=run_id,
         )
         return FailedRunEventStoreResult(error_event=error_event, run_marker=run_marker)

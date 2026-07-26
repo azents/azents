@@ -1,7 +1,6 @@
 """User stop finalization."""
 
 import dataclasses
-import datetime
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import Annotated
@@ -96,7 +95,7 @@ class UserStopFinalizer:
             removed_call_ids={call.call_id for call in effective_tool_calls},
         )
         if effective_run_id is None:
-            await self._mark_session_agent_runs_terminal(
+            await self.session_lifecycle.mark_session_agent_runs_terminal(
                 session_id,
                 owner_generation=owner_generation,
                 status=AgentRunStatus.STOPPED,
@@ -377,22 +376,12 @@ class UserStopFinalizer:
         owner_generation: int,
         status: AgentRunStatus,
     ) -> None:
-        """Close remaining running AgentRun projections when session is idle."""
-
-        async def mark_terminal(db_session: AsyncSession) -> None:
-            await self.session_lifecycle.assert_owner_generation(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            await self.agent_run_repository.mark_session_running_terminal(
-                db_session,
-                session_id=session_id,
-                status=status,
-                ended_at=datetime.datetime.now(datetime.UTC),
-            )
-
-        await self._run_short_db(mark_terminal)
+        """Close remaining Runs through the terminal coordinator."""
+        await self.session_lifecycle.mark_session_agent_runs_terminal(
+            session_id,
+            owner_generation=owner_generation,
+            status=status,
+        )
 
     async def _mark_agent_run_terminal_if_running(
         self,
@@ -402,25 +391,13 @@ class UserStopFinalizer:
         run_id: str,
         status: AgentRunStatus,
     ) -> None:
-        """Close AgentRun row as terminal state if still running."""
-
-        async def mark_terminal(db_session: AsyncSession) -> None:
-            await self.session_lifecycle.assert_owner_generation(
-                db_session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            run = await self.agent_run_repository.get_by_id(db_session, run_id)
-            if run is not None and run.session_id != session_id:
-                raise ValueError("AgentRun session mismatch")
-            await self.agent_run_repository.mark_terminal_if_running(
-                db_session,
-                run_id,
-                status,
-                ended_at=datetime.datetime.now(datetime.UTC),
-            )
-
-        await self._run_short_db(mark_terminal)
+        """Close one Run through the terminal coordinator."""
+        await self.session_lifecycle.mark_agent_run_terminal_if_running(
+            session_id,
+            owner_generation=owner_generation,
+            run_id=run_id,
+            status=status,
+        )
 
     async def _run_short_db(
         self,

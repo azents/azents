@@ -184,6 +184,7 @@ from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 from azents.services.xai_imagine import XaiImagineClient
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied,
@@ -348,6 +349,10 @@ class AgentEngineAdapter:
     ]
     model_file_pin_repo: Annotated[
         ModelFilePinRepository, Depends(ModelFilePinRepository)
+    ]
+    terminal_finalization_coordinator: Annotated[
+        TerminalRunFinalizationCoordinator,
+        Depends(TerminalRunFinalizationCoordinator),
     ]
     compactor: Annotated[ManualCompactor, Depends(EventCompactor)]
     summary_model_call: Annotated[SummaryModelCall, Depends(_summary_model_call)]
@@ -1008,6 +1013,7 @@ class AgentEngineAdapter:
             run_repo=self.run_repo,
             transcript_repo=self.transcript_repo,
             session_repo=self.session_head_repo,
+            terminal_finalization_coordinator=self.terminal_finalization_coordinator,
             system_prompt_snapshot_repo=self.system_prompt_snapshot_repo,
         )
 
