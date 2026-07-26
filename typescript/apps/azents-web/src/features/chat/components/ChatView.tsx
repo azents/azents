@@ -68,8 +68,10 @@ import { CompactionIndicator } from "./CompactionIndicator";
 import { MessageBubble } from "./MessageBubble";
 import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
+import { PendingMailboxBubble } from "./PendingMailboxBubble";
 import { RunRetryCard } from "./RunRetryCard";
 import { ToolActivityGroup } from "./ToolActivityGroup";
+import type { PendingMailboxEntry } from "../hooks/pendingMailboxState";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type {
   ActionExecutionProjection,
@@ -362,6 +364,8 @@ interface ChatViewProps {
   timelineEvents: ChatEventResponse[];
   /** not yet model turn  to not injected pending input buffers */
   pendingInputBuffers: PendingInputBuffer[];
+  /** typed durable mailbox pending entries */
+  pendingMailboxEntries?: PendingMailboxEntry[];
   activeAgent: AgentResponse | null;
   defaultInferenceProfile: RequestedInferenceProfile;
   sessionId?: string | null;
@@ -448,6 +452,7 @@ export function ChatView({
   messages,
   timelineEvents,
   pendingInputBuffers,
+  pendingMailboxEntries = [],
   activeAgent,
   defaultInferenceProfile,
   sessionId = null,
@@ -628,6 +633,7 @@ export function ChatView({
   const hasTimelineItems =
     messages.length > 0 ||
     pendingInputBuffers.length > 0 ||
+    pendingMailboxEntries.length > 0 ||
     liveRetryVisible ||
     liveOperationVisible ||
     activeRun !== null ||
@@ -1562,6 +1568,14 @@ export function ChatView({
                       lastEventReceivedAt={lastEventReceivedAt}
                     />
                   )}
+                {chatTimelineState.type === "LATEST_FOLLOWING" &&
+                  pendingMailboxEntries.map((entry) => (
+                    <PendingMailboxBubble
+                      key={`${entry.item.mailbox_item_id}:${entry.item.item_key}`}
+                      entry={entry}
+                      onDelete={onDeletePendingInputBuffer}
+                    />
+                  ))}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   pendingInputBuffers.map((buffer) =>
                     buffer.id.startsWith("optimistic:") ? (
