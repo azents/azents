@@ -334,6 +334,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Slack Connection Setup and Management Requirements](requirements/slack-260722-connection-management.md) | slack-260722 | 2026-07-22 | - |
 | [Readable Slack Channel Messages Requirements](requirements/slack-260723-readable-channel-messages.md) | slack-260723 | 2026-07-23 | 2026-07-23 |
 | [External Channel Exchange File Publication Requirements](requirements/slack-260725-outbound-exchange-files.md) | slack-260725 | 2026-07-25 | 2026-07-25 |
+| [Multi-Agent Slack App Routing Requirements](requirements/slackapp-260725-multi-agent-routing.md) | slackapp-260725 | 2026-07-25 | - |
 | [Slack Channel Control Feedback Requirements](requirements/slackops-260723-channel-control-feedback.md) | slackops-260723 | 2026-07-23 | 2026-07-23 |
 | [Stage 4 (browser/web QA) Historical Requirements Reconstruction](requirements/stage4-260410-stage4-web.md) | stage4-260410 | 2026-04-10 | 2026-04-10 |
 | [Use Standard Responses for ChatGPT OAuth Historical Requirements Reconstruction](requirements/standard-260716-standard-responses-for-chatgpt-oauth.md) | standard-260716 | 2026-07-16 | - |
@@ -665,6 +666,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Slack Connection Setup and Management](adr/slack-260722-connection-management.md)
 - [Readable Slack Channel Messages](adr/slack-260723-readable-channel-messages.md)
 - [External Channel Exchange File Publication](adr/slack-260725-outbound-exchange-files.md)
+- [Multi-Agent Slack App Routing](adr/slackapp-260725-multi-agent-routing.md)
 - [Slack Channel Control Feedback](adr/slackops-260723-channel-control-feedback.md)
 - [Stage 4 (browser/web QA) Historical Decision Reconstruction](adr/stage4-260410-stage4-web.md)
 - [Use Standard Responses for ChatGPT OAuth](adr/standard-260716-standard-responses-for-chatgpt-oauth.md)
