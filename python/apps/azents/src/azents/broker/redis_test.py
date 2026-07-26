@@ -147,7 +147,7 @@ class TestRedisBrokerMessages:
         await sender.send_message(wake_up)
         assert await worker.receive_messages() == [wake_up]
 
-        await sender.notify_mailbox_activity(wake_up.session_id)
+        await worker.notify_mailbox_activity(wake_up.session_id)
 
         assert await worker.receive_messages() == [
             SessionMailboxActivity(session_id=wake_up.session_id)
@@ -158,11 +158,10 @@ class TestRedisBrokerMessages:
         redis: Redis,
     ) -> None:
         """Idle sessions do not receive mailbox-only activity signals."""
-        sender = RedisBroker(redis)
         worker = RedisBroker(redis, worker_id="worker-1")
         await worker.setup()
 
-        await sender.notify_mailbox_activity("session-1")
+        await worker.notify_mailbox_activity("session-1")
 
         assert await redis.xlen("azents:worker:worker-1:incoming") == 0
 
