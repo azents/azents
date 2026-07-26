@@ -315,6 +315,7 @@ export function ChatSessionView({
           messages={output.messages}
           timelineEvents={output.timelineEvents}
           pendingInputBuffers={output.pendingInputBuffers}
+          pendingMailboxEntries={output.pendingMailboxEntries}
           activeAgent={agent}
           sessionId={output.sessionId}
           isResponsePending={output.isResponsePending}

@@ -21,6 +21,13 @@ import {
   resolveDismissedLiveRetryKey,
 } from "../hooks/liveRetryVisibility";
 import {
+  durableMailboxCorrelation,
+  emptyPendingMailboxState,
+  pendingMailboxReducer,
+  type PendingMailboxState,
+  selectPendingMailboxEntries,
+} from "../hooks/pendingMailboxState";
+import {
   applyProviderToolCallItem,
   providerToolCallFromPayload,
 } from "../hooks/providerToolCallProjection";
@@ -51,7 +58,6 @@ import type {
   FailedRunFinalizationReason,
   FailedRunRetryability,
   FileAttachment,
-  FilePart,
   GoalStateSnapshot,
   InputActionDefinition,
   PendingInputBuffer,
@@ -67,7 +73,6 @@ import type {
   ChatWriteResponse,
   LiveEventListResponse,
   PendingMailboxEnvelope,
-  PendingMailboxItem,
   RequestedInferenceProfile,
 } from "@azents/public-client";
 
@@ -120,6 +125,8 @@ export interface ChatSessionContainerOutput {
   timelineEvents: ChatEventResponse[];
   /** not yet model turn  to not injected pending input buffers */
   pendingInputBuffers: PendingInputBuffer[];
+  /** typed durable pending mailbox entries */
+  pendingMailboxEntries: ReturnType<typeof selectPendingMailboxEntries>;
   /** WebSocket connection status */
   connectionStatus: ConnectionStatus;
   /** waiting for response */
@@ -1509,94 +1516,6 @@ function mapInputBufferLiveEvent(
   };
 }
 
-function pendingMailboxItemToInputBuffer(
-  envelope: PendingMailboxEnvelope,
-  item: PendingMailboxItem,
-): PendingInputBuffer | null {
-  const presentation = item.presentation;
-  const metadata: Record<string, string> = {
-    mailbox_item_id: envelope.mailbox_item_id,
-    mailbox_item_key: item.item_key,
-    mailbox_kind: envelope.kind,
-    mailbox_presentation: presentation.type,
-  };
-  let content = "";
-  let action: ChatAction | null = null;
-  let requestedInferenceProfile: RequestedInferenceProfile | null = null;
-  let fileParts: FilePart[] = [];
-  let attachments: string[] = [];
-
-  switch (presentation.type) {
-    case "user_message":
-      content = presentation.content;
-      attachments = presentation.attachments ?? [];
-      fileParts =
-        presentation.file_parts?.map((part) => ({
-          ...part,
-          type: "file",
-        })) ?? [];
-      requestedInferenceProfile =
-        presentation.requested_inference_profile ?? null;
-      break;
-    case "goal_continuation":
-      content = presentation.content;
-      requestedInferenceProfile =
-        presentation.requested_inference_profile ?? null;
-      break;
-    case "agent_message":
-      content = presentation.content;
-      metadata.message_kind = presentation.message_kind;
-      break;
-    case "external_channel_message":
-      content = presentation.body ?? "";
-      metadata.provider = presentation.provider;
-      metadata.resource_label = presentation.resource_label;
-      metadata.resource_type = presentation.resource_type;
-      metadata.authorization = presentation.authorization;
-      break;
-    case "action_message":
-      content = presentation.message;
-      action = chatActionFromValue(presentation.action);
-      requestedInferenceProfile =
-        presentation.requested_inference_profile ?? null;
-      metadata.action = "true";
-      break;
-  }
-
-  return {
-    id: item.id,
-    sessionId: envelope.session_id,
-    content,
-    action,
-    attachments,
-    fileParts,
-    attachmentFiles: [],
-    metadata,
-    createdAt: item.created_at,
-    status: "pending",
-    requestedInferenceProfile,
-  };
-}
-
-function pendingMailboxEnvelopeToInputBuffers(
-  envelope: PendingMailboxEnvelope,
-): PendingInputBuffer[] {
-  return envelope.items.flatMap((item) => {
-    const buffer = pendingMailboxItemToInputBuffer(envelope, item);
-    return buffer === null ? [] : [buffer];
-  });
-}
-
-function pendingBufferMatchesMailboxItem(
-  buffer: PendingInputBuffer,
-  mailboxItemId: string,
-): boolean {
-  return (
-    buffer.id === mailboxItemId ||
-    buffer.metadata.mailbox_item_id === mailboxItemId
-  );
-}
-
 function pendingMailboxEnvelopeWaitsForModel(
   envelope: PendingMailboxEnvelope,
 ): boolean {
@@ -1613,6 +1532,7 @@ interface PartialHistoryState {
 interface ManagedLiveState {
   partialHistory: PartialHistoryState;
   pendingInputBuffers: PendingInputBuffer[];
+  pendingMailbox: PendingMailboxState;
   liveRun: ChatLiveRunState | null;
   dismissedLiveRetryKey: string | null;
   liveRunPhase: AgentRunPhase | null;
@@ -1675,6 +1595,7 @@ function emptyManagedLiveState(): ManagedLiveState {
   return {
     partialHistory: emptyPartialHistoryState(),
     pendingInputBuffers: [],
+    pendingMailbox: emptyPendingMailboxState(),
     liveRun: null,
     dismissedLiveRetryKey: null,
     liveRunPhase: null,
@@ -1797,9 +1718,17 @@ function replaceLiveStateFromSnapshot(
     emptyPartialHistoryState(),
   );
   const partialHistoryWithGoalContinuations = partialHistory;
-  const pendingInputBuffers = live.mailbox_items.flatMap(
-    pendingMailboxEnvelopeToInputBuffers,
-  );
+  const pendingInputBuffers: PendingInputBuffer[] = [];
+  let pendingMailbox = pendingMailboxReducer(emptyPendingMailboxState(), {
+    type: "BASELINE_REPLACED",
+    envelopes: live.mailbox_items,
+  });
+  for (const actionExecution of live.action_executions ?? []) {
+    pendingMailbox = pendingMailboxReducer(pendingMailbox, {
+      type: "ACTION_OWNERSHIP_UPDATED",
+      mailboxItemId: actionExecution.execution.source_mailbox_item_id,
+    });
+  }
   const runSnapshot = liveRunSnapshotFromResponse(live);
   const liveRun =
     runSnapshot.type === "PRESENT"
@@ -1810,12 +1739,14 @@ function replaceLiveStateFromSnapshot(
   const currentLiveRunPhase = liveRunPhase(liveRun);
   const isResponsePending =
     isUserBlockingRunPhase(currentLiveRunPhase) ||
-    partialHistory.order.length > 0;
+    partialHistory.order.length > 0 ||
+    live.mailbox_items.some(pendingMailboxEnvelopeWaitsForModel);
   return {
     state: {
       ...emptyManagedLiveState(),
       partialHistory: partialHistoryWithGoalContinuations,
       pendingInputBuffers,
+      pendingMailbox,
       liveRun,
       dismissedLiveRetryKey: resolveDismissedLiveRetryKey(
         liveRun,
@@ -2208,6 +2139,10 @@ export function useChatSessionContainer(
     sessionCurrentInferenceProfile ??
     agentDefaultInferenceProfile;
   const pendingInputBuffers = managedLiveState.pendingInputBuffers;
+  const pendingMailboxEntries = useMemo(
+    () => selectPendingMailboxEntries(managedLiveState.pendingMailbox),
+    [managedLiveState.pendingMailbox],
+  );
   const liveRun = useMemo(
     () =>
       liveRunForDisplay(
@@ -2395,6 +2330,10 @@ export function useChatSessionContainer(
         };
         setManagedLiveState((prev) => ({
           ...prev,
+          pendingMailbox: pendingMailboxReducer(prev.pendingMailbox, {
+            type: "ACTION_OWNERSHIP_UPDATED",
+            mailboxItemId: actionExecution.execution.source_mailbox_item_id,
+          }),
           actionExecutions: upsertActionExecutionProjection(
             prev.actionExecutions,
             actionExecution,
@@ -2443,10 +2382,10 @@ export function useChatSessionContainer(
       if ("type" in event && event.type === "mailbox_item_removed") {
         setManagedLiveState((prev) => ({
           ...prev,
-          pendingInputBuffers: prev.pendingInputBuffers.filter(
-            (buffer) =>
-              !pendingBufferMatchesMailboxItem(buffer, event.mailbox_item_id),
-          ),
+          pendingMailbox: pendingMailboxReducer(prev.pendingMailbox, {
+            type: "REMOVED",
+            mailboxItemId: event.mailbox_item_id,
+          }),
         }));
         return;
       }
@@ -2540,21 +2479,12 @@ export function useChatSessionContainer(
       }
 
       if ("type" in event && event.type === "mailbox_item_upserted") {
-        const pending = pendingMailboxEnvelopeToInputBuffers(
-          event.mailbox_item,
-        );
         setManagedLiveState((prev) => ({
           ...prev,
-          pendingInputBuffers: [
-            ...prev.pendingInputBuffers.filter(
-              (buffer) =>
-                !pendingBufferMatchesMailboxItem(
-                  buffer,
-                  event.mailbox_item.mailbox_item_id,
-                ),
-            ),
-            ...pending,
-          ],
+          pendingMailbox: pendingMailboxReducer(prev.pendingMailbox, {
+            type: "UPSERTED",
+            envelope: event.mailbox_item,
+          }),
           isResponsePending:
             prev.isResponsePending ||
             pendingMailboxEnvelopeWaitsForModel(event.mailbox_item),
@@ -2594,6 +2524,15 @@ export function useChatSessionContainer(
             prev.pendingInputBuffers,
             responseEvent,
           ),
+          pendingMailbox: (() => {
+            const correlation = durableMailboxCorrelation(responseEvent);
+            return correlation === null
+              ? prev.pendingMailbox
+              : pendingMailboxReducer(prev.pendingMailbox, {
+                  type: "DURABLE_PROMOTED",
+                  correlation,
+                });
+          })(),
         }));
         if (responseEvent.kind === "run_marker") {
           const markerRunId = stringField(responseEvent.payload, "run_id");
@@ -3279,12 +3218,22 @@ export function useChatSessionContainer(
 
   const onDeletePendingInputBuffer = useCallback(
     (bufferId: string) => {
+      const mailboxEntry =
+        managedLiveState.pendingMailbox.entriesByCorrelation[bufferId];
       const mailboxItemId =
+        mailboxEntry?.envelope.mailbox_item_id ??
         managedLiveState.pendingInputBuffers.find(
           (buffer) => buffer.id === bufferId,
-        )?.metadata.mailbox_item_id ?? bufferId;
+        )?.metadata.mailbox_item_id ??
+        bufferId;
       setManagedLiveState((prev) => ({
         ...prev,
+        pendingMailbox: mailboxEntry
+          ? pendingMailboxReducer(prev.pendingMailbox, {
+              type: "MARK_DELETING",
+              mailboxItemId,
+            })
+          : prev.pendingMailbox,
         pendingInputBuffers: prev.pendingInputBuffers.map((buffer) =>
           buffer.id === bufferId ? { ...buffer, status: "deleting" } : buffer,
         ),
@@ -3294,6 +3243,12 @@ export function useChatSessionContainer(
         {
           onSuccess: () => {
             setManagedLiveState((prev) => {
+              const nextMailbox = mailboxEntry
+                ? pendingMailboxReducer(prev.pendingMailbox, {
+                    type: "DELETE_SUCCEEDED",
+                    mailboxItemId,
+                  })
+                : prev.pendingMailbox;
               const nextBuffers = prev.pendingInputBuffers.filter(
                 (buffer) => buffer.id !== bufferId,
               );
@@ -3303,6 +3258,7 @@ export function useChatSessionContainer(
                 prev.liveRun !== null;
               return {
                 ...prev,
+                pendingMailbox: nextMailbox,
                 pendingInputBuffers: nextBuffers,
                 isResponsePending:
                   hasModelPendingInputBuffers(nextBuffers) ||
@@ -3314,6 +3270,12 @@ export function useChatSessionContainer(
           onError: () => {
             setManagedLiveState((prev) => ({
               ...prev,
+              pendingMailbox: mailboxEntry
+                ? pendingMailboxReducer(prev.pendingMailbox, {
+                    type: "DELETE_FAILED",
+                    mailboxItemId,
+                  })
+                : prev.pendingMailbox,
               pendingInputBuffers: prev.pendingInputBuffers.map((buffer) =>
                 buffer.id === bufferId
                   ? { ...buffer, status: "pending" }
@@ -3327,6 +3289,7 @@ export function useChatSessionContainer(
     [
       deleteInputBufferMutation,
       managedLiveState.pendingInputBuffers,
+      managedLiveState.pendingMailbox.entriesByCorrelation,
       sessionId,
       startResync,
     ],
@@ -3418,6 +3381,7 @@ export function useChatSessionContainer(
     messages,
     timelineEvents,
     pendingInputBuffers,
+    pendingMailboxEntries,
     connectionStatus,
     isResponsePending,
     isWritePending,
