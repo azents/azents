@@ -17,8 +17,8 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
-last_verified_at: 2026-07-24
-spec_version: 4
+last_verified_at: 2026-07-26
+spec_version: 5
 ---
 
 # Agent Runtime Persistence
@@ -80,6 +80,11 @@ Only `reset` may delete Agent Workspace data.
   storage.
 - `observe` is read-only.
 
+For desired-running Runtimes, periodic reconciliation uses idempotent `start` to compare the
+Provider-managed workload against the current Runner image and configuration. Equivalent workloads
+are reused. Drifted Docker containers or Kubernetes Pods are replaced while the host workspace
+directory or PVC remains intact.
+
 Any ambiguous backend outcome is treated as unavailable or retryable until Provider evidence proves
 the desired state. Ambiguity is not permission to delete the workspace.
 
@@ -140,4 +145,5 @@ Required checks:
 
 ## Changelog
 
+- **2026-07-26 (spec_version=5)** — Added storage-preserving periodic convergence for desired-running Runtime workload image and configuration drift.
 - **2026-07-03 (spec_version=3)** — Reflected Project-first Workspace browser ownership and registry-scoped Project root action boundary.
