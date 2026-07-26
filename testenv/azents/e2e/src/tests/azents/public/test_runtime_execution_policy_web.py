@@ -28,48 +28,45 @@ _SIGNUP_PASSWORD = "TestPass123!"
 _STATUS_RESPONSE_OVERRIDE = r"""
 (() => {
   const originalFetch = window.fetch.bind(window);
-  const mutate = (value) => {
-    if (Array.isArray(value)) {
-      return value.map(mutate);
-    }
-    if (value !== null && typeof value === "object") {
-      if (
-        Object.hasOwn(value, "configured") &&
-        Object.hasOwn(value, "target") &&
-        Object.hasOwn(value, "applied") &&
-        Object.hasOwn(value, "required_action") &&
-        Object.hasOwn(value, "status")
-      ) {
-        return {
-          ...value,
-          status: window.localStorage.getItem("e2e-runtime-policy-status"),
-          required_action: window.localStorage.getItem(
-            "e2e-runtime-policy-required-action",
-          ),
-        };
-      }
-      return Object.fromEntries(
-        Object.entries(value).map(([key, child]) => [key, mutate(child)]),
-      );
-    }
-    return value;
-  };
+  const status = () => ({
+    status: window.localStorage.getItem("e2e-runtime-policy-status") ?? "configured",
+    configured: {
+      profile_id: "standard",
+      digest: "configured-digest-0123456789",
+      capabilities: [
+        { module_id: "container.image_build", version: 1, enabled: false },
+        { module_id: "container.run", version: 1, enabled: true },
+        { module_id: "container.compose", version: 1, enabled: false },
+      ],
+      storage_mode: "ephemeral",
+      storage_capacity_bytes: 10737418240,
+      network_mode: "restricted",
+    },
+    target: null,
+    applied: null,
+    desired_generation: 3,
+    governing_layers: {},
+    reason_codes: [],
+    required_action: window.localStorage.getItem(
+      "e2e-runtime-policy-required-action",
+    ) ?? "apply",
+  });
+  const trpcResult = () => ({
+    result: { data: { json: status() } },
+  });
   window.fetch = async (...args) => {
-    const response = await originalFetch(...args);
     const requestUrl =
       typeof args[0] === "string" ? args[0] : args[0]?.url ?? "";
-    if (!requestUrl.includes("runtimeExecution.getAgentStatus")) {
-      return response;
+    if (requestUrl.includes("runtimeExecution.getAgentStatus")) {
+      const body = requestUrl.includes("batch=1")
+        ? [trpcResult()]
+        : trpcResult();
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     }
-    const payload = await response.clone().json();
-    const headers = new Headers(response.headers);
-    headers.delete("content-encoding");
-    headers.delete("content-length");
-    return new Response(JSON.stringify(mutate(payload)), {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
+    return originalFetch(...args);
   };
 })();
 """
@@ -170,6 +167,15 @@ def test_agent_runtime_execution_renders_server_status_and_required_action(
         f"{azents_main_web_url}/w/{context.workspace_handle}/agents/"
         f"{context.agent_id}/settings/execution"
     )
+    cast(Any, browser_driver).execute_cdp_cmd(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {"source": _STATUS_RESPONSE_OVERRIDE},
+    )
+    _set_status_projection(
+        browser_driver,
+        status="configured",
+        required_action="apply",
+    )
     browser_driver.get(page_url)
     _assert_status_projection(
         browser_driver,
@@ -178,10 +184,6 @@ def test_agent_runtime_execution_renders_server_status_and_required_action(
         apply_available=True,
     )
 
-    cast(Any, browser_driver).execute_cdp_cmd(
-        "Page.addScriptToEvaluateOnNewDocument",
-        {"source": _STATUS_RESPONSE_OVERRIDE},
-    )
     cases = (
         ("pending", "wait", "Pending", "Wait for Runtime", False),
         ("applied", "none", "Applied", "No action required", False),
