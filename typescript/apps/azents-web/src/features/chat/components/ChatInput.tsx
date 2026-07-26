@@ -182,6 +182,9 @@ function normalizeAction(
   ) {
     return { type: "skill", skill_path: action.skill_path };
   }
+  if (type === "cleanup_orphan_git_worktrees") {
+    return { type: "cleanup_orphan_git_worktrees" };
+  }
   return null;
 }
 
@@ -224,6 +227,9 @@ function normalizeStoredAction(value: unknown): ChatAction | null {
   }
   if (action.type === "skill" && typeof action.skill_path === "string") {
     return { type: "skill", skill_path: action.skill_path };
+  }
+  if (action.type === "cleanup_orphan_git_worktrees") {
+    return { type: "cleanup_orphan_git_worktrees" };
   }
   return null;
 }

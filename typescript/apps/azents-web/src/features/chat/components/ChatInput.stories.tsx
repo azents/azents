@@ -191,6 +191,21 @@ const inputActions: InputActionDefinition[] = [
     },
     attachments: { policy: "unsupported" },
   },
+  {
+    id: "cleanup_orphan_git_worktrees",
+    keyword: "cleanup-worktrees",
+    label: "Clean up orphan worktrees",
+    description:
+      "Find and permanently remove orphan Git worktrees from this runtime.",
+    action: { type: "cleanup_orphan_git_worktrees" },
+    category: "turn",
+    message: {
+      policy: "optional",
+      placeholder: "Optional cleanup note.",
+      max_length: null,
+    },
+    attachments: { policy: "unsupported" },
+  },
 ];
 
 const meta = {
@@ -336,6 +351,22 @@ export const SelectedActionChip = {
         "Polish the composer layout and verify the mobile model picker",
       ),
     ).toBeVisible();
+  },
+} satisfies Story;
+
+export const CleanupActionSelection = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-cleanup-action-selection",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByRole("textbox"), "/cleanup");
+    await userEvent.click(
+      canvas.getByRole("button", { name: /clean up orphan worktrees/i }),
+    );
+    await expect(canvas.getByText("/cleanup-worktrees")).toBeVisible();
+    await expect(canvas.getByRole("textbox")).toHaveValue("");
   },
 } satisfies Story;
 
