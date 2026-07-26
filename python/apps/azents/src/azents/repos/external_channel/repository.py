@@ -31,6 +31,7 @@ from azents.core.enums import (
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelHydrationStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -50,6 +51,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessRequest,
     RDBExternalChannelAction,
     RDBExternalChannelAgentRoute,
+    RDBExternalChannelAppClaim,
     RDBExternalChannelBinding,
     RDBExternalChannelBlock,
     RDBExternalChannelChannelDefault,
@@ -57,6 +59,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelConversationAdmission,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelEvent,
+    RDBExternalChannelIngressLease,
     RDBExternalChannelInteraction,
     RDBExternalChannelInvocationBatch,
     RDBExternalChannelInvocationBatchItem,
@@ -95,6 +98,8 @@ from .data import (
     ExternalChannelEventAdmission,
     ExternalChannelEventBoundary,
     ExternalChannelEventCreate,
+    ExternalChannelIngressLease,
+    ExternalChannelIngressLeaseClaim,
     ExternalChannelInteraction,
     ExternalChannelInteractionAdmission,
     ExternalChannelInteractionCreate,
@@ -288,6 +293,246 @@ class ExternalChannelRepository:
             .order_by(RDBExternalChannelConnection.id)
         )
         return list(result)
+
+    async def list_discord_gateway_connection_ids(
+        self,
+        session: AsyncSession,
+    ) -> list[str]:
+        """List active Discord connections with a current App claim."""
+        result = await session.scalars(
+            sa.select(RDBExternalChannelConnection.id)
+            .join(
+                RDBExternalChannelAppClaim,
+                RDBExternalChannelAppClaim.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .where(
+                RDBExternalChannelConnection.provider
+                == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelConnection.ingress_profile
+                == ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
+            )
+            .order_by(RDBExternalChannelConnection.id)
+        )
+        return list(result)
+
+    async def claim_discord_gateway_lease(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+        lease_until: datetime.datetime,
+    ) -> ExternalChannelIngressLeaseClaim | None:
+        """Claim one Discord lease while snapshotting current authority generations."""
+        await session.execute(
+            pg_insert(RDBExternalChannelIngressLease)
+            .values(id=uuid7().hex, connection_id=connection_id)
+            .on_conflict_do_nothing(index_elements=["connection_id"])
+        )
+        result = await session.execute(
+            sa.update(RDBExternalChannelIngressLease)
+            .where(
+                RDBExternalChannelIngressLease.connection_id == connection_id,
+                RDBExternalChannelIngressLease.connection_id
+                == RDBExternalChannelConnection.id,
+                RDBExternalChannelAppClaim.connection_id
+                == RDBExternalChannelConnection.id,
+                RDBExternalChannelConnection.provider
+                == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelConnection.ingress_profile
+                == ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
+                sa.or_(
+                    RDBExternalChannelIngressLease.lease_owner == lease_owner,
+                    RDBExternalChannelIngressLease.lease_until.is_(None),
+                    RDBExternalChannelIngressLease.lease_until < now,
+                ),
+            )
+            .values(
+                lease_owner=lease_owner,
+                lease_generation=RDBExternalChannelIngressLease.lease_generation + 1,
+                lease_until=lease_until,
+                heartbeat_at=now,
+                required_configuration_generation=(
+                    RDBExternalChannelConnection.configuration_generation
+                ),
+                required_app_claim_generation=(
+                    RDBExternalChannelAppClaim.claim_generation
+                ),
+            )
+            .returning(RDBExternalChannelIngressLease)
+        )
+        lease = result.scalar_one_or_none()
+        if lease is None:
+            return None
+        return ExternalChannelIngressLeaseClaim(
+            lease=ExternalChannelIngressLease.model_validate(lease)
+        )
+
+    async def get_owned_discord_gateway_configuration(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        lease_generation: int,
+        now: datetime.datetime,
+    ) -> ExternalChannelConnectionConfiguration | None:
+        """Return credentials only when every Gateway authority fence matches."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .join(
+                RDBExternalChannelIngressLease,
+                RDBExternalChannelIngressLease.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .join(
+                RDBExternalChannelAppClaim,
+                RDBExternalChannelAppClaim.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .where(
+                _discord_gateway_lease_fence(
+                    connection_id=connection_id,
+                    lease_owner=lease_owner,
+                    lease_generation=lease_generation,
+                    now=now,
+                )
+            )
+        )
+        return self._as(ExternalChannelConnectionConfiguration, rdb)
+
+    async def renew_discord_gateway_lease(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        lease_generation: int,
+        now: datetime.datetime,
+        lease_until: datetime.datetime,
+    ) -> bool:
+        """Renew only a current Discord Gateway owner with unchanged authority."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelIngressLease)
+            .where(
+                _discord_gateway_lease_fence(
+                    connection_id=connection_id,
+                    lease_owner=lease_owner,
+                    lease_generation=lease_generation,
+                    now=now,
+                )
+            )
+            .values(lease_until=lease_until, heartbeat_at=now)
+            .returning(RDBExternalChannelIngressLease.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def record_discord_gateway_gap(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        lease_generation: int,
+        now: datetime.datetime,
+        reason: str,
+    ) -> bool:
+        """Record a gap only for the current fenced Discord Gateway owner."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelIngressLease)
+            .where(
+                _discord_gateway_lease_fence(
+                    connection_id=connection_id,
+                    lease_owner=lease_owner,
+                    lease_generation=lease_generation,
+                    now=now,
+                )
+            )
+            .values(gap_detected_at=now, gap_reason=reason, heartbeat_at=now)
+            .returning(RDBExternalChannelIngressLease.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def release_discord_gateway_lease(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        lease_generation: int,
+        now: datetime.datetime,
+    ) -> bool:
+        """Release one current Discord lease without mutating connection authority."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelIngressLease)
+            .where(
+                _discord_gateway_lease_fence(
+                    connection_id=connection_id,
+                    lease_owner=lease_owner,
+                    lease_generation=lease_generation,
+                    now=now,
+                )
+            )
+            .values(lease_owner=None, lease_until=None, heartbeat_at=now)
+            .returning(RDBExternalChannelIngressLease.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def update_discord_gateway_checkpoint(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        lease_generation: int,
+        now: datetime.datetime,
+        encrypted_checkpoint: str,
+        checkpoint_version: int,
+        sequence: int,
+    ) -> bool:
+        """Persist a monotonic checkpoint only for the current fenced owner."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelIngressLease)
+            .where(
+                _discord_gateway_lease_fence(
+                    connection_id=connection_id,
+                    lease_owner=lease_owner,
+                    lease_generation=lease_generation,
+                    now=now,
+                ),
+                sa.or_(
+                    RDBExternalChannelIngressLease.last_handled_dispatch_sequence.is_(
+                        None
+                    ),
+                    RDBExternalChannelIngressLease.last_handled_dispatch_sequence
+                    < sequence,
+                ),
+            )
+            .values(
+                encrypted_checkpoint=encrypted_checkpoint,
+                checkpoint_version=checkpoint_version,
+                last_handled_dispatch_sequence=sequence,
+                heartbeat_at=now,
+            )
+            .returning(RDBExternalChannelIngressLease.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def claim_socket_connection(
         self,
@@ -3674,6 +3919,38 @@ def _progress_delete_payload(
         "thread_ts": thread_ts,
         "provider_message_key": provider_message_key,
     }
+
+
+def _discord_gateway_lease_fence(
+    *,
+    connection_id: str,
+    lease_owner: str,
+    lease_generation: int,
+    now: datetime.datetime,
+) -> sa.ColumnElement[bool]:
+    """Return the complete current-authority predicate for Discord lease mutation."""
+    return sa.and_(
+        RDBExternalChannelIngressLease.connection_id == connection_id,
+        RDBExternalChannelIngressLease.connection_id == RDBExternalChannelConnection.id,
+        RDBExternalChannelAppClaim.connection_id == RDBExternalChannelConnection.id,
+        RDBExternalChannelConnection.provider == ExternalChannelProvider.DISCORD,
+        RDBExternalChannelConnection.ingress_profile
+        == ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+        RDBExternalChannelConnection.status.in_(
+            (
+                ExternalChannelConnectionStatus.ACTIVE,
+                ExternalChannelConnectionStatus.DEGRADED,
+            )
+        ),
+        RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
+        RDBExternalChannelIngressLease.lease_owner == lease_owner,
+        RDBExternalChannelIngressLease.lease_generation == lease_generation,
+        RDBExternalChannelIngressLease.lease_until >= now,
+        RDBExternalChannelIngressLease.required_configuration_generation
+        == RDBExternalChannelConnection.configuration_generation,
+        RDBExternalChannelIngressLease.required_app_claim_generation
+        == RDBExternalChannelAppClaim.claim_generation,
+    )
 
 
 def _validate_interaction_projection_value(value: object, *, depth: int) -> None:
