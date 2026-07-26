@@ -79,6 +79,9 @@ from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.runtime.transfer.runtime_to_provider import (
+    RuntimeToProviderDeliveryExecutor,
+)
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.runtime_storage_error import RuntimeStorageError
@@ -623,6 +626,9 @@ def _make_toolkit(
     agents_store: _FakeAgentsAppendixDedupeStateStore | None = None,
     server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None = None,
     runtime_to_server_publication_service: PresentFilePublicationExecutor | None = None,
+    runtime_to_provider_delivery_service: (
+        RuntimeToProviderDeliveryExecutor | None
+    ) = None,
 ) -> RuntimeToolkit:
     """Create RuntimeToolkit for tests."""
     runner_operations = _FakeRunnerOperations(storage_files)
@@ -657,6 +663,7 @@ def _make_toolkit(
         agents_store=cast(Any, agents_store),
         server_to_runtime_transfer_service=server_to_runtime_transfer_service,
         runtime_to_server_publication_service=runtime_to_server_publication_service,
+        runtime_to_provider_delivery_service=runtime_to_provider_delivery_service,
         import_file_staging_configuration=None,
     )
     toolkit.set_session_id(session_id)
@@ -748,6 +755,7 @@ class TestBuiltinToolkitProviderResolve:
             project_repo=project_repo,
             server_to_runtime_transfer_service=None,
             runtime_to_server_publication_service=None,
+            runtime_to_provider_delivery_service=None,
             import_file_staging_configuration=None,
         )
         toolkit = await provider.resolve(

@@ -101,6 +101,10 @@ from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.runtime.transfer.runtime_to_provider import (
+    RuntimeToProviderDeliveryCapability,
+    RuntimeToProviderDeliveryExecutor,
+)
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.artifact import ArtifactService
@@ -571,6 +575,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
         runtime_to_server_publication_service: PresentFilePublicationExecutor | None,
+        runtime_to_provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
         import_file_staging_configuration: ImportFileStagingConfiguration | None,
     ) -> None:
         self._config = config
@@ -594,6 +599,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self.runtime_to_server_publication_service = (
             runtime_to_server_publication_service
         )
+        self.runtime_to_provider_delivery_service = runtime_to_provider_delivery_service
         self.import_file_staging_configuration = import_file_staging_configuration
         self._agents_context: RuntimeInstructionContext | None = None
         self._agents_appendix_lock = asyncio.Lock()
@@ -687,6 +693,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         )
         transfer_capability = await self._transfer_capability(runtime_agent_id)
         publication_capability = await self._publication_capability(runtime_agent_id)
+        provider_delivery_capability = await self._provider_delivery_capability(
+            runtime_agent_id
+        )
 
         async def resolve_patch_target() -> RuntimePatchTarget:
             runtime = await _ready_runtime_for_agent(
@@ -823,6 +832,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             file_ss,
             transfer_capability=transfer_capability,
             publication_capability=publication_capability,
+            provider_delivery_capability=provider_delivery_capability,
         )
         self.register_agents_context(instruction_context)
         if self.instruction_context_store is not None:
@@ -846,6 +856,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         *,
         transfer_capability: RuntimeTransferCapability | None,
         publication_capability: RuntimeToServerPublicationCapability | None,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
     ) -> RuntimeInstructionContext:
         """Build shared Runtime context for instruction appendix providers."""
         projects = sorted(
@@ -857,6 +868,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             projects=tuple(projects),
             transfer_capability=transfer_capability,
             publication_capability=publication_capability,
+            provider_delivery_capability=provider_delivery_capability,
         )
 
     async def _transfer_capability(
@@ -913,6 +925,29 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 runtime_id=runtime.id,
                 desired_generation=runtime.runner_generation,
             ),
+        )
+
+    async def _provider_delivery_capability(
+        self,
+        runtime_agent_id: str,
+    ) -> RuntimeToProviderDeliveryCapability | None:
+        """Build one trusted provider-delivery capability for the current Runtime."""
+        service = self.runtime_to_provider_delivery_service
+        if service is None:
+            return None
+        runtime = await _ready_runtime_for_agent(
+            agent_runtime_repo=self.agent_runtime_repo,
+            session_manager=self.session_manager,
+            agent_id=runtime_agent_id,
+        )
+        return RuntimeToProviderDeliveryCapability(
+            service=service,
+            target=ServerToRuntimeTarget(
+                runtime_id=runtime.id,
+                desired_generation=runtime.runner_generation,
+            ),
+            agent_id=self._agent_id,
+            session_id=self._runtime_session_id,
         )
 
     async def _load_projects(
@@ -1013,6 +1048,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
         runtime_to_server_publication_service: PresentFilePublicationExecutor | None,
+        runtime_to_provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
         import_file_staging_configuration: ImportFileStagingConfiguration | None,
     ) -> None:
         self.exchange_file_service = exchange_file_service
@@ -1030,6 +1066,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.runtime_to_server_publication_service = (
             runtime_to_server_publication_service
         )
+        self.runtime_to_provider_delivery_service = runtime_to_provider_delivery_service
         self.import_file_staging_configuration = import_file_staging_configuration
 
     async def resolve(
@@ -1065,6 +1102,9 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             server_to_runtime_transfer_service=self.server_to_runtime_transfer_service,
             runtime_to_server_publication_service=(
                 self.runtime_to_server_publication_service
+            ),
+            runtime_to_provider_delivery_service=(
+                self.runtime_to_provider_delivery_service
             ),
             import_file_staging_configuration=self.import_file_staging_configuration,
         )

@@ -36,6 +36,13 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkSnapshot,
     ChannelWorkTask,
 )
+from azents.runtime.transfer.runtime_to_provider import (
+    RuntimeToProviderBatch,
+    RuntimeToProviderCleanupError,
+    RuntimeToProviderDeliveryCapability,
+    RuntimeToProviderSource,
+    RuntimeToProviderTransferError,
+)
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
@@ -183,6 +190,7 @@ class ExternalChannelActionService:
         files: Sequence[ExternalChannelOutboundFileManifest],
         file_storage: FileStorage | None,
         authority: SessionResourceAuthority | None = None,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
     ) -> ChannelActionCommit:
         """Commit canonical state, then attempt every provider intent once."""
         async with self.session_manager() as session:
@@ -242,6 +250,7 @@ class ExternalChannelActionService:
                     file_storage=file_storage,
                     agent_id=agent_id,
                     authority=authority,
+                    provider_delivery_capability=provider_delivery_capability,
                 )
                 if delivery.operation is ExternalChannelDeliveryOperation.REPLY:
                     reply_delivered = (
@@ -295,6 +304,7 @@ class ExternalChannelActionService:
         file_storage: FileStorage | None = None,
         agent_id: str | None = None,
         authority: SessionResourceAuthority | None = None,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
     ) -> ExternalChannelDeliveryStatus | None:
         """Attempt one pending provider operation without automatic retry."""
         target = await self.prepare_delivery(delivery_attempt_id)
@@ -305,6 +315,7 @@ class ExternalChannelActionService:
             file_storage=file_storage,
             agent_id=agent_id,
             authority=authority,
+            provider_delivery_capability=provider_delivery_capability,
         )
 
     async def attempt_prepared_delivery(
@@ -314,6 +325,7 @@ class ExternalChannelActionService:
         file_storage: FileStorage | None = None,
         agent_id: str | None = None,
         authority: SessionResourceAuthority | None = None,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
     ) -> ExternalChannelDeliveryStatus | None:
         """Attempt a target captured before connection credentials were purged."""
         if target.status is not ExternalChannelDeliveryStatus.PENDING:
@@ -333,6 +345,7 @@ class ExternalChannelActionService:
                 file_storage=file_storage,
                 agent_id=agent_id,
                 authority=authority,
+                provider_delivery_capability=provider_delivery_capability,
             )
         except asyncio.CancelledError:
             await asyncio.shield(
@@ -399,6 +412,7 @@ class ExternalChannelActionService:
         file_storage: FileStorage | None,
         agent_id: str | None,
         authority: SessionResourceAuthority | None,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
     ) -> SlackControlMessageResult | DiscordDeliveryResult:
         if target.encrypted_credentials is None:
             return SlackControlMessageResult(
@@ -416,6 +430,7 @@ class ExternalChannelActionService:
                     file_storage=file_storage,
                     agent_id=agent_id,
                     authority=authority,
+                    provider_delivery_capability=provider_delivery_capability,
                 )
             case ExternalChannelProvider.DISCORD:
                 return await self._deliver_discord(
@@ -628,6 +643,7 @@ class ExternalChannelActionService:
         file_storage: FileStorage | None,
         agent_id: str | None,
         authority: SessionResourceAuthority | None,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
     ) -> SlackControlMessageResult:
         payload = target.request_payload
         presentation = resolve_slack_agent_presentation(
@@ -658,64 +674,17 @@ class ExternalChannelActionService:
                 if files is None:
                     return _invalid_payload()
                 if files:
-                    runtime_files = [
-                        file
-                        for file in files
-                        if file.source is ExternalChannelOutboundFileSource.RUNTIME
-                    ]
-                    exchange_files = [
-                        file
-                        for file in files
-                        if file.source is ExternalChannelOutboundFileSource.EXCHANGE
-                    ]
-                    if runtime_files and (
-                        file_storage is None
-                        or agent_id is None
-                        or not callable(getattr(file_storage, "read_range", None))
-                    ):
-                        return SlackControlMessageResult(
-                            status="failed",
-                            provider_message_key=None,
-                            error_kind="runtime_file_source_unavailable",
-                            error_summary=(
-                                "The original Runtime file source is unavailable."
-                            ),
-                        )
-                    if exchange_files and authority is None:
-                        return SlackControlMessageResult(
-                            status="failed",
-                            provider_message_key=None,
-                            error_kind="exchange_file_source_unavailable",
-                            error_summary=(
-                                "The original Exchange file source is unavailable."
-                            ),
-                        )
-                    ranged_storage = (
-                        None
-                        if file_storage is None
-                        else cast(RangedFileStorage, file_storage)
-                    )
-                    source_agent_id = agent_id
-                    return await self.slack_client.post_file_message(
+                    del file_storage, agent_id
+                    return await self._deliver_slack_files(
                         bot_token=bot_token,
                         tenant_id=tenant_id,
                         channel_id=channel_id,
                         thread_ts=thread_ts,
                         markdown_text=prepend_agent_markdown(presentation, text),
-                        files=[
-                            SlackOutboundFile(
-                                filename=file.filename,
-                                length=file.expected_size,
-                                content=lambda file=file: _slack_outbound_content(
-                                    manifest=file,
-                                    file_storage=ranged_storage,
-                                    agent_id=source_agent_id,
-                                    exchange_file_service=self.exchange_file_service,
-                                    authority=authority,
-                                ),
-                            )
-                            for file in files
-                        ],
+                        files=files,
+                        delivery_attempt_id=target.delivery_attempt_id,
+                        authority=authority,
+                        provider_delivery_capability=provider_delivery_capability,
                     )
                 return await self.slack_client.post_message(
                     bot_token=bot_token,
@@ -767,6 +736,216 @@ class ExternalChannelActionService:
                 return _invalid_payload()
             case _ as unreachable:
                 assert_never(unreachable)
+
+    async def _deliver_slack_files(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
+        markdown_text: str,
+        files: tuple[ExternalChannelOutboundFileManifest, ...],
+        delivery_attempt_id: str,
+        authority: SessionResourceAuthority | None,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
+    ) -> SlackControlMessageResult:
+        """Stream one Runtime batch and Exchange sources through one Slack completion.
+
+        The Runtime claims remain held until Slack's one completion result.
+        """
+        runtime_sources = tuple(
+            RuntimeToProviderSource(
+                runtime_path=file.path,
+                filename=file.filename,
+                media_type=file.media_type,
+                expected_size=file.expected_size,
+            )
+            for file in files
+            if file.source is ExternalChannelOutboundFileSource.RUNTIME
+        )
+        batch: RuntimeToProviderBatch | None = None
+        if runtime_sources:
+            if provider_delivery_capability is None:
+                return SlackControlMessageResult(
+                    status="failed",
+                    provider_message_key=None,
+                    error_kind="runtime_file_source_unavailable",
+                    error_summary="The original Runtime file source is unavailable.",
+                )
+            try:
+                batch = await provider_delivery_capability.prepare(
+                    operation_id=f"external-channel-delivery:{delivery_attempt_id}",
+                    batch_id=delivery_attempt_id,
+                    sources=runtime_sources,
+                )
+                await batch.ensure_active()
+            except asyncio.CancelledError:
+                if batch is not None:
+                    await asyncio.shield(batch.abandon_or_cancel())
+                raise
+            except RuntimeToProviderCleanupError:
+                return SlackControlMessageResult(
+                    status="unknown",
+                    provider_message_key=None,
+                    error_kind="runtime_transfer_cleanup_unknown",
+                    error_summary="Runtime file delivery cleanup is not confirmed.",
+                )
+            except RuntimeToProviderTransferError:
+                if batch is not None:
+                    try:
+                        await batch.abandon_or_cancel()
+                    except RuntimeToProviderTransferError:
+                        return SlackControlMessageResult(
+                            status="unknown",
+                            provider_message_key=None,
+                            error_kind="runtime_transfer_cleanup_unknown",
+                            error_summary=(
+                                "Runtime file delivery cleanup is not confirmed."
+                            ),
+                        )
+                return SlackControlMessageResult(
+                    status="failed",
+                    provider_message_key=None,
+                    error_kind="runtime_file_source_unavailable",
+                    error_summary="The original Runtime file source is unavailable.",
+                )
+        if (
+            any(
+                file.source is ExternalChannelOutboundFileSource.EXCHANGE
+                for file in files
+            )
+            and authority is None
+        ):
+            if batch is not None:
+                try:
+                    await batch.abandon_or_cancel()
+                except RuntimeToProviderCleanupError:
+                    return SlackControlMessageResult(
+                        status="unknown",
+                        provider_message_key=None,
+                        error_kind="runtime_transfer_cleanup_unknown",
+                        error_summary=(
+                            "Runtime file delivery cleanup is not confirmed."
+                        ),
+                    )
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="exchange_file_source_unavailable",
+                error_summary="The original Exchange file source is unavailable.",
+            )
+
+        provider_started = False
+
+        async def before_provider_request() -> None:
+            nonlocal provider_started
+            if batch is not None:
+                await batch.ensure_active()
+            provider_started = True
+
+        runtime_index = 0
+        outbound_files: list[SlackOutboundFile] = []
+        for file in files:
+            if file.source is ExternalChannelOutboundFileSource.RUNTIME:
+                source_index = runtime_index
+                runtime_index += 1
+                assert batch is not None
+                outbound_files.append(
+                    SlackOutboundFile(
+                        filename=file.filename,
+                        length=file.expected_size,
+                        content=lambda source_index=source_index: (
+                            _slack_runtime_provider_content(
+                                batch=batch,
+                                source_index=source_index,
+                            )
+                        ),
+                    )
+                )
+            else:
+                outbound_files.append(
+                    SlackOutboundFile(
+                        filename=file.filename,
+                        length=file.expected_size,
+                        content=lambda file=file: _slack_exchange_outbound_content(
+                            manifest=file,
+                            exchange_file_service=self.exchange_file_service,
+                            authority=authority,
+                        ),
+                    )
+                )
+        try:
+            result = await self.slack_client.post_file_message(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                markdown_text=markdown_text,
+                files=outbound_files,
+                before_provider_request=before_provider_request,
+            )
+        except asyncio.CancelledError:
+            if batch is not None and not provider_started:
+                await asyncio.shield(batch.abandon_or_cancel())
+            raise
+        except RuntimeToProviderTransferError:
+            if batch is not None and not provider_started:
+                try:
+                    await batch.abandon_or_cancel()
+                except RuntimeToProviderCleanupError:
+                    return SlackControlMessageResult(
+                        status="unknown",
+                        provider_message_key=None,
+                        error_kind="runtime_transfer_cleanup_unknown",
+                        error_summary=(
+                            "Runtime file delivery cleanup is not confirmed."
+                        ),
+                    )
+                return SlackControlMessageResult(
+                    status="failed",
+                    provider_message_key=None,
+                    error_kind="runtime_file_source_unavailable",
+                    error_summary="The original Runtime file source is unavailable.",
+                )
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="runtime_transfer_ambiguous",
+                error_summary="Runtime file delivery outcome is unknown.",
+            )
+        if batch is None:
+            return result
+        if result.status == "delivered":
+            try:
+                await batch.provider_completed()
+                await batch.acknowledge_and_settle()
+            except asyncio.CancelledError:
+                raise
+            except RuntimeToProviderTransferError:
+                return SlackControlMessageResult(
+                    status="unknown",
+                    provider_message_key=None,
+                    error_kind="runtime_transfer_settlement_unknown",
+                    error_summary=(
+                        "Slack accepted the file reply but Runtime transfer "
+                        "settlement is not confirmed."
+                    ),
+                )
+            return result
+        if result.status == "failed":
+            try:
+                await batch.abandon_or_cancel()
+            except asyncio.CancelledError:
+                raise
+            except RuntimeToProviderTransferError:
+                return SlackControlMessageResult(
+                    status="unknown",
+                    provider_message_key=None,
+                    error_kind="runtime_transfer_cleanup_unknown",
+                    error_summary="Runtime file delivery cleanup is not confirmed.",
+                )
+        return result
 
 
 def _provider_message_ts(value: object) -> str | None:
@@ -855,40 +1034,37 @@ def _outbound_files(
     return files
 
 
-async def _slack_outbound_content(
+async def _slack_runtime_provider_content(
+    *,
+    batch: RuntimeToProviderBatch,
+    source_index: int,
+) -> AsyncIterator[bytes]:
+    """Map one trusted Runtime batch stream to Slack's content error boundary."""
+    try:
+        async for chunk in batch.iter_source_chunks(source_index):
+            yield chunk
+    except RuntimeToProviderTransferError as error:
+        raise SlackOutboundFileContentError from error
+
+
+async def _slack_exchange_outbound_content(
     *,
     manifest: ExternalChannelOutboundFileManifest,
-    file_storage: RangedFileStorage | None,
-    agent_id: str | None,
     exchange_file_service: ExchangeFileService,
     authority: SessionResourceAuthority | None,
 ) -> AsyncIterator[bytes]:
+    """Map one authorized Exchange stream to Slack's content error boundary."""
     try:
-        match manifest.source:
-            case ExternalChannelOutboundFileSource.RUNTIME:
-                if file_storage is None or agent_id is None:
-                    raise ExternalChannelFileTransferError(
-                        "Runtime file source is unavailable."
-                    )
-                async for chunk in iter_external_channel_outbound_file_chunks(
-                    file_storage=file_storage,
-                    manifest=manifest,
-                    agent_id=agent_id,
-                ):
-                    yield chunk
-            case ExternalChannelOutboundFileSource.EXCHANGE:
-                if authority is None:
-                    raise ExternalChannelFileTransferError(
-                        "Exchange file source is unavailable."
-                    )
-                async for chunk in iter_external_channel_exchange_file_chunks(
-                    exchange_file_service=exchange_file_service,
-                    manifest=manifest,
-                    authority=authority,
-                ):
-                    yield chunk
-            case _ as unreachable:
-                assert_never(unreachable)
+        if authority is None:
+            raise ExternalChannelFileTransferError(
+                "Exchange file source is unavailable."
+            )
+        async for chunk in iter_external_channel_exchange_file_chunks(
+            exchange_file_service=exchange_file_service,
+            manifest=manifest,
+            authority=authority,
+        ):
+            yield chunk
     except ExternalChannelFileTransferError as error:
         raise SlackOutboundFileContentError from error
 

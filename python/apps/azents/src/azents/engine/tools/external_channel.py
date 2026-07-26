@@ -433,6 +433,11 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         else runtime_context.file_storage
                     ),
                     authority=self.resource_authority,
+                    provider_delivery_capability=(
+                        None
+                        if runtime_context is None
+                        else runtime_context.provider_delivery_capability
+                    ),
                 )
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None

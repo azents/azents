@@ -9,6 +9,8 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/374a722fb9ee_add_exchange_file_provenance.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/8fae7b9ab00a_add_model_file_run_lineage.py
   - python/apps/azents/src/azents/core/vfs.py
+  - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
+  - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
   - python/apps/azents/src/azents/services/file_storage.py
@@ -50,8 +52,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-25
-spec_version: 30
+last_verified_at: 2026-07-26
+spec_version: 31
 ---
 
 # File Exchange Storage
@@ -124,13 +126,18 @@ byte limits, and writes one bounded payload to the authorized Runtime destinatio
 actual size.
 
 A file-bearing `channel_action` accepts absolute Runtime paths and `exchange://` URIs.
-Runtime paths are statted before commit and stream through bounded Runtime range reads.
-An Exchange URI resolves only under the current canonical `SessionResourceAuthority`,
-first at preflight and again immediately before provider upload; both the stored metadata
-and returned byte length must match the committed bounded manifest. Relative paths,
-`artifact://`, and `azents://` are not outbound source forms. The flow does not create
-new staging bytes in object storage or convert source content into user attachments or
-model rich input.
+Runtime paths are statted before commit and, when the trusted Runtime provider-delivery
+capability is available, move through one verified Runtime upload attempt per source. The
+provider receives a bounded native stream from the internally resolved verified object; no
+ordinary Runtime range-read relay exposes the complete body to the application. A successful
+provider result is followed by authoritative consumer acknowledgement and transfer settlement.
+An Exchange URI resolves only under the current canonical `SessionResourceAuthority`, first
+at preflight and again immediately before provider upload; both the stored metadata and
+returned byte length must match the committed bounded manifest. Relative paths, `artifact://`,
+and `azents://` are not outbound source forms. The relay creates no ExchangeFile, Artifact,
+ModelFile, FilePart, or other durable product file-body resource. If the provider-delivery
+capability is absent before the coordinated Runtime transfer cutover, Runtime sources fail
+closed before provider mutation.
 
 ### Agent/tool output artifact
 
@@ -233,6 +240,9 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ## Changelog
 
+- **2026-07-26** — v31. Moved Runtime External Channel outbound sources to verified Runtime
+  upload and provider-native streaming with post-provider settlement, while preserving the
+  no-product-file-side-effect boundary.
 - **2026-07-25** — v30. Added authority-resolved Exchange files as an explicit outbound
   External Channel source while retaining Runtime paths and rejecting Artifact, managed
   VFS, and relative sources.

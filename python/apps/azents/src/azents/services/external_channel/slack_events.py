@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
@@ -891,6 +891,7 @@ class SlackConversationClient:
         thread_ts: str,
         markdown_text: str,
         files: Sequence[SlackOutboundFile],
+        before_provider_request: Callable[[], Awaitable[None]] | None = None,
     ) -> SlackControlMessageResult:
         """Upload ordered files and publish them through one Slack completion."""
         if (
@@ -907,6 +908,8 @@ class SlackConversationClient:
         uploaded_files: list[dict[str, str]] = []
         try:
             for file in files:
+                if before_provider_request is not None:
+                    await before_provider_request()
                 upload_target = self._success_payload(
                     await self._request(
                         "POST",
@@ -941,6 +944,8 @@ class SlackConversationClient:
                         error_summary="Slack returned an invalid file upload URL.",
                     )
                 try:
+                    if before_provider_request is not None:
+                        await before_provider_request()
                     upload_response = await self.http_client.request(
                         "POST",
                         upload_url,
@@ -989,6 +994,8 @@ class SlackConversationClient:
                         error_summary="Slack rejected the external file upload.",
                     )
                 uploaded_files.append({"id": file_id, "title": file.filename})
+            if before_provider_request is not None:
+                await before_provider_request()
             self._success_payload(
                 await self._request(
                     "POST",

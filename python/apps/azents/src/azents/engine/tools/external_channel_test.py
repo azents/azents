@@ -194,6 +194,7 @@ def _toolkit(
                 projects=(),
                 transfer_capability=None,
                 publication_capability=None,
+                provider_delivery_capability=None,
             )
         )
         toolkit.set_runtime_context_store(store)
