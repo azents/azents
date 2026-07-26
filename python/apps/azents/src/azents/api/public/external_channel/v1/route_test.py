@@ -31,6 +31,7 @@ def test_url_verification_returns_challenge() -> None:
     service.handle.return_value = SlackHTTPAdmissionResult(
         challenge="challenge-1",
         event_id=None,
+        interaction_id=None,
         created=None,
     )
 

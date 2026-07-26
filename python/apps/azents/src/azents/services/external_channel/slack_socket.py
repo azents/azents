@@ -1,6 +1,7 @@
 """Slack Socket Mode primitives for durable External Channel event admission."""
 
 import asyncio
+import dataclasses
 import datetime
 import json
 from collections.abc import Awaitable, Callable
@@ -11,7 +12,11 @@ import httpx
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
+from azents.core.enums import ExternalChannelInteractionType
 from azents.repos.external_channel.data import ExternalChannelEventCreate
+from azents.services.external_channel.interaction import (
+    ExternalChannelInteractionHandoff,
+)
 from azents.services.external_channel.slack_endpoint import (
     slack_api_base_url,
     slack_insecure_websocket_allowed,
@@ -19,7 +24,10 @@ from azents.services.external_channel.slack_endpoint import (
 from azents.services.external_channel.slack_http import (
     SlackEventCallback,
     SlackHTTPInvalidPayload,
+    SlackInteractionCallback,
     parse_slack_callback,
+    parse_slack_interaction_payload,
+    project_slack_shortcut_source_event,
 )
 
 MAX_SLACK_SOCKET_MESSAGE_BYTES = 256 * 1024
@@ -90,6 +98,17 @@ type SlackSocketConnector = Callable[
 ]
 type SlackSocketEventAdmission = Callable[
     [ExternalChannelEventCreate], Awaitable[object]
+]
+type SlackSocketInteractionAdmission = Callable[
+    [
+        SlackInteractionCallback,
+        ExternalChannelEventCreate | None,
+    ],
+    Awaitable[ExternalChannelInteractionHandoff | None],
+]
+type SlackSocketInteractionScheduler = Callable[
+    [ExternalChannelInteractionHandoff],
+    None,
 ]
 type SlackSocketSleep = Callable[[float], Awaitable[object]]
 type SlackSocketClock = Callable[[], datetime.datetime]
@@ -188,13 +207,15 @@ class SlackSocketWebAPIClient:
 
 
 class SlackSocketModeClient:
-    """Admit Socket Mode events durably before acknowledging their envelopes."""
+    """Admit Socket Mode callbacks durably before acknowledging their envelopes."""
 
     def __init__(
         self,
         *,
         web_api_client: SlackSocketEndpointOpener,
         admit_event: SlackSocketEventAdmission,
+        admit_interaction: SlackSocketInteractionAdmission | None = None,
+        schedule_interaction: SlackSocketInteractionScheduler | None = None,
         connector: SlackSocketConnector = _connect_socket,
         sleep: SlackSocketSleep = asyncio.sleep,
         clock: SlackSocketClock = _utc_now,
@@ -211,6 +232,8 @@ class SlackSocketModeClient:
             raise ValueError("Slack Socket Mode reconnect delay must not be negative.")
         self.web_api_client = web_api_client
         self.admit_event = admit_event
+        self.admit_interaction = admit_interaction
+        self.schedule_interaction = schedule_interaction
         self.connector = connector
         self.sleep = sleep
         self.clock = clock
@@ -275,9 +298,9 @@ class SlackSocketModeClient:
                         reason=reason,
                         admitted_event_count=admitted_event_count,
                     )
-                if envelope.type != "events_api":
+                if envelope.type not in {"events_api", "interactive"}:
                     continue
-                event = await self._admit_envelope(
+                admitted, interaction_handoff = await self._admit_envelope(
                     connection_id=connection_id,
                     envelope=envelope,
                 )
@@ -287,7 +310,13 @@ class SlackSocketModeClient:
                         separators=(",", ":"),
                     )
                 )
-                if event is not None:
+                if interaction_handoff is not None:
+                    if self.schedule_interaction is None:
+                        raise SlackSocketInvalidEnvelope(
+                            "Slack Socket interaction scheduling is unavailable."
+                        )
+                    self.schedule_interaction(interaction_handoff)
+                if admitted:
                     admitted_event_count += 1
         except asyncio.CancelledError:
             raise
@@ -299,36 +328,62 @@ class SlackSocketModeClient:
         *,
         connection_id: str,
         envelope: SlackSocketEnvelope,
-    ) -> ExternalChannelEventCreate | None:
-        """Durably admit one Events API envelope before its acknowledgement."""
+    ) -> tuple[bool, ExternalChannelInteractionHandoff | None]:
+        """Durably admit one Slack envelope before acknowledgement."""
         if envelope.envelope_id is None:
             raise SlackSocketInvalidEnvelope(
-                "Slack Events API envelope is missing its envelope identifier."
+                "Slack Socket envelope is missing its envelope identifier."
             )
         if envelope.payload is None:
             raise SlackSocketInvalidEnvelope(
-                "Slack Events API envelope is missing its payload."
+                "Slack Socket envelope is missing its payload."
             )
         raw_payload = json.dumps(envelope.payload, separators=(",", ":")).encode()
         try:
-            callback = parse_slack_callback(
-                connection_id=connection_id,
-                raw_body=raw_payload,
-                received_at=self.clock(),
-            )
+            if envelope.type == "events_api":
+                callback = parse_slack_callback(
+                    connection_id=connection_id,
+                    raw_body=raw_payload,
+                    received_at=self.clock(),
+                )
+            else:
+                callback = parse_slack_interaction_payload(
+                    payload=envelope.payload,
+                    provider_interaction_key=f"socket-{envelope.envelope_id}",
+                    received_at=self.clock(),
+                )
         except SlackHTTPInvalidPayload as error:
             raise SlackSocketInvalidEnvelope(
-                "Slack Events API envelope payload is invalid."
+                "Slack Socket envelope payload is invalid."
             ) from error
-        if not isinstance(callback, SlackEventCallback):
-            raise SlackSocketInvalidEnvelope(
-                "Slack Events API envelope does not contain an event callback."
+        if isinstance(callback, SlackEventCallback):
+            event = callback.event.model_copy(
+                update={"transport_envelope_id": envelope.envelope_id}
             )
-        event = callback.event.model_copy(
-            update={"transport_envelope_id": envelope.envelope_id}
-        )
-        await self.admit_event(event)
-        return event
+            await self.admit_event(event)
+            return True, None
+        if isinstance(callback, SlackInteractionCallback):
+            if self.admit_interaction is None:
+                raise SlackSocketInvalidEnvelope(
+                    "Slack Socket interaction admission is unavailable."
+                )
+            shortcut_source_event = (
+                project_slack_shortcut_source_event(
+                    connection_id=connection_id,
+                    payload=envelope.payload,
+                    provider_interaction_key=callback.provider_interaction_key,
+                    received_at=self.clock(),
+                )
+                if callback.interaction_type is ExternalChannelInteractionType.SHORTCUT
+                else None
+            )
+            handoff = await self.admit_interaction(callback, shortcut_source_event)
+            return True, handoff
+        if dataclasses.is_dataclass(callback):
+            raise SlackSocketInvalidEnvelope(
+                "Slack Socket envelope callback type is unsupported."
+            )
+        raise AssertionError("Slack Socket callback parser is not exhaustive.")
 
 
 def parse_slack_socket_envelope(message: str | bytes) -> SlackSocketEnvelope:

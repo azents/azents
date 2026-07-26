@@ -14,7 +14,11 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ExternalChannelConnectionStatus
+from azents.core.enums import (
+    ExternalChannelAppMode,
+    ExternalChannelConnectionStatus,
+    ExternalChannelInteractionStatus,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -28,6 +32,14 @@ from azents.services.external_channel.connection import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
+from azents.services.external_channel.interaction import (
+    ExternalChannelInteractionHandoff,
+    ExternalChannelInteractionProcessor,
+)
+from azents.services.external_channel.shortcut_source import (
+    ExternalChannelShortcutSourceService,
+)
+from azents.services.external_channel.slack_http import SlackInteractionCallback
 from azents.services.external_channel.slack_socket import (
     SlackSocketConnectionResult,
     SlackSocketError,
@@ -73,6 +85,14 @@ class SlackSocketManagerService:
     admission_service: Annotated[
         ExternalChannelAdmissionService,
         Depends(ExternalChannelAdmissionService),
+    ]
+    interaction_processor: Annotated[
+        ExternalChannelInteractionProcessor,
+        Depends(ExternalChannelInteractionProcessor),
+    ]
+    shortcut_source_service: Annotated[
+        ExternalChannelShortcutSourceService,
+        Depends(ExternalChannelShortcutSourceService),
     ]
     http_client: Annotated[
         httpx.AsyncClient,
@@ -161,9 +181,87 @@ class SlackSocketManagerService:
                     )
                 return await self.admission_service.admit(event)
 
+            async def admit_owned_interaction(
+                callback: SlackInteractionCallback,
+                shortcut_source_event: ExternalChannelEventCreate | None,
+            ) -> ExternalChannelInteractionHandoff | None:
+                if (
+                    callback.app_id != configuration.provider_app_id
+                    or callback.tenant_id != configuration.provider_tenant_id
+                    or not await self._owned_active(connection_id)
+                ):
+                    raise SlackSocketInvalidEnvelope(
+                        "Slack Socket connection is no longer authorized."
+                    )
+                selector_supported = (
+                    configuration.app_mode is ExternalChannelAppMode.MULTI
+                    and callback.requires_selector_processing()
+                )
+                if not selector_supported:
+                    shortcut_source_event = None
+                admission = await self.admission_service.admit_interaction(
+                    create=callback.interaction_create(
+                        connection_id=connection_id,
+                        transport=configuration.transport,
+                    ),
+                    principal=callback.principal_create(),
+                    shortcut_source_event=shortcut_source_event,
+                )
+                if shortcut_source_event is not None:
+                    await self.shortcut_source_service.ensure(
+                        shortcut_source_event=shortcut_source_event,
+                        interaction_id=admission.interaction.id,
+                        now=_utc_now(),
+                    )
+                claim = (
+                    await self.admission_service.begin_interaction_provider_mutation(
+                        interaction_id=admission.interaction.id,
+                        now=_utc_now(),
+                    )
+                    if selector_supported
+                    else None
+                )
+                if not selector_supported:
+                    await self.admission_service.finish_interaction_provider_mutation(
+                        interaction_id=admission.interaction.id,
+                        status=ExternalChannelInteractionStatus.REJECTED,
+                        error_kind="interaction_unsupported",
+                        error_summary=(
+                            "Slack interaction is outside the supported selector flow."
+                        ),
+                    )
+                return (
+                    ExternalChannelInteractionHandoff(
+                        interaction_id=claim.interaction.id,
+                        trigger_id=callback.trigger_id,
+                        selector_admission_id=callback.selector_admission_id,
+                        selector_metadata=callback.selector_metadata,
+                        selected_route_id=callback.selected_route_id,
+                        selector_navigation=callback.selector_navigation,
+                        selector_search=callback.selector_search,
+                        selector_view_id=callback.selector_view_id,
+                        selector_view_hash=callback.selector_view_hash,
+                    )
+                    if (claim is not None and claim.claimed)
+                    else None
+                )
+
+            def schedule_owned_interaction(
+                handoff: ExternalChannelInteractionHandoff,
+            ) -> None:
+                task = asyncio.create_task(
+                    self.admission_service.run_interaction_provider_mutation(
+                        handoff=handoff,
+                        callback=self.interaction_processor.process,
+                    )
+                )
+                task.add_done_callback(_log_interaction_task_failure)
+
             client = SlackSocketModeClient(
                 web_api_client=web_api_client,
                 admit_event=admit_owned,
+                admit_interaction=admit_owned_interaction,
+                schedule_interaction=schedule_owned_interaction,
                 reconnect_delay_seconds=self.reconnect_delay.total_seconds(),
             )
             while not shutdown_event.is_set():
@@ -375,3 +473,13 @@ def _required_ciphertext(
 
 def _utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
+
+
+def _log_interaction_task_failure(task: asyncio.Task[None]) -> None:
+    """Observe an already-terminalized handoff task without exposing triggers."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("Slack interaction handoff task failed")

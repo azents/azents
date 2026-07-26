@@ -4,10 +4,12 @@ import datetime
 import hashlib
 import hmac
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import AsyncMock
+from urllib.parse import urlencode
 
 import pytest
 from cryptography.fernet import Fernet
@@ -25,13 +27,26 @@ from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelEventAdmission,
     ExternalChannelEventCreate,
+    ExternalChannelInteractionAdmission,
+    ExternalChannelInteractionCreate,
+    ExternalChannelPrincipalCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.http_admission import SlackHTTPAdmissionService
-from azents.services.external_channel.slack_http import SlackHTTPUnauthorized
+from azents.services.external_channel.interaction import (
+    ExternalChannelInteractionHandoff,
+    ExternalChannelInteractionProcessor,
+)
+from azents.services.external_channel.shortcut_source import (
+    ExternalChannelShortcutSourceService,
+)
+from azents.services.external_channel.slack_http import (
+    SlackHTTPInvalidPayload,
+    SlackHTTPUnauthorized,
+)
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
 _SECRET = "signing-secret"
@@ -72,6 +87,16 @@ class _AdmissionDouble:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.events: list[ExternalChannelEventCreate] = []
+        self.interactions: list[
+            tuple[
+                ExternalChannelInteractionCreate,
+                ExternalChannelPrincipalCreate,
+                ExternalChannelEventCreate | None,
+            ]
+        ] = []
+        self.claimed_interaction_ids: list[str] = []
+        self.claimed = True
+        self.finished: list[tuple[str, str, str | None]] = []
 
     async def admit(
         self,
@@ -88,11 +113,63 @@ class _AdmissionDouble:
             ),
         )
 
+    async def admit_interaction(
+        self,
+        *,
+        create: ExternalChannelInteractionCreate,
+        principal: ExternalChannelPrincipalCreate,
+        shortcut_source_event: ExternalChannelEventCreate | None = None,
+    ) -> ExternalChannelInteractionAdmission:
+        self.interactions.append((create, principal, shortcut_source_event))
+        if self.fail:
+            raise RuntimeError("database unavailable")
+        return cast(
+            ExternalChannelInteractionAdmission,
+            SimpleNamespace(
+                interaction=SimpleNamespace(id="interaction-row-1"),
+                created=True,
+            ),
+        )
+
+    async def begin_interaction_provider_mutation(
+        self,
+        *,
+        interaction_id: str,
+        now: datetime.datetime,
+    ) -> object:
+        assert now == _NOW
+        self.claimed_interaction_ids.append(interaction_id)
+        return SimpleNamespace(
+            interaction=SimpleNamespace(id=interaction_id),
+            claimed=self.claimed,
+        )
+
+    async def finish_interaction_provider_mutation(
+        self,
+        *,
+        interaction_id: str,
+        status: object,
+        error_kind: str | None,
+        error_summary: str | None,
+    ) -> None:
+        del error_summary
+        self.finished.append((interaction_id, str(status), error_kind))
+
+    async def run_interaction_provider_mutation(
+        self,
+        *,
+        handoff: ExternalChannelInteractionHandoff,
+        callback: Callable[[ExternalChannelInteractionHandoff], Awaitable[None]],
+    ) -> None:
+        await callback(handoff)
+        self.finished.append((handoff.interaction_id, "completed", None))
+
 
 def _configuration(
     codec: ExternalChannelCredentialsCodec,
     *,
     status: ExternalChannelConnectionStatus,
+    app_mode: ExternalChannelAppMode = ExternalChannelAppMode.MULTI,
 ) -> ExternalChannelConnectionConfiguration:
     return ExternalChannelConnectionConfiguration(
         id="connection-1",
@@ -100,7 +177,7 @@ def _configuration(
         provider=ExternalChannelProvider.SLACK,
         transport=ExternalChannelTransport.HTTP,
         status=status,
-        app_mode=ExternalChannelAppMode.SINGLE,
+        app_mode=app_mode,
         provider_app_id="A-1",
         provider_tenant_id="T-1",
         provider_bot_user_id="B-1",
@@ -132,6 +209,7 @@ def _service(
     configuration: ExternalChannelConnectionConfiguration | None,
     codec: ExternalChannelCredentialsCodec,
     admission: _AdmissionDouble,
+    interaction_processor: ExternalChannelInteractionProcessor | None = None,
 ) -> tuple[SlackHTTPAdmissionService, _RepositoryDouble]:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -144,6 +222,15 @@ def _service(
             repository=cast(ExternalChannelRepository, repository),
             credentials_codec=codec,
             admission_service=cast(ExternalChannelAdmissionService, admission),
+            interaction_processor=(
+                cast(ExternalChannelInteractionProcessor, AsyncMock())
+                if interaction_processor is None
+                else interaction_processor
+            ),
+            shortcut_source_service=cast(
+                ExternalChannelShortcutSourceService,
+                AsyncMock(),
+            ),
         ),
         repository,
     )
@@ -173,6 +260,37 @@ def _event_body(*, app_id: str = "A-1", tenant_id: str = "T-1") -> bytes:
             },
         }
     ).encode()
+
+
+def _interaction_body(
+    *,
+    interaction_type: str = "message_action",
+    app_id: str = "A-1",
+    tenant_id: str = "T-1",
+) -> bytes:
+    payload: dict[str, object] = {
+        "type": interaction_type,
+        "api_app_id": app_id,
+        "team": {"id": tenant_id},
+        "user": {"id": "U-1"},
+        "callback_id": "ask-agent",
+        "trigger_id": "trigger-secret-must-not-persist",
+        "response_url": "https://hooks.slack.com/actions/private",
+        "channel": {"id": "C-1"},
+        "message": {
+            "ts": "100.0001",
+            "thread_ts": "100.0001",
+            "text": "private source text",
+        },
+    }
+    if interaction_type in {"block_actions", "block_suggestion"}:
+        payload["actions"] = [{"action_id": "agent-selector", "value": "route-1"}]
+    if interaction_type == "view_submission":
+        payload["view"] = {
+            "callback_id": "agent-selector",
+            "private_metadata": "opaque-interaction-id",
+        }
+    return urlencode({"payload": json.dumps(payload)}).encode()
 
 
 @pytest.fixture
@@ -235,6 +353,225 @@ async def test_matching_active_event_is_admitted_before_return(
     assert result.event_id == "event-row-1"
     assert result.created is True
     assert [event.provider_event_id for event in admission.events] == ["Ev-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("interaction_type", "expected_type", "expected_surface", "supported"),
+    [
+        ("message_action", "shortcut", "unknown", True),
+        ("block_actions", "block_action", "unknown", False),
+        ("block_suggestion", "options", "unknown", False),
+        ("view_submission", "view_submission", "modal", False),
+    ],
+)
+async def test_matching_active_interaction_is_admitted_without_raw_payload(
+    codec: ExternalChannelCredentialsCodec,
+    interaction_type: str,
+    expected_type: str,
+    expected_surface: str,
+    supported: bool,
+) -> None:
+    """Commit one signed form interaction before returning acknowledgement."""
+    admission = _AdmissionDouble()
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+    )
+    body = _interaction_body(interaction_type=interaction_type)
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert result.challenge is None
+    assert result.event_id is None
+    assert result.interaction_id == "interaction-row-1"
+    assert result.created is True
+    assert admission.claimed_interaction_ids == (
+        ["interaction-row-1"] if supported else []
+    )
+    assert (result.interaction_handoff is not None) is supported
+    if result.interaction_handoff is not None:
+        assert result.interaction_handoff.interaction_id == "interaction-row-1"
+    assert admission.finished == (
+        []
+        if supported
+        else [("interaction-row-1", "rejected", "interaction_unsupported")]
+    )
+    assert admission.events == []
+    assert len(admission.interactions) == 1
+    create, principal, shortcut_source_event = admission.interactions[0]
+    assert create.interaction_type.value == expected_type
+    assert create.provider_interaction_key.startswith("http-")
+    assert create.resource_correlation_key == "C-1:100.0001"
+    assert create.projection == {
+        "interaction_type": expected_type,
+        "surface": expected_surface,
+    }
+    assert principal.provider_user_id == "U-1"
+    persisted = repr((create, principal))
+    assert "trigger-secret" not in persisted
+    assert "hooks.slack.com" not in persisted
+    assert "private source text" not in persisted
+    assert "trigger-secret" not in repr(result)
+    if interaction_type == "message_action":
+        assert shortcut_source_event is not None
+        assert shortcut_source_event.provider_event_id == (
+            f"shortcut-{create.provider_interaction_key}"
+        )
+        assert shortcut_source_event.resource_correlation_key == "C-1:100.0001"
+        assert shortcut_source_event.envelope["event"] == {
+            "type": "app_mention",
+            "channel": "C-1",
+            "user": "U-1",
+            "ts": "100.0001",
+            "thread_ts": "100.0001",
+            "text": "private source text",
+        }
+    else:
+        assert shortcut_source_event is None
+
+
+@pytest.mark.asyncio
+async def test_single_shortcut_is_durably_rejected_without_selector_source() -> None:
+    """Single Apps acknowledge shortcuts without creating Multi selector work."""
+    codec = ExternalChannelCredentialsCodec(
+        CredentialCipher(Fernet.generate_key().decode())
+    )
+    admission = _AdmissionDouble()
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+            app_mode=ExternalChannelAppMode.SINGLE,
+        ),
+        codec=codec,
+        admission=admission,
+    )
+    body = _interaction_body()
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert result.interaction_id == "interaction-row-1"
+    assert result.interaction_handoff is None
+    assert admission.claimed_interaction_ids == []
+    assert admission.finished == [
+        ("interaction-row-1", "rejected", "interaction_unsupported")
+    ]
+    assert len(admission.interactions) == 1
+    assert admission.interactions[0][2] is None
+
+
+@pytest.mark.asyncio
+async def test_duplicate_interaction_claim_suppresses_ephemeral_handoff(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """An already-processing interaction cannot schedule provider I/O again."""
+    admission = _AdmissionDouble()
+    admission.claimed = False
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+    )
+    body = _interaction_body()
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert admission.claimed_interaction_ids == ["interaction-row-1"]
+    assert result.interaction_handoff is None
+
+
+@pytest.mark.asyncio
+async def test_provider_processor_runs_only_after_http_admission_returns(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """The request path returns a handoff before any provider mutation runs."""
+    admission = _AdmissionDouble()
+    processor = AsyncMock()
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+        interaction_processor=cast(ExternalChannelInteractionProcessor, processor),
+    )
+    body = _interaction_body()
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert result.interaction_handoff is not None
+    processor.process.assert_not_awaited()
+
+    await service.run_interaction_handoff(result.interaction_handoff)
+
+    processor.process.assert_awaited_once_with(result.interaction_handoff)
+    assert admission.finished == [
+        ("interaction-row-1", "completed", None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_claim_failure_prevents_http_success_ack_result(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """A failure before the durable claim must escape rather than acknowledge."""
+    admission = _AdmissionDouble()
+
+    async def fail_claim(**_: object) -> object:
+        raise RuntimeError("claim failed")
+
+    admission.begin_interaction_provider_mutation = fail_claim
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+    )
+    body = _interaction_body()
+    timestamp, signature = _signed(body)
+
+    with pytest.raises(RuntimeError, match="claim failed"):
+        await service.handle(
+            raw_body=body,
+            timestamp_header=timestamp,
+            signature_header=signature,
+            received_at=_NOW,
+        )
 
 
 @pytest.mark.asyncio
@@ -317,3 +654,32 @@ async def test_database_failure_propagates_without_success_acknowledgement(
             signature_header=signature,
             received_at=_NOW,
         )
+
+
+@pytest.mark.asyncio
+async def test_invalid_signed_interaction_does_not_admit_trusted_work(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """Reject a malformed form after HMAC verification without admission."""
+    admission = _AdmissionDouble()
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+    )
+    body = b"payload=not-json"
+    timestamp, signature = _signed(body)
+
+    with pytest.raises(SlackHTTPInvalidPayload):
+        await service.handle(
+            raw_body=body,
+            timestamp_header=timestamp,
+            signature_header=signature,
+            received_at=_NOW,
+        )
+
+    assert admission.events == []
+    assert admission.interactions == []

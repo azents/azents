@@ -1,14 +1,16 @@
 """Slack HTTP callback orchestration with durable event admission."""
 
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, assert_never
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelInteractionStatus,
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
@@ -21,13 +23,23 @@ from azents.services.external_channel.connection import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
+from azents.services.external_channel.interaction import (
+    ExternalChannelInteractionHandoff,
+    ExternalChannelInteractionProcessor,
+)
+from azents.services.external_channel.shortcut_source import (
+    ExternalChannelShortcutSourceService,
+)
 from azents.services.external_channel.slack_http import (
     SlackEventCallback,
     SlackEventRouteIdentity,
     SlackHTTPUnauthorized,
+    SlackInteractionCallback,
+    SlackInteractionRouteIdentity,
     SlackURLVerification,
     parse_slack_callback,
     parse_slack_callback_route,
+    project_slack_shortcut_source_event_from_callback_body,
     verify_slack_signature,
 )
 
@@ -38,12 +50,17 @@ class SlackHTTPAdmissionResult:
 
     challenge: str | None
     event_id: str | None
+    interaction_id: str | None
     created: bool | None
+    interaction_handoff: ExternalChannelInteractionHandoff | None = field(
+        default=None,
+        repr=False,
+    )
 
 
 @dataclass
 class SlackHTTPAdmissionService:
-    """Verify a Slack callback and durably admit ordinary events before return."""
+    """Verify a Slack callback and durably admit it before acknowledgement."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession],
@@ -61,6 +78,14 @@ class SlackHTTPAdmissionService:
         ExternalChannelAdmissionService,
         Depends(ExternalChannelAdmissionService),
     ]
+    interaction_processor: Annotated[
+        ExternalChannelInteractionProcessor,
+        Depends(ExternalChannelInteractionProcessor),
+    ]
+    shortcut_source_service: Annotated[
+        ExternalChannelShortcutSourceService,
+        Depends(ExternalChannelShortcutSourceService),
+    ]
 
     async def handle(
         self,
@@ -76,9 +101,12 @@ class SlackHTTPAdmissionService:
             return SlackHTTPAdmissionResult(
                 challenge=route.challenge,
                 event_id=None,
+                interaction_id=None,
                 created=None,
             )
-        if not isinstance(route, SlackEventRouteIdentity):
+        if not isinstance(
+            route, SlackEventRouteIdentity | SlackInteractionRouteIdentity
+        ):
             raise AssertionError("Slack callback route is not exhaustive.")
         async with self.session_manager() as session:
             configuration = (
@@ -137,7 +165,104 @@ class SlackHTTPAdmissionService:
                 return SlackHTTPAdmissionResult(
                     challenge=None,
                     event_id=admission.event.id,
+                    interaction_id=None,
                     created=admission.created,
+                )
+            case (
+                SlackInteractionCallback(app_id=app_id, tenant_id=tenant_id) as callback
+            ):
+                if configuration.status not in {
+                    ExternalChannelConnectionStatus.ACTIVE,
+                    ExternalChannelConnectionStatus.DEGRADED,
+                }:
+                    raise SlackHTTPUnauthorized(
+                        "Slack callback could not be authenticated."
+                    )
+                if (
+                    configuration.provider_app_id != app_id
+                    or configuration.provider_tenant_id != tenant_id
+                ):
+                    raise SlackHTTPUnauthorized(
+                        "Slack callback could not be authenticated."
+                    )
+                shortcut_source_event = (
+                    project_slack_shortcut_source_event_from_callback_body(
+                        connection_id=configuration.id,
+                        raw_body=raw_body,
+                        provider_interaction_key=callback.provider_interaction_key,
+                        received_at=received_at,
+                    )
+                    if (
+                        configuration.app_mode is ExternalChannelAppMode.MULTI
+                        and callback.requires_selector_processing()
+                    )
+                    else None
+                )
+                admission = await self.admission_service.admit_interaction(
+                    create=callback.interaction_create(
+                        connection_id=configuration.id,
+                        transport=ExternalChannelTransport.HTTP,
+                    ),
+                    principal=callback.principal_create(),
+                    shortcut_source_event=shortcut_source_event,
+                )
+                if shortcut_source_event is not None:
+                    await self.shortcut_source_service.ensure(
+                        shortcut_source_event=shortcut_source_event,
+                        interaction_id=admission.interaction.id,
+                        now=received_at,
+                    )
+                selector_supported = (
+                    configuration.app_mode is ExternalChannelAppMode.MULTI
+                    and callback.requires_selector_processing()
+                )
+                claim = (
+                    await self.admission_service.begin_interaction_provider_mutation(
+                        interaction_id=admission.interaction.id,
+                        now=received_at,
+                    )
+                    if selector_supported
+                    else None
+                )
+                if not selector_supported:
+                    await self.admission_service.finish_interaction_provider_mutation(
+                        interaction_id=admission.interaction.id,
+                        status=ExternalChannelInteractionStatus.REJECTED,
+                        error_kind="interaction_unsupported",
+                        error_summary=(
+                            "Slack interaction is outside the supported selector flow."
+                        ),
+                    )
+                return SlackHTTPAdmissionResult(
+                    challenge=None,
+                    event_id=None,
+                    interaction_id=admission.interaction.id,
+                    created=admission.created,
+                    interaction_handoff=(
+                        ExternalChannelInteractionHandoff(
+                            interaction_id=claim.interaction.id,
+                            trigger_id=callback.trigger_id,
+                            selector_admission_id=callback.selector_admission_id,
+                            selector_metadata=callback.selector_metadata,
+                            selected_route_id=callback.selected_route_id,
+                            selector_navigation=callback.selector_navigation,
+                            selector_search=callback.selector_search,
+                            selector_view_id=callback.selector_view_id,
+                            selector_view_hash=callback.selector_view_hash,
+                        )
+                        if claim is not None and claim.claimed
+                        else None
+                    ),
                 )
             case _ as unreachable:
                 assert_never(unreachable)
+
+    async def run_interaction_handoff(
+        self,
+        handoff: ExternalChannelInteractionHandoff,
+    ) -> None:
+        """Invoke the injected processor only after the admission/claim commits."""
+        await self.admission_service.run_interaction_provider_mutation(
+            handoff=handoff,
+            callback=self.interaction_processor.process,
+        )

@@ -622,6 +622,7 @@ class ExternalChannelWorkRepository:
                     sa.select(
                         RDBExternalChannelAgentRoute,
                         RDBExternalChannelConnection,
+                        RDBAgent,
                     )
                     .join(
                         RDBExternalChannelAccessRequest,
@@ -633,12 +634,16 @@ class ExternalChannelWorkRepository:
                         RDBExternalChannelConnection.id
                         == RDBExternalChannelAgentRoute.connection_id,
                     )
+                    .outerjoin(
+                        RDBAgent,
+                        RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                    )
                     .where(RDBExternalChannelAccessRequest.id == attempt.origin_id)
                 )
             ).one_or_none()
             if request_route is None:
                 return None
-            route, connection = request_route
+            route, connection, agent = request_route
             return ChannelDeliveryTarget(
                 delivery_attempt_id=attempt.id,
                 operation=attempt.operation,
@@ -648,6 +653,9 @@ class ExternalChannelWorkRepository:
                 provider=connection.provider,
                 encrypted_credentials=connection.encrypted_credentials,
                 provider_tenant_id=connection.provider_tenant_id,
+                capabilities=connection.capabilities,
+                agent_name=None if agent is None else agent.name,
+                agent_avatar=None if agent is None else agent.avatar,
                 request_payload=dict(attempt.request_payload),
             )
         row = (
@@ -656,6 +664,7 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelDeliveryAttempt,
                     RDBExternalChannelAgentRoute,
                     RDBExternalChannelConnection,
+                    RDBAgent,
                 )
                 .join(
                     RDBExternalChannelBinding,
@@ -672,12 +681,16 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelConnection.id
                     == RDBExternalChannelAgentRoute.connection_id,
                 )
+                .outerjoin(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                )
                 .where(RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id)
             )
         ).one_or_none()
         if row is None:
             return None
-        attempt, route, connection = row
+        attempt, route, connection, agent = row
         return ChannelDeliveryTarget(
             delivery_attempt_id=attempt.id,
             operation=attempt.operation,
@@ -687,6 +700,9 @@ class ExternalChannelWorkRepository:
             provider=connection.provider,
             encrypted_credentials=connection.encrypted_credentials,
             provider_tenant_id=connection.provider_tenant_id,
+            capabilities=connection.capabilities,
+            agent_name=None if agent is None else agent.name,
+            agent_avatar=None if agent is None else agent.avatar,
             request_payload=dict(attempt.request_payload),
         )
 

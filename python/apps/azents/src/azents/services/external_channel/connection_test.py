@@ -329,6 +329,7 @@ async def test_valid_connection_activation_persists_identity_and_redacts_secrets
             bot_user_id="B-1",
         ),
         capabilities=capabilities,
+        customize_messages=True,
     )
     repository = _RepositoryDouble()
     repository.configuration = _configuration(codec)
@@ -353,6 +354,10 @@ async def test_valid_connection_activation_persists_identity_and_redacts_secrets
     assert repository.health_status is ExternalChannelConnectionStatus.ACTIVE
     assert repository.health_tenant_id == "T-1"
     assert repository.health_bot_user_id == "B-1"
+    assert repository.health_capabilities is not None
+    assert repository.health_capabilities["customize_messages"] is True
+    assert snapshot.capabilities is not None
+    assert "customize_messages" not in snapshot.capabilities.model_dump()
     assert repository.configuration is not None
     assert repository.health_expected_encrypted_credentials == (
         repository.configuration.encrypted_credentials

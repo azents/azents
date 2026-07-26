@@ -4,6 +4,7 @@ import datetime
 import hashlib
 import hmac
 import json
+from urllib.parse import parse_qs, urlencode
 
 import httpx
 import pytest
@@ -20,10 +21,14 @@ from azents.services.external_channel.slack_http import (
     SlackEventRouteIdentity,
     SlackHTTPPayloadTooLarge,
     SlackHTTPUnauthorized,
+    SlackInteractionCallback,
+    SlackInteractionRouteIdentity,
     SlackURLVerification,
     SlackWebAPIClient,
     parse_slack_callback,
     parse_slack_callback_route,
+    parse_slack_interaction_payload,
+    project_slack_shortcut_source_event,
     verify_slack_signature,
 )
 
@@ -101,6 +106,42 @@ def _event_body() -> bytes:
     ).encode()
 
 
+def _interaction_body(*, interaction_type: str = "message_action") -> bytes:
+    """Build one URL-encoded Slack interaction body with excluded secret fields."""
+    payload: dict[str, object] = {
+        "type": interaction_type,
+        "api_app_id": "A-1",
+        "team": {"id": "T-1"},
+        "user": {"id": "U-1"},
+        "callback_id": "ask-agent",
+        "trigger_id": "trigger-secret-must-not-persist",
+        "response_url": "https://hooks.slack.com/actions/private",
+        "channel": {"id": "C-1"},
+        "message": {
+            "ts": "100.0001",
+            "thread_ts": "100.0001",
+            "text": "private source text",
+        },
+    }
+    if interaction_type in {"block_actions", "block_suggestion"}:
+        payload["actions"] = [{"action_id": "agent-selector", "value": "route-1"}]
+    if interaction_type == "view_submission":
+        payload["view"] = {
+            "callback_id": "azents_agent_selector",
+            "private_metadata": "signed-selector-metadata",
+            "state": {
+                "values": {
+                    "azents_agent_selector_route": {
+                        "azents_agent_selector_route": {
+                            "selected_option": {"value": "route-1"}
+                        }
+                    }
+                }
+            },
+        }
+    return urlencode({"payload": json.dumps(payload)}).encode()
+
+
 def test_signature_verification_uses_exact_raw_body() -> None:
     """Accept the signed bytes and reject a semantically equal reserialization."""
     body = b'{"type":"url_verification","challenge":"abc"}'
@@ -157,6 +198,125 @@ def test_event_callback_exposes_untrusted_routing_identity() -> None:
     result = parse_slack_callback_route(_event_body())
 
     assert result == SlackEventRouteIdentity(app_id="A-1", tenant_id="T-1")
+
+
+def test_interaction_callback_exposes_only_untrusted_routing_identity() -> None:
+    """Read the interaction App and Team before HMAC verification."""
+    result = parse_slack_callback_route(_interaction_body())
+
+    assert result == SlackInteractionRouteIdentity(app_id="A-1", tenant_id="T-1")
+
+
+@pytest.mark.parametrize(
+    ("interaction_type", "expected_type", "expected_surface"),
+    [
+        ("message_action", "shortcut", "unknown"),
+        ("block_actions", "block_action", "unknown"),
+        ("block_suggestion", "options", "unknown"),
+        ("view_submission", "view_submission", "modal"),
+    ],
+)
+def test_interaction_callback_projects_only_bounded_safe_metadata(
+    interaction_type: str,
+    expected_type: str,
+    expected_surface: str,
+) -> None:
+    """Do not retain form text, trigger IDs, response URLs, or action values."""
+    result = parse_slack_callback(
+        connection_id="connection-1",
+        raw_body=_interaction_body(interaction_type=interaction_type),
+        received_at=_NOW,
+    )
+
+    assert isinstance(result, SlackInteractionCallback)
+    assert result.interaction_type.value == expected_type
+    assert result.actor_user_id == "U-1"
+    assert result.resource_correlation_key == "C-1:100.0001"
+    assert result.provider_interaction_key.startswith("http-")
+    assert result.projection == {
+        "interaction_type": expected_type,
+        "surface": expected_surface,
+    }
+    if interaction_type == "view_submission":
+        assert result.selector_metadata == "signed-selector-metadata"
+        assert result.selected_route_id == "route-1"
+    persisted = repr(result)
+    assert "trigger-secret" not in persisted
+    assert "hooks.slack.com" not in persisted
+    assert "private source text" not in persisted
+    assert "route-1" not in persisted
+
+
+def test_selector_navigation_projects_only_transient_bounded_modal_state() -> None:
+    """Keep page/search controls in memory without persisting their values."""
+    result = parse_slack_interaction_payload(
+        payload={
+            "type": "block_actions",
+            "api_app_id": "A-1",
+            "team": {"id": "T-1"},
+            "user": {"id": "U-1"},
+            "actions": [{"action_id": "azents_agent_selector_next"}],
+            "view": {
+                "id": "V-1",
+                "hash": "hash-1",
+                "callback_id": "azents_agent_selector",
+                "private_metadata": "signed-selector-metadata",
+                "state": {
+                    "values": {
+                        "azents_agent_selector_search": {
+                            "azents_agent_selector_search": {"value": "  operations  "}
+                        }
+                    }
+                },
+            },
+        },
+        provider_interaction_key="http-navigation",
+        received_at=_NOW,
+    )
+
+    assert result.requires_selector_processing()
+    assert result.selector_navigation == "next"
+    assert result.selector_search == "operations"
+    assert result.selector_view_id == "V-1"
+    assert result.selector_view_hash == "hash-1"
+    assert result.selector_metadata == "signed-selector-metadata"
+    assert "operations" not in repr(result)
+    assert "signed-selector-metadata" not in repr(result)
+
+
+def test_message_shortcut_source_projects_to_stable_canonical_event() -> None:
+    """Retain only canonical source content and stable retry identity."""
+    payload = json.loads(
+        parse_qs(_interaction_body(interaction_type="message_action").decode())[
+            "payload"
+        ][0]
+    )
+    source = project_slack_shortcut_source_event(
+        connection_id="connection-1",
+        payload=payload,
+        provider_interaction_key="http-abc",
+        received_at=_NOW,
+    )
+    retry = project_slack_shortcut_source_event(
+        connection_id="connection-1",
+        payload=payload,
+        provider_interaction_key="http-abc",
+        received_at=_NOW,
+    )
+
+    assert source.provider_event_id == retry.provider_event_id == "shortcut-http-abc"
+    assert source.resource_correlation_key == "C-1:100.0001"
+    assert source.envelope["event"] == {
+        "type": "app_mention",
+        "channel": "C-1",
+        "user": "U-1",
+        "ts": "100.0001",
+        "thread_ts": "100.0001",
+        "text": "private source text",
+    }
+    persisted = repr(source)
+    assert "trigger-secret" not in persisted
+    assert "hooks.slack.com" not in persisted
 
 
 def test_event_callback_projects_bounded_routing_and_message_fields() -> None:
@@ -366,21 +526,23 @@ async def test_auth_test_returns_sanitized_identity() -> None:
 
 
 @pytest.mark.parametrize(
-    ("optional_scopes", "download_files", "upload_files"),
+    ("optional_scopes", "download_files", "upload_files", "customize_messages"),
     [
-        ("files:read", True, False),
-        ("files:write", False, True),
-        ("files:read,files:write", True, True),
-        ("files:read invalid", False, False),
+        ("files:read", True, False, False),
+        ("files:write", False, True, False),
+        ("files:read,files:write", True, True, False),
+        ("chat:write.customize", False, False, True),
+        ("files:read invalid", False, False, False),
     ],
 )
 @pytest.mark.asyncio
-async def test_auth_test_derives_optional_file_capabilities_independently(
+async def test_auth_test_derives_optional_internal_capabilities_independently(
     optional_scopes: str,
     download_files: bool,
     upload_files: bool,
+    customize_messages: bool,
 ) -> None:
-    """Optional file scopes never gate unrelated text connection behavior."""
+    """Optional scopes never gate unrelated text connection behavior."""
     required_scopes = (
         "app_mentions:read,channels:history,channels:read,groups:history,"
         "groups:read,chat:write,users:read"
@@ -416,6 +578,7 @@ async def test_auth_test_derives_optional_file_capabilities_independently(
     assert result.capabilities is not None
     assert result.capabilities.download_files is download_files
     assert result.capabilities.upload_files is upload_files
+    assert result.customize_messages is customize_messages
 
 
 @pytest.mark.asyncio

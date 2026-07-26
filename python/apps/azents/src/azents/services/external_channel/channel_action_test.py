@@ -3,12 +3,14 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
 from azents.core.enums import (
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
@@ -74,6 +76,9 @@ class _RepositoryDouble:
             provider=ExternalChannelProvider.SLACK,
             encrypted_credentials="ciphertext",
             provider_tenant_id="T1",
+            capabilities=None,
+            agent_name=None,
+            agent_avatar=None,
             request_payload={
                 "channel_id": "C1",
                 "thread_ts": "1.000001",
@@ -327,6 +332,7 @@ def _service(
             ExchangeFileService,
             exchange_file_service or _ExchangeFileService(),
         ),
+        config=cast(Config, SimpleNamespace(avatar_cdn_base_url=None)),
     )
 
 

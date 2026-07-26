@@ -36,6 +36,10 @@ from azents.services.external_channel.slack_endpoint import (
 _MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
 _MAX_ATTACHMENT_TYPES = 32
 SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12_000
+SLACK_INTERACTION_VIEW_TITLE_MAX_LENGTH = 24
+SLACK_INTERACTION_VIEW_PRIVATE_METADATA_MAX_LENGTH = 3_000
+SLACK_INTERACTION_VIEW_MAX_BLOCKS = 100
+SLACK_INTERACTION_VIEW_MAX_BYTES = 100 * 1024
 _MAX_REFERENCE_IDS = 20
 _SLACK_USER_REFERENCE = re.compile(r"<@([A-Z0-9]+)(?:\|[^>]+)?>|@([UW][A-Z0-9]+)")
 _SLACK_CHANNEL_REFERENCE = re.compile(
@@ -198,6 +202,27 @@ class SlackControlMessageResult:
 
     status: Literal["delivered", "failed", "unknown"]
     provider_message_key: str | None
+    error_kind: str | None
+    error_summary: str | None
+
+
+@dataclass(frozen=True)
+class SlackInteractionView:
+    """Bounded selector modal content without provider authority or raw source data."""
+
+    callback_id: str
+    title: str
+    private_metadata: str
+    blocks: list[dict[str, object]]
+    submit_title: str | None
+    close_title: str | None
+
+
+@dataclass(frozen=True)
+class SlackInteractionViewResult:
+    """Sanitized one-attempt Slack view mutation outcome."""
+
+    status: Literal["opened", "updated", "expired", "conflict", "rejected", "unknown"]
     error_kind: str | None
     error_summary: str | None
 
@@ -700,83 +725,43 @@ class SlackConversationClient:
         approval_url: str,
         participant_label: str,
         participant_provider_user_id: str,
+        agent_name: str | None,
+        agent_markdown_line: str | None,
+        icon_url: str | None,
     ) -> SlackControlMessageResult:
         """Attempt one ordinary thread reply containing an approval link."""
-        try:
-            response = await self._request(
-                "POST",
-                "/chat.postMessage",
-                bot_token=bot_token,
-                json_body={
-                    "channel": channel_id,
-                    "thread_ts": thread_ts,
-                    **_approval_message_payload(
-                        approval_url,
-                        participant_label=participant_label,
-                        participant_provider_user_id=participant_provider_user_id,
-                    ),
-                    "unfurl_links": False,
-                    "unfurl_media": False,
-                },
-            )
-            payload = self._success_payload(response)
-        except SlackProviderPermissionDenied:
-            return SlackControlMessageResult(
-                status="failed",
-                provider_message_key=None,
-                error_kind="missing_scope",
-                error_summary="Slack App permissions are incomplete.",
-            )
-        except SlackProviderCredentialsInvalid:
-            return SlackControlMessageResult(
-                status="failed",
-                provider_message_key=None,
-                error_kind="credentials_invalid",
-                error_summary="Slack rejected the configured credential.",
-            )
-        except SlackProviderResourceUnavailable:
-            return SlackControlMessageResult(
-                status="failed",
-                provider_message_key=None,
-                error_kind="resource_unavailable",
-                error_summary="Slack cannot post to the linked conversation.",
-            )
-        except SlackProviderRateLimited:
-            return SlackControlMessageResult(
-                status="failed",
-                provider_message_key=None,
-                error_kind="rate_limited",
-                error_summary="Slack rate limited the control message attempt.",
-            )
-        except SlackProviderRequestRejected as error:
-            return SlackControlMessageResult(
-                status="failed",
-                provider_message_key=None,
-                error_kind="provider_rejected",
-                error_summary=(
-                    f"Slack rejected the control message ({error.error_code})."
-                ),
-            )
-        except SlackProviderTemporaryError:
-            return SlackControlMessageResult(
-                status="unknown",
-                provider_message_key=None,
-                error_kind="provider_ambiguous",
-                error_summary="Slack delivery outcome is unknown.",
-            )
-        ts = payload.get("ts")
-        if not isinstance(ts, str) or not ts:
-            return SlackControlMessageResult(
-                status="unknown",
-                provider_message_key=None,
-                error_kind="provider_response_invalid",
-                error_summary="Slack did not return a message identity.",
-            )
-        return SlackControlMessageResult(
-            status="delivered",
-            provider_message_key=f"slack:{tenant_id}:{channel_id}:{ts}",
-            error_kind=None,
-            error_summary=None,
+        message = _approval_message_payload(
+            approval_url,
+            participant_label=participant_label,
+            participant_provider_user_id=participant_provider_user_id,
+        )
+        if agent_name is not None and agent_markdown_line is not None:
+            text = message.get("text")
+            blocks = message.get("blocks")
+            if isinstance(text, str) and isinstance(blocks, list):
+                message["text"] = f"{agent_name}\n{text}"
+                message["blocks"] = [
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": agent_markdown_line},
+                    },
+                    *blocks,
+                ]
+        return await self._attempt_message_operation(
+            bot_token=bot_token,
+            tenant_id=tenant_id,
+            channel_id=channel_id,
+            path="/chat.postMessage",
+            json_body={
+                "channel": channel_id,
+                "thread_ts": thread_ts,
+                **message,
+                **({"icon_url": icon_url} if icon_url is not None else {}),
+                "unfurl_links": False,
+                "unfurl_media": False,
+            },
+            expected_message_ts=None,
+            allow_icon_fallback=icon_url is not None,
         )
 
     async def post_message(
@@ -787,6 +772,7 @@ class SlackConversationClient:
         channel_id: str,
         thread_ts: str,
         markdown_text: str,
+        icon_url: str | None,
     ) -> SlackControlMessageResult:
         """Attempt one ordinary thread message without retry."""
         if len(markdown_text) > SLACK_MARKDOWN_TEXT_MAX_LENGTH:
@@ -805,10 +791,70 @@ class SlackConversationClient:
                 "channel": channel_id,
                 "thread_ts": thread_ts,
                 "markdown_text": markdown_text,
+                **({"icon_url": icon_url} if icon_url is not None else {}),
                 "unfurl_links": False,
                 "unfurl_media": False,
             },
             expected_message_ts=None,
+            allow_icon_fallback=icon_url is not None,
+        )
+
+    async def open_interaction_view(
+        self,
+        *,
+        bot_token: str,
+        trigger_id: str,
+        view: SlackInteractionView,
+    ) -> SlackInteractionViewResult:
+        """Open one bounded modal with an ephemeral trigger that is never retained."""
+        self._validate_interaction_view(view)
+        if not trigger_id or len(trigger_id) > 512:
+            return SlackInteractionViewResult(
+                status="expired",
+                error_kind="trigger_expired",
+                error_summary="Slack interaction trigger is unavailable.",
+            )
+        return await self._attempt_interaction_view_mutation(
+            path="/views.open",
+            bot_token=bot_token,
+            json_body={
+                "trigger_id": trigger_id,
+                "view": self._interaction_view_payload(view),
+            },
+            success_status="opened",
+        )
+
+    async def update_interaction_view(
+        self,
+        *,
+        bot_token: str,
+        view_id: str,
+        view_hash: str | None,
+        view: SlackInteractionView,
+    ) -> SlackInteractionViewResult:
+        """Update one current modal without retrying a conflicting view revision."""
+        self._validate_interaction_view(view)
+        if not view_id or len(view_id) > 255:
+            return SlackInteractionViewResult(
+                status="rejected",
+                error_kind="provider_payload_invalid",
+                error_summary="Slack interaction view identifier is invalid.",
+            )
+        if view_hash is not None and (not view_hash or len(view_hash) > 255):
+            return SlackInteractionViewResult(
+                status="conflict",
+                error_kind="view_hash_conflict",
+                error_summary="Slack interaction view revision is unavailable.",
+            )
+        return await self._attempt_interaction_view_mutation(
+            path="/views.update",
+            bot_token=bot_token,
+            json_body={
+                "view_id": view_id,
+                **({"hash": view_hash} if view_hash is not None else {}),
+                "view": self._interaction_view_payload(view),
+            },
+            success_status="updated",
         )
 
     async def post_file_message(
@@ -1022,6 +1068,7 @@ class SlackConversationClient:
                 "link_names": False,
             },
             expected_message_ts=message_ts,
+            allow_icon_fallback=False,
         )
 
     async def post_blocks(
@@ -1033,6 +1080,7 @@ class SlackConversationClient:
         thread_ts: str,
         text: str,
         blocks: list[dict[str, object]],
+        icon_url: str | None,
     ) -> SlackControlMessageResult:
         """Post one operational Block Kit message without retry."""
         return await self._attempt_message_operation(
@@ -1045,6 +1093,7 @@ class SlackConversationClient:
                 "thread_ts": thread_ts,
                 "text": text,
                 "blocks": blocks,
+                **({"icon_url": icon_url} if icon_url is not None else {}),
                 "mrkdwn": False,
                 "parse": "none",
                 "link_names": False,
@@ -1052,6 +1101,7 @@ class SlackConversationClient:
                 "unfurl_media": False,
             },
             expected_message_ts=None,
+            allow_icon_fallback=icon_url is not None,
         )
 
     async def delete_message(
@@ -1070,6 +1120,122 @@ class SlackConversationClient:
             path="/chat.delete",
             json_body={"channel": channel_id, "ts": message_ts},
             expected_message_ts=message_ts,
+            allow_icon_fallback=False,
+        )
+
+    @staticmethod
+    def _validate_interaction_view(view: SlackInteractionView) -> None:
+        """Reject oversized or incomplete modal content before Slack mutation."""
+        for name, value in (
+            ("callback ID", view.callback_id),
+            ("title", view.title),
+            ("private metadata", view.private_metadata),
+        ):
+            if not value:
+                raise ValueError(f"Slack interaction view {name} must not be blank.")
+        if len(view.callback_id) > 255:
+            raise ValueError("Slack interaction view callback ID is too long.")
+        if len(view.title) > SLACK_INTERACTION_VIEW_TITLE_MAX_LENGTH:
+            raise ValueError("Slack interaction view title is too long.")
+        if (
+            len(view.private_metadata)
+            > SLACK_INTERACTION_VIEW_PRIVATE_METADATA_MAX_LENGTH
+        ):
+            raise ValueError("Slack interaction view private metadata is too long.")
+        if len(view.blocks) > SLACK_INTERACTION_VIEW_MAX_BLOCKS:
+            raise ValueError("Slack interaction view contains too many blocks.")
+        try:
+            encoded = json.dumps(
+                SlackConversationClient._interaction_view_payload(view),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode()
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "Slack interaction view is not JSON serializable."
+            ) from error
+        if len(encoded) > SLACK_INTERACTION_VIEW_MAX_BYTES:
+            raise ValueError("Slack interaction view exceeds Slack's size limit.")
+
+    @staticmethod
+    def _interaction_view_payload(view: SlackInteractionView) -> dict[str, object]:
+        """Build a Slack modal payload from already bounded selector state."""
+        return {
+            "type": "modal",
+            "callback_id": view.callback_id,
+            "private_metadata": view.private_metadata,
+            "title": {"type": "plain_text", "text": view.title},
+            "blocks": view.blocks,
+            **(
+                {"submit": {"type": "plain_text", "text": view.submit_title}}
+                if view.submit_title is not None
+                else {}
+            ),
+            **(
+                {"close": {"type": "plain_text", "text": view.close_title}}
+                if view.close_title is not None
+                else {}
+            ),
+        }
+
+    async def _attempt_interaction_view_mutation(
+        self,
+        *,
+        path: str,
+        bot_token: str,
+        json_body: dict[str, object],
+        success_status: Literal["opened", "updated"],
+    ) -> SlackInteractionViewResult:
+        """Map one view mutation to a sanitized one-attempt provider outcome."""
+        try:
+            self._success_payload(
+                await self._request(
+                    "POST",
+                    path,
+                    bot_token=bot_token,
+                    json_body=json_body,
+                )
+            )
+        except SlackProviderRequestRejected as error:
+            if error.error_code == "trigger_expired":
+                return SlackInteractionViewResult(
+                    status="expired",
+                    error_kind="trigger_expired",
+                    error_summary="Slack interaction trigger expired.",
+                )
+            if error.error_code in {"invalid_hash", "view_not_found"}:
+                return SlackInteractionViewResult(
+                    status="conflict",
+                    error_kind="view_hash_conflict",
+                    error_summary="Slack interaction view changed before update.",
+                )
+            return SlackInteractionViewResult(
+                status="rejected",
+                error_kind="provider_rejected",
+                error_summary="Slack rejected the interaction view mutation.",
+            )
+        except (
+            SlackProviderCredentialsInvalid,
+            SlackProviderPermissionDenied,
+            SlackProviderResourceUnavailable,
+        ) as error:
+            _log_slack_provider_failure(error, operation="interaction_view")
+            return SlackInteractionViewResult(
+                status="rejected",
+                error_kind="provider_unavailable",
+                error_summary="Slack interaction view mutation is unavailable.",
+            )
+        except (SlackProviderRateLimited, SlackProviderTemporaryError) as error:
+            _log_slack_provider_failure(error, operation="interaction_view")
+            return SlackInteractionViewResult(
+                status="unknown",
+                error_kind="provider_ambiguous",
+                error_summary="Slack interaction view outcome is unknown.",
+            )
+        return SlackInteractionViewResult(
+            status=success_status,
+            error_kind=None,
+            error_summary=None,
         )
 
     async def _attempt_message_operation(
@@ -1081,6 +1247,7 @@ class SlackConversationClient:
         path: str,
         json_body: dict[str, object],
         expected_message_ts: str | None,
+        allow_icon_fallback: bool,
     ) -> SlackControlMessageResult:
         """Map one Slack mutation into a sanitized at-most-once outcome."""
         try:
@@ -1092,6 +1259,20 @@ class SlackConversationClient:
             )
             payload = self._success_payload(response)
         except SlackProviderPermissionDenied:
+            if allow_icon_fallback:
+                return await self._attempt_message_operation(
+                    bot_token=bot_token,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    path=path,
+                    json_body={
+                        key: value
+                        for key, value in json_body.items()
+                        if key != "icon_url"
+                    },
+                    expected_message_ts=expected_message_ts,
+                    allow_icon_fallback=False,
+                )
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,
@@ -1127,6 +1308,20 @@ class SlackConversationClient:
                 error_summary="Slack rate limited the provider operation.",
             )
         except SlackProviderRequestRejected as error:
+            if allow_icon_fallback:
+                return await self._attempt_message_operation(
+                    bot_token=bot_token,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    path=path,
+                    json_body={
+                        key: value
+                        for key, value in json_body.items()
+                        if key != "icon_url"
+                    },
+                    expected_message_ts=expected_message_ts,
+                    allow_icon_fallback=False,
+                )
             return SlackControlMessageResult(
                 status="failed",
                 provider_message_key=None,

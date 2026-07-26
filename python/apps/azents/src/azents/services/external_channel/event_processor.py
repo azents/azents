@@ -6,7 +6,7 @@ import datetime
 import logging
 import secrets
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import Depends
@@ -87,6 +87,13 @@ from azents.services.external_channel.connection import (
     get_slack_validation_http_client,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
+from azents.services.external_channel.presentation import (
+    normalize_slack_agent_name,
+    prepend_agent_blocks,
+    prepend_agent_fallback,
+    resolve_slack_agent_name_presentation,
+    resolve_slack_agent_presentation,
+)
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
     SlackConversationAccess,
@@ -174,6 +181,22 @@ class ExternalChannelPersistedRevision:
     message: ExternalChannelMessage
     trim: ExternalChannelPendingContextTrim
     applied: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class ExternalChannelSelectedAdmissionContinuation:
+    """Committed post-selection state with an optional approval-control delivery."""
+
+    status: Literal["bound", "awaiting_access", "already_bound", "expired", "rejected"]
+    control_delivery_attempt_id: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class _SlackSelectorControlPresentation:
+    """One bounded thread control that opens the shared Agent selector."""
+
+    text: str
+    blocks: list[dict[str, object]]
 
 
 @dataclasses.dataclass
@@ -284,6 +307,228 @@ class ExternalChannelEventProcessorService:
         for event in events:
             await self._process_claimed_event_safely(event)
         return len(events)
+
+    async def continue_selected_admission(
+        self,
+        *,
+        admission_id: str,
+        principal_id: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelSelectedAdmissionContinuation:
+        """Continue one selected source through existing grant or approval policy."""
+        async with self.session_manager() as session:
+            snapshot = await self.repository.get_conversation_admission(
+                session,
+                admission_id=admission_id,
+            )
+            if snapshot is None:
+                raise SlackEventExcluded("The selected Slack admission is unavailable.")
+            connection = await self.repository.lock_connection_for_routing(
+                session,
+                connection_id=snapshot.connection_id,
+            )
+            if connection is None:
+                raise SlackEventExcluded(
+                    "The selected Slack connection is unavailable."
+                )
+            if snapshot.selected_route_id is None:
+                raise SlackEventExcluded("The selected Slack route is unavailable.")
+            route = await self.repository.get_routable_route_by_id(
+                session,
+                route_id=snapshot.selected_route_id,
+            )
+            if route is None or route.connection_id != connection.id:
+                raise SlackEventExcluded("The selected Slack route is unavailable.")
+            resource = await self.repository.lock_resource(
+                session,
+                resource_id=snapshot.resource_id,
+            )
+            if resource is None or resource.connection_id != connection.id:
+                raise SlackEventExcluded("The selected Slack resource is unavailable.")
+            binding = await self.repository.lock_active_binding_by_resource(
+                session,
+                resource_id=resource.id,
+            )
+            admission = await self.repository.lock_open_conversation_admission(
+                session,
+                resource_id=resource.id,
+            )
+            if (
+                admission is None
+                or admission.id != snapshot.id
+                or admission.initiating_principal_id != principal_id
+                or admission.selected_route_id != route.id
+                or admission.status
+                is not ExternalChannelConversationAdmissionStatus.SELECTED
+            ):
+                raise SlackEventExcluded("The selected Slack admission changed.")
+            if admission.expires_at <= now:
+                await self.repository.transition_conversation_admission(
+                    session,
+                    admission_id=admission.id,
+                    status=ExternalChannelConversationAdmissionStatus.EXPIRED,
+                    selected_route_id=route.id,
+                )
+                await session.commit()
+                return ExternalChannelSelectedAdmissionContinuation(
+                    status="expired",
+                    control_delivery_attempt_id=None,
+                )
+            if binding is not None:
+                await session.commit()
+                return ExternalChannelSelectedAdmissionContinuation(
+                    status="already_bound",
+                    control_delivery_attempt_id=None,
+                )
+            source_message = await self.repository.get_message(
+                session,
+                message_id=admission.source_message_id,
+            )
+            if (
+                source_message is None
+                or source_message.resource_id != resource.id
+                or source_message.current_revision_id is None
+            ):
+                await self.repository.transition_conversation_admission(
+                    session,
+                    admission_id=admission.id,
+                    status=ExternalChannelConversationAdmissionStatus.REJECTED,
+                    selected_route_id=route.id,
+                )
+                await session.commit()
+                return ExternalChannelSelectedAdmissionContinuation(
+                    status="rejected",
+                    control_delivery_attempt_id=None,
+                )
+            active_agent_id = route.require_active_agent_id()
+            if (
+                await self.repository.get_active_block(
+                    session,
+                    agent_id=active_agent_id,
+                    principal_id=principal_id,
+                )
+                is not None
+            ):
+                await self.repository.transition_conversation_admission(
+                    session,
+                    admission_id=admission.id,
+                    status=ExternalChannelConversationAdmissionStatus.REJECTED,
+                    selected_route_id=route.id,
+                )
+                await session.commit()
+                return ExternalChannelSelectedAdmissionContinuation(
+                    status="rejected",
+                    control_delivery_attempt_id=None,
+                )
+            trim = await self._project_current_revision(
+                session,
+                route=route,
+                resource=resource,
+                message=source_message,
+                provider_position=source_message.provider_position,
+                now=now,
+                applied=True,
+            )
+            grant = await self.repository.get_active_access_grant(
+                session,
+                agent_id=active_agent_id,
+                principal_id=principal_id,
+                agent_session_id=None,
+            )
+            if grant is not None:
+                binding = await self._create_granted_initial_binding(
+                    session,
+                    route=route,
+                    resource=resource,
+                    trigger_message=source_message,
+                    expected_admission_id=admission.id,
+                )
+                await self._record_trim(
+                    session,
+                    route=route,
+                    resource=resource,
+                    binding=binding,
+                    trim=trim,
+                )
+                await self.repository.transition_conversation_admission(
+                    session,
+                    admission_id=admission.id,
+                    status=ExternalChannelConversationAdmissionStatus.BOUND,
+                    selected_route_id=route.id,
+                )
+                await session.commit()
+                return ExternalChannelSelectedAdmissionContinuation(
+                    status="bound",
+                    control_delivery_attempt_id=None,
+                )
+            principal = await self.repository.get_principal(
+                session,
+                principal_id=principal_id,
+            )
+            labels = resource.labels or {}
+            tenant_id = labels.get("tenant_id")
+            channel_id = labels.get("channel_id")
+            thread_ts = labels.get("thread_ts")
+            if (
+                principal is None
+                or not principal.provider_user_id
+                or not isinstance(tenant_id, str)
+                or not tenant_id
+                or not isinstance(channel_id, str)
+                or not channel_id
+                or not isinstance(thread_ts, str)
+                or not thread_ts
+            ):
+                raise SlackEventExcluded("The selected Slack source is unavailable.")
+            control_delivery_attempt_id = (
+                await self._create_access_request_and_control_intent(
+                    session,
+                    route=route,
+                    resource=resource,
+                    binding=None,
+                    source_message=source_message,
+                    principal_id=principal_id,
+                    participant_provider_user_id=principal.provider_user_id,
+                    participant_label=(
+                        principal.display_name or principal.provider_user_id
+                    ),
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    trim=trim,
+                    now=now,
+                )
+            )
+            await self.repository.transition_conversation_admission(
+                session,
+                admission_id=admission.id,
+                status=ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
+                selected_route_id=route.id,
+            )
+            await session.commit()
+            return ExternalChannelSelectedAdmissionContinuation(
+                status="awaiting_access",
+                control_delivery_attempt_id=control_delivery_attempt_id,
+            )
+
+    async def attempt_selected_admission_control_delivery(
+        self,
+        *,
+        connection_id: str,
+        delivery_attempt_id: str,
+    ) -> None:
+        """Attempt one committed post-selection approval control without a DB lock."""
+        configuration = await self._connection_configuration(connection_id)
+        if configuration.encrypted_credentials is None:
+            raise RuntimeError("External Channel delivery credentials are unavailable.")
+        credentials = self.credentials_codec.decrypt(
+            configuration.encrypted_credentials
+        )
+        await self._attempt_control_delivery(
+            configuration=configuration,
+            delivery_attempt_id=delivery_attempt_id,
+            bot_token=credentials.bot_token,
+        )
 
     async def reconcile_waiting_bindings(self) -> int:
         """Activate allowed bindings only after hydration reconciliation completes."""
@@ -971,6 +1216,25 @@ class ExternalChannelEventProcessorService:
                 ),
             )
             canonical_message = persisted_revision.message
+            if binding is not None and _is_shortcut_source_event(event):
+                assert route is not None
+                control_delivery_attempt_id = (
+                    await self._create_bound_shortcut_control_intent(
+                        session,
+                        event=event,
+                        resource=resource,
+                        binding=binding,
+                        route=route,
+                    )
+                )
+                await session.commit()
+                return ExternalChannelPersistedMessage(
+                    resource_id=resource.id,
+                    hydration_required=False,
+                    control_delivery_attempt_id=control_delivery_attempt_id,
+                    activity_delivery_attempt_id=None,
+                    wake_up=None,
+                )
             route, admission = await self._resolve_route_for_resource(
                 session,
                 connection_id=connection.id,
@@ -984,6 +1248,20 @@ class ExternalChannelEventProcessorService:
                 now=now,
             )
             if route is None:
+                control_delivery_attempt_id = (
+                    await self._create_selector_control_intent(
+                        session,
+                        resource=resource,
+                        admission=admission,
+                    )
+                    if (
+                        admission is not None
+                        and admission.status
+                        is ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
+                        and not _is_shortcut_source_event(event)
+                    )
+                    else None
+                )
                 await session.commit()
                 return ExternalChannelPersistedMessage(
                     resource_id=resource.id,
@@ -991,7 +1269,7 @@ class ExternalChannelEventProcessorService:
                         message.invocation
                         and not _hydration_terminal(resource.hydration_status)
                     ),
-                    control_delivery_attempt_id=None,
+                    control_delivery_attempt_id=control_delivery_attempt_id,
                     activity_delivery_attempt_id=None,
                     wake_up=None,
                 )
@@ -1107,7 +1385,9 @@ class ExternalChannelEventProcessorService:
                                     )
                                     or participant_provider_user_id
                                 ),
-                                message=message,
+                                tenant_id=message.tenant_id,
+                                channel_id=message.channel_id,
+                                thread_ts=message.root_thread_ts,
                                 trim=trim,
                                 now=now,
                             )
@@ -1404,6 +1684,121 @@ class ExternalChannelEventProcessorService:
         )
         return route, admission
 
+    async def _create_selector_control_intent(
+        self,
+        session: AsyncSession,
+        *,
+        resource: ExternalChannelResource,
+        admission: ExternalChannelConversationAdmission,
+    ) -> str | None:
+        """Create or reuse the one thread selector control for a retained source."""
+        labels = resource.labels or {}
+        tenant_id = labels.get("tenant_id")
+        channel_id = labels.get("channel_id")
+        thread_ts = labels.get("thread_ts")
+        if (
+            not isinstance(tenant_id, str)
+            or not tenant_id
+            or not isinstance(channel_id, str)
+            or not channel_id
+            or not isinstance(thread_ts, str)
+            or not thread_ts
+        ):
+            return None
+        attempt = await self.repository.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                # The retained admission is the selector-control root.
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id=admission.id,
+                channel_action_id=None,
+                binding_id=None,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload={
+                    "provider": "slack",
+                    "control_kind": "agent_selector",
+                    "tenant_id": tenant_id,
+                    "channel_id": channel_id,
+                    "thread_ts": thread_ts,
+                    "conversation_admission_id": admission.id,
+                },
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            ),
+        )
+        return (
+            attempt.id
+            if attempt.status is ExternalChannelDeliveryStatus.PENDING
+            else None
+        )
+
+    async def _create_bound_shortcut_control_intent(
+        self,
+        session: AsyncSession,
+        *,
+        event: ExternalChannelEvent,
+        resource: ExternalChannelResource,
+        binding: ExternalChannelBinding,
+        route: ExternalChannelAgentRoute,
+    ) -> str | None:
+        """Report the immutable existing binding without invoking its Session."""
+        if binding.route_id != route.id:
+            raise RuntimeError("External Channel binding route changed.")
+        agent = await self.agent_repository.get_by_id(
+            session,
+            route.require_active_agent_id(),
+        )
+        recorded_agent_name = normalize_slack_agent_name(
+            None if agent is None else agent.name
+        )
+        labels = resource.labels or {}
+        tenant_id = labels.get("tenant_id")
+        channel_id = labels.get("channel_id")
+        thread_ts = labels.get("thread_ts")
+        if (
+            not isinstance(tenant_id, str)
+            or not tenant_id
+            or not isinstance(channel_id, str)
+            or not channel_id
+            or not isinstance(thread_ts, str)
+            or not thread_ts
+            or recorded_agent_name is None
+        ):
+            return None
+        attempt = await self.repository.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id=event.id,
+                channel_action_id=None,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload={
+                    "provider": "slack",
+                    "control_kind": "shortcut_already_bound",
+                    "tenant_id": tenant_id,
+                    "channel_id": channel_id,
+                    "thread_ts": thread_ts,
+                    "recorded_agent_name": recorded_agent_name,
+                },
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            ),
+        )
+        return (
+            attempt.id
+            if attempt.status is ExternalChannelDeliveryStatus.PENDING
+            else None
+        )
+
     @staticmethod
     def log_route_resolution(
         *,
@@ -1567,7 +1962,9 @@ class ExternalChannelEventProcessorService:
         principal_id: str,
         participant_provider_user_id: str,
         participant_label: str,
-        message: SlackNormalizedMessage,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
         trim: ExternalChannelPendingContextTrim,
         now: datetime.datetime,
     ) -> str | None:
@@ -1603,9 +2000,9 @@ class ExternalChannelEventProcessorService:
         approval_url = _approval_url(self.config.web_url, request.id)
         payload: dict[str, object] = {
             "provider": "slack",
-            "tenant_id": message.tenant_id,
-            "channel_id": message.channel_id,
-            "thread_ts": message.root_thread_ts,
+            "tenant_id": tenant_id,
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
             "access_request_id": request.id,
             "participant_provider_user_id": participant_provider_user_id,
             "participant_label": participant_label,
@@ -1710,6 +2107,10 @@ class ExternalChannelEventProcessorService:
     ) -> None:
         """Attempt one Activity Tracker mutation and durable reconciliation."""
         async with self.session_manager() as session:
+            target = await self.work_repository.get_delivery_target(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+            )
             attempt = await self.repository.start_delivery_attempt(
                 session,
                 delivery_attempt_id=delivery_attempt_id,
@@ -1718,6 +2119,10 @@ class ExternalChannelEventProcessorService:
             await session.commit()
         if attempt is None:
             return
+        presentation = resolve_slack_agent_presentation(
+            target,
+            avatar_cdn_base_url=self.config.avatar_cdn_base_url,
+        )
         payload = attempt.request_payload
         tenant_id = payload.get("tenant_id")
         channel_id = payload.get("channel_id")
@@ -1746,8 +2151,12 @@ class ExternalChannelEventProcessorService:
                 tenant_id=tenant_id,
                 channel_id=channel_id,
                 thread_ts=thread_ts,
-                text=text,
-                blocks=[block for block in blocks if isinstance(block, dict)],
+                text=prepend_agent_fallback(presentation, text),
+                blocks=prepend_agent_blocks(
+                    presentation,
+                    [block for block in blocks if isinstance(block, dict)],
+                ),
+                icon_url=(None if presentation is None else presentation.icon_url),
             )
             result_status = ExternalChannelDeliveryStatus(result.status)
             provider_message_key = result.provider_message_key
@@ -1767,8 +2176,11 @@ class ExternalChannelEventProcessorService:
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     message_ts=message_ts,
-                    text=text,
-                    blocks=[block for block in blocks if isinstance(block, dict)],
+                    text=prepend_agent_fallback(presentation, text),
+                    blocks=prepend_agent_blocks(
+                        presentation,
+                        [block for block in blocks if isinstance(block, dict)],
+                    ),
                 )
                 result_status = ExternalChannelDeliveryStatus(result.status)
                 provider_message_key = result.provider_message_key
@@ -1814,6 +2226,10 @@ class ExternalChannelEventProcessorService:
     ) -> None:
         """Attempt the one-time Session link message for a new binding."""
         async with self.session_manager() as session:
+            target = await self.work_repository.get_delivery_target(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+            )
             attempt = await self.repository.start_delivery_attempt(
                 session,
                 delivery_attempt_id=delivery_attempt_id,
@@ -1822,6 +2238,10 @@ class ExternalChannelEventProcessorService:
             await session.commit()
         if attempt is None:
             return
+        presentation = resolve_slack_agent_presentation(
+            target,
+            avatar_cdn_base_url=self.config.avatar_cdn_base_url,
+        )
         payload = attempt.request_payload
         tenant_id = payload.get("tenant_id")
         channel_id = payload.get("channel_id")
@@ -1851,8 +2271,12 @@ class ExternalChannelEventProcessorService:
                 tenant_id=tenant_id,
                 channel_id=channel_id,
                 thread_ts=thread_ts,
-                text=text,
-                blocks=[block for block in blocks if isinstance(block, dict)],
+                text=prepend_agent_fallback(presentation, text),
+                blocks=prepend_agent_blocks(
+                    presentation,
+                    [block for block in blocks if isinstance(block, dict)],
+                ),
+                icon_url=(None if presentation is None else presentation.icon_url),
             )
             result_status = ExternalChannelDeliveryStatus(result.status)
             provider_message_key = result.provider_message_key
@@ -1887,6 +2311,10 @@ class ExternalChannelEventProcessorService:
     ) -> None:
         now = _now()
         async with self.session_manager() as session:
+            target = await self.work_repository.get_delivery_target(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+            )
             attempt = await self.repository.start_delivery_attempt(
                 session,
                 delivery_attempt_id=delivery_attempt_id,
@@ -1895,14 +2323,96 @@ class ExternalChannelEventProcessorService:
             await session.commit()
         if attempt is None:
             return
+        presentation = resolve_slack_agent_presentation(
+            target,
+            avatar_cdn_base_url=self.config.avatar_cdn_base_url,
+        )
         payload = attempt.request_payload
         tenant_id = payload.get("tenant_id")
         channel_id = payload.get("channel_id")
         thread_ts = payload.get("thread_ts")
+        control_kind = payload.get("control_kind")
+        conversation_admission_id = payload.get("conversation_admission_id")
         approval_url = payload.get("approval_url")
         participant_provider_user_id = payload.get("participant_provider_user_id")
         participant_label = payload.get("participant_label")
-        if (
+        if control_kind == "agent_selector":
+            if (
+                not isinstance(tenant_id, str)
+                or not tenant_id
+                or not isinstance(channel_id, str)
+                or not channel_id
+                or not isinstance(thread_ts, str)
+                or not thread_ts
+                or not isinstance(conversation_admission_id, str)
+                or not conversation_admission_id
+            ):
+                result_status = ExternalChannelDeliveryStatus.FAILED
+                provider_message_key = None
+                error_kind = "control_payload_invalid"
+                error_summary = "The persisted Slack control payload is invalid."
+            else:
+                selector = _render_agent_selector_control(conversation_admission_id)
+                result = await self.slack_client.post_blocks(
+                    bot_token=bot_token,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    text=selector.text,
+                    blocks=selector.blocks,
+                    icon_url=None,
+                )
+                result_status = ExternalChannelDeliveryStatus(result.status)
+                provider_message_key = result.provider_message_key
+                error_kind = result.error_kind
+                error_summary = result.error_summary
+        elif control_kind == "shortcut_already_bound":
+            recorded_presentation = resolve_slack_agent_name_presentation(
+                payload.get("recorded_agent_name")
+                if isinstance(payload.get("recorded_agent_name"), str)
+                else None
+            )
+            bound_presentation = presentation or recorded_presentation
+            if (
+                not isinstance(tenant_id, str)
+                or not tenant_id
+                or not isinstance(channel_id, str)
+                or not channel_id
+                or not isinstance(thread_ts, str)
+                or not thread_ts
+                or bound_presentation is None
+            ):
+                result_status = ExternalChannelDeliveryStatus.FAILED
+                provider_message_key = None
+                error_kind = "control_payload_invalid"
+                error_summary = "The persisted Slack control payload is invalid."
+            else:
+                text = (
+                    "This conversation is already linked to the recorded Agent. "
+                    "Start a separate top-level conversation to use another Agent."
+                )
+                result = await self.slack_client.post_blocks(
+                    bot_token=bot_token,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    text=prepend_agent_fallback(bound_presentation, text),
+                    blocks=prepend_agent_blocks(
+                        bound_presentation,
+                        [
+                            {
+                                "type": "section",
+                                "text": {"type": "mrkdwn", "text": text},
+                            }
+                        ],
+                    ),
+                    icon_url=bound_presentation.icon_url,
+                )
+                result_status = ExternalChannelDeliveryStatus(result.status)
+                provider_message_key = result.provider_message_key
+                error_kind = result.error_kind
+                error_summary = result.error_summary
+        elif (
             not isinstance(tenant_id, str)
             or not tenant_id
             or not isinstance(channel_id, str)
@@ -1929,6 +2439,11 @@ class ExternalChannelEventProcessorService:
                 approval_url=approval_url,
                 participant_label=participant_label,
                 participant_provider_user_id=participant_provider_user_id,
+                agent_name=(None if presentation is None else presentation.name),
+                agent_markdown_line=(
+                    None if presentation is None else presentation.markdown_line
+                ),
+                icon_url=(None if presentation is None else presentation.icon_url),
             )
             result_status = ExternalChannelDeliveryStatus(result.status)
             provider_message_key = result.provider_message_key
@@ -2662,6 +3177,40 @@ def _approval_url(web_url: str, access_request_id: str) -> str | None:
     if not normalized:
         return None
     return f"{normalized}/external-channel/access/{access_request_id}"
+
+
+def _is_shortcut_source_event(event: ExternalChannelEvent) -> bool:
+    """Avoid creating a mention selector control for a shortcut-owned source."""
+    return event.provider_event_id.startswith("shortcut-")
+
+
+def _render_agent_selector_control(
+    conversation_admission_id: str,
+) -> _SlackSelectorControlPresentation:
+    """Render the one generic control for a retained Multi-App conversation."""
+    return _SlackSelectorControlPresentation(
+        text="Select an Agent to continue this conversation.",
+        blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Select an Agent to continue this conversation.",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Select Agent"},
+                        "action_id": "azents_agent_selector_open",
+                        "value": conversation_admission_id,
+                    }
+                ],
+            },
+        ],
+    )
 
 
 def _session_url(

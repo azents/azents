@@ -81,6 +81,7 @@ from .data import (
     ExternalChannelBindingCreate,
     ExternalChannelBlock,
     ExternalChannelBlockCreate,
+    ExternalChannelCatalogRoute,
     ExternalChannelChannelDefault,
     ExternalChannelChannelDefaultCreate,
     ExternalChannelConnection,
@@ -925,6 +926,8 @@ class ExternalChannelRepository:
         )
         if existing is None:
             raise RuntimeError("External Channel interaction admission lookup failed")
+        if not _interaction_admission_is_compatible(existing, create):
+            raise ValueError("External Channel interaction retry is incompatible.")
         return ExternalChannelInteractionAdmission(interaction=existing, created=False)
 
     async def get_interaction_by_provider_key(
@@ -943,6 +946,72 @@ class ExternalChannelRepository:
             )
         )
         return self._as(ExternalChannelInteraction, rdb)
+
+    async def lock_interaction(
+        self,
+        session: AsyncSession,
+        *,
+        interaction_id: str,
+    ) -> ExternalChannelInteraction | None:
+        """Lock one retained interaction before a trigger-bearing provider mutation."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelInteraction)
+            .where(RDBExternalChannelInteraction.id == interaction_id)
+            .with_for_update()
+        )
+        return self._as(ExternalChannelInteraction, rdb)
+
+    async def transition_interaction(
+        self,
+        session: AsyncSession,
+        *,
+        interaction_id: str,
+        status: ExternalChannelInteractionStatus,
+        error_kind: str | None,
+        error_summary: str | None,
+        transitioned_at: datetime.datetime | None = None,
+    ) -> ExternalChannelInteraction | None:
+        """Apply one guarded interaction state transition without replaying I/O."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelInteraction)
+            .where(RDBExternalChannelInteraction.id == interaction_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        allowed = {
+            ExternalChannelInteractionStatus.ACCEPTED: {
+                ExternalChannelInteractionStatus.PROCESSING,
+                ExternalChannelInteractionStatus.EXPIRED,
+                ExternalChannelInteractionStatus.REJECTED,
+            },
+            ExternalChannelInteractionStatus.PROCESSING: {
+                ExternalChannelInteractionStatus.COMPLETED,
+                ExternalChannelInteractionStatus.FAILED,
+                ExternalChannelInteractionStatus.EXPIRED,
+            },
+            ExternalChannelInteractionStatus.COMPLETED: {
+                ExternalChannelInteractionStatus.COMPLETED,
+            },
+            ExternalChannelInteractionStatus.FAILED: {
+                ExternalChannelInteractionStatus.FAILED,
+            },
+            ExternalChannelInteractionStatus.EXPIRED: {
+                ExternalChannelInteractionStatus.EXPIRED,
+            },
+            ExternalChannelInteractionStatus.REJECTED: {
+                ExternalChannelInteractionStatus.REJECTED,
+            },
+        }
+        if status not in allowed[rdb.status]:
+            raise ValueError("External Channel interaction transition is invalid.")
+        rdb.status = status
+        rdb.error_kind = error_kind
+        rdb.error_summary = error_summary
+        if transitioned_at is not None:
+            rdb.updated_at = transitioned_at
+        await session.flush()
+        return ExternalChannelInteraction.model_validate(rdb)
 
     async def create_conversation_admission_idempotent(
         self,
@@ -1189,6 +1258,66 @@ class ExternalChannelRepository:
             return None
         return ExternalChannelAgentRoute.model_validate(route)
 
+    async def list_routable_multi_catalog_routes(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        principal_id: str,
+        search: str | None,
+        offset: int,
+        limit: int,
+    ) -> list[ExternalChannelCatalogRoute]:
+        """List current Multi selector routes by canonical Agent name and route ID."""
+        if offset < 0 or limit <= 0 or limit > 100:
+            raise ValueError("External Channel selector page is invalid.")
+        normalized_search = None if search is None else search.strip()
+        if normalized_search is not None and len(normalized_search) > 100:
+            raise ValueError("External Channel selector search is too long.")
+        statement = (
+            sa.select(RDBExternalChannelAgentRoute, RDBAgent.name)
+            .join(
+                RDBExternalChannelConnection,
+                RDBExternalChannelConnection.id
+                == RDBExternalChannelAgentRoute.connection_id,
+            )
+            .join(RDBAgent, RDBAgent.id == RDBExternalChannelAgentRoute.agent_id)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.MULTI,
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.MULTI,
+                RDBExternalChannelAgentRoute.catalog_status
+                == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                RDBAgent.workspace_id == RDBExternalChannelConnection.workspace_id,
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                ~sa.exists().where(
+                    RDBExternalChannelBlock.agent_id == RDBAgent.id,
+                    RDBExternalChannelBlock.principal_id == principal_id,
+                    RDBExternalChannelBlock.removed_at.is_(None),
+                ),
+            )
+            .order_by(sa.func.lower(RDBAgent.name), RDBExternalChannelAgentRoute.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        if normalized_search:
+            statement = statement.where(RDBAgent.name.ilike(f"%{normalized_search}%"))
+        rows = (await session.execute(statement)).all()
+        return [
+            ExternalChannelCatalogRoute(
+                route=ExternalChannelAgentRoute.model_validate(route),
+                agent_name=agent_name,
+            )
+            for route, agent_name in rows
+        ]
+
     async def lock_open_conversation_admission(
         self,
         session: AsyncSession,
@@ -1232,6 +1361,18 @@ class ExternalChannelRepository:
             )
         )
         return self._as(ExternalChannelConversationAdmission, rdb)
+
+    async def get_conversation_admission(
+        self,
+        session: AsyncSession,
+        *,
+        admission_id: str,
+    ) -> ExternalChannelConversationAdmission | None:
+        """Fetch one admission snapshot before canonical lock acquisition."""
+        return self._as(
+            ExternalChannelConversationAdmission,
+            await session.get(RDBExternalChannelConversationAdmission, admission_id),
+        )
 
     async def transition_conversation_admission(
         self,
@@ -1980,6 +2121,18 @@ class ExternalChannelRepository:
         )
         rdb: RDBExternalChannelPrincipal = result.scalar_one()
         return ExternalChannelPrincipal.model_validate(rdb)
+
+    async def get_principal(
+        self,
+        session: AsyncSession,
+        *,
+        principal_id: str,
+    ) -> ExternalChannelPrincipal | None:
+        """Fetch one canonical provider principal by durable identity."""
+        return self._as(
+            ExternalChannelPrincipal,
+            await session.get(RDBExternalChannelPrincipal, principal_id),
+        )
 
     async def create_message_idempotent(
         self,
@@ -3462,6 +3615,23 @@ def validate_interaction_projection(projection: dict[str, Any]) -> None:
         ) from error
     if len(encoded) > _MAX_INTERACTION_PROJECTION_BYTES:
         raise ValueError("External Channel interaction projection exceeds 16 KiB.")
+
+
+def _interaction_admission_is_compatible(
+    existing: ExternalChannelInteraction,
+    create: ExternalChannelInteractionCreate,
+) -> bool:
+    """Keep one provider key bound to one immutable authenticated interaction."""
+    return (
+        existing.connection_id == create.connection_id
+        and existing.transport is create.transport
+        and existing.interaction_type is create.interaction_type
+        and existing.callback_id == create.callback_id
+        and existing.action_id == create.action_id
+        and existing.principal_id == create.principal_id
+        and existing.resource_correlation_key == create.resource_correlation_key
+        and existing.projection == create.projection
+    )
 
 
 def _validate_interaction_identifier(

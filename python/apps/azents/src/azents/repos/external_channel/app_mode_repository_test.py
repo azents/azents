@@ -438,7 +438,7 @@ async def test_interaction_admission_is_idempotent_and_validates_principal_bound
         _interaction_create(
             connection.id,
             principal_id=principal.id,
-            projection={"state": "conflicting-retry"},
+            projection={"state": "first"},
         ),
     )
     foreign_principal = await repo.create_principal_idempotent(
@@ -458,6 +458,15 @@ async def test_interaction_admission_is_idempotent_and_validates_principal_bound
     assert retry.created is False
     assert retry.interaction.id == first.interaction.id
     assert retry.interaction.projection == {"state": "first"}
+    with pytest.raises(ValueError, match="retry is incompatible"):
+        await repo.admit_interaction(
+            rdb_session,
+            _interaction_create(
+                connection.id,
+                principal_id=principal.id,
+                projection={"state": "conflicting-retry"},
+            ),
+        )
     for invalid in (
         _interaction_create(
             connection.id,

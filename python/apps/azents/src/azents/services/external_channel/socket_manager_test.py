@@ -16,6 +16,12 @@ from azents.services.external_channel.admission import ExternalChannelAdmissionS
 from azents.services.external_channel.credentials import (
     ExternalChannelCredentialsCodec,
 )
+from azents.services.external_channel.interaction import (
+    ExternalChannelInteractionProcessor,
+)
+from azents.services.external_channel.shortcut_source import (
+    ExternalChannelShortcutSourceService,
+)
 from azents.services.external_channel.socket_manager import (
     SlackSocketManagerService,
 )
@@ -99,6 +105,8 @@ def _service(
         repository=cast(ExternalChannelRepository, repository),
         credentials_codec=cast(ExternalChannelCredentialsCodec, object()),
         admission_service=cast(ExternalChannelAdmissionService, object()),
+        interaction_processor=cast(ExternalChannelInteractionProcessor, object()),
+        shortcut_source_service=cast(ExternalChannelShortcutSourceService, object()),
         http_client=cast(httpx.AsyncClient, object()),
         manager_id="manager-1",
     )
