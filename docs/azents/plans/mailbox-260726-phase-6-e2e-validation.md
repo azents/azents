@@ -70,3 +70,12 @@ tags: [agent, mailbox, e2e, testenv, migration, validation, plan]
 The local runtime as of July 26, 2026 has no `docker` executable or `/var/run/docker.sock`. Docker-backed Postgres migration, full testenv, browser Web Surface, Selenium, and containerized provider lanes are therefore blocked locally unless the environment changes. Record the exact failed prerequisite and expected CI lane; do not label those scenarios skipped/pass.
 
 The validation report must use KST dates and include: branch/commit range; environment versions; prerequisite/fixture status; commands and exit results; scenario-to-API/WS/DOM evidence; migration upgrade/downgrade outcome; generated-contract evidence; failures/fixes/reviews; blocked lanes; and implementation-versus-living-spec drift. It must state that the later Spec Promotion phase owns spec edits and snapshot implementation dates.
+
+## Spec Review Result
+
+- Review target: the implemented Phase 5 stack from `feature/mailbox-260726-pending-api` to `feature/mailbox-260726-web-lifecycle`.
+- Result: the following living specs are impacted because their `code_paths` match the implemented chat stack and their bodies still describe legacy InputBuffer transport or pending terminology:
+  - `docs/azents/spec/flow/chat-session-resync.md` — update the REST/WS pending contract, typed envelope/item identity, durable/action precedence, and native reconciliation semantics.
+  - `docs/azents/spec/domain/conversation.md` — update FIFO mailbox terminology and action ownership correlation from `input_buffer_id` to `source_mailbox_item_id`.
+  - `docs/azents/spec/domain/goal.md` — reconcile Goal continuation transport and its Goal-specific pending presentation/mutation-control rules with the typed mailbox projection.
+- No living spec is edited in Phase 6. No OpenAPI or generated-client drift is identified after explicit public OpenAPI dump, Python client generation, and TypeScript public-client generation commands.
