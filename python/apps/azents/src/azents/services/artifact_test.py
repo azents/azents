@@ -8,6 +8,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.infra.s3.service import S3ObjectIdentity, S3ProductPublicationMetadata
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -194,6 +195,12 @@ class _FakeS3Service:
     def __init__(self, session_boundary: "_SessionBoundary") -> None:
         self.objects: dict[str, bytes] = {}
         self.deleted_keys: list[str] = []
+        self.product_copy_calls: list[
+            tuple[S3ObjectIdentity, S3ObjectIdentity, int, S3ProductPublicationMetadata]
+        ] = []
+        self.product_cleanup_calls: list[
+            tuple[S3ObjectIdentity, int, S3ProductPublicationMetadata]
+        ] = []
         self.session_boundary = session_boundary
 
     async def upload(
@@ -221,6 +228,35 @@ class _FakeS3Service:
         assert self.session_boundary.active == 0
         self.deleted_keys.append(key)
         self.objects.pop(key, None)
+
+    async def copy_verified_transfer_object_to_product(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        destination: S3ObjectIdentity,
+        expected_size: int,
+        publication_metadata: S3ProductPublicationMetadata,
+    ) -> None:
+        """Copy one trusted source into the final product key."""
+        assert self.session_boundary.active == 0
+        self.product_copy_calls.append(
+            (source, destination, expected_size, publication_metadata)
+        )
+        self.objects[destination.key] = b"x" * expected_size
+
+    async def delete_uncommitted_product_object(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        publication_metadata: S3ProductPublicationMetadata,
+    ) -> None:
+        """Record conditional product cleanup."""
+        assert self.session_boundary.active == 0
+        self.product_cleanup_calls.append(
+            (identity, expected_size, publication_metadata)
+        )
+        self.objects.pop(identity.key, None)
 
 
 class _WorkspaceS3Config:
@@ -256,6 +292,23 @@ class _SessionBoundary:
             yield cast(AsyncSession, object())
         finally:
             self.active -= 1
+
+
+class _AuthorityArtifactService(ArtifactService):
+    """Artifact service with explicit authority outcomes for publication tests."""
+
+    authority_results: list[bool]
+
+    async def _has_valid_resource_authority(
+        self,
+        session: AsyncSession,
+        authority: SessionResourceAuthority,
+        *,
+        lock: bool = False,
+    ) -> bool:
+        """Return the next explicitly injected authority result."""
+        del session, authority, lock
+        return self.authority_results.pop(0)
 
 
 def _make_agent_session() -> AgentSession:
@@ -317,6 +370,32 @@ def _make_service() -> tuple[ArtifactService, _FakeArtifactRepository, _FakeS3Se
         s3_service=cast(Any, s3),
         config=cast(Any, _Config()),
     )
+    return service, artifact_repo, s3
+
+
+def _make_authority_service(
+    *,
+    authority_results: list[bool],
+) -> tuple[_AuthorityArtifactService, _FakeArtifactRepository, _FakeS3Service]:
+    """Create ArtifactService with authority checks injected for publication tests."""
+    artifact_repo = _FakeArtifactRepository()
+    session_boundary = _SessionBoundary()
+    s3 = _FakeS3Service(session_boundary)
+    service = _AuthorityArtifactService(
+        artifact_repository=cast(Any, artifact_repo),
+        agent_session_repository=cast(
+            Any, _FakeAgentSessionRepository(_make_agent_session())
+        ),
+        agent_run_repository=cast(Any, object()),
+        workspace_user_repository=cast(
+            Any,
+            _FakeWorkspaceUserRepository(_make_workspace_user()),
+        ),
+        session_manager=session_boundary.session_manager,
+        s3_service=cast(Any, s3),
+        config=cast(Any, _Config()),
+    )
+    service.authority_results = authority_results
     return service, artifact_repo, s3
 
 
@@ -435,6 +514,87 @@ async def test_authority_resolves_artifact_created_by_previous_session_run() -> 
     assert isinstance(resolved, Success)
     assert resolved.value.body == b"hello"
     assert resolved.value.artifact.created_run_id == "run-1"
+
+
+@pytest.mark.asyncio
+async def test_authority_publishes_verified_object_without_body_relay() -> None:
+    """Authority publication copies the verified object and persists its manifest."""
+    service, artifact_repo, s3 = _make_authority_service(authority_results=[True, True])
+    authority = SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=3,
+        owner_generation=0,
+    )
+    source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-object")
+    sha256 = "a" * 64
+
+    result = await service.create_from_verified_object_for_authority(
+        authority=authority,
+        source=source,
+        size_bytes=5 * 1024 * 1024,
+        sha256=sha256,
+        filename="report.txt",
+        media_type="text/plain",
+    )
+
+    assert isinstance(result, Success)
+    artifact = result.value
+    assert artifact.size_bytes == 5 * 1024 * 1024
+    assert artifact.sha256 == sha256
+    assert artifact_repo.artifacts[artifact.id] == artifact
+    assert s3.product_copy_calls == [
+        (
+            source,
+            S3ObjectIdentity(bucket="test-bucket", key=artifact.storage_key),
+            5 * 1024 * 1024,
+            S3ProductPublicationMetadata(
+                sha256=sha256,
+                content_type="text/plain",
+                publication_id=artifact.id,
+            ),
+        )
+    ]
+    assert s3.product_cleanup_calls == []
+
+
+@pytest.mark.asyncio
+async def test_authority_publication_compensates_uncommitted_verified_object() -> None:
+    """Authority revalidation failure conditionally compensates the final object."""
+    service, artifact_repo, s3 = _make_authority_service(
+        authority_results=[True, False]
+    )
+    authority = SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=3,
+        owner_generation=0,
+    )
+    source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-object")
+
+    result = await service.create_from_verified_object_for_authority(
+        authority=authority,
+        source=source,
+        size_bytes=7,
+        sha256="b" * 64,
+        filename="report.txt",
+        media_type="text/plain",
+    )
+
+    assert isinstance(result, Failure)
+    assert artifact_repo.artifacts == {}
+    assert len(s3.product_copy_calls) == 1
+    assert len(s3.product_cleanup_calls) == 1
+    cleanup_identity, cleanup_size, cleanup_metadata = s3.product_cleanup_calls[0]
+    assert cleanup_identity.key == s3.product_copy_calls[0][1].key
+    assert cleanup_size == 7
+    assert cleanup_metadata.publication_id not in artifact_repo.artifacts
 
 
 def test_artifact_uri_returns_storage_key_only() -> None:

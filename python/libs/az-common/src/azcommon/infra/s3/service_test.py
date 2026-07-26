@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 from azcommon.infra.s3.service import (
     S3CompletedPart,
     S3ObjectIdentity,
+    S3ProductPublicationMetadata,
     S3Service,
     S3TransferCancelled,
     S3TransferCleanupRequired,
@@ -154,6 +155,8 @@ class _FakeS3Client:
             _string_argument(arguments, "Key"),
         )
         existing = self.objects.get(destination)
+        if arguments.get("IfNoneMatch") == "*" and existing is not None:
+            raise _client_error("PreconditionFailed")
         if (
             existing is not None
             and "azents-transfer-reservation" not in existing.metadata
@@ -559,6 +562,187 @@ async def test_head_propagates_unexpected_storage_error() -> None:
 
     with pytest.raises(ClientError):
         await service.head(S3ObjectIdentity(bucket="bucket", key="source"))
+
+
+@pytest.mark.asyncio
+async def test_product_publication_native_copy_fences_source_and_verifies_final() -> (
+    None
+):
+    """Product publication copies verified bytes without an application download."""
+    body = b"verified transfer bytes"
+    digest = _sha256(body)
+    source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-source")
+    destination = S3ObjectIdentity(bucket="workspace-bucket", key="final-product")
+    publication = S3ProductPublicationMetadata(
+        sha256=digest,
+        content_type="text/plain",
+        publication_id="exchange-file-id",
+    )
+    client = _FakeS3Client()
+    client.objects[(source.bucket, source.key)] = _StoredObject(
+        body,
+        {"azents-transfer-sha256": digest},
+        "application/octet-stream",
+    )
+    service = _service(client)
+
+    final = await service.copy_verified_transfer_object_to_product(
+        source=source,
+        destination=destination,
+        expected_size=len(body),
+        publication_metadata=publication,
+    )
+
+    assert final.identity == destination
+    assert final.content_length == len(body)
+    assert final.content_type == "text/plain"
+    assert client.bodies == []
+    assert client.copy_requests == [
+        {
+            "Bucket": "workspace-bucket",
+            "Key": "final-product",
+            "CopySource": {
+                "Bucket": "transfer-bucket",
+                "Key": "verified-source",
+            },
+            "CopySourceIfMatch": f'"{digest}"',
+            "IfNoneMatch": "*",
+            "MetadataDirective": "REPLACE",
+            "Metadata": {
+                "azents-product-publication-sha256": digest,
+                "azents-product-publication-id": "exchange-file-id",
+            },
+            "ContentType": "text/plain",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_product_publication_rejects_existing_final_key_without_cleanup() -> None:
+    """A final-key collision fails closed and preserves the other object."""
+    body = b"verified transfer bytes"
+    digest = _sha256(body)
+    source = S3ObjectIdentity(bucket="bucket", key="source")
+    destination = S3ObjectIdentity(bucket="bucket", key="final-product")
+    winner = _StoredObject(b"winner", {"owner": "other"}, "text/plain")
+    client = _FakeS3Client()
+    client.objects[(source.bucket, source.key)] = _StoredObject(
+        body,
+        {"azents-transfer-sha256": digest},
+        None,
+    )
+    client.objects[(destination.bucket, destination.key)] = winner
+
+    with pytest.raises(FileExistsError):
+        await _service(client).copy_verified_transfer_object_to_product(
+            source=source,
+            destination=destination,
+            expected_size=len(body),
+            publication_metadata=S3ProductPublicationMetadata(
+                sha256=digest,
+                content_type="text/plain",
+                publication_id="artifact-id",
+            ),
+        )
+
+    assert client.objects[(destination.bucket, destination.key)] == winner
+    assert client.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_product_publication_fails_closed_when_verified_source_changes() -> None:
+    """The final copy cannot use a source changed after transfer verification."""
+    original = b"verified transfer bytes"
+    digest = _sha256(original)
+    source = S3ObjectIdentity(bucket="bucket", key="source")
+    destination = S3ObjectIdentity(bucket="bucket", key="final-product")
+    client = _FakeS3Client()
+    client.objects[(source.bucket, source.key)] = _StoredObject(
+        original,
+        {"azents-transfer-sha256": digest},
+        None,
+    )
+    client.mutate_source_before_copy = b"changed transfer bytes!"
+
+    with pytest.raises(ClientError):
+        await _service(client).copy_verified_transfer_object_to_product(
+            source=source,
+            destination=destination,
+            expected_size=len(original),
+            publication_metadata=S3ProductPublicationMetadata(
+                sha256=digest,
+                content_type=None,
+                publication_id="artifact-id",
+            ),
+        )
+
+    assert (destination.bucket, destination.key) not in client.objects
+
+
+@pytest.mark.asyncio
+async def test_product_cleanup_deletes_only_exact_uncommitted_object() -> None:
+    """Conditional cleanup deletes the owned object with its observed ETag."""
+    body = b"verified transfer bytes"
+    digest = _sha256(body)
+    destination = S3ObjectIdentity(bucket="bucket", key="final-product")
+    publication = S3ProductPublicationMetadata(
+        sha256=digest,
+        content_type="text/plain",
+        publication_id="exchange-file-id",
+    )
+    client = _FakeS3Client()
+    client.objects[(destination.bucket, destination.key)] = _StoredObject(
+        body,
+        {
+            "azents-product-publication-sha256": digest,
+            "azents-product-publication-id": "exchange-file-id",
+        },
+        "text/plain",
+    )
+
+    await _service(client).delete_uncommitted_product_object(
+        identity=destination,
+        expected_size=len(body),
+        publication_metadata=publication,
+    )
+
+    assert (destination.bucket, destination.key) not in client.objects
+    assert client.delete_calls == ["final-product"]
+
+
+@pytest.mark.asyncio
+async def test_product_cleanup_preserves_destination_replaced_after_owned_head() -> (
+    None
+):
+    """Conditional cleanup cannot delete a newer product object."""
+    body = b"verified transfer bytes"
+    digest = _sha256(body)
+    destination = S3ObjectIdentity(bucket="bucket", key="final-product")
+    publication = S3ProductPublicationMetadata(
+        sha256=digest,
+        content_type="text/plain",
+        publication_id="exchange-file-id",
+    )
+    winner = _StoredObject(b"winner", {"owner": "other"}, "text/plain")
+    client = _FakeS3Client()
+    client.objects[(destination.bucket, destination.key)] = _StoredObject(
+        body,
+        {
+            "azents-product-publication-sha256": digest,
+            "azents-product-publication-id": "exchange-file-id",
+        },
+        "text/plain",
+    )
+    client.replace_before_delete = winner
+
+    with pytest.raises(RuntimeError, match="changed before conditional cleanup"):
+        await _service(client).delete_uncommitted_product_object(
+            identity=destination,
+            expected_size=len(body),
+            publication_metadata=publication,
+        )
+
+    assert client.objects[(destination.bucket, destination.key)] == winner
 
 
 @pytest.mark.asyncio

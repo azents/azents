@@ -7,7 +7,11 @@ import logging
 import re
 from typing import Annotated
 
-from azcommon.infra.s3.service import S3Service
+from azcommon.infra.s3.service import (
+    S3ObjectIdentity,
+    S3ProductPublicationMetadata,
+    S3Service,
+)
 from azcommon.result import Failure, Result, Success
 from azcommon.types import JSONValue
 from azcommon.uuid import uuid7
@@ -287,6 +291,90 @@ class ArtifactService:
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_object(object_key)
+
+    async def create_from_verified_object_for_authority(
+        self,
+        *,
+        authority: SessionResourceAuthority,
+        source: S3ObjectIdentity,
+        size_bytes: int,
+        sha256: str,
+        filename: str | None,
+        media_type: str,
+        source_tool_name: str | None = None,
+        source_call_id: str | None = None,
+        source_part_index: int | None = None,
+        description: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> Result[Artifact, ArtifactAccessDenied]:
+        """Publish a verified transfer object as an authority-owned Artifact."""
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(ArtifactAccessDenied())
+        artifact_id = uuid7().hex
+        object_key = artifact_storage_key(
+            workspace_id=authority.workspace_id,
+            session_id=authority.session_id,
+            created_run_index=authority.run_index,
+            artifact_id=artifact_id,
+        )
+        publication_metadata = S3ProductPublicationMetadata(
+            sha256=sha256,
+            content_type=media_type,
+            publication_id=artifact_id,
+        )
+        succeeded = False
+        try:
+            await self.s3_service.copy_verified_transfer_object_to_product(
+                source=source,
+                destination=S3ObjectIdentity(
+                    bucket=self.config.workspace_s3.bucket,
+                    key=object_key,
+                ),
+                expected_size=size_bytes,
+                publication_metadata=publication_metadata,
+            )
+            async with self.session_manager() as session:
+                if not await self._has_valid_resource_authority(
+                    session,
+                    authority,
+                    lock=True,
+                ):
+                    return Failure(ArtifactAccessDenied())
+                now = datetime.datetime.now(datetime.UTC)
+                created = await self.artifact_repository.create(
+                    session,
+                    ArtifactCreate(
+                        id=artifact_id,
+                        workspace_id=authority.workspace_id,
+                        session_id=authority.session_id,
+                        agent_id=authority.agent_id,
+                        created_run_id=authority.run_id,
+                        created_run_index=authority.run_index,
+                        expires_at=artifact_expires_at(now=now, config=self.config),
+                        name=_sanitize_display_filename(filename),
+                        media_type=media_type,
+                        size_bytes=size_bytes,
+                        sha256=sha256,
+                        source_tool_name=source_tool_name,
+                        source_call_id=source_call_id,
+                        source_part_index=source_part_index,
+                        description=description,
+                        metadata=_json_metadata(metadata),
+                    ),
+                )
+            succeeded = True
+            return Success(created)
+        finally:
+            if not succeeded:
+                await self.s3_service.delete_uncommitted_product_object(
+                    identity=S3ObjectIdentity(
+                        bucket=self.config.workspace_s3.bucket,
+                        key=object_key,
+                    ),
+                    expected_size=size_bytes,
+                    publication_metadata=publication_metadata,
+                )
 
     async def resolve_for_authority(
         self,

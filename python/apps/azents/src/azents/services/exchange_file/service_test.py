@@ -1,6 +1,7 @@
 """ExchangeFileService tests."""
 
 import datetime
+import hashlib
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
@@ -8,6 +9,10 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.infra.s3.service import (
+    S3ObjectIdentity,
+    S3ProductPublicationMetadata,
+)
 from azcommon.result import Failure, Result, Success
 from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +41,7 @@ from azents.repos.exchange_file.data import (
     ExchangeFileCreate,
 )
 from azents.repos.workspace_user.data import WorkspaceUser
+from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -285,6 +291,13 @@ class _FakeS3Service:
     def __init__(self, session_boundary: "_SessionBoundary") -> None:
         self.objects: dict[str, bytes] = {}
         self.fail_delete = False
+        self.product_copy_calls: list[
+            tuple[S3ObjectIdentity, S3ObjectIdentity, int, S3ProductPublicationMetadata]
+        ] = []
+        self.product_cleanup_calls: list[
+            tuple[S3ObjectIdentity, int, S3ProductPublicationMetadata]
+        ] = []
+        self.chunk_sizes: list[int] = []
         self.session_boundary = session_boundary
 
     async def upload(
@@ -314,6 +327,54 @@ class _FakeS3Service:
             msg = "delete failed"
             raise RuntimeError(msg)
         self.objects.pop(key, None)
+
+    async def copy_verified_transfer_object_to_product(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        destination: S3ObjectIdentity,
+        expected_size: int,
+        publication_metadata: S3ProductPublicationMetadata,
+    ) -> None:
+        """Record native final-object publication."""
+        assert self.session_boundary.active == 0
+        self.product_copy_calls.append(
+            (source, destination, expected_size, publication_metadata)
+        )
+        self.objects[destination.key] = self.objects[source.key]
+
+    async def delete_uncommitted_product_object(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        publication_metadata: S3ProductPublicationMetadata,
+    ) -> None:
+        """Record conditional final-object compensation."""
+        assert self.session_boundary.active == 0
+        self.product_cleanup_calls.append(
+            (identity, expected_size, publication_metadata)
+        )
+        self.objects.pop(identity.key, None)
+
+    @asynccontextmanager
+    async def iter_chunks(
+        self,
+        identity: S3ObjectIdentity,
+        *,
+        maximum_chunk_size: int,
+    ) -> AsyncGenerator[AsyncGenerator[bytes, None], None]:
+        """Stream stored source bytes in bounded chunks."""
+        assert self.session_boundary.active == 0
+        self.chunk_sizes.append(maximum_chunk_size)
+
+        async def chunks() -> AsyncGenerator[bytes, None]:
+            """Yield the source body without one complete relay."""
+            body = self.objects[identity.key]
+            for offset in range(0, len(body), maximum_chunk_size):
+                yield body[offset : offset + maximum_chunk_size]
+
+        yield chunks()
 
 
 class _WorkspaceS3Config:
@@ -349,6 +410,23 @@ class _SessionBoundary:
             yield cast(AsyncSession, object())
         finally:
             self.active -= 1
+
+
+class _AuthorityExchangeFileService(ExchangeFileService):
+    """Exchange service with explicit authority outcomes for publication tests."""
+
+    authority_results: list[bool]
+
+    async def _has_valid_resource_authority(
+        self,
+        session: AsyncSession,
+        authority: SessionResourceAuthority,
+        *,
+        lock: bool = False,
+    ) -> bool:
+        """Return the next injected authority outcome."""
+        del session, authority, lock
+        return self.authority_results.pop(0)
 
 
 def _make_agent_session() -> AgentSession:
@@ -460,6 +538,32 @@ def _make_service(
     return service, exchange_file_repository, s3_service
 
 
+def _make_authority_service(
+    *,
+    authority_results: list[bool],
+) -> tuple[
+    _AuthorityExchangeFileService,
+    _FakeExchangeFileRepository,
+    _FakeS3Service,
+]:
+    """Create Exchange service with authority checks injected for publication tests."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    authority_service = _AuthorityExchangeFileService(
+        exchange_file_repository=service.exchange_file_repository,
+        agent_repository=service.agent_repository,
+        agent_session_repository=service.agent_session_repository,
+        agent_run_repository=service.agent_run_repository,
+        workspace_user_repository=service.workspace_user_repository,
+        session_manager=service.session_manager,
+        s3_service=service.s3_service,
+        config=service.config,
+    )
+    authority_service.authority_results = authority_results
+    return authority_service, repository, s3_service
+
+
 def _jpeg_bytes(size: tuple[int, int] = (900, 600)) -> bytes:
     """Create JPEG bytes for tests."""
     image = Image.new("RGB", size, (20, 80, 140))
@@ -502,6 +606,102 @@ async def test_create_agent_upload_stores_object_and_metadata() -> None:
     assert repository.files[file.id].sha256
     assert file.retention_root_session_id is None
     assert file.retention_bound_at is None
+
+
+@pytest.mark.asyncio
+async def test_authority_publishes_large_verified_object_without_body_relay() -> None:
+    """Verified publication native-copies the original and streams only its preview."""
+    service, repository, s3_service = _make_authority_service(
+        authority_results=[True, True]
+    )
+    source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-object")
+    body = b"a" * (5 * 1024 * 1024)
+    s3_service.objects[source.key] = body
+    authority = SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="root-session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=0,
+    )
+
+    result = await service.create_from_verified_object_for_authority(
+        authority=authority,
+        source=source,
+        size_bytes=len(body),
+        sha256=hashlib.sha256(body).hexdigest(),
+        provenance_kind=ExchangeFileProvenanceKind.TOOL,
+        source_tool_name="present_file",
+        source_provider=None,
+        filename="large.txt",
+        media_type="text/plain",
+    )
+
+    assert isinstance(result, Success)
+    file = result.value
+    assert file.preview_summary == "a" * 2000 + "\n... (truncated)"
+    assert repository.files[file.id] == file
+    assert s3_service.chunk_sizes == [64 * 1024]
+    assert s3_service.product_copy_calls == [
+        (
+            source,
+            S3ObjectIdentity(bucket="test-bucket", key=file.object_key),
+            len(body),
+            S3ProductPublicationMetadata(
+                sha256=hashlib.sha256(body).hexdigest(),
+                content_type="text/plain",
+                publication_id=file.id,
+            ),
+        )
+    ]
+    assert s3_service.product_cleanup_calls == []
+
+
+@pytest.mark.asyncio
+async def test_authority_verified_publication_compensates_final_object() -> None:
+    """A failed authority recheck conditionally cleans up the final Exchange object."""
+    service, repository, s3_service = _make_authority_service(
+        authority_results=[True, False]
+    )
+    source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-object")
+    body = b"published text"
+    sha256 = hashlib.sha256(body).hexdigest()
+    s3_service.objects[source.key] = body
+    authority = SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="root-session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=0,
+    )
+
+    result = await service.create_from_verified_object_for_authority(
+        authority=authority,
+        source=source,
+        size_bytes=len(body),
+        sha256=sha256,
+        provenance_kind=ExchangeFileProvenanceKind.TOOL,
+        source_tool_name="present_file",
+        source_provider=None,
+        filename="published.txt",
+        media_type="text/plain",
+    )
+
+    assert isinstance(result, Failure)
+    assert repository.files == {}
+    assert len(s3_service.product_copy_calls) == 1
+    assert len(s3_service.product_cleanup_calls) == 1
+    cleanup_identity, cleanup_size, cleanup_metadata = s3_service.product_cleanup_calls[
+        0
+    ]
+    copied_destination = s3_service.product_copy_calls[0][1]
+    assert cleanup_identity == copied_destination
+    assert cleanup_size == len(body)
+    assert cleanup_metadata.publication_id not in repository.files
 
 
 @pytest.mark.asyncio

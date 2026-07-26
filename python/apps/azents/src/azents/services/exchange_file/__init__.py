@@ -5,11 +5,17 @@ import datetime
 import hashlib
 import logging
 import re
+import tempfile
 import unicodedata
+from codecs import getincrementaldecoder
 from io import BytesIO
 from typing import Annotated, assert_never
 
-from azcommon.infra.s3.service import S3Service
+from azcommon.infra.s3.service import (
+    S3ObjectIdentity,
+    S3ProductPublicationMetadata,
+    S3Service,
+)
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
@@ -256,7 +262,9 @@ class _PreparedExchangeFile:
 
     create: ExchangeFileCreate
     object_key: str
-    body: bytes
+    body: bytes | None
+    source: S3ObjectIdentity | None = None
+    publication_metadata: S3ProductPublicationMetadata | None = None
     preview_width: int | None = None
     preview_height: int | None = None
     preview_generated_at: datetime.datetime | None = None
@@ -292,8 +300,24 @@ def _filename_supports_text_preview(filename: str) -> bool:
 
 def _make_text_preview(body: bytes, media_type: str, filename: str) -> str | None:
     """Create a bounded preview when attachment bytes are safe UTF-8 text."""
+    if not _supports_text_preview(media_type, filename):
+        return None
+
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if _contains_binary_control_characters(text):
+        return None
+    if len(text) <= _MAX_TEXT_PREVIEW_CHARS:
+        return text
+    return text[:_MAX_TEXT_PREVIEW_CHARS] + "\n... (truncated)"
+
+
+def _supports_text_preview(media_type: str, filename: str) -> bool:
+    """Return whether content metadata permits safe text preview validation."""
     normalized_media_type = media_type.partition(";")[0].strip().lower()
-    supported = (
+    return (
         normalized_media_type.startswith("text/")
         or normalized_media_type in _TEXT_PREVIEW_MEDIA_TYPES
         or normalized_media_type.endswith(_TEXT_PREVIEW_MEDIA_TYPE_SUFFIXES)
@@ -303,21 +327,29 @@ def _make_text_preview(body: bytes, media_type: str, filename: str) -> str | Non
             and _filename_supports_text_preview(filename)
         )
     )
-    if not supported:
-        return None
 
-    try:
-        text = body.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
-    if any(
+
+def _contains_binary_control_characters(text: str) -> bool:
+    """Return whether text includes unsafe binary control characters."""
+    return any(
         unicodedata.category(character) == "Cc" and character not in "\t\n\r"
         for character in text
-    ):
-        return None
-    if len(text) <= _MAX_TEXT_PREVIEW_CHARS:
-        return text
-    return text[:_MAX_TEXT_PREVIEW_CHARS] + "\n... (truncated)"
+    )
+
+
+def _append_preview_text(
+    preview_parts: list[str],
+    preview_length: int,
+    truncated: bool,
+    text: str,
+) -> tuple[int, bool]:
+    """Retain at most the preview character limit while tracking truncation."""
+    remaining = _MAX_TEXT_PREVIEW_CHARS - preview_length
+    if remaining <= 0:
+        return preview_length, truncated or bool(text)
+    retained = text[:remaining]
+    preview_parts.append(retained)
+    return preview_length + len(retained), truncated or len(text) > len(retained)
 
 
 def make_exchange_preview_thumbnail(
@@ -336,7 +368,11 @@ def make_exchange_preview_thumbnail(
             extra={"media_type": media_type, "reason": type(err).__name__},
         )
         return None
+    return _thumbnail_from_loaded_image(img)
 
+
+def _thumbnail_from_loaded_image(img: Image.Image) -> ExchangePreviewThumbnail:
+    """Convert a loaded image to the bounded Exchange thumbnail."""
     img = ImageOps.exif_transpose(img)
     img.thumbnail(
         (_PREVIEW_THUMBNAIL_MAX_SIZE, _PREVIEW_THUMBNAIL_MAX_SIZE),
@@ -492,6 +528,53 @@ class ExchangeFileService:
                 await self._cleanup_uploaded_objects(
                     [file.object_key for file in prepared]
                 )
+
+    async def create_from_verified_object_for_authority(
+        self,
+        *,
+        authority: SessionResourceAuthority,
+        source: S3ObjectIdentity,
+        size_bytes: int,
+        sha256: str,
+        provenance_kind: ExchangeFileProvenanceKind,
+        source_tool_name: str | None,
+        source_provider: str | None,
+        filename: str | None,
+        media_type: str,
+        origin_type: ExchangeFileOrigin = ExchangeFileOrigin.ARTIFACT,
+    ) -> Result[ExchangeFile, FileAccessDenied]:
+        """Publish a verified transfer object as an internal ExchangeFile."""
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(FileAccessDenied())
+        prepared = await self._prepare_verified_files(
+            authority=authority,
+            source=source,
+            size_bytes=size_bytes,
+            sha256=sha256,
+            provenance_kind=provenance_kind,
+            source_tool_name=source_tool_name,
+            source_provider=source_provider,
+            filename=filename,
+            media_type=media_type,
+            origin_type=origin_type,
+        )
+        succeeded = False
+        try:
+            await self._upload_prepared_files(prepared)
+            async with self.session_manager() as session:
+                if not await self._has_valid_resource_authority(
+                    session,
+                    authority,
+                    lock=True,
+                ):
+                    return Failure(FileAccessDenied())
+                created = await self._persist_prepared_files(session, prepared)
+            succeeded = True
+            return Success(created)
+        finally:
+            if not succeeded:
+                await self._cleanup_prepared_verified_files(prepared)
 
     async def resolve_for_authority(
         self,
@@ -971,18 +1054,223 @@ class ExchangeFileService:
         )
         return prepared
 
+    async def _prepare_verified_files(
+        self,
+        *,
+        authority: SessionResourceAuthority,
+        source: S3ObjectIdentity,
+        size_bytes: int,
+        sha256: str,
+        provenance_kind: ExchangeFileProvenanceKind,
+        source_tool_name: str | None,
+        source_provider: str | None,
+        filename: str | None,
+        media_type: str,
+        origin_type: ExchangeFileOrigin,
+    ) -> list[_PreparedExchangeFile]:
+        """Prepare product metadata without retaining the verified original body."""
+        prepared = self._prepare_files(
+            workspace_id=authority.workspace_id,
+            agent_id=authority.agent_id,
+            source_user_id=None,
+            source_run_id=authority.run_id,
+            source_tool_name=source_tool_name,
+            source_provider=source_provider,
+            provenance_kind=provenance_kind,
+            filename=filename,
+            media_type=media_type,
+            body=b"",
+            origin_type=origin_type,
+            retention_root_session_id=authority.root_session_id,
+        )
+        source_prepared = prepared[0]
+        preview_filename = (
+            filename if filename is not None else source_prepared.create.filename
+        )
+        source_create = source_prepared.create.model_copy(
+            update={
+                "size_bytes": size_bytes,
+                "sha256": sha256,
+                "preview_summary": await self._make_text_preview_from_object(
+                    source=source,
+                    media_type=media_type,
+                    filename=preview_filename,
+                ),
+            }
+        )
+        prepared[0] = dataclasses.replace(
+            source_prepared,
+            create=source_create,
+            body=None,
+            source=source,
+            publication_metadata=S3ProductPublicationMetadata(
+                sha256=sha256,
+                content_type=media_type,
+                publication_id=source_create.id,
+            ),
+        )
+        thumbnail = await self._make_thumbnail_from_object(
+            source=source,
+            media_type=media_type,
+        )
+        if thumbnail is None:
+            return prepared
+        thumbnail_id = uuid7().hex
+        thumbnail_create = source_create.model_copy(
+            update={
+                "id": thumbnail_id,
+                "filename": f"{source_create.filename}.preview.jpg",
+                "media_type": _PREVIEW_THUMBNAIL_MEDIA_TYPE,
+                "size_bytes": len(thumbnail.body),
+                "sha256": hashlib.sha256(thumbnail.body).hexdigest(),
+                "created_by_user_id": None,
+                "provenance_kind": ExchangeFileProvenanceKind.PREVIEW,
+                "source_user_id": None,
+                "source_agent_id": None,
+                "source_run_id": None,
+                "source_tool_name": None,
+                "source_provider": None,
+                "source_exchange_file_id": source_create.id,
+                "preview_title": f"{source_create.filename} preview",
+                "preview_summary": None,
+                "preview_generated_at": thumbnail.generated_at,
+            }
+        )
+        prepared.append(
+            _PreparedExchangeFile(
+                create=thumbnail_create,
+                object_key=exchange_file_object_key(
+                    workspace_id=authority.workspace_id,
+                    file_id=thumbnail_id,
+                ),
+                body=thumbnail.body,
+                preview_width=thumbnail.width,
+                preview_height=thumbnail.height,
+                preview_generated_at=thumbnail.generated_at,
+            )
+        )
+        return prepared
+
     async def _upload_prepared_files(
         self,
         prepared: list[_PreparedExchangeFile],
     ) -> None:
         """Upload prepared blobs without an open DB session."""
         for file in prepared:
-            await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
-                key=file.object_key,
-                body=file.body,
-                content_type=file.create.media_type,
-            )
+            if file.source is not None and file.publication_metadata is not None:
+                await self.s3_service.copy_verified_transfer_object_to_product(
+                    source=file.source,
+                    destination=S3ObjectIdentity(
+                        bucket=self.config.workspace_s3.bucket,
+                        key=file.object_key,
+                    ),
+                    expected_size=file.create.size_bytes,
+                    publication_metadata=file.publication_metadata,
+                )
+            elif file.body is not None:
+                await self.s3_service.upload(
+                    bucket=self.config.workspace_s3.bucket,
+                    key=file.object_key,
+                    body=file.body,
+                    content_type=file.create.media_type,
+                )
+            else:
+                raise ValueError("Prepared ExchangeFile has no publishable source")
+
+    async def _make_text_preview_from_object(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        media_type: str,
+        filename: str,
+    ) -> str | None:
+        """Validate text incrementally while retaining only the bounded preview."""
+        if not _supports_text_preview(media_type, filename):
+            return None
+        decoder = getincrementaldecoder("utf-8")("strict")
+        preview_parts: list[str] = []
+        preview_length = 0
+        truncated = False
+        try:
+            async with self.s3_service.iter_chunks(
+                source,
+                maximum_chunk_size=64 * 1024,
+            ) as chunks:
+                async for chunk in chunks:
+                    decoded = decoder.decode(chunk)
+                    if _contains_binary_control_characters(decoded):
+                        return None
+                    preview_length, truncated = _append_preview_text(
+                        preview_parts,
+                        preview_length,
+                        truncated,
+                        decoded,
+                    )
+                decoded = decoder.decode(b"", final=True)
+        except UnicodeDecodeError:
+            return None
+        if _contains_binary_control_characters(decoded):
+            return None
+        _, truncated = _append_preview_text(
+            preview_parts,
+            preview_length,
+            truncated,
+            decoded,
+        )
+        preview = "".join(preview_parts)
+        return preview + "\n... (truncated)" if truncated else preview
+
+    async def _make_thumbnail_from_object(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        media_type: str,
+    ) -> ExchangePreviewThumbnail | None:
+        """Generate an image thumbnail through a disk-spilling stream."""
+        if not media_type.startswith("image/"):
+            return None
+        with tempfile.SpooledTemporaryFile(
+            max_size=4 * 1024 * 1024,
+            mode="w+b",
+        ) as file:
+            async with self.s3_service.iter_chunks(
+                source,
+                maximum_chunk_size=64 * 1024,
+            ) as chunks:
+                async for chunk in chunks:
+                    file.write(chunk)
+            file.seek(0)
+            try:
+                image = Image.open(file)
+                image.load()
+            except (OSError, UnidentifiedImageError, ValueError) as err:
+                logger.warning(
+                    "Exchange image upload did not produce preview thumbnail",
+                    extra={"media_type": media_type, "reason": type(err).__name__},
+                )
+                return None
+        return _thumbnail_from_loaded_image(image)
+
+    async def _cleanup_prepared_verified_files(
+        self,
+        prepared: list[_PreparedExchangeFile],
+    ) -> None:
+        """Compensate an uncommitted verified publication and derived previews."""
+        for file in prepared:
+            if file.publication_metadata is not None:
+                await self.s3_service.delete_uncommitted_product_object(
+                    identity=S3ObjectIdentity(
+                        bucket=self.config.workspace_s3.bucket,
+                        key=file.object_key,
+                    ),
+                    expected_size=file.create.size_bytes,
+                    publication_metadata=file.publication_metadata,
+                )
+            else:
+                await self.s3_service.delete(
+                    bucket=self.config.workspace_s3.bucket,
+                    key=file.object_key,
+                )
 
     async def _persist_prepared_files(
         self,
