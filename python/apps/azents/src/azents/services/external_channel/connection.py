@@ -14,6 +14,7 @@ from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
@@ -115,6 +116,11 @@ class ExternalChannelConnectionService:
         payload = ExternalChannelConnectionCredentialPayload(
             provider=ExternalChannelProvider.SLACK,
             transport=transport,
+            ingress_profile=(
+                ExternalChannelIngressProfile.SLACK_SOCKET
+                if transport is ExternalChannelTransport.SOCKET
+                else ExternalChannelIngressProfile.SLACK_HTTP
+            ),
             credentials=credentials,
         )
         contract = SlackExternalChannelProviderContract()
@@ -123,6 +129,12 @@ class ExternalChannelConnectionService:
             workspace_id=workspace_id,
             provider=ExternalChannelProvider.SLACK,
             transport=transport,
+            ingress_profile=(
+                ExternalChannelIngressProfile.SLACK_SOCKET
+                if transport is ExternalChannelTransport.SOCKET
+                else ExternalChannelIngressProfile.SLACK_HTTP
+            ),
+            configuration_generation=1,
             app_mode=app_mode,
             status=ExternalChannelConnectionStatus.CONFIGURING,
             provider_app_id=app_id,

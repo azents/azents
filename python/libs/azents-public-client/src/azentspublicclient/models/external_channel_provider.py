@@ -27,6 +27,7 @@ class ExternalChannelProvider(str, Enum):
     allowed enum values
     """
     SLACK = 'slack'
+    DISCORD = 'discord'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAppMode,
+    ExternalChannelIngressProfile,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
@@ -334,6 +335,11 @@ class ExternalChannelManagementService:
             ExternalChannelConnectionCredentialPayload(
                 provider=credentials.provider,
                 transport=transport,
+                ingress_profile=(
+                    ExternalChannelIngressProfile.SLACK_SOCKET
+                    if transport is ExternalChannelTransport.SOCKET
+                    else ExternalChannelIngressProfile.SLACK_HTTP
+                ),
                 credentials=credentials,
             )
         )
@@ -751,6 +757,11 @@ class ExternalChannelManagementService:
             ExternalChannelConnectionCredentialPayload(
                 provider=credentials.provider,
                 transport=transport,
+                ingress_profile=(
+                    ExternalChannelIngressProfile.SLACK_SOCKET
+                    if transport is ExternalChannelTransport.SOCKET
+                    else ExternalChannelIngressProfile.SLACK_HTTP
+                ),
                 credentials=credentials,
             ),
         )

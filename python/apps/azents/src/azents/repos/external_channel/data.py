@@ -22,17 +22,21 @@ from azents.core.enums import (
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelHydrationStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
+    ExternalChannelResourceProvisioningOperation,
+    ExternalChannelResourceProvisioningStatus,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
+    ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
 
@@ -50,6 +54,10 @@ class ExternalChannelConnection(_Record):
     workspace_id: str
     provider: ExternalChannelProvider
     transport: ExternalChannelTransport
+    ingress_profile: ExternalChannelIngressProfile = (
+        ExternalChannelIngressProfile.SLACK_HTTP
+    )
+    configuration_generation: int = 1
     status: ExternalChannelConnectionStatus
     app_mode: ExternalChannelAppMode
     provider_app_id: str | None
@@ -76,6 +84,10 @@ class ExternalChannelConnectionCreate(_Record):
     workspace_id: str
     provider: ExternalChannelProvider
     transport: ExternalChannelTransport
+    ingress_profile: ExternalChannelIngressProfile = (
+        ExternalChannelIngressProfile.SLACK_HTTP
+    )
+    configuration_generation: int = 1
     status: ExternalChannelConnectionStatus
     app_mode: ExternalChannelAppMode
     provider_app_id: str | None
@@ -102,6 +114,10 @@ class ExternalChannelConnectionConfiguration(_Record):
     workspace_id: str
     provider: ExternalChannelProvider
     transport: ExternalChannelTransport
+    ingress_profile: ExternalChannelIngressProfile = (
+        ExternalChannelIngressProfile.SLACK_HTTP
+    )
+    configuration_generation: int = 1
     status: ExternalChannelConnectionStatus
     app_mode: ExternalChannelAppMode
     provider_app_id: str | None
@@ -787,6 +803,7 @@ class ExternalChannelDeliveryAttempt(_Record):
     channel_action_id: str | None
     binding_id: str | None
     operation: ExternalChannelDeliveryOperation
+    part_ordinal: int = 0
     request_payload: dict[str, Any]
     status: ExternalChannelDeliveryStatus
     provider_message_key: str | None
@@ -806,6 +823,7 @@ class ExternalChannelDeliveryAttemptCreate(_Record):
     channel_action_id: str | None
     binding_id: str | None
     operation: ExternalChannelDeliveryOperation
+    part_ordinal: int = 0
     request_payload: dict[str, Any]
     status: ExternalChannelDeliveryStatus
     provider_message_key: str | None
@@ -813,6 +831,71 @@ class ExternalChannelDeliveryAttemptCreate(_Record):
     error_summary: str | None
     attempted_at: datetime.datetime | None
     completed_at: datetime.datetime | None
+
+
+class ExternalChannelAppClaim(_Record):
+    """Current provider App claim independent from disconnected history."""
+
+    id: str
+    provider: ExternalChannelProvider
+    provider_app_id: str
+    connection_id: str
+    claim_generation: int
+    acquired_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelIngressLease(_Record):
+    """Provider-neutral lease and resumable checkpoint for inbound ownership."""
+
+    id: str
+    connection_id: str
+    lease_owner: str | None
+    lease_generation: int
+    lease_until: datetime.datetime | None
+    heartbeat_at: datetime.datetime | None
+    required_configuration_generation: int | None
+    required_app_claim_generation: int | None
+    gap_detected_at: datetime.datetime | None
+    gap_reason: str | None
+    encrypted_checkpoint: str | None
+    checkpoint_version: int | None
+    last_handled_dispatch_sequence: int | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelResourceProvisioning(_Record):
+    """Durable result state for a resource provisioning operation."""
+
+    id: str
+    resource_id: str
+    conversation_admission_id: str
+    operation: ExternalChannelResourceProvisioningOperation
+    target_provider_resource_key: str
+    status: ExternalChannelResourceProvisioningStatus
+    confirmed_provider_resource_key: str | None
+    error_kind: str | None
+    error_summary: str | None
+    attempted_at: datetime.datetime | None
+    completed_at: datetime.datetime | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelWorkProjectionPart(_Record):
+    """Current provider projection for an ordered canonical Work part."""
+
+    id: str
+    work_id: str
+    part_ordinal: int
+    desired_progress_revision: int
+    status: ExternalChannelWorkProjectionStatus
+    provider_message_key: str | None
+    latest_delivery_attempt_id: str | None
+    deleted_at: datetime.datetime | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
 
 class ExternalChannelArchiveTermination(_Record):

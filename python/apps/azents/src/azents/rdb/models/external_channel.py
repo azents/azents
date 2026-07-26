@@ -26,17 +26,21 @@ from azents.core.enums import (
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelHydrationStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
+    ExternalChannelResourceProvisioningOperation,
+    ExternalChannelResourceProvisioningStatus,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
+    ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
 from azents.rdb.models.base import RDBModel
@@ -57,6 +61,12 @@ external_channel_provider_enum = ENUM(
 external_channel_transport_enum = ENUM(
     ExternalChannelTransport,
     name="external_channel_transport",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_ingress_profile_enum = ENUM(
+    ExternalChannelIngressProfile,
+    name="external_channel_ingress_profile",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -216,6 +226,24 @@ external_channel_delivery_status_enum = ENUM(
     create_type=False,
     values_callable=_enum_values,
 )
+external_channel_resource_provisioning_operation_enum = ENUM(
+    ExternalChannelResourceProvisioningOperation,
+    name="external_channel_resource_provisioning_operation",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_resource_provisioning_status_enum = ENUM(
+    ExternalChannelResourceProvisioningStatus,
+    name="external_channel_resource_provisioning_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_work_projection_status_enum = ENUM(
+    ExternalChannelWorkProjectionStatus,
+    name="external_channel_work_projection_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
 
 
 class RDBExternalChannelConnection(RDBModel):
@@ -358,6 +386,18 @@ class RDBExternalChannelConnection(RDBModel):
         nullable=True,
         default=None,
     )
+    ingress_profile: Mapped[ExternalChannelIngressProfile] = mapped_column(
+        external_channel_ingress_profile_enum,
+        nullable=False,
+        default=ExternalChannelIngressProfile.SLACK_HTTP,
+        server_default=ExternalChannelIngressProfile.SLACK_HTTP.value,
+    )
+    configuration_generation: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -380,6 +420,158 @@ class RDBExternalChannelConnection(RDBModel):
         UQ_HTTP_CALLBACK_SELECTOR_HASH,
         UQ_ID_APP_MODE,
     )
+
+
+class RDBExternalChannelAppClaim(RDBModel):
+    """Current provider App ownership independent from disconnected history."""
+
+    __tablename__ = "external_channel_app_claims"
+
+    UQ_PROVIDER_APP_ID = sa.UniqueConstraint(
+        "provider",
+        "provider_app_id",
+        name="uq_external_channel_app_claims_provider_app_id",
+    )
+    IX_CONNECTION_ID = sa.Index(
+        "ix_external_channel_app_claims_connection_id",
+        "connection_id",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    provider: Mapped[ExternalChannelProvider] = mapped_column(
+        external_channel_provider_enum,
+        nullable=False,
+    )
+    provider_app_id: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    connection_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_connections.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    claim_generation: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
+    acquired_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (UQ_PROVIDER_APP_ID, IX_CONNECTION_ID)
+
+
+class RDBExternalChannelIngressLease(RDBModel):
+    """Provider-neutral leased ingress ownership and resumable checkpoint."""
+
+    __tablename__ = "external_channel_ingress_leases"
+
+    UQ_CONNECTION_ID = sa.UniqueConstraint(
+        "connection_id",
+        name="uq_external_channel_ingress_leases_connection_id",
+    )
+    IX_LEASE_UNTIL = sa.Index(
+        "ix_external_channel_ingress_leases_lease_until",
+        "lease_until",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    connection_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_connections.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    lease_owner: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    lease_generation: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    lease_until: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    heartbeat_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    required_configuration_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
+    )
+    required_app_claim_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
+    )
+    gap_detected_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    gap_reason: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    encrypted_checkpoint: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    checkpoint_version: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
+    )
+    last_handled_dispatch_sequence: Mapped[int | None] = mapped_column(
+        sa.BigInteger,
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (UQ_CONNECTION_ID, IX_LEASE_UNTIL)
 
 
 class RDBExternalChannelAgentRoute(RDBModel):
@@ -2116,6 +2308,7 @@ class RDBExternalChannelDeliveryAttempt(RDBModel):
         "origin_id",
         "binding_id",
         "operation",
+        "part_ordinal",
         unique=True,
         postgresql_where=sa.text("binding_id IS NOT NULL"),
     )
@@ -2124,6 +2317,7 @@ class RDBExternalChannelDeliveryAttempt(RDBModel):
         "origin_type",
         "origin_id",
         "operation",
+        "part_ordinal",
         unique=True,
         postgresql_where=sa.text("binding_id IS NULL"),
     )
@@ -2148,6 +2342,12 @@ class RDBExternalChannelDeliveryAttempt(RDBModel):
         external_channel_delivery_status_enum,
         nullable=False,
         server_default=ExternalChannelDeliveryStatus.PENDING.value,
+    )
+    part_ordinal: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
     )
     channel_action_id: Mapped[str | None] = mapped_column(
         sa.String(32),
@@ -2206,3 +2406,165 @@ class RDBExternalChannelDeliveryAttempt(RDBModel):
         UQ_OPERATION_WITH_BINDING,
         UQ_OPERATION_WITHOUT_BINDING,
     )
+
+
+class RDBExternalChannelResourceProvisioning(RDBModel):
+    """Durable provider mutation required to make a resource usable."""
+
+    __tablename__ = "external_channel_resource_provisionings"
+
+    UQ_RESOURCE_ADMISSION_OPERATION = sa.UniqueConstraint(
+        "resource_id",
+        "conversation_admission_id",
+        "operation",
+        name=(
+            "uq_external_channel_resource_provisionings_resource_admission_operation"
+        ),
+    )
+    IX_STATUS_CREATED_AT = sa.Index(
+        "ix_external_channel_resource_provisionings_status_created_at",
+        "status",
+        "created_at",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    resource_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_resources.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    conversation_admission_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "external_channel_conversation_admissions.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    operation: Mapped[ExternalChannelResourceProvisioningOperation] = mapped_column(
+        external_channel_resource_provisioning_operation_enum,
+        nullable=False,
+    )
+    target_provider_resource_key: Mapped[str] = mapped_column(
+        sa.String(255),
+        nullable=False,
+    )
+    status: Mapped[ExternalChannelResourceProvisioningStatus] = mapped_column(
+        external_channel_resource_provisioning_status_enum,
+        nullable=False,
+        default=ExternalChannelResourceProvisioningStatus.PENDING,
+        server_default=ExternalChannelResourceProvisioningStatus.PENDING.value,
+    )
+    confirmed_provider_resource_key: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    error_kind: Mapped[str | None] = mapped_column(
+        sa.String(120),
+        nullable=True,
+        default=None,
+    )
+    error_summary: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    attempted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (UQ_RESOURCE_ADMISSION_OPERATION, IX_STATUS_CREATED_AT)
+
+
+class RDBExternalChannelWorkProjectionPart(RDBModel):
+    """Current provider projection state for one ordered Channel Work part."""
+
+    __tablename__ = "external_channel_work_projection_parts"
+
+    UQ_WORK_PART_ORDINAL = sa.UniqueConstraint(
+        "work_id",
+        "part_ordinal",
+        name="uq_external_channel_work_projection_parts_work_part_ordinal",
+    )
+    IX_STATUS_UPDATED_AT = sa.Index(
+        "ix_external_channel_work_projection_parts_status_updated_at",
+        "status",
+        "updated_at",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    work_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_works.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    part_ordinal: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    desired_progress_revision: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    status: Mapped[ExternalChannelWorkProjectionStatus] = mapped_column(
+        external_channel_work_projection_status_enum,
+        nullable=False,
+        default=ExternalChannelWorkProjectionStatus.PENDING,
+        server_default=ExternalChannelWorkProjectionStatus.PENDING.value,
+    )
+    provider_message_key: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    latest_delivery_attempt_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_delivery_attempts.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (UQ_WORK_PART_ORDINAL, IX_STATUS_UPDATED_AT)
