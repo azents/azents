@@ -21,6 +21,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution.data import PendingCommandSnapshot
+from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -136,6 +137,26 @@ class _AgentSessionRepository:
         self.idle_session_ids.append(runtime_id)
 
 
+class _TerminalFinalizationCoordinator:
+    """Terminal coordinator test double."""
+
+    async def finalize_run_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+    ) -> None:
+        del session, run_id
+
+    async def finalize_runs_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        run_ids: list[str],
+    ) -> None:
+        del session, run_ids
+
+
 class _MailboxRepository:
     """MailboxRepository test double."""
 
@@ -247,10 +268,11 @@ class _AgentRunRepository:
         session_id: str,
         status: AgentRunStatus,
         ended_at: datetime,
-    ) -> None:
+    ) -> list[AgentRunState]:
         """Record broad terminal transition requests."""
         del session, status, ended_at
         self.terminal_session_ids.append(session_id)
+        return []
 
 
 def _running_run() -> AgentRunState:
@@ -293,6 +315,10 @@ def _service(
             MailboxRepository,
             _MailboxRepository(pending_scheduling_modes),
         ),
+        terminal_finalization_coordinator=cast(
+            TerminalRunFinalizationCoordinator,
+            _TerminalFinalizationCoordinator(),
+        ),
     )
 
 
@@ -312,6 +338,10 @@ async def test_heartbeat_session_refreshes_db_and_active_owner_lease() -> None:
         mailbox_item_repository=cast(
             MailboxRepository,
             _MailboxRepository(set()),
+        ),
+        terminal_finalization_coordinator=cast(
+            TerminalRunFinalizationCoordinator,
+            _TerminalFinalizationCoordinator(),
         ),
     )
 

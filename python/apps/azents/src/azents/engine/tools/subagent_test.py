@@ -46,7 +46,6 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.mailbox import MailboxEnqueue, MailboxService
-from azents.services.subagent_terminal_result import SubagentTerminalResultService
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -631,28 +630,6 @@ class _MailboxService:
         return session_id in self.pending_wake_session_ids
 
 
-class _SubagentTerminalResultService:
-    """SubagentTerminalResultService fake for wait tests."""
-
-    def __init__(self, mailbox_item_service: _MailboxService) -> None:
-        self.mailbox_item_service = mailbox_item_service
-        self.parent_repairs: list[tuple[str, str]] = []
-        self.publish_mailbox_on_repair = False
-
-    async def deliver_pending_for_parent_children(
-        self,
-        parent_session_id: str,
-        *,
-        repair_source: str,
-    ) -> None:
-        """Record parent wait repair boundaries."""
-        self.parent_repairs.append((parent_session_id, repair_source))
-        if self.publish_mailbox_on_repair:
-            self.mailbox_item_service.pending_agent_message_session_ids.add(
-                parent_session_id
-            )
-
-
 class _Broker:
     """SessionBroker fake for subagent tool tests."""
 
@@ -700,10 +677,6 @@ async def _make_toolkit() -> tuple[
             ),
         ),
         mailbox_item_service=cast(MailboxService, mailbox_item_service),
-        subagent_terminal_result_service=cast(
-            SubagentTerminalResultService,
-            _SubagentTerminalResultService(mailbox_item_service),
-        ),
         broker=cast(SessionBroker, broker),
         agent_repository=cast(AgentRepository, agent_repository),
         agent=agent,
@@ -1257,10 +1230,6 @@ async def test_wait_agent_returns_for_current_mailbox_activity() -> None:
     """Current mailbox activity completes a targetless wait immediately."""
     toolkit, repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
     input_service.pending_agent_message_session_ids.add("root-session")
-    terminal_service = cast(
-        _SubagentTerminalResultService,
-        toolkit.subagent_terminal_result_service,
-    )
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",
@@ -1278,7 +1247,6 @@ async def test_wait_agent_returns_for_current_mailbox_activity() -> None:
         "message": "Mailbox updated.",
         "timed_out": False,
     }
-    assert terminal_service.parent_repairs == [("root-session", "parent_wait")]
     assert repo.observation_updates == []
 
 
@@ -1412,10 +1380,6 @@ async def test_wait_agent_timeout_reports_active_descendants() -> None:
         id="child-session",
         run_state=AgentSessionRunState.RUNNING,
     )
-    terminal_service = cast(
-        _SubagentTerminalResultService,
-        toolkit.subagent_terminal_result_service,
-    )
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",
@@ -1433,38 +1397,6 @@ async def test_wait_agent_timeout_reports_active_descendants() -> None:
         "message": "Wait timed out; active descendants: /root/child",
         "timed_out": True,
     }
-    assert terminal_service.parent_repairs == [
-        ("root-session", "parent_wait"),
-        ("root-session", "parent_wait"),
-    ]
-
-
-async def test_wait_agent_parent_repair_can_publish_terminal_mailbox() -> None:
-    """The parent-wait repair boundary surfaces missed terminal delivery."""
-    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
-    terminal_service = cast(
-        _SubagentTerminalResultService,
-        toolkit.subagent_terminal_result_service,
-    )
-    terminal_service.publish_mailbox_on_repair = True
-    state = await toolkit.update_context(
-        TurnContext(
-            workspace_id="workspace-1",
-            model="gpt-5.1",
-            run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
-            session_id="root-session",
-        )
-    )
-    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
-
-    result = await tool.handler("{}")
-
-    assert json.loads(cast(str, result)) == {
-        "message": "Mailbox updated.",
-        "timed_out": False,
-    }
-    assert terminal_service.parent_repairs == [("root-session", "parent_wait")]
 
 
 async def test_wait_agent_reports_when_no_descendants_exist() -> None:

@@ -13,6 +13,7 @@ from azents.engine.events.types import Event, RunMarkerPayload, SystemErrorPaylo
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 
 
 class _TranscriptRepository:
@@ -72,6 +73,22 @@ class _Session:
     """Dummy session."""
 
 
+class _TerminalFinalizationCoordinator:
+    """Terminal coordinator test double."""
+
+    def __init__(self) -> None:
+        self.run_ids: list[str] = []
+
+    async def finalize_run_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+    ) -> None:
+        del session
+        self.run_ids.append(run_id)
+
+
 def _payload_from_create(create: EventCreate) -> SystemErrorPayload | RunMarkerPayload:
     if create.kind == EventKind.SYSTEM_ERROR:
         return SystemErrorPayload.model_validate(create.payload)
@@ -103,9 +120,14 @@ async def test_failed_run_event_store_appends_terminal_failed_run() -> None:
     """FailedRunEventStore owns durable failed-run appends and run transition."""
     transcript_repo = _TranscriptRepository()
     run_repo = _RunRepository()
+    coordinator = _TerminalFinalizationCoordinator()
     store = FailedRunEventStore(
         transcript_repo=cast(TranscriptRepository, transcript_repo),
         run_repo=cast(AgentRunRepository, run_repo),
+        terminal_finalization_coordinator=cast(
+            TerminalRunFinalizationCoordinator,
+            coordinator,
+        ),
     )
 
     result = await store.append_terminal_failed_run(
@@ -149,3 +171,4 @@ async def test_failed_run_event_store_appends_terminal_failed_run() -> None:
             "temporary failure",
         )
     ]
+    assert coordinator.run_ids == ["run-001".rjust(32, "0")]

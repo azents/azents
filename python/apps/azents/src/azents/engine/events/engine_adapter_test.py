@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, 
 from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Annotated
+from typing import Annotated, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -129,6 +129,7 @@ from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 from azents.services.xai_imagine import (
     XaiImagineAuthenticationError,
     XaiImagineClient,
@@ -2609,6 +2610,10 @@ def _agent_engine_adapter(
         transcript_repo=transcript_repo or _TranscriptRepo([]),
         system_prompt_snapshot_repo=AgentSessionSystemPromptSnapshotRepository(),
         model_file_pin_repo=_ModelFilePinRepo(),
+        terminal_finalization_coordinator=cast(
+            TerminalRunFinalizationCoordinator,
+            AsyncMock(),
+        ),
         compactor=compactor or _Compactor(),
         summary_model_call=summary_model_call
         or functools.partial(summarize_text_with_model, watchdog=watchdog),
