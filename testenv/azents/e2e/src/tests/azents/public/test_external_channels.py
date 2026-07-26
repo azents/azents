@@ -294,9 +294,11 @@ def _plan_delivery(slack_provider_fake_url: str) -> dict[str, object] | None:
         if (
             delivery.get("operation") == "chat.update"
             and isinstance(blocks, list)
-            and blocks
-            and isinstance(blocks[0], dict)
-            and cast(dict[str, object], blocks[0]).get("type") == "plan"
+            and any(
+                isinstance(block, dict)
+                and cast(dict[str, object], block).get("type") == "plan"
+                for block in cast(list[object], blocks)
+            )
         ):
             return delivery
     return None
@@ -1574,7 +1576,7 @@ def test_provider_native_channel_work_progress_journey(
             message="Slack Plan update was not delivered",
         ),
     )
-    assert plan_delivery["text"] == (
+    expected_fallback = (
         "Investigating error logs…\n"
         "In progress: Inspect recent failures\n"
         "Completed: Verify the affected release\n"
@@ -1582,8 +1584,17 @@ def test_provider_native_channel_work_progress_journey(
         "Pending: Summarize the incident"
     )
     blocks = cast(list[dict[str, object]], plan_delivery["blocks"])
-    assert len(blocks) == 1
-    plan = blocks[0]
+    assert len(blocks) == 2
+    identity = blocks[0]
+    assert identity["type"] == "section"
+    identity_text = cast(dict[str, object], identity["text"])
+    assert identity_text["type"] == "mrkdwn"
+    agent_markdown = cast(str, identity_text["text"])
+    assert agent_markdown.startswith("*External Channel Agent 1 ")
+    assert agent_markdown.endswith("*")
+    agent_name = agent_markdown[1:-1]
+    assert plan_delivery["text"] == f"{agent_name}\n{expected_fallback}"
+    plan = blocks[1]
     assert plan["type"] == "plan"
     assert plan["title"] == "Investigating error logs…"
     assert "plan_id" not in plan

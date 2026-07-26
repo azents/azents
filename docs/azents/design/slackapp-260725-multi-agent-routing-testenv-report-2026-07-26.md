@@ -12,7 +12,7 @@ tags: [external-channel, slack, validation, e2e, testenv, migration, security]
 ## Scope and Boundaries
 
 - Origin: `8/10 — E2E/testenv validation`
-- Branch/base: `validation/slack-multi-agent-app` → `feature/slack-multi-agent-app-web` (`03563d1e`)
+- Branch/base: `validation/slack-multi-agent-app` → `feature/slack-multi-agent-app-web`
 - Requirements: [slackapp-260725/REQ](../requirements/slackapp-260725-multi-agent-routing.md)
 - ADR: [slackapp-260725/ADR](../adr/slackapp-260725-multi-agent-routing.md)
 - Design: [slackapp-260725/DESIGN](slackapp-260725-multi-agent-routing.md)
@@ -65,7 +65,7 @@ gate disabled by default until every deployed API and worker instance is mode-aw
 | Date (KST) | Command | Result | Evidence |
 | --- | --- | --- | --- |
 | 2026-07-26 | `cd python/apps/azents && uv run pytest src/azents/services/external_channel/interaction_test.py -q` | pass | `11 passed`; selector admission, modal, navigation, submission, metadata, and expiry tests passed. |
-| 2026-07-26 | `cd testenv/azents/e2e && uv run pytest src/tests/test_slack_provider_fake.py -q` | pass | `15 passed`; distinct installation identity and redacted selector view/control evidence passed. |
+| 2026-07-26 | `cd testenv/azents/e2e && uv run pytest src/tests/test_slack_provider_fake.py -q` | pass | `16 passed`; distinct installation identity, redacted selector view/control evidence, and prefixed native Plan capture passed. |
 | 2026-07-26 | `cd testenv/azents/e2e && uv run ruff check . && uv run ruff format --check . && uv run pyright .` | pass | Ruff and formatting passed; Pyright reported `0 errors, 0 warnings`. |
 | 2026-07-26 | `cd testenv/azents/e2e && uv run pytest ./src/tests/azents/public/test_external_channels.py --collect-only -q` | pass | All eight External Channel journeys collected, including the two new Multi App journeys. |
 | 2026-07-26 | `cd python/apps/azents && uv run ruff check --fix . && uv run ruff format . && uv run pyright && uv run pytest` | pass | Ruff and formatting passed; Pyright reported `0 errors, 0 warnings`; Pytest reported `2531 passed, 611 skipped`. Docker-backed repository and migration cases were skipped by their existing environment guards. |
@@ -73,14 +73,15 @@ gate disabled by default until every deployed API and worker instance is mode-aw
 | 2026-07-26 | `cd python/apps/azents && uv run pytest src/azents/rdb/external_channel_app_mode_migration_test.py --collect-only -q` | pass | All 13 app-mode migration cases collected, including legacy preservation, ambiguity rejection, and unsafe downgrade rejection. |
 | 2026-07-26 | `cd testenv/azents && uv run testenv bootstrap local` | blocked | Exit code `1`; `.env` creation succeeded, then `devserver-down` failed because the runtime has no Docker executable or daemon. |
 | 2026-07-26 | focused Multi App management and selector E2E node IDs | blocked | Both tests collected, then errored in the session `container_network` fixture because `/var/run/docker.sock` does not exist. No product scenario step ran. |
-| 2026-07-26 | PR 7 TypeScript sequence: format, lint, typecheck, Web tests, build | pass | The parent Web branch reported format/lint/typecheck/build success and `123` passing Web tests before PR 8 branched from `03563d1e`. |
+| 2026-07-26 | PR 7 TypeScript sequence: format, lint, typecheck, Web tests, build | pass | The parent Web branch reported format/lint/typecheck/build success and `123` passing Web tests before PR 8 branched from it. |
 
 ## Grounded Fixes Found During Validation
 
 | Finding | Evidence | Fix | Verification |
 | --- | --- | --- | --- |
 | Selector service tests encoded an admission expiry as one day after the fixed date `2026-07-25`, so they began failing when real UTC time passed that date. | Seven full-suite failures raised `Slack selector admission is unavailable` before the intended assertions. Production correctly rejected the expired admission. | Replaced the calendar-fragile valid and expired fixtures with timezone-aware `datetime.max` and `datetime.min` boundaries. Production fail-closed expiry logic is unchanged. | Focused selector tests: `11 passed`; full backend: `2531 passed, 611 skipped`. |
-| The Slack fake could not represent several App identities or drive modal callbacks without exposing transient triggers or visible copy. | Multi App setup and selector E2E had no deterministic provider evidence boundary. | Added configurable provider identity, modal mutation handling, and bounded redacted selector evidence. | Slack fake tests: `15 passed`; E2E Ruff, format, and Pyright passed. |
+| The Slack fake could not represent several App identities or drive modal callbacks without exposing transient triggers or visible copy. | Multi App setup and selector E2E had no deterministic provider evidence boundary. | Added configurable provider identity, modal mutation handling, and bounded redacted selector evidence. | Slack fake tests: `16 passed`; E2E Ruff, format, and Pyright passed. |
+| The runtime-provider journey still assumed a native Plan was the first Slack block, but Agent-associated output now prepends the required Agent identity section. | Two GitHub runtime-provider runs reached completed canonical work and tool execution, then timed out because the fake omitted prefixed Plan blocks from its evidence. | Detect a native Plan anywhere in an update, retain the full ordered block payload, and assert that the Agent identity section precedes the Plan with a matching fallback prefix. Production delivery behavior is unchanged. | Slack fake tests: `16 passed`; E2E Ruff, format, and Pyright passed. Docker-backed runtime-provider execution awaits the corrected GitHub run. |
 | No product E2E joined Workspace management, route/default lifecycle, mention selection, duplicate callbacks, approval, and final binding projection. | Existing External Channel E2E covered dedicated connection, approval, work, files, Socket Mode, and Web surfaces only. | Added one Workspace management journey and one mention-selector journey using public/admin APIs and signed callbacks. | Both tests collect. Local execution is Docker-blocked; required GitHub deterministic E2E must supply execution evidence. |
 
 ## Primary Matrix Status

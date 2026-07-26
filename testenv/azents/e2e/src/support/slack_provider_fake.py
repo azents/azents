@@ -755,12 +755,14 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             delivery["selector_admission_id"] = selector_admission_id
         blocks = body.get("blocks")
         typed_blocks = cast(list[object], blocks) if isinstance(blocks, list) else []
-        first_block: object | None = typed_blocks[0] if typed_blocks else None
         if (
             operation == "chat.update"
             and isinstance(blocks, list)
-            and isinstance(first_block, dict)
-            and cast(dict[str, object], first_block).get("type") == "plan"
+            and any(
+                isinstance(block, dict)
+                and cast(dict[str, object], block).get("type") == "plan"
+                for block in typed_blocks
+            )
         ):
             delivery["text"] = _optional_string(body, "text")
             delivery["blocks"] = blocks

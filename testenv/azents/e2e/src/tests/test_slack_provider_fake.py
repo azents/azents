@@ -255,6 +255,59 @@ def test_slack_fake_captures_selector_control_without_visible_copy(
     assert "Private button label" not in rendered
 
 
+def test_slack_fake_captures_plan_after_agent_identity_block(
+    slack_fake_url: str,
+) -> None:
+    """Retain the native Plan when current Agent attribution precedes it."""
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Incident Agent*",
+            },
+        },
+        {
+            "type": "plan",
+            "title": "Investigating…",
+            "tasks": [
+                {
+                    "task_id": "inspect",
+                    "title": "Inspect logs",
+                    "status": "in_progress",
+                }
+            ],
+        },
+    ]
+    requests.post(
+        f"{slack_fake_url}/api/chat.update",
+        json={
+            "channel": "C-E2E",
+            "ts": "1721600000.000100",
+            "text": "Incident Agent\nInvestigating…",
+            "blocks": blocks,
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert evidence["deliveries"] == [
+        {
+            "operation": "chat.update",
+            "channel": "C-E2E",
+            "thread_ts": None,
+            "message_ts": "1721600000.000100",
+            "outcome": "delivered",
+            "approval_request_id": None,
+            "text": "Incident Agent\nInvestigating…",
+            "blocks": blocks,
+        }
+    ]
+
+
 def test_slack_fake_serves_private_file_without_leaking_content_evidence(
     slack_fake_url: str,
 ) -> None:
