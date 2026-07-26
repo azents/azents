@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+import errno
 import hashlib
 import os
 import shutil
@@ -624,21 +625,32 @@ async def test_download_uses_unnamed_stage_and_leaves_no_reclaimable_path(
 @pytest.mark.asyncio
 async def test_download_fails_closed_when_parent_lacks_unnamed_temporary_file_support(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A filesystem without O_TMPFILE cannot trigger a mutable-name fallback."""
+    """An unsupported O_TMPFILE capability cannot trigger a mutable-name fallback."""
     destination = tmp_path / "destination.bin"
     data = b"safe"
     control = _Control()
+    transfer = _Transfer(
+        (
+            RunnerDownloadChunk(offset=0, data=data),
+            RunnerDownloadComplete(
+                actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
+            ),
+        )
+    )
+
+    def unsupported_unnamed_temporary_file(parent_fd: int) -> int:
+        del parent_fd
+        raise OSError(errno.EOPNOTSUPP, "Operation not supported")
+
+    monkeypatch.setattr(
+        "azents_runtime_runner.transfer._open_unnamed_temporary_file",
+        unsupported_unnamed_temporary_file,
+    )
     manager = RunnerTransferManager(
         control=control,
-        transfer=_Transfer(
-            (
-                RunnerDownloadChunk(offset=0, data=data),
-                RunnerDownloadComplete(
-                    actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
-                ),
-            )
-        ),
+        transfer=transfer,
         accepted_generation=lambda: 1,
     )
 
@@ -647,6 +659,7 @@ async def test_download_fails_closed_when_parent_lacks_unnamed_temporary_file_su
     result = await _result(control)
     assert result.outcome is RunnerTransferOutcome.FAILED
     assert result.failure is RunnerTransferFailure.DESTINATION_FAILED
+    assert transfer.download_calls == 0
     assert not destination.exists()
     await manager.close()
 
