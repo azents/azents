@@ -13,6 +13,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/external_channel/discord_activation.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
+  - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/session_lifecycle/orchestrator.py
   - python/apps/azents/src/azents/services/session_lifecycle/registry.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
@@ -22,7 +23,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-26
-spec_version: 12
+spec_version: 13
 ---
 
 # External Channel Lifecycle
@@ -70,6 +71,15 @@ worker cannot continue mutation after replacement or disconnect.
 Revoking a participant grant deletes the selected grant policy row after an ownership
 check. It does not delete canonical provider content, invocation history, projected
 Session events, or unrelated grants.
+
+An Allow decision locks the connection, route, resource, binding, admission, and
+request before creating or reusing its grant and binding. Slack keeps the existing
+`waiting_hydration` activation transition. Discord has no remote-history hydration
+adapter, so Allow creates an immediately active binding, ensures active Channel Work,
+releases the retained request source through one invocation batch and mailbox item,
+then wakes the Session after commit. Repeated Allow decisions reuse the same durable
+binding, batch, and mailbox identity. Final Allow, Deny, and Block decisions create a
+provider-aware idempotent delete intent when their approval control was delivered.
 
 Every new file download and file-bearing publication revalidates the current Agent,
 Session, route, binding, connection, and directional capability. Binding disconnect,
@@ -147,6 +157,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 13) — Added provider-aware Allow activation:
+  immediate Discord binding/work/invocation release and approval-control deletion,
+  while preserving Slack hydration activation.
 - **2026-07-26** (spec_version 12) — Defined Discord's provisional PING-only
   callback activation order, fenced cleanup after registration failure, and removal of
   the deployment-scoped Discord rollout gate.

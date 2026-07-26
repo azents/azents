@@ -3698,9 +3698,46 @@ class ExternalChannelRepository:
         )
         if control is None or control.provider_message_key is None:
             return None
-        channel_id = control.request_payload.get("channel_id")
-        thread_ts = control.request_payload.get("thread_ts")
-        if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        provider = await session.scalar(
+            sa.select(RDBExternalChannelConnection.provider)
+            .join(
+                RDBExternalChannelAgentRoute,
+                RDBExternalChannelAgentRoute.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .join(
+                RDBExternalChannelAccessRequest,
+                RDBExternalChannelAccessRequest.route_id
+                == RDBExternalChannelAgentRoute.id,
+            )
+            .where(RDBExternalChannelAccessRequest.id == access_request_id)
+        )
+        if provider is ExternalChannelProvider.DISCORD:
+            guild_id = control.request_payload.get("guild_id")
+            channel_id = control.request_payload.get("channel_id")
+            if (
+                not isinstance(guild_id, str)
+                or not guild_id
+                or not isinstance(channel_id, str)
+                or not channel_id
+            ):
+                return None
+            payload = {
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+                "provider_message_key": control.provider_message_key,
+            }
+        elif provider is ExternalChannelProvider.SLACK:
+            channel_id = control.request_payload.get("channel_id")
+            thread_ts = control.request_payload.get("thread_ts")
+            if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+                return None
+            payload = {
+                "channel_id": channel_id,
+                "thread_ts": thread_ts,
+                "provider_message_key": control.provider_message_key,
+            }
+        else:
             return None
         return await self.create_delivery_attempt_idempotent(
             session,
@@ -3710,11 +3747,7 @@ class ExternalChannelRepository:
                 channel_action_id=None,
                 binding_id=None,
                 operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                request_payload={
-                    "channel_id": channel_id,
-                    "thread_ts": thread_ts,
-                    "provider_message_key": control.provider_message_key,
-                },
+                request_payload=payload,
                 status=ExternalChannelDeliveryStatus.PENDING,
                 provider_message_key=control.provider_message_key,
                 error_kind=None,

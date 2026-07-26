@@ -22,6 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
   - python/apps/azents/src/azents/services/external_channel/discord_events.py
+  - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
@@ -36,7 +37,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-07-26
-spec_version: 10
+spec_version: 11
 ---
 
 # External Channel Provider Ingress
@@ -170,6 +171,18 @@ The worker claims admitted events in bounded batches with a claim owner and expi
 - Unlinked ordinary messages wait briefly for an out-of-order correlated mention, then become ignored rather than creating a resource.
 - Messages authored by the configured Slack App or bot are ignored during ordinary event processing and history hydration, preventing provider output from re-entering Agent context.
 - Canonical principals, messages, revisions, and pending context are stored before access decisions.
+- An eligible Discord mention uses the same durable route, admission, pending-context,
+  block, grant, binding, invocation-batch, and mailbox boundaries as Slack. A Discord
+  principal remains provider provenance and access-policy subject matter only; it is
+  never inferred to be an Azents User.
+- A granted Discord mention creates or reuses an immediately active binding, releases
+  retained context exactly once, ensures active Channel Work, and wakes the bound
+  Session after commit. Discord has no remote-history hydration adapter, so it does
+  not enter Slack's `waiting_hydration` activation gate.
+- An ungranted Discord mention creates the durable access request and its
+  provider-visible approval control without waking a Session. Allow releases the
+  retained source message through the same invocation batch and mailbox boundary;
+  block, revocation, or denial never release new input.
 - When an eligible principal already has an Agent-scoped grant and the resource has
   no active binding, initial binding creation uses the shared root Session boundary
   to snapshot the Agent's current automatic Project policy into a new root
@@ -185,7 +198,11 @@ The worker claims admitted events in bounded batches with a claim owner and expi
   Invalid credentials and missing Slack scopes require reconnect but preserve routing.
   Lost resource access marks hydration incomplete and terminalizes the resource.
 
-Activation waits until hydration is terminal and every correlated event through the persisted boundary is terminal. This prevents out-of-order or post-trigger/pre-activation message loss.
+Slack activation waits until hydration is terminal and every correlated event through
+the persisted boundary is terminal. This prevents out-of-order or
+post-trigger/pre-activation message loss. Discord activation instead serializes on
+the resource lock and commits its retained context, active binding, batch, mailbox,
+and Channel Work before the post-commit wake-up.
 
 ## File Metadata Projection
 
@@ -217,6 +234,9 @@ excluded.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 11) — Completed Discord mention routing through
+  provider-neutral authorization, immediate binding activation, invocation release,
+  Channel Work, and post-commit wake-up without provider-principal-to-User mapping.
 - **2026-07-26** (spec_version 10) — Added selector-scoped Ed25519 Discord
   interaction admission and the dedicated lease-fenced Gateway Worker with
   admission-coupled checkpoints, secure production transport, and sanitized

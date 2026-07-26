@@ -436,7 +436,7 @@ class ExternalChannelActionService:
         agent_id: str | None,
         authority: SessionResourceAuthority | None,
     ) -> DiscordDeliveryResult:
-        """Deliver one Discord text or multipart file mutation."""
+        """Deliver one Discord text, multipart file, or control mutation."""
         payload = target.request_payload
         guild_id = payload.get("guild_id")
         channel_id = payload.get("channel_id")
@@ -455,6 +455,7 @@ class ExternalChannelActionService:
             case (
                 ExternalChannelDeliveryOperation.REPLY
                 | ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                | ExternalChannelDeliveryOperation.CONTROL_MESSAGE
             ):
                 text = payload.get("text")
                 if not isinstance(text, str):
@@ -553,8 +554,6 @@ class ExternalChannelActionService:
                     channel_id=channel_id,
                     message_id=message_id,
                 )
-            case ExternalChannelDeliveryOperation.CONTROL_MESSAGE:
-                return _discord_invalid_payload()
             case _ as unreachable:
                 assert_never(unreachable)
 

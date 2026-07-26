@@ -34,6 +34,7 @@ from azents.services.external_channel.discord_events import (
 )
 from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
+    ExternalChannelPersistedMessage,
     ExternalChannelPersistedRevision,
 )
 from azents.services.external_channel.slack_events import (
@@ -147,6 +148,38 @@ class _Processor(ExternalChannelEventProcessorService):
             }
         )
         return cast(ExternalChannelPersistedRevision, object())
+
+    async def _persist_discord_message_event(
+        self,
+        *,
+        session: AsyncSession,
+        event: ExternalChannelEvent,
+        configuration: ExternalChannelConnectionConfiguration,
+        connection: object,
+        resource: ExternalChannelResource,
+        message: DiscordNormalizedMessage,
+        now: datetime.datetime,
+    ) -> ExternalChannelPersistedMessage:
+        """Keep resource-persistence tests focused below the routing boundary."""
+        del configuration, connection
+        await self._persist_normalized_message(
+            session,
+            resource=resource,
+            message=message,
+            source_event_id=event.id,
+            now=now,
+            original_url=None,
+            reference_mappings={},
+            provider=ExternalChannelProvider.DISCORD,
+        )
+        await session.commit()
+        return ExternalChannelPersistedMessage(
+            resource_id=resource.id,
+            hydration_required=False,
+            control_delivery_attempt_id=None,
+            activity_delivery_attempt_id=None,
+            wake_up=None,
+        )
 
     async def _complete_event(
         self,

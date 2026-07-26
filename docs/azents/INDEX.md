@@ -38,9 +38,9 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-26 | 8 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-26 | 14 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-26 | 12 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-26 | 10 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-26 | 15 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-26 | 13 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-26 | 11 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-25 | 30 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -150,6 +150,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Execution Transcript Normalization Historical Requirements Reconstruction](requirements/execution-260527-execution-transcript-normalization.md) | execution-260527 | 2026-05-27 | 2026-05-28 |
 | [Session Workspace Project Existing Folder Registration Historical Requirements Reconstruction](requirements/existing-260611-existing-folder-registration.md) | existing-260611 | 2026-06-11 | 2026-06-11 |
 | [External Watch / Raw Session Event Subscription Historical Requirements Reconstruction](requirements/external-260503-external-watch-raw-subscription.md) | external-260503 | 2026-05-03 | 2026-05-03 |
+| [Discord Message Invocation Requirements](requirements/external-260726-discord-message-invocation.md) | external-260726 | 2026-07-26 | - |
 | [Failed-run Error Retry and Finalization Historical Requirements Reconstruction](requirements/failed-260627-failed-error-retry.md) | failed-260627 | 2026-06-27 | - |
 | [Scope Failed-run Retry to One Model Turn Historical Requirements Reconstruction](requirements/failed-260716-failed-retry-to-turn.md) | failed-260716 | 2026-07-16 | 2026-03-26 |
 | [Keep OpenAI HTTP Failure Semantics at the Azents Boundary Historical Requirements Reconstruction](requirements/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md) | failure-260716 | 2026-07-16 | - |
@@ -487,6 +488,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Agent Execution Transcript Normalization](adr/execution-260527-execution-transcript-normalization.md)
 - [Session Workspace Project Existing Folder Registration Historical Decision Reconstruction](adr/existing-260611-existing-folder-registration.md)
 - [External Watch / Raw Session Event Subscription Historical Decision Reconstruction](adr/external-260503-external-watch-raw-subscription.md)
+- [Discord Message Invocation](adr/external-260726-discord-message-invocation.md)
 - [Failed-run Error Retry and Finalization](adr/failed-260627-failed-error-retry.md)
 - [Scope Failed-run Retry to One Model Turn](adr/failed-260716-failed-retry-to-turn.md)
 - [Keep OpenAI HTTP Failure Semantics at the Azents Boundary](adr/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md)
