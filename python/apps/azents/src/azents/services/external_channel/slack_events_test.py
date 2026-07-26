@@ -826,8 +826,8 @@ async def test_file_info_rejects_mismatched_response_identity() -> None:
             )
 
 
-async def test_private_file_download_authenticates_and_enforces_actual_limit() -> None:
-    """Private bytes use the bearer token and stop before returning an oversize body."""
+async def test_private_file_stream_authenticates_and_enforces_actual_limit() -> None:
+    """Private stream uses bearer auth and enforces its actual-byte limit."""
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -836,24 +836,29 @@ async def test_private_file_download_authenticates_and_enforces_actual_limit() -
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         client = SlackConversationClient(http)
-        body = await client.download_private_file(
+        async with client.open_private_file_stream(
             bot_token="xoxb-secret",
             private_url="https://files.slack.test/private/F123",
             max_bytes=8,
-        )
+            maximum_chunk_size=4,
+        ) as stream:
+            body = b"".join([chunk async for chunk in stream])
         with pytest.raises(SlackProviderFileTooLarge):
-            await client.download_private_file(
+            async with client.open_private_file_stream(
                 bot_token="xoxb-secret",
                 private_url="https://files.slack.test/private/F123",
                 max_bytes=7,
-            )
+                maximum_chunk_size=4,
+            ) as stream:
+                async for _ in stream:
+                    pass
 
     assert body == b"12345678"
     assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
     assert requests[0].url == "https://files.slack.test/private/F123"
 
 
-async def test_private_file_download_rejects_partial_response_status() -> None:
+async def test_private_file_stream_rejects_partial_response_status() -> None:
     """A ranged or empty success is not accepted as the complete Slack file."""
 
     def handler(_: httpx.Request) -> httpx.Response:
@@ -861,11 +866,13 @@ async def test_private_file_download_rejects_partial_response_status() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         with pytest.raises(SlackProviderTemporaryError, match="incomplete"):
-            await SlackConversationClient(http).download_private_file(
+            async with SlackConversationClient(http).open_private_file_stream(
                 bot_token="xoxb-secret",
                 private_url="https://files.slack.test/private/F123",
                 max_bytes=100,
-            )
+                maximum_chunk_size=4,
+            ):
+                pass
 
 
 async def test_control_message_reports_ambiguous_network_outcome_without_retry() -> (

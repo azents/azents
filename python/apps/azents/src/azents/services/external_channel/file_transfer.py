@@ -1,11 +1,14 @@
 """Explicit provider-to-Runtime External Channel file transfer."""
 
+import asyncio
+import datetime
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Annotated, TypeGuard, assert_never
+from typing import Annotated, Protocol, TypeGuard, assert_never
 
 import httpx
+from azcommon.uuid import uuid7
 from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +18,7 @@ from azents.core.external_channel_file import (
     EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
     MAX_EXTERNAL_CHANNEL_FILES,
     ExternalChannelFileLocator,
+    ExternalChannelFileMetadata,
     ExternalChannelOutboundFileManifest,
     ExternalChannelOutboundFileSource,
 )
@@ -23,6 +27,17 @@ from azents.core.system_setting import SystemSettingSection
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.work_data import ExternalChannelFileAccessTarget
+from azents.runtime.transfer.provider_source import (
+    DeferredProviderServerToRuntimeSource,
+    ProviderStagingStore,
+)
+from azents.runtime.transfer.server_to_runtime import (
+    ServerToRuntimeSourceMetadata,
+    ServerToRuntimeTarget,
+    ServerToRuntimeTransferError,
+    ServerToRuntimeTransferRequest,
+)
 from azents.services.exchange_file import (
     ExchangeFileDownload,
     ExchangeFileService,
@@ -66,6 +81,49 @@ from azents.services.system_setting.service import SystemSettingsService
 
 class ExternalChannelFileTransferError(ValueError):
     """One requested External Channel file cannot be materialized safely."""
+
+
+class ServerToRuntimeTransferExecutor(Protocol):
+    """Backend-only terminal-success Runtime transfer capability."""
+
+    async def transfer(self, request: ServerToRuntimeTransferRequest) -> None:
+        """Deliver one complete source and await Runtime destination commit."""
+        ...
+
+
+@dataclass(frozen=True)
+class ExternalChannelInboundStagingConfiguration:
+    """Trusted configuration for deferred provider file staging."""
+
+    s3_service: ProviderStagingStore
+    workspace_bucket: str
+    transfer_object_prefix: str
+    stream_chunk_size: int
+    multipart_part_size: int
+    multipart_copy_threshold: int
+    multipart_copy_part_size: int
+    deadline_after: datetime.timedelta
+
+    def __post_init__(self) -> None:
+        """Reject incomplete or unbounded provider staging configuration."""
+        if not self.workspace_bucket or not self.transfer_object_prefix.strip("/"):
+            raise ValueError("External Channel transfer storage is required")
+        if (
+            min(
+                self.stream_chunk_size,
+                self.multipart_part_size,
+                self.multipart_copy_threshold,
+                self.multipart_copy_part_size,
+            )
+            <= 0
+        ):
+            raise ValueError("External Channel transfer byte bounds must be positive")
+        if self.stream_chunk_size > self.multipart_part_size:
+            raise ValueError(
+                "External Channel stream chunk size exceeds multipart part size"
+            )
+        if self.deadline_after <= datetime.timedelta():
+            raise ValueError("External Channel transfer deadline must be positive")
 
 
 @dataclass(frozen=True)
@@ -142,18 +200,24 @@ class ExternalChannelFileTransferService:
         SystemSettingsService,
         Depends(SystemSettingsService),
     ]
+    inbound_staging_configuration: ExternalChannelInboundStagingConfiguration | None = (
+        None
+    )
 
     async def download(
         self,
         *,
         session_id: str,
         agent_id: str,
+        operation_id: str,
         file: str,
         path: str,
         overwrite: bool,
         file_storage: FileStorage,
+        transfer_service: ServerToRuntimeTransferExecutor | None,
+        transfer_target: ServerToRuntimeTarget | None,
     ) -> ExternalChannelFileDownloadResult:
-        """Download one provider-authorized file and write one complete Runtime file."""
+        """Stage one provider-authorized file and await Runtime destination commit."""
         locator = self._parse_locator(file)
         if not PurePosixPath(path).is_absolute():
             raise ExternalChannelFileTransferError(
@@ -191,6 +255,15 @@ class ExternalChannelFileTransferService:
             raise ExternalChannelFileTransferError(
                 f"File already exists: {path}. Set overwrite=true to replace it."
             )
+        staging_configuration = self.inbound_staging_configuration
+        if (
+            transfer_service is None
+            or transfer_target is None
+            or staging_configuration is None
+        ):
+            raise ExternalChannelFileTransferError(
+                "Runtime file transfer service is unavailable."
+            )
         credentials = self.credentials_codec.decrypt(target.encrypted_credentials)
         resolved = await self.system_settings.resolve(
             SystemSettingSection.EXTERNAL_CHANNEL_FILES
@@ -204,9 +277,16 @@ class ExternalChannelFileTransferService:
                     bot_token=credentials.bot_token,
                     provider_file_id=locator.provider_file_id,
                     path=path,
+                    overwrite=overwrite,
                     limit=limit,
                     agent_id=agent_id,
-                    file_storage=file_storage,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                    locator=locator,
+                    target=target,
+                    transfer_service=transfer_service,
+                    transfer_target=transfer_target,
+                    staging_configuration=staging_configuration,
                 )
             case ExternalChannelProvider.DISCORD:
                 source = await self._discord_file_source(
@@ -233,9 +313,16 @@ class ExternalChannelFileTransferService:
         bot_token: str,
         provider_file_id: str,
         path: str,
+        overwrite: bool,
         limit: int,
         agent_id: str,
-        file_storage: FileStorage,
+        session_id: str,
+        operation_id: str,
+        locator: ExternalChannelFileLocator,
+        target: ExternalChannelFileAccessTarget,
+        transfer_service: ServerToRuntimeTransferExecutor,
+        transfer_target: ServerToRuntimeTarget,
+        staging_configuration: ExternalChannelInboundStagingConfiguration,
     ) -> ExternalChannelFileDownloadResult:
         try:
             info = await self.slack_client.fetch_file_download_info(
@@ -243,98 +330,115 @@ class ExternalChannelFileTransferService:
                 provider_file_id=provider_file_id,
             )
             metadata = info.metadata
-            if not metadata.supported:
-                reason = metadata.unsupported_reason
-                raise ExternalChannelFileTransferError(
-                    "Slack file mode is unsupported"
-                    + (f": {reason.value}." if reason is not None else ".")
-                )
-            if metadata.declared_size is None:
-                raise ExternalChannelFileTransferError(
-                    "Slack file metadata does not include a valid size."
-                )
-            if metadata.declared_size > limit:
-                raise ExternalChannelFileTransferError(
-                    f"Slack file exceeds the configured inbound limit of {limit} bytes."
-                )
-            if info.private_url is None:
+            filename, declared_size = _validate_slack_file_metadata(
+                metadata=metadata,
+                provider_file_id=provider_file_id,
+                limit=limit,
+            )
+            private_url = info.private_url
+            if private_url is None:
                 raise ExternalChannelFileTransferError(
                     "Slack file metadata does not include a private download target."
                 )
-            body = await self.slack_client.download_private_file(
-                bot_token=bot_token,
-                private_url=info.private_url,
-                max_bytes=limit,
+            source = DeferredProviderServerToRuntimeSource(
+                metadata=ServerToRuntimeSourceMetadata(
+                    canonical_uri=(
+                        f"external-channel://slack/{locator.binding_id}/"
+                        f"{provider_file_id}"
+                    ),
+                    source_kind="external_channel_slack",
+                    display_name=filename,
+                    media_type=metadata.media_type or "application/octet-stream",
+                    size=declared_size,
+                    sha256=None,
+                    expires_at=None,
+                ),
+                open_stream=lambda *, maximum_chunk_size: (
+                    self.slack_client.open_private_file_stream(
+                        bot_token=bot_token,
+                        private_url=private_url,
+                        max_bytes=limit,
+                        maximum_chunk_size=maximum_chunk_size,
+                    )
+                ),
+                revalidate_authority=lambda: self._revalidate_slack_source(
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    locator=locator,
+                    target=target,
+                    bot_token=bot_token,
+                    expected_metadata=metadata,
+                    limit=limit,
+                ),
+                s3_service=staging_configuration.s3_service,
+                bucket=staging_configuration.workspace_bucket,
+                transfer_object_prefix=staging_configuration.transfer_object_prefix,
+                preparation_id_source=lambda: uuid7().hex,
+                maximum_size=limit,
+                stream_chunk_size=staging_configuration.stream_chunk_size,
+                multipart_part_size=staging_configuration.multipart_part_size,
+                multipart_copy_threshold=staging_configuration.multipart_copy_threshold,
+                multipart_copy_part_size=(
+                    staging_configuration.multipart_copy_part_size
+                ),
             )
-            if len(body) != metadata.declared_size:
-                raise ExternalChannelFileTransferError(
-                    "Slack file size does not match current provider metadata."
+            await transfer_service.transfer(
+                ServerToRuntimeTransferRequest(
+                    source=source,
+                    target=transfer_target,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                    destination=path,
+                    overwrite=overwrite,
+                    product_maximum_size=limit,
+                    provider_maximum_size=limit,
+                    deadline_at=(
+                        datetime.datetime.now(datetime.UTC)
+                        + staging_configuration.deadline_after
+                    ),
                 )
+            )
+        except asyncio.CancelledError:
+            raise
         except ExternalChannelFileTransferError:
             raise
-        except SlackProviderFileTooLarge:
+        except (
+            SlackProviderFileTooLarge,
+            SlackProviderFileNotFound,
+            SlackProviderPermissionDenied,
+            SlackProviderCredentialsInvalid,
+            SlackProviderRateLimited,
+            SlackProviderRequestRejected,
+            SlackProviderTemporaryError,
+        ) as error:
+            raise _map_slack_download_error(error, limit=limit) from None
+        except ServerToRuntimeTransferError as error:
             raise ExternalChannelFileTransferError(
-                f"Slack file exceeds the configured inbound limit of {limit} bytes."
-            ) from None
-        except SlackProviderFileNotFound:
-            raise ExternalChannelFileTransferError(
-                "Slack no longer exposes the requested file."
-            ) from None
-        except SlackProviderPermissionDenied:
-            raise ExternalChannelFileTransferError(
-                "Slack denied access to the requested file."
-            ) from None
-        except SlackProviderCredentialsInvalid:
-            raise ExternalChannelFileTransferError(
-                "Slack rejected the active External Channel credential."
-            ) from None
-        except SlackProviderRateLimited:
-            raise ExternalChannelFileTransferError(
-                "Slack rate limited the file download request."
-            ) from None
-        except SlackProviderRequestRejected as error:
-            raise ExternalChannelFileTransferError(
-                f"Slack rejected the file download ({error.error_code})."
-            ) from None
-        except SlackProviderTemporaryError:
-            raise ExternalChannelFileTransferError(
-                "Slack file download is temporarily unavailable."
-            ) from None
-        filename = metadata.name or metadata.title
-        if filename is None:
-            raise ExternalChannelFileTransferError(
-                "Slack file metadata does not include a filename."
-            )
-        try:
-            attachment = await file_storage.put(
-                path,
-                body,
-                metadata.media_type or "",
-                agent_id=agent_id,
-            )
-        except PermissionError:
-            raise ExternalChannelFileTransferError(
-                f"Runtime destination is not writable: {path}."
-            ) from None
-        except RuntimeStorageError as error:
-            raise ExternalChannelFileTransferError(
-                f"Failed to write the Runtime file: {error.detail}"
+                f"Failed to write the Runtime file: {error}"
             ) from None
         except ValueError as error:
-            raise ExternalChannelFileTransferError(str(error)) from None
-        except OSError:
+            message = str(error)
+            if "exceeds" in message:
+                raise ExternalChannelFileTransferError(
+                    f"Slack file exceeds the configured inbound limit of {limit} bytes."
+                ) from None
+            if "size" in message or "hash" in message:
+                raise ExternalChannelFileTransferError(
+                    "Slack file size does not match current provider metadata."
+                ) from None
             raise ExternalChannelFileTransferError(
-                f"Failed to write the Runtime file: {path}."
+                "Failed to write the Runtime file."
             ) from None
-        if attachment.size != len(body):
+        except Exception:
             raise ExternalChannelFileTransferError(
-                "Runtime reported an incomplete file write."
-            )
+                "Failed to write the Runtime file."
+            ) from None
         return ExternalChannelFileDownloadResult(
             path=path,
             filename=filename,
             media_type=metadata.media_type,
-            bytes_written=len(body),
+            bytes_written=declared_size,
         )
 
     async def _discord_file_source(
@@ -506,6 +610,57 @@ class ExternalChannelFileTransferService:
             media_type=metadata.media_type,
             bytes_written=len(body),
         )
+
+    async def _revalidate_slack_source(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        locator: ExternalChannelFileLocator,
+        target: ExternalChannelFileAccessTarget,
+        bot_token: str,
+        expected_metadata: ExternalChannelFileMetadata,
+        limit: int,
+    ) -> bool:
+        """Revalidate active binding and current provider metadata before READY."""
+        async with self.session_manager() as session:
+            current = await self.repository.get_active_file_access_target(
+                session,
+                session_id=session_id,
+                agent_id=agent_id,
+                binding_id=locator.binding_id,
+            )
+        if current is None:
+            raise ExternalChannelFileTransferError(
+                "External Channel binding is not active for this AgentSession."
+            )
+        if current.provider is not locator.provider:
+            raise ExternalChannelFileTransferError(
+                "External Channel file locator does not match its active provider."
+            )
+        capabilities = self._capabilities(current.capabilities)
+        if not capabilities.download_files or current.encrypted_credentials is None:
+            raise ExternalChannelFileTransferError(
+                "External Channel file authorization changed before transfer completed."
+            )
+        if current != target:
+            raise ExternalChannelFileTransferError(
+                "External Channel binding changed before file transfer completed."
+            )
+        info = await self.slack_client.fetch_file_download_info(
+            bot_token=bot_token,
+            provider_file_id=locator.provider_file_id,
+        )
+        _validate_slack_file_metadata(
+            metadata=info.metadata,
+            provider_file_id=locator.provider_file_id,
+            limit=limit,
+        )
+        if info.metadata != expected_metadata:
+            raise ExternalChannelFileTransferError(
+                "Slack file changed before transfer completed."
+            )
+        return True
 
     async def prepare_outbound(
         self,
@@ -729,6 +884,87 @@ def _discord_resource_source_allowed(
         if isinstance((value := resource_labels.get(key)), str)
     }
     return channel_id in allowed_channels
+
+
+def _validate_slack_file_metadata(
+    *,
+    metadata: ExternalChannelFileMetadata,
+    provider_file_id: str,
+    limit: int,
+) -> tuple[str, int]:
+    """Validate one files.info response before source admission."""
+    if metadata.provider_file_id != provider_file_id:
+        raise ExternalChannelFileTransferError(
+            "Slack file metadata does not match the selected locator."
+        )
+    if not metadata.supported:
+        reason = metadata.unsupported_reason
+        raise ExternalChannelFileTransferError(
+            "Slack file mode is unsupported"
+            + (f": {reason.value}." if reason is not None else ".")
+        )
+    declared_size = metadata.declared_size
+    if declared_size is None:
+        raise ExternalChannelFileTransferError(
+            "Slack file metadata does not include a valid size."
+        )
+    if declared_size > limit:
+        raise ExternalChannelFileTransferError(
+            f"Slack file exceeds the configured inbound limit of {limit} bytes."
+        )
+    filename = metadata.name or metadata.title
+    if filename is None:
+        raise ExternalChannelFileTransferError(
+            "Slack file metadata does not include a filename."
+        )
+    return filename, declared_size
+
+
+def _map_slack_download_error(
+    error: (
+        SlackProviderFileTooLarge
+        | SlackProviderFileNotFound
+        | SlackProviderPermissionDenied
+        | SlackProviderCredentialsInvalid
+        | SlackProviderRateLimited
+        | SlackProviderRequestRejected
+        | SlackProviderTemporaryError
+    ),
+    *,
+    limit: int,
+) -> ExternalChannelFileTransferError:
+    """Map provider failures to the existing External Channel file contract."""
+    match error:
+        case SlackProviderFileTooLarge():
+            return ExternalChannelFileTransferError(
+                f"Slack file exceeds the configured inbound limit of {limit} bytes."
+            )
+        case SlackProviderFileNotFound():
+            return ExternalChannelFileTransferError(
+                "Slack no longer exposes the requested file."
+            )
+        case SlackProviderPermissionDenied():
+            return ExternalChannelFileTransferError(
+                "Slack denied access to the requested file."
+            )
+        case SlackProviderCredentialsInvalid():
+            return ExternalChannelFileTransferError(
+                "Slack rejected the active External Channel credential."
+            )
+        case SlackProviderRateLimited():
+            return ExternalChannelFileTransferError(
+                "Slack rate limited the file download request."
+            )
+        case SlackProviderRequestRejected():
+            return ExternalChannelFileTransferError(
+                f"Slack rejected the file download ({error.error_code})."
+            )
+        case SlackProviderTemporaryError():
+            return ExternalChannelFileTransferError(
+                "Slack file download is temporarily unavailable."
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 async def iter_external_channel_outbound_file_chunks(

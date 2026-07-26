@@ -95,6 +95,11 @@ class _StateSink:
         return True
 
 
+class _TransferResultSink:
+    async def handle(self, result: object, *, request_id: str) -> None:
+        del result, request_id
+
+
 class _ObjectStore:
     def __init__(self, download: bytes) -> None:
         self.download = download
