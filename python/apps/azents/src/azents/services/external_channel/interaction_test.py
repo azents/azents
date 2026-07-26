@@ -54,7 +54,8 @@ from azents.services.external_channel.slack_events import (
     SlackInteractionViewResult,
 )
 
-_NOW = datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC)
+_VALID_EXPIRY = datetime.datetime.max.replace(tzinfo=datetime.UTC)
+_EXPIRED_AT = datetime.datetime.min.replace(tzinfo=datetime.UTC)
 _SECRET = "selector-metadata-test-secret"
 
 
@@ -93,7 +94,7 @@ class _Repository:
             resource_id="resource-1",
             initiating_principal_id="principal-1",
             status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-            expires_at=_NOW + datetime.timedelta(days=1),
+            expires_at=_VALID_EXPIRY,
         )
         self.interactions = {self.interaction.id: self.interaction}
 
@@ -655,7 +656,7 @@ async def test_expired_admission_blocks_modal_before_provider_io() -> None:
     """Expired selector scope cannot open or update a Slack modal."""
     repository = _Repository()
     repository.admission = repository.admission.model_copy(
-        update={"expires_at": _NOW - datetime.timedelta(days=1)}
+        update={"expires_at": _EXPIRED_AT}
     )
     selector = _Selector(_catalog())
     slack = _Slack(
