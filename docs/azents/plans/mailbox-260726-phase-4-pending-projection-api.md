@@ -11,7 +11,7 @@ tags: [agent, mailbox, api, websocket, openapi, client, plan]
 
 - Phase: `4 — Pending projection API and generated clients`
 - Branch/base: `feature/mailbox-260726-pending-api` → `feature/mailbox-260726-runtime-wait`
-- PR boundary: Replace the legacy Event-shaped pending-input public contract with a server-owned, typed pending mailbox projection for REST live state, write snapshots, WebSocket actions, OpenAPI, and generated public clients. Correct server-side action-handoff publication ordering. Do not implement Web state or rendering.
+- PR boundary: Replace the legacy Event-shaped pending-input public contract with a server-owned, typed pending mailbox projection for REST live state, write snapshots, WebSocket actions, OpenAPI, and generated public clients. Correct server-side action-handoff publication ordering. Update only the bounded local Web compatibility adapter required to consume the no-alias generated contract and keep workspace checks green; native typed Web state and pending UX remain Phase 5.
 - Inputs: [`mailbox-260726/REQ`](../requirements/mailbox-260726-unified-agent-input-mailbox.md), [`mailbox-260726/ADR`](../adr/mailbox-260726-unified-agent-input-mailbox.md), [`mailbox-260726/DESIGN`](../design/mailbox-260726-unified-agent-input-mailbox.md), the [multi-phase implementation plan](mailbox-260726-implementation-plan.md), and completed [Phase 1](mailbox-260726-phase-1-persistence.md), [Phase 2](mailbox-260726-phase-2-terminal-delivery.md), and [Phase 3](mailbox-260726-phase-3-runtime-activity-wait.md) execution plans.
 - Deliverables:
   - A closed server-owned pending mailbox envelope/item projection for all current mailbox kinds, including admitted External Channel invocation items.
@@ -20,8 +20,11 @@ tags: [agent, mailbox, api, websocket, openapi, client, plan]
   - A mailbox-named pending-item delete route and action-execution source correlation without legacy public aliases.
   - Action-handoff publication ordering in which active `ActionExecution` is published before its pending mailbox projection is removed.
   - Regenerated public OpenAPI, Python client, and TypeScript client artifacts.
+  - A bounded local Web adapter that translates typed pending envelopes and
+    dedicated mailbox WebSocket frames into the existing internal pending-input
+    reducer shape without restoring a public or generated legacy API.
 - Non-goals:
-  - No mailbox schema or payload changes, producer scheduling changes, runtime wait changes, terminal-finalization changes, Web reducer/state/rendering changes, or compatibility aliases.
+  - No mailbox schema or payload changes, producer scheduling changes, runtime wait changes, terminal-finalization changes, public compatibility aliases, native typed Web mailbox state, source-specific renderer redesign, or pending UX changes.
   - No raw mailbox persistence payload, provider diagnostics, credentials, or raw External Channel envelope exposure.
 - Interfaces:
   - `PendingMailboxEnvelope`: `mailbox_item_id`, `session_id`, mailbox kind, scheduling mode, `created_at`, and ordered pending items.
@@ -29,11 +32,15 @@ tags: [agent, mailbox, api, websocket, openapi, client, plan]
   - REST and write snapshots expose `mailbox_items: list[PendingMailboxEnvelope]`; no `input_buffers` or `input_buffer_events` aliases remain.
   - WebSocket upsert action carries one typed envelope; removal carries `session_id` and `mailbox_item_id` only.
   - Action-execution public correlation uses `source_mailbox_item_id`; no public `input_buffer_id` remains.
+  - The Phase 4 Web adapter is local-only: it flattens the typed public
+    envelope/item projection and mailbox WebSocket actions into the existing
+    internal pending-input representation solely until Phase 5 replaces that
+    representation. It does not add server/client aliases or change rendering.
 
 | Workstream | Owner | Owned paths | Depends on | Output | Validation |
 | --- | --- | --- | --- | --- | --- |
-| Typed pending projection, REST/WS contract, action ordering, OpenAPI/client generation, and tests | `/root/mailbox-implementer` | `python/apps/azents/src/azents/{api/public/chat/v1,services/chat,transport,worker/events,worker/live,worker/run}/**`; `python/apps/azents/specs/public/openapi.json`; `python/libs/azents-public-client/**`; `typescript/packages/azents-public-client/**`; Phase 4 plan | Phase 1 mailbox payloads, Phase 3 runtime branch | Typed projections, no-alias public cutover, dedicated actions, correct action handoff order, regenerated clients | Backend/API/transport tests; OpenAPI dump; Python/TypeScript client generation and checks; full relevant quality suite |
-| Independent review | `/root/mailbox-reviewer` | Read-only Phase 4 diff and evidence | Implementer validation | Grounded findings and recheck verdict | Projection privacy, no aliases, correlation, action ordering, resync, authorization, generated artifacts, Phase 5 exclusion |
+| Typed pending projection, REST/WS contract, action ordering, OpenAPI/client generation, bounded Web adapter, and tests | `/root/mailbox-implementer` | `python/apps/azents/src/azents/{api/public/chat/v1,services/chat,transport,worker/events,worker/live,worker/run}/**`; `python/apps/azents/specs/public/openapi.json`; `python/libs/azents-public-client/**`; `typescript/{packages/azents-public-client,apps/azents-web/src/features/chat/{types.ts,hooks/useChatWebSocket.ts,containers/useChatSessionContainer.ts,components/{ActionExecutionTimelineCard.stories.tsx,ChatView.stories.tsx}},apps/azents-web/src/trpc/routers/chat.ts}`; Phase 4 plan | Phase 1 mailbox payloads, Phase 3 runtime branch | Typed projections, no-alias public cutover, dedicated actions, correct action handoff order, regenerated clients, compile-safe local adapter | Backend/API/transport tests; OpenAPI dump; Python/TypeScript client generation and full workspace checks |
+| Independent review | `/root/mailbox-reviewer` | Read-only Phase 4 diff and evidence | Implementer validation | Grounded findings and recheck verdict | Projection privacy, no aliases, correlation, action ordering, resync, authorization, generated artifacts, adapter boundary, Phase 5 exclusion |
 
 - Integration order:
   1. Define typed service and public projection models from the existing typed mailbox payloads. Every projection must be built from durable mailbox rows; it may not re-read External Channel source records or expose raw persistence JSON.
@@ -41,15 +48,18 @@ tags: [agent, mailbox, api, websocket, openapi, client, plan]
   3. Add dedicated mailbox WebSocket serializers and publish one envelope only after a newly admitted mailbox item commits. Do not rebroadcast idempotent existing admission.
   4. Split post-commit promotion/handoff publication so message promotion publishes durable history before mailbox removal, while operation Turn Action handoff publishes active `ActionExecution` before mailbox removal.
   5. Remove all public legacy names and generic live-event use for pending mailbox items. Regenerate OpenAPI and both public clients from the schema; never hand-edit generated output.
-  6. Compare the final diff against this phase's non-goals before independent review.
-- Independent review: `/root/mailbox-reviewer` verifies all-kind projections, no-alias public cutover, stable envelope/item correlation, committed-publish ordering, idempotent retry behavior, action-handoff ordering, authorization/privacy, REST resync, generated artifacts, and the exclusion of Phase 5 rendering.
+  6. Update only the documented local Web adapter and generated-client consumer
+     renames so typed REST and mailbox WebSocket values reach the existing
+     internal reducer without changing source-specific pending rendering.
+  7. Compare the final diff against this phase's non-goals before independent review.
+- Independent review: `/root/mailbox-reviewer` verifies all-kind projections, no-alias public cutover, stable envelope/item correlation, committed-publish ordering, idempotent retry behavior, action-handoff ordering, authorization/privacy, REST resync, generated artifacts, the local adapter boundary, and the exclusion of Phase 5 rendering.
 - Final validation:
   - Focused mailbox projection, chat API, transport, publisher/projector, executor/action-handoff, authorization, and resync tests.
   - `cd python/apps/azents && uv run python src/cli/dump_openapi.py`.
   - `cd python/libs/azents-public-client && make generate`.
   - `cd typescript && pnpm run generate --filter=@azents/public-client`.
-  - Relevant Python and TypeScript format, lint, typecheck/build, generated-artifact determinism, full backend pytest, docs index check, `git diff --check`, and reviewer `CLEAN`.
-- Scope-drift check: permit only typed pending projection/public contract/client-generation/action-ordering code and tests. Move Web reducer/rendering, mailbox persistence, producer scheduling, and spec promotion work to their designated later phases.
+  - Full Python and TypeScript format, lint, typecheck, build, generated-artifact determinism, backend pytest, docs index check, `git diff --check`, and reviewer `CLEAN`.
+- Scope-drift check: permit only typed pending projection/public contract/client-generation/action-ordering code, the documented local Web adapter paths, and their tests. Move native typed Web mailbox state, renderer/pending-emphasis work, mailbox persistence, producer scheduling, and spec promotion to their designated later phases.
 
 ## Projection Contract
 
@@ -94,4 +104,7 @@ A successful idempotent retry that returns an existing mailbox item does not pub
 
 - The generated TypeScript public client output is ignored; generation and consuming-package type checks are still required evidence.
 - Existing living specs describe `input_buffers`; update them only in the later spec-promotion phase after implementation validation.
-- The Phase 4 API contract intentionally precedes Phase 5 UI adoption. Backend/API tests must therefore prove contract and ordering independently of Web rendering.
+- Phase 4 uses a bounded local adapter so the no-alias generated API can compile
+  against the current Web reducer. Phase 5 replaces that adapter and the
+  Event-shaped internal pending representation with native typed mailbox state
+  and source-specific pending rendering.
