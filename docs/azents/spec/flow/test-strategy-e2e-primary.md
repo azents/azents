@@ -25,7 +25,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-07-26
-spec_version: 10
+spec_version: 11
 ---
 
 # E2E Primary Test Strategy
@@ -134,6 +134,20 @@ Live workflow runs `live_external` E2E marker. If credential is missing in live 
 
 Agent Runtime Provider E2E follows the same policy. The focused required lane creates its System Docker Provider declaration through the trusted bootstrap source, enrolls it through the Admin and Public HTTP APIs, and passes only the issued credential to the Provider process. In required live Runtime Provider runs, missing or stale external provider prerequisites are treated as failures. Optional or nightly runs can report prerequisite-not-ready as a skip summary.
 
+Runtime Execution Profile E2E creates policy state through Admin/Public APIs only. It verifies
+typed unknown-field rejection, fail-closed unavailable capability, hierarchy reductions and
+expansion rejection, save versus explicit Apply, idempotent Apply, automatic restrictive
+convergence, bounded audit/status projections, and response redaction. A Web Surface journey first
+uses an actual server projection and may use server-shaped response fixtures only for bounded
+presentation branches.
+
+Qualified Kubernetes execution-policy coverage is live evidence. Its prerequisite contract must
+distinguish unadvertised capability from advertised-but-unenforced privileged engine, CNI,
+containment, and storage capability. Unadvertised capability may skip that live scenario; an
+advertised capability whose admission, isolation, network, or storage enforcement cannot be proven
+must fail. Missing Docker/testcontainers or qualified-cluster prerequisites are unavailable
+evidence, never a local live-PASS substitute.
+
 ## Feature and Ship Workflow Requirements
 
 azents feature design must include `## Test Strategy` section. Minimum items are E2E primary plan, whether testenv fixture/prerequisite support is needed and why, fixture/product seed, credential contract, prerequisite snapshot, evidence format, CI execution policy, and live/optional skip/fail criteria.
@@ -149,6 +163,7 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-07-26** — v11. Added Runtime Execution Profile API-managed E2E, safe policy-evidence redaction, explicit Apply/convergence coverage, and qualified Kubernetes fail/skip requirements.
 - **2026-07-26** — v10. Added the credential-free Discord REST/Gateway fake,
   signed interaction relay, provider-evidence redaction contract, and public-API
   Single/Multi deterministic E2E boundary.

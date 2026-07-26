@@ -20,6 +20,8 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_provider_control/**
   - python/apps/azents/src/azents/services/runtime_provider_public/**
   - python/apps/azents/src/azents/services/runtime_provider_selection/**
+  - python/apps/azents/src/azents/services/runtime_execution_policy/**
+  - python/apps/azents/src/azents/repos/runtime_execution_policy/**
   - python/apps/azents/src/azents/api/admin/runtime_provider/**
   - python/apps/azents/src/azents/api/admin/runtime_provider_enrollment/**
   - python/apps/azents/src/azents/api/public/runtime_provider/**
@@ -35,8 +37,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/app/runtime-providers/**
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
-last_verified_at: 2026-07-23
-spec_version: 3
+last_verified_at: 2026-07-26
+spec_version: 4
 ---
 
 # Runtime Provider
@@ -62,6 +64,35 @@ New logical Runtime creation uses one exact Provider candidate. Agent preference
 The selected Provider resource ID, opaque logical ID, binding origin, contract/configuration revision identifiers, and policy digest are persisted on the logical Runtime. An immutable effective policy snapshot is attached before lifecycle dispatch. Later default, availability, contract, or configuration changes never move an existing logical Runtime.
 
 When no eligible Provider exists, Public Agent Runtime lifecycle endpoints return a stable `409` unavailable outcome instead of creating a partial Runtime or selecting a deployment/environment default.
+
+## Runtime execution policy compatibility
+
+Runtime execution policy is Provider-neutral typed product intent. Platform publishes the upper
+authority envelope and named Profiles; Workspace may only tighten that envelope and allow a subset
+of Profiles; Agent may select an allowed Profile and add only supported restrictive overrides.
+`system-standard` is the reserved immutable baseline Profile. Ordinary Profiles are active or
+retired and use expected-version mutation. Retiring an ordinary Profile preserves existing Agent
+intent but makes affected selection unavailable until a valid Profile is chosen. Platform/Profile
+writes are capability-gated, so unsupported authority cannot be introduced by profile creation or
+replacement.
+
+Raw Provider registration metadata is not product capability authority. The server-owned
+management/status gate is authoritative: the resolver marks an unsatisfied Profile unavailable and
+provisioning fails closed rather than dropping an unsupported module or selecting a weaker Runtime.
+
+Agent intent is independent from a physical Runtime. Saving Agent Profile/override intent does not
+advance Runtime desired generation. Explicit Apply attaches an immutable target snapshot and
+generation. Platform or Workspace tightening automatically creates a narrower target without a
+second Agent Apply; it preserves Agent Workspace storage and does not invoke reset or terminal
+delete. Audit and public projections contain only bounded policy metadata, reason codes, source
+layers, digests, and generations.
+
+The current server capability gate keeps `privileged_engine` unavailable and exposes storage/network
+mode `none`. Kubernetes Provider registration metadata such as `engine_storage_ephemeral` is not
+yet translated into product availability. Image build, container run, Compose, ephemeral or
+persistent engine storage, and qualified nested-workload enablement are therefore not advertised.
+Admin/Public surfaces must not expose Provider credentials, socket paths, raw manifests, Kubernetes
+resource names, or generic privileged controls.
 
 ## Authentication bindings
 
@@ -100,5 +131,6 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **4 (2026-07-26):** Added restrictive Runtime Execution Profile compatibility, explicit Apply versus automatic tightening convergence, safe policy projections, and the current fail-closed privileged-engine boundary.
 - **3 (2026-07-23):** Promoted durable authentication bindings, explicit issued-token and Kubernetes ServiceAccount methods, Admin binding lifecycle, TokenReview workload identity, secret-free Helm deployment, and Runtime storage preservation behavior.
 - **2 (2026-07-23):** Added Provider policy, selection, and credential-bootstrap deployment behavior.

@@ -18,7 +18,7 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
 last_verified_at: 2026-07-26
-spec_version: 5
+spec_version: 6
 ---
 
 # Agent Runtime Persistence
@@ -41,6 +41,14 @@ revision IDs, and an immutable policy snapshot are stored before lifecycle comma
 A later availability, default, contract, or configuration change does not reassign an existing logical
 Runtime. If no Provider can satisfy the request, the lifecycle API returns an explicit unavailable
 conflict and no partial Runtime is persisted.
+
+Runtime execution policy stores Agent intent separately from the applied Runtime target. Platform
+and Workspace restrictions can only narrow policy. An Agent Profile/override change is pending until
+explicit Apply attaches the next immutable target snapshot. A Platform or Workspace tightening
+automatically attaches a narrower target and advances desired generation without reset, terminal
+deletion, Provider fallback, or Agent Workspace data loss. Target/applied snapshots, policy digest,
+source versions, and Provider evidence are generation-fenced durable metadata; they do not expose
+credentials, projected tokens, socket paths, or raw manifests.
 
 ## Event Persistence
 
@@ -111,6 +119,15 @@ and fenced by Control generation. Stale observations cannot overwrite newer desi
 Reset is the only command that may delete/recreate the PVC contents. Stop/restart/recover must not
 delete the PVC.
 
+The initial execution-policy topology is fixed Provider infrastructure, not user-configurable Pod
+input. A Runtime may contain the Runner, policy gateway, and fixed engine components, but the
+Runner and nested workloads do not receive the Provider ServiceAccount, Provider credentials,
+Runtime Control credentials other than their Runtime-bound path, host sockets, or generic
+privileged controls. Agent Workspace PVC storage remains distinct from nested-engine storage.
+The current server capability gate exposes engine storage mode `none`; raw Provider registration
+metadata does not itself enable ephemeral storage. Persistent nested-engine storage also remains
+unavailable until a Provider advertises and qualifies bounded capacity.
+
 ## Docker Provider v1
 
 Docker Provider v1 assumes one stable Docker host. For each Runtime it creates a host directory and
@@ -142,8 +159,12 @@ Required checks:
 - Workspace service tests reject missing provider workspace paths with explicit errors.
 - Runner state sink tests preserve provider path authority and reject missing/mismatched paths.
 - Deterministic azents E2E covers Agent Workspace bootstrap and reset action availability.
+- Execution-policy E2E uses Admin/Public API setup, verifies save versus Apply and automatic
+  restrictive convergence, and treats absent Docker or qualified Kubernetes prerequisites as
+  unavailable evidence rather than passing enablement.
 
 ## Changelog
 
+- **2026-07-26 (spec_version=6)** — Added durable execution-policy target/applied snapshots, reset-free restrictive convergence, fixed Kubernetes topology isolation, and separate unqualified nested-engine storage.
 - **2026-07-26 (spec_version=5)** — Added storage-preserving periodic convergence for desired-running Runtime workload image and configuration drift.
 - **2026-07-03 (spec_version=3)** — Reflected Project-first Workspace browser ownership and registry-scoped Project root action boundary.
