@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     # Browser-copyable Slack Events API callback URL. Production may expose this
     # through a different public hostname than the authenticated API.
     external_channel_slack_callback_url: str | None = None
+    # Public base URL used to configure per-connection Discord interactions.
+    external_channel_discord_callback_url: str | None = None
     # Rollout gate: enable only after every API and worker is mode-aware.
     external_channel_multi_app_enabled: bool = False
     # Rollout gate: Discord requires its Gateway, callback, fixture, and E2E paths.
@@ -377,6 +379,7 @@ class Config(BaseModel):
     web_url: str = ""
     api_url: str = ""
     external_channel_slack_callback_url: str = ""
+    external_channel_discord_callback_url: str = ""
     external_channel_multi_app_enabled: bool = False
     external_channel_discord_enabled: bool = False
     oauth_secret_key: str = ""
@@ -467,6 +470,9 @@ class Config(BaseModel):
             api_url=settings.api_url or "",
             external_channel_slack_callback_url=(
                 settings.external_channel_slack_callback_url or ""
+            ),
+            external_channel_discord_callback_url=(
+                settings.external_channel_discord_callback_url or ""
             ),
             external_channel_multi_app_enabled=(
                 settings.external_channel_multi_app_enabled

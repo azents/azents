@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAppMode,
     ExternalChannelIngressProfile,
+    ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
@@ -60,6 +61,9 @@ from azents.services.external_channel.data import (
     ExternalChannelConnectionCredentialPayload,
     ExternalChannelConnectionStatusSnapshot,
     SlackConnectionCredentials,
+)
+from azents.services.external_channel.discord_activation import (
+    DiscordConnectionActivationService,
 )
 from azents.services.external_channel.provider import (
     SlackExternalChannelProviderContract,
@@ -144,6 +148,10 @@ class ExternalChannelManagementService:
     connection_service: Annotated[
         ExternalChannelConnectionService,
         Depends(ExternalChannelConnectionService),
+    ]
+    discord_activation_service: Annotated[
+        DiscordConnectionActivationService,
+        Depends(DiscordConnectionActivationService),
     ]
     action_service: Annotated[
         ExternalChannelActionService,
@@ -283,6 +291,9 @@ class ExternalChannelManagementService:
                 ),
             )
             await session.commit()
+        await self.discord_activation_service.activate(
+            connection_id=setup.connection.id
+        )
         connections = await self.list_connections(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -369,6 +380,9 @@ class ExternalChannelManagementService:
             credentials=credentials,
             app_mode=ExternalChannelAppMode.MULTI,
         )
+        await self.discord_activation_service.activate(
+            connection_id=setup.connection.id
+        )
         connection = await self.get_multi_connection(
             workspace_id=workspace_id,
             connection_id=setup.connection.id,
@@ -382,10 +396,14 @@ class ExternalChannelManagementService:
         connection_id: str,
     ) -> ExternalChannelConnectionStatusSnapshot:
         """Validate one Workspace-owned Multi App without exposing credentials."""
-        await self.get_multi_connection(
+        connection = await self.get_multi_connection(
             workspace_id=workspace_id,
             connection_id=connection_id,
         )
+        if connection.provider is ExternalChannelProvider.DISCORD:
+            return await self.discord_activation_service.activate(
+                connection_id=connection_id
+            )
         return await self.connection_service.validate_connection(
             connection_id=connection_id
         )
@@ -801,6 +819,17 @@ class ExternalChannelManagementService:
             workspace_user_id=workspace_user_id,
             connection_id=connection_id,
         )
+        async with self.session_manager() as session:
+            connection = await self.domain_repository.get_connection(
+                session,
+                connection_id=connection_id,
+            )
+        if connection is None:
+            raise ExternalChannelManagementNotFound(connection_id)
+        if connection.provider is ExternalChannelProvider.DISCORD:
+            return await self.discord_activation_service.activate(
+                connection_id=connection_id
+            )
         return await self.connection_service.validate_connection(
             connection_id=connection_id
         )

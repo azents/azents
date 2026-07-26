@@ -36,6 +36,10 @@ from azents.repos.external_channel.management_data import (
     ManagedConnection,
     ManagedMultiRoute,
 )
+from azents.services.external_channel.data import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
+)
 from azents.services.external_channel.management import (
     ExternalChannelManagementService,
     slack_manifest_guidance,
@@ -62,6 +66,80 @@ def _connection() -> ManagedConnection:
         socket_gap_reason=None,
         disconnected_at=None,
     )
+
+
+async def test_setup_discord_commits_route_before_callback_activation() -> None:
+    """Dedicated setup cannot make provider ingress active before its route exists."""
+    events: list[str] = []
+    session = AsyncMock(spec=AsyncSession)
+
+    async def commit() -> None:
+        events.append("commit")
+
+    session.commit.side_effect = commit
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    domain_repository = AsyncMock()
+
+    async def create_agent_route(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        events.append("route")
+
+    domain_repository.create_agent_route.side_effect = create_agent_route
+    connection_service = AsyncMock()
+    connection_service.create_discord_connection.return_value = SimpleNamespace(
+        connection=SimpleNamespace(id="connection-1")
+    )
+    activation_service = AsyncMock()
+
+    async def activate(*, connection_id: str) -> object:
+        assert connection_id == "connection-1"
+        events.append("activate")
+        return object()
+
+    activation_service.activate.side_effect = activate
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1"
+    )
+    agent_admin_repository = AsyncMock()
+    agent_admin_repository.is_admin.return_value = True
+    service = ExternalChannelManagementService(
+        session_manager=session_manager,
+        repository=AsyncMock(),
+        domain_repository=domain_repository,
+        lifecycle_repository=AsyncMock(),
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+        workspace_user_repository=AsyncMock(),
+        connection_service=connection_service,
+        discord_activation_service=activation_service,
+        action_service=AsyncMock(),
+        access_service=AsyncMock(),
+    )
+    managed = _connection().model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "status": ExternalChannelConnectionStatus.ACTIVE,
+        }
+    )
+    service.list_connections = AsyncMock(return_value=[managed])
+
+    result = await service.setup_discord(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        workspace_user_id="workspace-user-1",
+        app_id="app-1",
+        configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+        credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
+    )
+
+    assert result.connection == managed
+    assert events == ["route", "commit", "activate"]
+    activation_service.activate.assert_awaited_once_with(connection_id="connection-1")
 
 
 def _multi_route(
@@ -131,6 +209,7 @@ async def test_add_multi_route_returns_existing_available_association() -> None:
         agent_admin_repository=AsyncMock(),
         workspace_user_repository=AsyncMock(),
         connection_service=AsyncMock(),
+        discord_activation_service=AsyncMock(),
         action_service=AsyncMock(),
         access_service=AsyncMock(),
     )
@@ -289,6 +368,7 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
         agent_admin_repository=agent_admin_repository,
         workspace_user_repository=AsyncMock(),
         connection_service=AsyncMock(),
+        discord_activation_service=AsyncMock(),
         action_service=action_service,
         access_service=AsyncMock(),
     )
@@ -377,6 +457,7 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         agent_admin_repository=AsyncMock(),
         workspace_user_repository=AsyncMock(),
         connection_service=AsyncMock(),
+        discord_activation_service=AsyncMock(),
         action_service=action_service,
         access_service=AsyncMock(),
     )

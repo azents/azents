@@ -15,6 +15,15 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
+from azents.services.external_channel.discord_http import (
+    DiscordHTTPAdmissionService,
+)
+from azents.services.external_channel.discord_interaction import (
+    MAX_DISCORD_INTERACTION_BODY_BYTES,
+    DiscordInteractionInvalidPayload,
+    DiscordInteractionUnauthorized,
+    discord_interaction_response_type,
+)
 from azents.services.external_channel.http_admission import SlackHTTPAdmissionService
 from azents.services.external_channel.slack_http import (
     MAX_SLACK_HTTP_BODY_BYTES,
@@ -24,6 +33,52 @@ from azents.services.external_channel.slack_http import (
 )
 
 router = APIRouter()
+
+
+@router.post("/discord/interactions/{selector}", include_in_schema=False)
+async def receive_discord_interaction(
+    selector: str,
+    request: Request,
+    service: Annotated[
+        DiscordHTTPAdmissionService,
+        Depends(DiscordHTTPAdmissionService),
+    ],
+    x_signature_ed25519: Annotated[
+        str | None,
+        Header(alias="X-Signature-Ed25519"),
+    ] = None,
+    x_signature_timestamp: Annotated[
+        str | None,
+        Header(alias="X-Signature-Timestamp"),
+    ] = None,
+) -> Response:
+    """Authenticate one Discord interaction before acknowledging endpoint PING."""
+    try:
+        raw_body = await _read_bounded_discord_body(request)
+        result = await service.handle(
+            selector=selector,
+            raw_body=raw_body,
+            timestamp=x_signature_timestamp,
+            signature=x_signature_ed25519,
+            received_at=datetime.datetime.now(datetime.UTC),
+        )
+    except DiscordInteractionUnauthorized as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Discord interaction could not be authenticated.",
+        ) from error
+    except DiscordInteractionInvalidPayload as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Discord interaction payload is invalid.",
+        ) from error
+    if result.ping:
+        return JSONResponse(content={"type": 1})
+    return JSONResponse(
+        content={
+            "type": discord_interaction_response_type(result.envelope.interaction_type)
+        }
+    )
 
 
 @router.post("/slack/events", include_in_schema=False)
@@ -95,4 +150,24 @@ async def _read_bounded_body(request: Request) -> bytes:
             raise SlackHTTPPayloadTooLarge(
                 "Slack callback payload exceeds the size limit."
             )
+    return bytes(body)
+
+
+async def _read_bounded_discord_body(request: Request) -> bytes:
+    """Read one bounded Discord interaction body before signature verification."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except ValueError as error:
+            raise DiscordInteractionInvalidPayload(
+                "Discord interaction Content-Length is invalid."
+            ) from error
+        if declared_length > MAX_DISCORD_INTERACTION_BODY_BYTES:
+            raise DiscordInteractionInvalidPayload("Discord interaction is too large.")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_DISCORD_INTERACTION_BODY_BYTES:
+            raise DiscordInteractionInvalidPayload("Discord interaction is too large.")
     return bytes(body)
