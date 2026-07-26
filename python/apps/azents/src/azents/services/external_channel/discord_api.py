@@ -7,8 +7,7 @@ from typing import Annotated
 import httpx
 from fastapi import Depends
 
-_DISCORD_APPLICATION_URL = "https://discord.com/api/v10/oauth2/applications/@me"
-_DISCORD_CURRENT_USER_URL = "https://discord.com/api/v10/users/@me"
+from azents.services.external_channel.discord_endpoint import discord_api_base_url
 
 
 class DiscordAPIError(RuntimeError):
@@ -45,7 +44,7 @@ class DiscordAPIClient:
         """Return App identity and interaction verification key."""
         try:
             response = await self.http_client.get(
-                _DISCORD_APPLICATION_URL,
+                f"{discord_api_base_url()}/oauth2/applications/@me",
                 headers={"Authorization": f"Bot {bot_token}"},
             )
         except httpx.RequestError as error:
@@ -82,7 +81,7 @@ class DiscordAPIClient:
         """Return the current Bot user identity required for mention classification."""
         try:
             response = await self.http_client.get(
-                _DISCORD_CURRENT_USER_URL,
+                f"{discord_api_base_url()}/users/@me",
                 headers={"Authorization": f"Bot {bot_token}"},
             )
         except httpx.RequestError as error:
@@ -110,7 +109,7 @@ class DiscordAPIClient:
         """Configure one Application's outgoing interaction endpoint."""
         try:
             response = await self.http_client.patch(
-                f"https://discord.com/api/v10/applications/{application_id}",
+                f"{discord_api_base_url()}/applications/{application_id}",
                 headers={"Authorization": f"Bot {bot_token}"},
                 json={"interactions_endpoint_url": endpoint_url},
             )

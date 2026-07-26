@@ -56,6 +56,10 @@ _SLACK_PROVIDER_FAKE = (
     REPOSITORY_ROOT / "testenv/azents/e2e/src/support/slack_provider_fake.py"
 )
 _SLACK_PROVIDER_INTERNAL_API_URL = "http://slack-fake:8083/api"
+_DISCORD_PROVIDER_FAKE = (
+    REPOSITORY_ROOT / "testenv/azents/e2e/src/support/discord_provider_fake.py"
+)
+_DISCORD_PROVIDER_INTERNAL_API_URL = "http://discord-fake:8085/api/v10"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
 _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY = "e2e/system-docker"
@@ -387,6 +391,48 @@ def slack_provider_fake_url(
 
 
 @pytest.fixture(scope="session")
+def discord_provider_fake_container(
+    container_network: Network,
+    azents_server_image: str,
+) -> Generator[DockerContainer, None, None]:
+    """Run the deterministic Discord REST and Gateway boundary."""
+    with (
+        DockerContainer(
+            azents_server_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_volume_mapping(str(_DISCORD_PROVIDER_FAKE), "/app/discord_fake.py", "ro")
+        .with_command(["python", "/app/discord_fake.py"])
+        .with_exposed_ports(8085, 8086)
+        .with_network(container_network)
+        .with_network_aliases("discord-fake") as container
+    ):
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(8085)
+        for _ in range(30):
+            try:
+                response = requests.get(f"http://{host}:{port}/health", timeout=2)
+                if response.status_code == 200:
+                    break
+            except requests.exceptions.RequestException:
+                pass
+            time.sleep(1)
+        else:
+            pytest.fail("Discord provider fake did not start in time")
+        yield container
+
+
+@pytest.fixture(scope="session")
+def discord_provider_fake_url(
+    discord_provider_fake_container: DockerContainer,
+) -> str:
+    """Return the host-visible deterministic Discord fake control URL."""
+    host = discord_provider_fake_container.get_container_host_ip()
+    port = discord_provider_fake_container.get_exposed_port(8085)
+    return f"http://{host}:{port}"
+
+
+@pytest.fixture(scope="session")
 def rustfs_access_key(s3_credentials: tuple[str, str]) -> str:
     """RustFS access key."""
     return s3_credentials[0]
@@ -636,6 +682,16 @@ def _configure_azents_server_container(
         )
         .with_env("AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET", "true")
         .with_env("AZ_EXTERNAL_CHANNEL_MULTI_APP_ENABLED", "true")
+        .with_env("AZ_EXTERNAL_CHANNEL_DISCORD_ENABLED", "true")
+        .with_env(
+            "AZ_EXTERNAL_CHANNEL_DISCORD_CALLBACK_URL",
+            "http://azents-public-server:8010",
+        )
+        .with_env(
+            "AZ_TESTENV_DISCORD_API_BASE_URL",
+            _DISCORD_PROVIDER_INTERNAL_API_URL,
+        )
+        .with_env("AZ_TESTENV_DISCORD_ALLOW_INSECURE_GATEWAY", "true")
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")
         .with_env("AZ_AGENT_HOME_IDLE_TIMEOUT_SECS", "60")
@@ -980,6 +1036,52 @@ def azents_engine_worker_container(
         finally:
             _log_server_output(container, "azents-engine-worker")
             _remove_agent_runtime_containers(container_network.name)
+
+
+@pytest.fixture(scope="session")
+def azents_discord_gateway_worker_container(
+    container_network: Network,
+    postgres_container: PostgresContainer,
+    rustfs_container: DockerContainer,
+    valkey_container: DockerContainer,
+    rustfs_access_key: str,
+    rustfs_secret_key: str,
+    s3_bucket_name: str,
+    azents_server_image: str,
+    azents_public_server_container: DockerContainer,
+    auth_jwt_secret_key: str,
+    credential_encryption_key: str,
+    system_bootstrap_setup_token: str,
+    discord_provider_fake_container: DockerContainer,
+) -> Generator[DockerContainer, None, None]:
+    """Run the dedicated Discord Gateway Worker against the deterministic fake."""
+    del azents_public_server_container, discord_provider_fake_container
+    base_container = (
+        DockerContainer(
+            image=azents_server_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_name(f"azents-discord-gateway-worker-{random_secret(4)}")
+        .with_network_aliases("azents-discord-gateway-worker")
+        .with_command(["./bin/discordgatewayworker.sh"])
+        .with_exposed_ports(8013)
+    )
+    container = _configure_azents_server_container(
+        base_container,
+        container_network,
+        postgres_container,
+        rustfs_access_key,
+        rustfs_secret_key,
+        s3_bucket_name,
+        auth_jwt_secret_key,
+        credential_encryption_key,
+        system_bootstrap_setup_token,
+    ).with_env("AZ_WORKER_HEALTH_PORT", "8013")
+
+    with container:
+        _wait_for_tcp_ready(container, 8013, "azents-discord-gateway-worker")
+        yield container
+        _log_server_output(container, "azents-discord-gateway-worker")
 
 
 @pytest.fixture(scope="session")

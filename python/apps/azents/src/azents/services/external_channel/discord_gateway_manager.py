@@ -32,6 +32,10 @@ from azents.services.external_channel.connection import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import DiscordConnectionCredentials
+from azents.services.external_channel.discord_endpoint import (
+    discord_api_base_url,
+    discord_insecure_gateway_allowed,
+)
 from azents.services.external_channel.discord_events import (
     project_discord_gateway_dispatch,
 )
@@ -44,7 +48,6 @@ from azents.services.external_channel.discord_gateway import (
 )
 
 logger = logging.getLogger(__name__)
-_DISCORD_GATEWAY_API_URL = "https://discord.com/api/v10/gateway/bot"
 _POLL_INTERVAL = datetime.timedelta(seconds=5)
 _LEASE_DURATION = datetime.timedelta(seconds=45)
 _RENEW_INTERVAL = datetime.timedelta(seconds=15)
@@ -452,7 +455,7 @@ class DiscordGatewayManagerService:
 
     async def _discover_gateway_url(self, bot_token: str) -> str:
         response = await self.http_client.get(
-            _DISCORD_GATEWAY_API_URL,
+            f"{discord_api_base_url()}/gateway/bot",
             headers={"Authorization": f"Bot {bot_token}"},
         )
         if response.status_code in {401, 403}:
@@ -468,7 +471,14 @@ class DiscordGatewayManagerService:
         if not isinstance(payload, dict):
             raise DiscordGatewayError("Discord Gateway discovery returned an object.")
         endpoint_url = payload.get("url")
-        if not isinstance(endpoint_url, str) or not endpoint_url.startswith("wss://"):
+        if not isinstance(endpoint_url, str):
+            raise DiscordGatewayError(
+                "Discord Gateway discovery returned an invalid endpoint."
+            )
+        endpoint_scheme_allowed = endpoint_url.startswith("wss://") or (
+            discord_insecure_gateway_allowed() and endpoint_url.startswith("ws://")
+        )
+        if not endpoint_scheme_allowed:
             raise DiscordGatewayError(
                 "Discord Gateway discovery returned an invalid endpoint."
             )

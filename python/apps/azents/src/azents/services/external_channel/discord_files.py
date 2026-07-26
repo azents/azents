@@ -12,6 +12,10 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
+from azents.services.external_channel.discord_endpoint import (
+    discord_api_base_url,
+    discord_test_origin_matches,
+)
 
 
 class DiscordFileProviderError(RuntimeError):
@@ -165,7 +169,7 @@ class DiscordChannelClient:
         try:
             response = await self.http_client.request(
                 method,
-                f"https://discord.com/api/v10{path}",
+                f"{discord_api_base_url()}{path}",
                 headers={"Authorization": f"Bot {bot_token}"},
             )
         except httpx.RequestError as error:
@@ -271,6 +275,14 @@ def _download_url_allowed(value: str) -> bool:
         port = parsed.port
     except ValueError:
         return False
+    if (
+        discord_test_origin_matches(value)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path.startswith("/attachments/")
+        and not parsed.fragment
+    ):
+        return True
     return (
         parsed.scheme == "https"
         and parsed.username is None
