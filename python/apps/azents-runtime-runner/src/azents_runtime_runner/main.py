@@ -14,17 +14,25 @@ from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
     RuntimeRunnerControlStreamClosed,
 )
+from azents_runtime_control.grpc_runner_transfer_client import (
+    GrpcRunnerTransferClient,
+)
 from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.runner import (
     RunnerConnectionRejected,
     RunnerRegistration,
     RunnerRunLoop,
 )
+from azents_runtime_control.transfer import (
+    RUNNER_TRANSFER_CAPABILITY,
+    RUNNER_TRANSFER_PROTOCOL_VERSION,
+)
 
 from azents_runtime_runner.operations import RunnerOperations
+from azents_runtime_runner.transfer import RunnerTransferManager
 from azents_runtime_runner.workspace import Workspace
 
-_PROTOCOL_VERSION = "2026-07-20"
+_PROTOCOL_VERSION = RUNNER_TRANSFER_PROTOCOL_VERSION
 _CAPABILITIES = (
     "bash",
     "file.read",
@@ -42,6 +50,7 @@ _CAPABILITIES = (
     "file.move",
     "file.bulk_delete",
     "file.bulk_move",
+    RUNNER_TRANSFER_CAPABILITY,
 )
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS = 5.0
@@ -105,6 +114,7 @@ def main() -> None:
 
 async def run_runtime_runner() -> None:
     endpoint = _required_env("AZ_RUNTIME_CONTROL_ENDPOINT")
+    transfer_endpoint = os.environ.get("AZ_RUNTIME_TRANSFER_ENDPOINT") or endpoint
     runtime_id = _required_env("AZ_RUNTIME_ID")
     workspace_path = _required_env("AZ_AGENT_WORKSPACE_PATH")
     runner_id = os.environ.get("AZ_RUNTIME_RUNNER_ID") or f"runner-{uuid.uuid4()}"
@@ -159,6 +169,12 @@ async def run_runtime_runner() -> None:
             tls=control_tls,
             allow_insecure=allow_insecure_control,
         )
+        transfer_client = GrpcRunnerTransferClient.from_endpoint(
+            transfer_endpoint,
+            runner_auth_token=runner_auth_token,
+            tls=control_tls,
+            allow_insecure=allow_insecure_control,
+        )
         connection_id = _control_connection_id(base_connection_id)
         operations = RunnerOperations(client=client, workspace=workspace)
         run_loop = RunnerRunLoop(
@@ -182,6 +198,18 @@ async def run_runtime_runner() -> None:
                 limit_config.max_concurrent_control_operations
             ),
         )
+
+        def accepted_generation(run_loop: RunnerRunLoop = run_loop) -> int | None:
+            accepted = run_loop.accepted
+            return None if accepted is None else accepted.generation
+
+        transfer_manager = RunnerTransferManager(
+            control=client,
+            transfer=transfer_client,
+            accepted_generation=accepted_generation,
+        )
+        client.set_transfer_intent_handler(transfer_manager.handle_intent)
+        client.set_transfer_cancel_handler(transfer_manager.handle_cancel)
         try:
             _LOGGER.info(
                 "Runtime Runner connecting to Control",
@@ -205,6 +233,8 @@ async def run_runtime_runner() -> None:
                 extra={"runtime_id": runtime_id, "runner_id": runner_id},
             )
         finally:
+            await transfer_manager.close()
+            await transfer_client.close()
             await operations.close()
             try:
                 await asyncio.wait_for(

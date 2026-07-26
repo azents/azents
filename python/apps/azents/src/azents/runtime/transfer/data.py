@@ -231,6 +231,7 @@ class RuntimeTransferRecord:
     progress: RuntimeTransferProgress | None
     upload_response_committed_at: datetime | None
     runner_result_confirmed_at: datetime | None
+    runner_commit_expires_at: datetime | None
     cancellation_requested_at: datetime | None
     cancellation_reason: RuntimeTransferCancellationReason | None
     consumer_claim_id: str | None
@@ -334,6 +335,10 @@ class RuntimeTransferRecord:
                 raise ValueError(
                     "Runner result confirmation requires an uncancelled upload"
                 )
+        if self.runner_commit_expires_at is not None:
+            _aware(self.runner_commit_expires_at, "runner_commit_expires_at")
+            if self.admission.direction is not RuntimeTransferDirection.DOWNLOAD:
+                raise ValueError("Download commit expiry requires a download")
         if (self.cancellation_requested_at is None) != (
             self.cancellation_reason is None
         ):

@@ -1,6 +1,7 @@
 """Shared gRPC client transport security configuration."""
 
 import dataclasses
+from collections.abc import Sequence
 
 import grpc
 
@@ -22,14 +23,19 @@ def create_grpc_aio_channel(
     *,
     tls: GrpcClientTlsConfig | None,
     allow_insecure: bool,
+    options: Sequence[tuple[str, int | str]] = (),
 ) -> grpc.aio.Channel:
     """Create a secure channel unless insecure transport is explicitly allowed."""
     if tls is not None:
         credentials = grpc.ssl_channel_credentials(
             root_certificates=tls.root_certificates
         )
+        if options:
+            return grpc.aio.secure_channel(endpoint, credentials, options=options)
         return grpc.aio.secure_channel(endpoint, credentials)
     if allow_insecure:
+        if options:
+            return grpc.aio.insecure_channel(endpoint, options=options)
         return grpc.aio.insecure_channel(endpoint)
     raise ValueError(
         "gRPC TLS configuration is required unless insecure transport is "

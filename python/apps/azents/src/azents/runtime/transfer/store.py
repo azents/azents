@@ -202,6 +202,22 @@ class RuntimeTransferStateStore(Protocol):
         actual_sha256: str,
     ) -> RuntimeTransferRecord | None: ...
 
+    async def confirm_download_commit(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Atomically commit a verified Runner destination publication."""
+        ...
+
     async def mark_committed(
         self,
         transfer_id: str,
