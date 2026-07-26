@@ -1791,8 +1791,8 @@ def _register_message(
         register=runtime_runner_control_pb2.RunnerRegister(
             runtime_id="runtime-1",
             runner_id="runner-1",
-            protocol_version="agent-runtime-runner.v1",
-            capabilities=("bash", "file.read"),
+            protocol_version="2026-07-25",
+            capabilities=("bash", "file.read", "file.transfer.v1"),
             health="ok",
             workspace_path="/workspace/agent",
             auth_credential_id="credential-1",

@@ -158,10 +158,14 @@ class RuntimeRunnerControlGrpcServicer(
                 "Runner execution-policy evidence does not match the current target",
             )
             raise AssertionError("unreachable")
-        accepted = await self._control_protocol.register_runner(
-            registration,
-            registered_at=datetime.now(UTC),
-        )
+        try:
+            accepted = await self._control_protocol.register_runner(
+                registration,
+                registered_at=datetime.now(UTC),
+            )
+        except ValueError as exc:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
+            raise AssertionError("unreachable") from exc
         _LOGGER.info(
             "Runtime Runner stream registered",
             extra={

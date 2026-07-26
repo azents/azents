@@ -768,7 +768,7 @@ def _register() -> control_pb.RunnerMessage:
         register=control_pb.RunnerRegister(
             runtime_id="runtime-1",
             runner_id="runner-1",
-            protocol_version="agent-runtime-runner.v1",
+            protocol_version="2026-07-25",
             capabilities=("file.transfer.v1",),
             health="ok",
             workspace_path="/workspace",

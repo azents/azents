@@ -631,8 +631,8 @@ def _runner_registration() -> RuntimeRunnerRegistration:
     return RuntimeRunnerRegistration(
         runtime_id="runtime-1",
         runner_id="runner-1",
-        protocol_version="2026-05-25",
-        capabilities=RuntimeProtocolCapabilities(("bash", "files")),
+        protocol_version="2026-07-25",
+        capabilities=RuntimeProtocolCapabilities(("bash", "files", "file.transfer.v1")),
         health="ok",
         workspace_path="/workspace/agent",
         metadata={"image": "runner:v1"},

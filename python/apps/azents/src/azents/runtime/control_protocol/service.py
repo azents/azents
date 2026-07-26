@@ -6,6 +6,11 @@ import secrets
 from datetime import datetime
 from typing import Protocol
 
+from azents_runtime_control.transfer import (
+    RUNNER_TRANSFER_CAPABILITY,
+    RUNNER_TRANSFER_PROTOCOL_VERSION,
+)
+
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
@@ -125,6 +130,10 @@ class RuntimeControlProtocolService:
         registered_at: datetime,
     ) -> RuntimeRunnerRegistrationAccepted:
         """Register a Runner connection and issue a runner generation."""
+        if registration.protocol_version != RUNNER_TRANSFER_PROTOCOL_VERSION:
+            raise ValueError("Runner protocol version is not supported")
+        if RUNNER_TRANSFER_CAPABILITY not in registration.capabilities.values:
+            raise ValueError("Runner transfer capability is required")
         previous = await self._store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=registration.runtime_id,
