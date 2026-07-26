@@ -6,15 +6,23 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from azcommon.di import Container
 
+from azents.core.deps import get_config, get_credential_cipher
+from azents.rdb.deps import get_session_manager
 from azents.repos.external_channel.data import (
     ExternalChannelEventCreate,
     ExternalChannelIngressLease,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.services.external_channel.connection import (
+    get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.discord_gateway import DiscordGatewayDispatch
 from azents.services.external_channel.discord_gateway_manager import (
     DiscordGatewayLeaseLost,
     DiscordGatewayManagerService,
+    get_discord_gateway_http_client,
 )
 
 
@@ -98,6 +106,33 @@ def _dispatch(*, guild_id: str = "guild-1") -> DiscordGatewayDispatch:
             "content": "Hello",
         },
     )
+
+
+def _mock_dependency() -> MagicMock:
+    """Provide one inert dependency for DI graph construction."""
+    return MagicMock()
+
+
+def _test_session_manager() -> _SessionManager:
+    """Provide one inert session manager for DI graph construction."""
+    return _SessionManager()
+
+
+@pytest.mark.asyncio
+async def test_gateway_manager_dependency_graph_is_resolvable() -> None:
+    """The worker can resolve its manager through the production DI container."""
+    overrides = {
+        get_config: _mock_dependency,
+        get_session_manager: _test_session_manager,
+        ExternalChannelRepository: _mock_dependency,
+        get_external_channel_credentials_codec: _mock_dependency,
+        get_credential_cipher: _mock_dependency,
+        get_discord_gateway_http_client: _mock_dependency,
+    }
+    async with Container(dependency_overrides=overrides) as container:
+        service = await container.solve(DiscordGatewayManagerService)
+
+    assert service.gateway_client is not None
 
 
 @pytest.mark.asyncio
