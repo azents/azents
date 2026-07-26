@@ -26,6 +26,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import (
+    CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
 )
 from azents.engine.events.types import ActionExecutionResultPayload
@@ -65,6 +66,8 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.runtime.control_protocol.runner_operations import (
+    RuntimeDiscoveredGitWorktree,
+    RuntimeDiscoverManagedGitWorktreesResult,
     RuntimeFileDeleteResult,
     RuntimeFileListResult,
     RuntimeGitCreateWorktreeResult,
@@ -74,6 +77,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeGitRefsResult,
     RuntimeGitRemoveWorktreeResult,
     RuntimeOperationTextCallback,
+    RuntimeRemoveDiscoveredGitWorktreeResult,
     RuntimeRunnerOperationCanceledError,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
@@ -219,12 +223,14 @@ class _RunnerOperations:
         unexpected_cleanup_failures: list[Exception] | None = None,
         cleanup_failure_code: str | None = None,
         parent_delete_canceled: bool = False,
+        discovered_entries: tuple[RuntimeDiscoveredGitWorktree, ...] = (),
     ) -> None:
         self.failures = list(failures or [])
         self.cleanup_failures = list(cleanup_failures or [])
         self.unexpected_cleanup_failures = list(unexpected_cleanup_failures or [])
         self.cleanup_failure_code = cleanup_failure_code
         self.parent_delete_canceled = parent_delete_canceled
+        self.discovered_entries = discovered_entries
         self.calls: list[dict[str, object]] = []
         self.inspect_result: RuntimeGitInspectWorktreeResult | None = None
         self.remove_outcome: Literal["removed", "already_absent"] = "removed"
@@ -297,6 +303,60 @@ class _RunnerOperations:
             worktree_path=worktree_path,
             branch_name=branch_name,
             final_cursor="cursor-1",
+        )
+
+    async def discover_managed_git_worktrees(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeDiscoverManagedGitWorktreesResult:
+        """Return configured managed worktree discovery results."""
+        del deadline_at
+        self.calls.append(
+            {
+                "operation": "discover_managed_git_worktrees",
+                "runtime_id": runtime_id,
+                "runner_generation": runner_generation,
+                "owner_session_id": owner_session_id,
+            }
+        )
+        return RuntimeDiscoverManagedGitWorktreesResult(
+            entries=self.discovered_entries,
+            final_cursor="cursor-discover",
+        )
+
+    async def remove_discovered_git_worktree(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        discovered: RuntimeDiscoveredGitWorktree,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeRemoveDiscoveredGitWorktreeResult:
+        """Remove a configured discovered worktree."""
+        del deadline_at
+        self.calls.append(
+            {
+                "operation": "remove_discovered_git_worktree",
+                "runtime_id": runtime_id,
+                "runner_generation": runner_generation,
+                "owner_session_id": owner_session_id,
+                "worktree_path": discovered.worktree_path,
+            }
+        )
+        if self.cleanup_failures:
+            raise RuntimeRunnerOperationFailedError(
+                self.cleanup_failures.pop(0),
+                code=self.cleanup_failure_code,
+            )
+        return RuntimeRemoveDiscoveredGitWorktreeResult(
+            worktree_path=discovered.worktree_path,
+            outcome=self.remove_outcome,
+            final_cursor="cursor-remove-discovered",
         )
 
     async def inspect_git_worktree(
@@ -825,6 +885,109 @@ class TestSessionGitWorktreeService:
                 "starting_ref": "main",
             }
         ]
+
+    async def test_orphan_cleanup_logs_candidate_failure_and_terminal_summary(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Orphan cleanup emits Loki-searchable structured operational logs."""
+        worktree_path = "/workspace/agent/.azents/worktrees/orphan/repo"
+        runner = _RunnerOperations(
+            discovered_entries=(
+                RuntimeDiscoveredGitWorktree(
+                    worktree_path=worktree_path,
+                    registered=False,
+                    repository_anchor_path=None,
+                    branch_name=None,
+                    fingerprint="orphan-fingerprint",
+                    failure_code="worktree_ownership_ambiguous",
+                ),
+            ),
+        )
+        (
+            worktree_service,
+            _,
+            agent_id,
+            session_id,
+        ) = await _create_ready_worktree_session(
+            rdb_session_manager,
+            slug="orphan-cleanup-logs",
+            runner=runner,
+        )
+        action = CleanupOrphanGitWorktreesAction()
+        async with rdb_session_manager() as session:
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    sender_user_id=None,
+                    id=None,
+                    session_id=session_id,
+                    input_buffer_id="01900000000070008000000000000005",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=0,
+                ),
+            )
+
+        with caplog.at_level(
+            logging.INFO,
+            logger="azents.services.session_git_worktree",
+        ):
+            result = await worktree_service.run_cleanup_orphan_git_worktrees_action(
+                agent_id=agent_id,
+                session_id=session_id,
+                execution=execution,
+                action=action,
+                owner_generation=execution.owner_generation,
+            )
+
+        assert result.completed is True
+        start_record = next(
+            record
+            for record in caplog.records
+            if record.message == "Manual orphan Git worktree cleanup started"
+        )
+        discovery_record = next(
+            record
+            for record in caplog.records
+            if record.message == "Managed Git worktree discovery completed"
+        )
+        candidate_record = next(
+            record
+            for record in caplog.records
+            if record.message == "Manual orphan Git worktree cleanup candidate failed"
+        )
+        terminal_record = next(
+            record
+            for record in caplog.records
+            if record.message
+            == "Manual orphan Git worktree cleanup completed with failures"
+        )
+        for record in (
+            start_record,
+            discovery_record,
+            candidate_record,
+            terminal_record,
+        ):
+            assert record.__dict__["operation"] == "cleanup_orphan_git_worktrees"
+            assert record.__dict__["action_execution_id"] == execution.id
+            assert record.__dict__["runtime_id"] is not None
+        assert start_record.__dict__["stage"] == "initializing"
+        assert discovery_record.__dict__["candidate_count"] == 1
+        assert discovery_record.__dict__["unidentified_candidate_count"] == 1
+        assert candidate_record.__dict__["stage"] == "candidate_validation"
+        assert candidate_record.__dict__["worktree_path"] == worktree_path
+        assert (
+            candidate_record.__dict__["reason_code"] == "worktree_ownership_ambiguous"
+        )
+        assert terminal_record.__dict__["stage"] == "terminal"
+        assert terminal_record.__dict__["reason_code"] == "candidate_failures"
+        assert terminal_record.__dict__["candidate_count"] == 1
+        assert terminal_record.__dict__["failed_count"] == 1
+        assert terminal_record.__dict__["protected_count"] == 0
+        assert terminal_record.__dict__["removed_count"] == 0
 
     async def test_running_action_handover_cancels_without_reexecution(
         self,
