@@ -6,6 +6,7 @@ import hmac
 import json
 import time
 from typing import Any, cast
+from urllib.parse import urlencode
 
 import azentsadminclient
 import azentspublicclient
@@ -13,13 +14,16 @@ import pytest
 import requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api
+from azentspublicclient.api.invitation_v1_api import InvitationV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
+from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.create_invitation_request import CreateInvitationRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.external_channel_access_grant_scope import (
     ExternalChannelAccessGrantScope,
@@ -27,8 +31,12 @@ from azentspublicclient.models.external_channel_access_grant_scope import (
 from azentspublicclient.models.external_channel_access_request_status import (
     ExternalChannelAccessRequestStatus,
 )
+from azentspublicclient.models.external_channel_app_mode import ExternalChannelAppMode
 from azentspublicclient.models.external_channel_binding_activation_status import (
     ExternalChannelBindingActivationStatus,
+)
+from azentspublicclient.models.external_channel_channel_default_status import (
+    ExternalChannelChannelDefaultStatus,
 )
 from azentspublicclient.models.external_channel_connection_status import (
     ExternalChannelConnectionStatus,
@@ -36,16 +44,24 @@ from azentspublicclient.models.external_channel_connection_status import (
 from azentspublicclient.models.external_channel_decision_input import (
     ExternalChannelDecisionInput,
 )
+from azentspublicclient.models.external_channel_route_catalog_status import (
+    ExternalChannelRouteCatalogStatus,
+)
 from azentspublicclient.models.external_channel_transport import (
     ExternalChannelTransport,
 )
 from azentspublicclient.models.external_channel_work_task_status import (
     ExternalChannelWorkTaskStatus,
 )
+from azentspublicclient.models.generation_fence_request import GenerationFenceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
+from azentspublicclient.models.multi_channel_default_request import (
+    MultiChannelDefaultRequest,
+)
+from azentspublicclient.models.multi_route_create_request import MultiRouteCreateRequest
 from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.slack_connection_credentials import (
     SlackConnectionCredentials,
@@ -53,6 +69,7 @@ from azentspublicclient.models.slack_connection_credentials import (
 from azentspublicclient.models.slack_connection_setup_request import (
     SlackConnectionSetupRequest,
 )
+from azentspublicclient.models.workspace_user_role import WorkspaceUserRole
 from docker.models.containers import Container
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -83,6 +100,27 @@ def _create_agent(
     shell_enabled: bool,
 ) -> tuple[str, str, str, str]:
     """Create an authenticated workspace administrator and one active Agent."""
+    token, email, handle, agent_ids = _create_workspace_agents(
+        public_api_client,
+        admin_api_client,
+        public_server_url,
+        agent_count=1,
+        runtime_provider_id=runtime_provider_id,
+        shell_enabled=shell_enabled,
+    )
+    return token, email, handle, agent_ids[0]
+
+
+def _create_workspace_agents(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    public_server_url: str,
+    *,
+    agent_count: int,
+    runtime_provider_id: str | None,
+    shell_enabled: bool,
+) -> tuple[str, str, str, list[str]]:
+    """Create one Workspace owner and a deterministic active Agent catalog."""
     suffix = unique()
     token, _, email = authenticate_user(
         public_api_client,
@@ -118,22 +156,58 @@ def _create_agent(
         handle,
         integration.id,
     )
-    agent = AgentV1Api(public_api_client).agent_v1_create_agent(
-        handle=handle,
-        agent_create_request=AgentCreateRequest(
-            name=f"External Channel Agent {suffix}",
-            model_selection=model_selection,
-            lightweight_model_selection=model_selection,
-            type=AgentType.PUBLIC,
-            runtime_provider_id=runtime_provider_id,
-            shell_enabled=shell_enabled,
-        ),
-        _headers=headers,
+    agent_api = AgentV1Api(public_api_client)
+    agent_ids = [
+        agent_api.agent_v1_create_agent(
+            handle=handle,
+            agent_create_request=AgentCreateRequest(
+                name=f"External Channel Agent {index + 1} {suffix}",
+                model_selection=model_selection,
+                lightweight_model_selection=model_selection,
+                type=AgentType.PUBLIC,
+                runtime_provider_id=runtime_provider_id,
+                shell_enabled=shell_enabled,
+            ),
+            _headers=headers,
+        ).id
+        for index in range(agent_count)
+    ]
+    return token, email, handle, agent_ids
+
+
+def _invite_workspace_user(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    *,
+    owner_token: str,
+    handle: str,
+    role: WorkspaceUserRole,
+) -> str:
+    """Create, invite, and accept one Workspace user through public APIs."""
+    email = f"external-channel-{role.value}-{unique()}@example.com"
+    token, _, _ = authenticate_user(
+        public_api_client,
+        admin_api_client,
+        email=email,
     )
-    return token, email, handle, agent.id
+    invitation_api = InvitationV1Api(public_api_client)
+    invitation = invitation_api.invitation_v1_create_invitation(
+        handle,
+        CreateInvitationRequest(email=email, role=role),
+        _headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    invitation_api.invitation_v1_accept_invitation(
+        invitation.id,
+        _headers={"Authorization": f"Bearer {token}"},
+    )
+    return token
 
 
-def _signed_headers(body: bytes) -> dict[str, str]:
+def _signed_headers(
+    body: bytes,
+    *,
+    content_type: str = "application/json",
+) -> dict[str, str]:
     timestamp = str(int(time.time()))
     signing_base = b"v0:" + timestamp.encode() + b":" + body
     signature = (
@@ -145,7 +219,7 @@ def _signed_headers(body: bytes) -> dict[str, str]:
         ).hexdigest()
     )
     return {
-        "Content-Type": "application/json",
+        "Content-Type": content_type,
         "X-Slack-Request-Timestamp": timestamp,
         "X-Slack-Signature": signature,
     }
@@ -175,6 +249,38 @@ def _approval_request_id(slack_provider_fake_url: str) -> str:
     return ""
 
 
+def _selector_admission_id(slack_provider_fake_url: str) -> str:
+    """Return the latest opaque admission exposed by a selector control."""
+    deliveries = _provider_state(slack_provider_fake_url).get("deliveries")
+    if not isinstance(deliveries, list):
+        return ""
+    for raw_delivery in reversed(cast(list[object], deliveries)):
+        if not isinstance(raw_delivery, dict):
+            continue
+        admission_id = cast(dict[str, object], raw_delivery).get(
+            "selector_admission_id"
+        )
+        if isinstance(admission_id, str) and admission_id:
+            return admission_id
+    return ""
+
+
+def _latest_selector_view(
+    slack_provider_fake_url: str,
+) -> dict[str, object] | None:
+    """Return the latest sanitized selector view evidence."""
+    views = _provider_state(slack_provider_fake_url).get("views")
+    if not isinstance(views, list):
+        return None
+    for raw_view in reversed(cast(list[object], views)):
+        if not isinstance(raw_view, dict):
+            continue
+        view = cast(dict[str, object], raw_view)
+        if view.get("callback_id") == "azents_agent_selector":
+            return view
+    return None
+
+
 def _plan_delivery(slack_provider_fake_url: str) -> dict[str, object] | None:
     """Return the latest captured Slack Plan mutation."""
     deliveries = _provider_state(slack_provider_fake_url).get("deliveries")
@@ -188,9 +294,11 @@ def _plan_delivery(slack_provider_fake_url: str) -> dict[str, object] | None:
         if (
             delivery.get("operation") == "chat.update"
             and isinstance(blocks, list)
-            and blocks
-            and isinstance(blocks[0], dict)
-            and cast(dict[str, object], blocks[0]).get("type") == "plan"
+            and any(
+                isinstance(block, dict)
+                and cast(dict[str, object], block).get("type") == "plan"
+                for block in cast(list[object], blocks)
+            )
         ):
             return delivery
     return None
@@ -709,6 +817,533 @@ def test_connection_update_and_repeated_disconnect(
     assert repeated.credentials_configured is False
 
 
+def test_multi_app_workspace_management_default_and_disconnect_journey(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    slack_provider_fake_url: str,
+) -> None:
+    """Exercise Workspace authority, catalog, generation fences, and lifecycle."""
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "provider_app_id": "A-MULTI-E2E",
+            "provider_team_id": "T-MULTI-E2E",
+            "provider_bot_user_id": "U-BOT-MULTI-E2E",
+        },
+        timeout=5,
+    ).raise_for_status()
+    owner_token, _, handle, agent_ids = _create_workspace_agents(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        agent_count=2,
+        runtime_provider_id=None,
+        shell_enabled=False,
+    )
+    manager_token = _invite_workspace_user(
+        public_api_client,
+        admin_api_client,
+        owner_token=owner_token,
+        handle=handle,
+        role=WorkspaceUserRole.MANAGER,
+    )
+    member_token = _invite_workspace_user(
+        public_api_client,
+        admin_api_client,
+        owner_token=owner_token,
+        handle=handle,
+        role=WorkspaceUserRole.MEMBER,
+    )
+    external_api = ExternalChannelV1Api(public_api_client)
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+    manager_headers = {"Authorization": f"Bearer {manager_token}"}
+    member_headers = {"Authorization": f"Bearer {member_token}"}
+
+    with pytest.raises(ApiException) as member_error:
+        external_api.external_channel_v1_list_multi_slack_connections(
+            handle=handle,
+            _headers=member_headers,
+        )
+    assert cast(Any, member_error.value).status == 403
+
+    setup = external_api.external_channel_v1_setup_multi_slack_connection(
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id="A-MULTI-E2E",
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=manager_headers,
+    )
+    connection = setup.connection
+    assert connection.app_mode is ExternalChannelAppMode.MULTI
+    assert connection.status is ExternalChannelConnectionStatus.ACTIVE
+    assert connection.active_agent_count == 0
+    assert connection.configured_default_count == 0
+    assert connection.credentials_configured is True
+    setup_json = setup.model_dump_json(by_alias=True)
+    assert _BOT_TOKEN not in setup_json
+    assert _SIGNING_SECRET not in setup_json
+
+    first_route = external_api.external_channel_v1_add_multi_slack_route(
+        connection_id=connection.id,
+        handle=handle,
+        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
+        _headers=manager_headers,
+    )
+    duplicate_route = external_api.external_channel_v1_add_multi_slack_route(
+        connection_id=connection.id,
+        handle=handle,
+        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
+        _headers=manager_headers,
+    )
+    second_route = external_api.external_channel_v1_add_multi_slack_route(
+        connection_id=connection.id,
+        handle=handle,
+        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[1]),
+        _headers=owner_headers,
+    )
+    assert duplicate_route.id == first_route.id
+    routes = external_api.external_channel_v1_list_multi_slack_routes(
+        connection_id=connection.id,
+        handle=handle,
+        _headers=manager_headers,
+    )
+    assert [route.id for route in routes.items] == [first_route.id, second_route.id]
+    assert all(
+        route.catalog_status is ExternalChannelRouteCatalogStatus.AVAILABLE
+        for route in routes.items
+    )
+
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "provider_app_id": "A-MULTI-E2E-SECOND",
+            "provider_team_id": "T-MULTI-E2E",
+            "provider_bot_user_id": "U-BOT-MULTI-E2E",
+        },
+        timeout=5,
+    ).raise_for_status()
+    second_setup = external_api.external_channel_v1_setup_multi_slack_connection(
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id="A-MULTI-E2E-SECOND",
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=owner_headers,
+    )
+    shared_agent_route = external_api.external_channel_v1_add_multi_slack_route(
+        connection_id=second_setup.connection.id,
+        handle=handle,
+        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
+        _headers=owner_headers,
+    )
+    assert second_setup.connection.id != connection.id
+    assert shared_agent_route.agent_id == agent_ids[0]
+
+    current = external_api.external_channel_v1_get_multi_slack_connection(
+        connection_id=connection.id,
+        handle=handle,
+        _headers=owner_headers,
+    )
+    channel_default = (
+        external_api.external_channel_v1_replace_multi_slack_channel_default(
+            connection_id=connection.id,
+            provider_channel_id=_CHANNEL_ID,
+            handle=handle,
+            multi_channel_default_request=MultiChannelDefaultRequest(
+                expected_generation=current.generation,
+                route_id=first_route.id,
+            ),
+            _headers=manager_headers,
+        )
+    )
+    assert channel_default.route_id == first_route.id
+    assert channel_default.agent_id == agent_ids[0]
+    assert channel_default.status is ExternalChannelChannelDefaultStatus.ACTIVE
+
+    with pytest.raises(ApiException) as stale_error:
+        external_api.external_channel_v1_clear_multi_slack_channel_default(
+            connection_id=connection.id,
+            provider_channel_id=_CHANNEL_ID,
+            handle=handle,
+            generation_fence_request=GenerationFenceRequest(
+                expected_generation=current.generation,
+            ),
+            _headers=manager_headers,
+        )
+    assert cast(Any, stale_error.value).status == 409
+
+    route_impact = external_api.external_channel_v1_get_multi_slack_route_impact(
+        connection_id=connection.id,
+        route_id=first_route.id,
+        handle=handle,
+        _headers=owner_headers,
+    )
+    assert route_impact.active_default_count == 1
+    assert route_impact.active_binding_count == 0
+    removed = external_api.external_channel_v1_remove_multi_slack_route(
+        connection_id=connection.id,
+        route_id=first_route.id,
+        handle=handle,
+        generation_fence_request=GenerationFenceRequest(
+            expected_generation=route_impact.generation,
+        ),
+        _headers=manager_headers,
+    )
+    assert removed.route_id == first_route.id
+    assert removed.active_default_count == 1
+
+    routes_after_removal = external_api.external_channel_v1_list_multi_slack_routes(
+        connection_id=connection.id,
+        handle=handle,
+        _headers=owner_headers,
+    )
+    by_id = {route.id: route for route in routes_after_removal.items}
+    assert (
+        by_id[first_route.id].catalog_status
+        is ExternalChannelRouteCatalogStatus.REMOVED
+    )
+    assert (
+        by_id[second_route.id].catalog_status
+        is ExternalChannelRouteCatalogStatus.AVAILABLE
+    )
+    defaults = external_api.external_channel_v1_list_multi_slack_channel_defaults(
+        connection_id=connection.id,
+        handle=handle,
+        _headers=owner_headers,
+    )
+    assert len(defaults.items) == 1
+    assert defaults.items[0].status is ExternalChannelChannelDefaultStatus.INVALIDATED
+
+    foreign_token, _, foreign_handle, _ = _create_workspace_agents(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        agent_count=1,
+        runtime_provider_id=None,
+        shell_enabled=False,
+    )
+    with pytest.raises(ApiException) as foreign_error:
+        external_api.external_channel_v1_get_multi_slack_connection(
+            connection_id=connection.id,
+            handle=foreign_handle,
+            _headers={"Authorization": f"Bearer {foreign_token}"},
+        )
+    assert cast(Any, foreign_error.value).status == 404
+
+    connection_impact = (
+        external_api.external_channel_v1_get_multi_slack_connection_impact(
+            connection_id=connection.id,
+            handle=handle,
+            _headers=manager_headers,
+        )
+    )
+    assert connection_impact.active_route_count == 1
+    disconnected = external_api.external_channel_v1_disconnect_multi_slack_connection(
+        connection_id=connection.id,
+        handle=handle,
+        generation_fence_request=GenerationFenceRequest(
+            expected_generation=connection_impact.generation,
+        ),
+        _headers=manager_headers,
+    )
+    assert disconnected.disconnected_route_count == 1
+    historical = external_api.external_channel_v1_get_multi_slack_connection(
+        connection_id=connection.id,
+        handle=handle,
+        _headers=owner_headers,
+    )
+    assert historical.status is ExternalChannelConnectionStatus.DISCONNECTED
+    assert historical.credentials_configured is False
+
+
+def test_multi_app_mention_selector_deduplicates_and_preserves_approval_source(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_engine_worker_container: Container,
+    slack_provider_fake_url: str,
+) -> None:
+    """Select once from an unconfigured mention and release its source once."""
+    del azents_engine_worker_container
+    app_id = "A-MULTI-SELECTOR"
+    team_id = "T-MULTI-SELECTOR"
+    root_timestamp = f"{int(time.time()) - 60}.000500"
+    source_text = "<@B-E2E> choose the incident Agent"
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "provider_app_id": app_id,
+            "provider_team_id": team_id,
+            "provider_bot_user_id": "U-BOT-MULTI-SELECTOR",
+            "history_pages": [
+                [
+                    {
+                        "user": "U-SELECTOR",
+                        "ts": root_timestamp,
+                        "text": source_text,
+                    }
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    owner_token, _, handle, agent_ids = _create_workspace_agents(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        agent_count=2,
+        runtime_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {owner_token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_multi_slack_connection(
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id=app_id,
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=headers,
+    )
+    routes = [
+        external_api.external_channel_v1_add_multi_slack_route(
+            connection_id=setup.connection.id,
+            handle=handle,
+            multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_id),
+            _headers=headers,
+        )
+        for agent_id in agent_ids
+    ]
+    assert (
+        external_api.external_channel_v1_list_multi_slack_channel_defaults(
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        ).items
+        == []
+    )
+
+    callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+    event_body = json.dumps(
+        {
+            "type": "event_callback",
+            "event_id": f"Ev-{unique()}",
+            "event_time": int(time.time()),
+            "api_app_id": app_id,
+            "team_id": team_id,
+            "event": {
+                "type": "app_mention",
+                "channel": _CHANNEL_ID,
+                "channel_type": "channel",
+                "user": "U-SELECTOR",
+                "text": source_text,
+                "ts": root_timestamp,
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    for _ in range(2):
+        response = requests.post(
+            callback_url,
+            data=event_body,
+            headers=_signed_headers(event_body),
+            timeout=5,
+        )
+        assert response.status_code == 200
+
+    selector_admission_id = wait_until(
+        lambda: _selector_admission_id(slack_provider_fake_url),
+        timeout=15,
+        interval=0.2,
+        message="Unconfigured Multi App mention did not produce a selector",
+    )
+    block_payload = {
+        "type": "block_actions",
+        "api_app_id": app_id,
+        "team": {"id": team_id},
+        "user": {"id": "U-SELECTOR"},
+        "trigger_id": "trigger-selector-e2e",
+        "channel": {"id": _CHANNEL_ID},
+        "message": {
+            "ts": root_timestamp,
+            "thread_ts": root_timestamp,
+        },
+        "actions": [
+            {
+                "action_id": "azents_agent_selector_open",
+                "value": selector_admission_id,
+            }
+        ],
+    }
+    block_body = urlencode(
+        {"payload": json.dumps(block_payload, separators=(",", ":"))}
+    ).encode()
+    for _ in range(2):
+        response = requests.post(
+            callback_url,
+            data=block_body,
+            headers=_signed_headers(
+                block_body,
+                content_type="application/x-www-form-urlencoded",
+            ),
+            timeout=5,
+        )
+        assert response.status_code == 200
+
+    selector_view = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _latest_selector_view(slack_provider_fake_url),
+            timeout=15,
+            interval=0.2,
+            message="Selector interaction did not open a modal",
+        ),
+    )
+    assert selector_view["route_ids"] == [route.id for route in routes]
+    assert selector_view["has_submit"] is True
+    metadata = selector_view.get("private_metadata")
+    assert isinstance(metadata, str)
+    assert metadata
+
+    submission_payload = {
+        "type": "view_submission",
+        "api_app_id": app_id,
+        "team": {"id": team_id},
+        "user": {"id": "U-SELECTOR"},
+        "view": {
+            "id": selector_view["view_id"],
+            "hash": selector_view["view_hash"],
+            "callback_id": "azents_agent_selector",
+            "private_metadata": metadata,
+            "state": {
+                "values": {
+                    "azents_agent_selector_route": {
+                        "azents_agent_selector_route": {
+                            "selected_option": {"value": routes[1].id}
+                        }
+                    }
+                }
+            },
+        },
+    }
+    submission_body = urlencode(
+        {"payload": json.dumps(submission_payload, separators=(",", ":"))}
+    ).encode()
+    for _ in range(2):
+        response = requests.post(
+            callback_url,
+            data=submission_body,
+            headers=_signed_headers(
+                submission_body,
+                content_type="application/x-www-form-urlencoded",
+            ),
+            timeout=5,
+        )
+        assert response.status_code == 200
+
+    request_id = wait_until(
+        lambda: _approval_request_id(slack_provider_fake_url),
+        timeout=15,
+        interval=0.2,
+        message="Selected access-required Agent did not request approval",
+    )
+
+    def hydrated_approval() -> object | None:
+        current = external_api.external_channel_v1_get_approval_request(
+            access_request_id=request_id,
+            _headers=headers,
+        )
+        return current if current.original_url is not None else None
+
+    approval = cast(
+        Any,
+        wait_until(
+            hydrated_approval,
+            timeout=15,
+            interval=0.2,
+            message="Selected source was not hydrated for approval",
+        ),
+    )
+    assert approval.status is ExternalChannelAccessRequestStatus.PENDING
+    assert approval.agent_id == agent_ids[1]
+    assert approval.agent_session_id is None
+    assert approval.source_text == source_text
+
+    decision = ExternalChannelDecisionInput(
+        decision="allow_agent",
+        summary="Multi selector E2E approval",
+    )
+    decided = external_api.external_channel_v1_decide_approval_request(
+        access_request_id=request_id,
+        external_channel_decision_input=decision,
+        _headers=headers,
+    )
+    repeated = external_api.external_channel_v1_decide_approval_request(
+        access_request_id=request_id,
+        external_channel_decision_input=decision,
+        _headers=headers,
+    )
+    assert decided.agent_session_id is not None
+    assert repeated.agent_session_id == decided.agent_session_id
+
+    def active_selected_binding() -> object | None:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_ids[1],
+            session_id=cast(str, decided.agent_session_id),
+            handle=handle,
+            _headers=headers,
+        )
+        if (
+            len(projection.items) == 1
+            and projection.items[0].activation_status
+            is ExternalChannelBindingActivationStatus.ACTIVE
+        ):
+            return projection
+        return None
+
+    selected_binding = cast(
+        Any,
+        wait_until(
+            active_selected_binding,
+            timeout=10,
+            interval=0.2,
+            message="Selected Multi App route did not create one active binding",
+        ),
+    )
+    assert len(selected_binding.items) == 1
+    provider_state = _provider_state(slack_provider_fake_url)
+    request_counts = cast(dict[str, int], provider_state["request_counts"])
+    assert request_counts["views.open"] == 1
+    assert provider_state["views"] == [selector_view]
+    assert _BOT_TOKEN not in str(provider_state)
+    assert _SIGNING_SECRET not in str(provider_state)
+
+
 @pytest.mark.runtime_provider
 def test_provider_native_channel_work_progress_journey(
     request: pytest.FixtureRequest,
@@ -941,7 +1576,7 @@ def test_provider_native_channel_work_progress_journey(
             message="Slack Plan update was not delivered",
         ),
     )
-    assert plan_delivery["text"] == (
+    expected_fallback = (
         "Investigating error logs…\n"
         "In progress: Inspect recent failures\n"
         "Completed: Verify the affected release\n"
@@ -949,8 +1584,17 @@ def test_provider_native_channel_work_progress_journey(
         "Pending: Summarize the incident"
     )
     blocks = cast(list[dict[str, object]], plan_delivery["blocks"])
-    assert len(blocks) == 1
-    plan = blocks[0]
+    assert len(blocks) == 2
+    identity = blocks[0]
+    assert identity["type"] == "section"
+    identity_text = cast(dict[str, object], identity["text"])
+    assert identity_text["type"] == "mrkdwn"
+    agent_markdown = cast(str, identity_text["text"])
+    assert agent_markdown.startswith("*External Channel Agent 1 ")
+    assert agent_markdown.endswith("*")
+    agent_name = agent_markdown[1:-1]
+    assert plan_delivery["text"] == f"{agent_name}\n{expected_fallback}"
+    plan = blocks[1]
     assert plan["type"] == "plan"
     assert plan["title"] == "Investigating error logs…"
     assert "plan_id" not in plan

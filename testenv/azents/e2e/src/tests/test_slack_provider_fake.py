@@ -131,6 +131,183 @@ def test_slack_fake_controls_membership_history_and_delivery_failure(
     assert update == {"ok": False, "error": "token_revoked"}
 
 
+def test_slack_fake_configures_installation_identity_and_captures_selector_view(
+    slack_fake_url: str,
+) -> None:
+    """Represent distinct Apps and retain only opaque selector state."""
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
+        json={
+            "provider_app_id": "A-MULTI",
+            "provider_team_id": "T-MULTI",
+            "provider_bot_user_id": "U-BOT-MULTI",
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    auth = requests.post(
+        f"{slack_fake_url}/api/auth.test",
+        headers={"Authorization": "Bearer xoxb-private-token"},
+        timeout=5,
+    ).json()
+    bot = requests.get(
+        f"{slack_fake_url}/api/bots.info",
+        params={"bot": "B-E2E"},
+        timeout=5,
+    ).json()
+    opened = requests.post(
+        f"{slack_fake_url}/api/views.open",
+        json={
+            "trigger_id": "trigger-secret",
+            "view": {
+                "type": "modal",
+                "callback_id": "azents_agent_selector",
+                "private_metadata": "signed-opaque-metadata",
+                "title": {"type": "plain_text", "text": "Select an Agent"},
+                "blocks": [
+                    {
+                        "type": "input",
+                        "element": {
+                            "type": "static_select",
+                            "options": [
+                                {
+                                    "text": {
+                                        "type": "plain_text",
+                                        "text": "Private Agent Name",
+                                    },
+                                    "value": "route-1",
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "submit": {"type": "plain_text", "text": "Select"},
+            },
+        },
+        headers={"Authorization": "Bearer xoxb-private-token"},
+        timeout=5,
+    )
+    opened.raise_for_status()
+
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    rendered = str(evidence)
+    assert auth["team_id"] == "T-MULTI"
+    assert auth["user_id"] == "U-BOT-MULTI"
+    assert bot["bot"]["app_id"] == "A-MULTI"
+    assert evidence["views"] == [
+        {
+            "operation": "views.open",
+            "view_id": "V-E2E-1",
+            "view_hash": "hash-1",
+            "callback_id": "azents_agent_selector",
+            "private_metadata": "signed-opaque-metadata",
+            "route_ids": ["route-1"],
+            "has_submit": True,
+            "outcome": "delivered",
+        }
+    ]
+    assert "trigger-secret" not in rendered
+    assert "xoxb-private-token" not in rendered
+    assert "Private Agent Name" not in rendered
+
+
+def test_slack_fake_captures_selector_control_without_visible_copy(
+    slack_fake_url: str,
+) -> None:
+    """Expose only the opaque admission needed to drive the next callback."""
+    requests.post(
+        f"{slack_fake_url}/api/chat.postMessage",
+        json={
+            "channel": "C-E2E",
+            "thread_ts": "1721600000.000100",
+            "text": "Private selector instructions",
+            "blocks": [
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "Private button label",
+                            },
+                            "action_id": "azents_agent_selector_open",
+                            "value": "admission-1",
+                        }
+                    ],
+                }
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    rendered = str(evidence)
+    assert evidence["deliveries"][0]["action_ids"] == ["azents_agent_selector_open"]
+    assert evidence["deliveries"][0]["selector_admission_id"] == "admission-1"
+    assert "Private selector instructions" not in rendered
+    assert "Private button label" not in rendered
+
+
+def test_slack_fake_captures_plan_after_agent_identity_block(
+    slack_fake_url: str,
+) -> None:
+    """Retain the native Plan when current Agent attribution precedes it."""
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Incident Agent*",
+            },
+        },
+        {
+            "type": "plan",
+            "title": "Investigating…",
+            "tasks": [
+                {
+                    "task_id": "inspect",
+                    "title": "Inspect logs",
+                    "status": "in_progress",
+                }
+            ],
+        },
+    ]
+    requests.post(
+        f"{slack_fake_url}/api/chat.update",
+        json={
+            "channel": "C-E2E",
+            "ts": "1721600000.000100",
+            "text": "Incident Agent\nInvestigating…",
+            "blocks": blocks,
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert evidence["deliveries"] == [
+        {
+            "operation": "chat.update",
+            "channel": "C-E2E",
+            "thread_ts": None,
+            "message_ts": "1721600000.000100",
+            "outcome": "delivered",
+            "approval_request_id": None,
+            "text": "Incident Agent\nInvestigating…",
+            "blocks": blocks,
+        }
+    ]
+
+
 def test_slack_fake_serves_private_file_without_leaking_content_evidence(
     slack_fake_url: str,
 ) -> None:
