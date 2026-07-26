@@ -19,7 +19,9 @@ tags: [agent, mailbox, web, chat, lifecycle, plan]
   - Source-specific pending presentation for user messages, Agent messages, Goal continuations, External Channel items, and Turn Actions with shared pending emphasis.
   - Correlation-based suppression so durable history and active or durable ActionExecution ownership win over stale pending state.
   - Existing delete mutation, resync, latest-following, detached-history, authorization, and subagent read-only behavior preserved.
-  - Deterministic reducer/selector and presentation coverage, plus the Phase 5 E2E fixture plan required for later integrated validation.
+  - Deterministic reducer/selector and presentation coverage, plus documented
+    refresh/reconnect, compound External Channel, and action-handoff fixture
+    prerequisites for the later integrated Validation phase.
 - Non-goals:
   - No API, OpenAPI, generated client, mailbox schema/payload, producer scheduling, runtime wait, terminal-finalization, or server publication-order changes.
   - No public or local fallback to the removed Event-shaped pending API or `PendingInputBuffer` adapter.
@@ -48,7 +50,10 @@ tags: [agent, mailbox, web, chat, lifecycle, plan]
 - Final validation:
   - TypeScript format, lint, typecheck, and build for the full workspace.
   - Deterministic native-state reducer/selector and renderer tests for every mailbox kind, compound External Channel ordering, duplicate/reordered WebSocket frames, stale REST baseline rejection, durable-first promotion, action handoff, detached history, and delete rollback.
-  - Targeted testenv/E2E fixture coverage for refresh/reconnect, pending promotion, and Turn Action handoff without live provider credentials.
+  - Record the deterministic testenv/E2E fixture prerequisites for the later
+    Validation phase; that phase executes refresh/reconnect, pending promotion,
+    compound External Channel, and Turn Action handoff coverage without live
+    provider credentials.
   - Relevant backend contract tests unchanged or rerun as integration evidence, docs index check, `git diff --check`, and reviewer `CLEAN`.
 - Scope-drift check: permit only native Web pending lifecycle, corresponding tests/fixtures, and this plan. Move server/API/client changes, persistence, runtime behavior, general chat redesign, spec promotion, and unrelated E2E work to their designated phases.
 
@@ -98,4 +103,6 @@ The mailbox delete operation keeps existing session authorization, mutable-kind 
 
 - Existing External Channel durable renderer expects metadata not present in the safe pending union. The pending-specific adapter must use safe defaults/omission, not source lookups or server contract expansion.
 - Current Web coverage is story-oriented; Phase 5 must add deterministic reducer/selector test coverage before E2E validation.
-- Deterministic E2E fixtures must cover provider-independent External Channel snapshots and operation action handoff; live provider credentials are not required.
+- The later Validation phase must execute deterministic provider-independent
+  External Channel snapshots and operation action handoff; live provider
+  credentials are not required.
