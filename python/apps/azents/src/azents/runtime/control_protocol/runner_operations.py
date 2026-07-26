@@ -360,6 +360,35 @@ class RuntimeGitRemoveWorktreeResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeDiscoveredGitWorktree:
+    """One content-free Git worktree identity discovered under the managed root."""
+
+    worktree_path: str
+    registered: bool
+    repository_anchor_path: str | None
+    branch_name: str | None
+    fingerprint: str
+    failure_code: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeDiscoverManagedGitWorktreesResult:
+    """Completed managed Git worktree discovery operation result."""
+
+    entries: tuple[RuntimeDiscoveredGitWorktree, ...]
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeRemoveDiscoveredGitWorktreeResult:
+    """Completed guarded removal of a previously discovered Git worktree."""
+
+    worktree_path: str
+    outcome: Literal["removed", "already_absent"]
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeGitDeleteBranchResult:
     """Completed Git branch deletion operation result."""
 
@@ -387,6 +416,8 @@ type RuntimeForegroundResult = (
     | RuntimeGitCreateWorktreeResult
     | RuntimeGitInspectWorktreeResult
     | RuntimeGitRemoveWorktreeResult
+    | RuntimeDiscoverManagedGitWorktreesResult
+    | RuntimeRemoveDiscoveredGitWorktreeResult
     | RuntimeGitDeleteBranchResult
 )
 
@@ -1026,6 +1057,73 @@ class RuntimeRunnerOperationClient:
             generation=runner_generation,
             deadline_at=deadline_at,
             text_output_callback=text_output_callback,
+        )
+
+    async def discover_managed_git_worktrees(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        deadline_at: datetime,
+    ) -> RuntimeDiscoverManagedGitWorktreesResult:
+        """Discover Git worktrees below the Runner's fixed managed root."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="discover_managed_git_worktrees",
+                owner_session_id=owner_session_id,
+                payload={},
+                deadline_at=deadline_at,
+                body_stream_id=None,
+            )
+        )
+        return await self.resume_discover_managed_git_worktrees(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
+    async def remove_discovered_git_worktree(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        discovered: RuntimeDiscoveredGitWorktree,
+        deadline_at: datetime,
+    ) -> RuntimeRemoveDiscoveredGitWorktreeResult:
+        """Force-remove one Runner-discovered worktree after identity revalidation."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="remove_discovered_git_worktree",
+                owner_session_id=owner_session_id,
+                payload={
+                    "worktree_path": discovered.worktree_path,
+                    "repository_anchor_path": discovered.repository_anchor_path or "",
+                    "branch_name": discovered.branch_name or "",
+                    "fingerprint": discovered.fingerprint,
+                    "force": True,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+            )
+        )
+        return await self.resume_remove_discovered_git_worktree(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
         )
 
     async def remove_git_worktree(
@@ -1802,6 +1900,62 @@ class RuntimeRunnerOperationClient:
             final_cursor=final.cursor,
         )
 
+    async def resume_discover_managed_git_worktrees(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeDiscoverManagedGitWorktreesResult:
+        """Resume reading a managed Git worktree discovery reply stream."""
+        final = await self._read_until_final(
+            reply_stream_id,
+            _ReplyFolder(after_cursor=after_cursor),
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeDiscoverManagedGitWorktreesResult(
+            entries=tuple(_discovered_git_worktrees(final.event.payload)),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_remove_discovered_git_worktree(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeRemoveDiscoveredGitWorktreeResult:
+        """Resume reading a guarded discovered-worktree removal reply stream."""
+        final = await self._read_until_final(
+            reply_stream_id,
+            _ReplyFolder(after_cursor=after_cursor),
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeRemoveDiscoveredGitWorktreeResult(
+            worktree_path=_str_payload(
+                final.event.payload,
+                "removed_discovered_worktree_path",
+            ),
+            outcome=_git_remove_outcome(final.event.payload.get("outcome")),
+            final_cursor=final.cursor,
+        )
+
     async def resume_git_delete_branch(
         self,
         *,
@@ -1935,6 +2089,11 @@ class RuntimeRunnerOperationClient:
             while True:
                 now = datetime.now(timezone.utc)
                 if now >= deadline_at:
+                    await self._request_runner_operation_cancel(
+                        runtime_id=runtime_id,
+                        generation=generation,
+                        operation_id=operation_id,
+                    )
                     await self._append_local_final_error(
                         reply_stream_id=reply_stream_id,
                         request_id=request_id,
@@ -1954,6 +2113,11 @@ class RuntimeRunnerOperationClient:
                     and time.monotonic() >= next_cancel_check_at
                     and await cancel_check()
                 ):
+                    await self._request_runner_operation_cancel(
+                        runtime_id=runtime_id,
+                        generation=generation,
+                        operation_id=operation_id,
+                    )
                     await self._append_local_final_error(
                         reply_stream_id=reply_stream_id,
                         request_id=request_id,
@@ -2005,6 +2169,11 @@ class RuntimeRunnerOperationClient:
                             )
                         return record
         except asyncio.CancelledError:
+            await self._request_runner_operation_cancel(
+                runtime_id=runtime_id,
+                generation=generation,
+                operation_id=operation_id,
+            )
             await self._append_local_final_error(
                 reply_stream_id=reply_stream_id,
                 request_id=request_id,
@@ -2016,6 +2185,23 @@ class RuntimeRunnerOperationClient:
                 created_at=datetime.now(timezone.utc),
             )
             raise
+
+    async def _request_runner_operation_cancel(
+        self,
+        *,
+        runtime_id: str | None,
+        generation: int | None,
+        operation_id: str | None,
+    ) -> None:
+        """Request cancellation when a foreground operation has a routable identity."""
+        if runtime_id is None or generation is None or operation_id is None:
+            return
+        await self._control_protocol.request_runner_operation_cancel(
+            runtime_id=runtime_id,
+            runner_generation=generation,
+            operation_id=operation_id,
+            created_at=datetime.now(timezone.utc),
+        )
 
     async def _append_local_final_error(
         self,
@@ -2380,6 +2566,46 @@ def _git_ref_type(
     if value == "other":
         return "other"
     return None
+
+
+def _discovered_git_worktrees(
+    payload: dict[str, JsonValue],
+) -> list[RuntimeDiscoveredGitWorktree]:
+    """Decode bounded managed-worktree discovery entries."""
+    raw_entries = payload.get("discovered_worktrees")
+    if not isinstance(raw_entries, list):
+        return []
+    entries: list[RuntimeDiscoveredGitWorktree] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        worktree_path = raw_entry.get("worktree_path")
+        fingerprint = raw_entry.get("fingerprint")
+        if not isinstance(worktree_path, str) or not isinstance(fingerprint, str):
+            continue
+        entries.append(
+            RuntimeDiscoveredGitWorktree(
+                worktree_path=worktree_path,
+                registered=_bool_payload(raw_entry, "registered", default=False),
+                repository_anchor_path=_nonempty_optional_str(
+                    raw_entry,
+                    "repository_anchor_path",
+                ),
+                branch_name=_nonempty_optional_str(raw_entry, "branch_name"),
+                fingerprint=fingerprint,
+                failure_code=_nonempty_optional_str(raw_entry, "failure_code"),
+            )
+        )
+    return entries
+
+
+def _nonempty_optional_str(
+    payload: dict[str, JsonValue],
+    key: str,
+) -> str | None:
+    """Decode an optional string serialized by protobuf as an empty string."""
+    value = payload.get(key)
+    return value if isinstance(value, str) and value else None
 
 
 def _file_stat_result(

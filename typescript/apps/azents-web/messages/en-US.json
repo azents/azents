@@ -1550,6 +1550,15 @@
       "projectRegistered": "Project registered: {path}",
       "branch": "Branch: {branch}",
       "baseRef": "Base ref: {ref}",
+      "cleanup": {
+        "title": "Orphan worktree cleanup",
+        "phase": "Phase: {phase}",
+        "examined": "Examined {count}",
+        "removed": "Removed {count}",
+        "protected": "Protected {count}",
+        "alreadyAbsent": "Already absent {count}",
+        "attention": "Needs attention {count}"
+      },
       "result": {
         "pending": "Waiting to create worktree…",
         "running": "Creating worktree…",

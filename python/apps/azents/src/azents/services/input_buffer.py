@@ -32,6 +32,7 @@ from azents.core.inference_profile import (
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
     ChatAction,
+    CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
     GoalAction,
     SkillAction,
@@ -151,11 +152,11 @@ def fold_turn_eligibility(eligible: bool, effect: TurnEffect) -> bool:
 
 
 @dataclasses.dataclass(frozen=True)
-class WorktreeActionInput:
-    """Durably claimed buffer-only worktree action awaiting external execution."""
+class OperationActionInput:
+    """Durably claimed buffer-only operation action awaiting external execution."""
 
     buffer: InputBuffer
-    action: CreateGitWorktreeAction
+    action: CreateGitWorktreeAction | CleanupOrphanGitWorktreesAction
     execution: ActionExecution | None
 
 
@@ -164,7 +165,7 @@ class PromotedInputBuffers:
     """Result of preparing one FIFO InputBuffer."""
 
     turn_effect: TurnEffect
-    worktree_action: WorktreeActionInput | None
+    operation_action: OperationActionInput | None
     requested_inference_profile: RequestedInferenceProfile | None
     user_messages: list[RunUserMessage]
     events: list[Event]
@@ -214,7 +215,7 @@ class InputBufferPreparationOutcome:
 
     promoted: list[_PromotedInputBuffer]
     turn_effect: TurnEffect
-    worktree_action: WorktreeActionInput | None
+    operation_action: OperationActionInput | None
 
 
 class InputBufferProcessor(Protocol):
@@ -497,7 +498,7 @@ class InputBufferService:
             if not claimed:
                 return PromotedInputBuffers(
                     turn_effect=TurnEffect.NEUTRAL,
-                    worktree_action=None,
+                    operation_action=None,
                     requested_inference_profile=None,
                     user_messages=[],
                     events=[],
@@ -531,25 +532,25 @@ class InputBufferService:
                     session_id=session_id,
                     inference_state=prepared_inference_state,
                 )
-            worktree_action = outcome.worktree_action
-            if worktree_action is not None:
+            operation_action = outcome.operation_action
+            if operation_action is not None:
                 execution = await self.action_execution_repository.create(
                     session,
                     ActionExecutionCreate(
                         id=None,
                         session_id=session_id,
-                        input_buffer_id=worktree_action.buffer.id,
-                        sender_user_id=worktree_action.buffer.sender_user_id,
-                        action_type=worktree_action.action.type,
+                        input_buffer_id=operation_action.buffer.id,
+                        sender_user_id=operation_action.buffer.sender_user_id,
+                        action_type=operation_action.action.type,
                         action=_JSON_OBJECT_ADAPTER.validate_python(
-                            worktree_action.action.model_dump(mode="json")
+                            operation_action.action.model_dump(mode="json")
                         ),
                         status=ActionExecutionStatus.PENDING,
                         owner_generation=agent_session.owner_generation,
                     ),
                 )
-                worktree_action = dataclasses.replace(
-                    worktree_action,
+                operation_action = dataclasses.replace(
+                    operation_action,
                     execution=execution,
                 )
             event_inserted = await self._append_input_buffer_events(
@@ -607,8 +608,8 @@ class InputBufferService:
                     event_ids=promoted_event_ids,
                 )
             buffer_ids = list(dict.fromkeys(item.buffer.id for item in promoted))
-            if worktree_action is not None:
-                buffer_ids.append(worktree_action.buffer.id)
+            if operation_action is not None:
+                buffer_ids.append(operation_action.buffer.id)
             deleted_count = await self.input_buffer_repository.delete_claimed_by_ids(
                 session,
                 session_id,
@@ -626,7 +627,7 @@ class InputBufferService:
 
         return PromotedInputBuffers(
             turn_effect=outcome.turn_effect,
-            worktree_action=worktree_action,
+            operation_action=operation_action,
             requested_inference_profile=(
                 _requested_inference_profile(promoted[0].buffer) if promoted else None
             ),
@@ -870,7 +871,7 @@ class InputBufferService:
             return InputBufferPreparationOutcome(
                 promoted=[],
                 turn_effect=TurnEffect.NEUTRAL,
-                worktree_action=None,
+                operation_action=None,
             )
         buffer = claimed[0]
         if (
@@ -880,7 +881,7 @@ class InputBufferService:
             return InputBufferPreparationOutcome(
                 promoted=[],
                 turn_effect=TurnEffect.NEUTRAL,
-                worktree_action=None,
+                operation_action=None,
             )
         if (
             _buffer_requires_inference(buffer)
@@ -923,8 +924,8 @@ class InputBufferService:
                         return _GoalActionInputBufferProcessor(self)
                     case SkillAction():
                         return _SkillActionInputBufferProcessor(self, action)
-                    case CreateGitWorktreeAction():
-                        return _CreateGitWorktreeActionInputBufferProcessor(action)
+                    case CreateGitWorktreeAction() | CleanupOrphanGitWorktreesAction():
+                        return _OperationActionInputBufferProcessor(action)
                     case _:
                         assert_never(action)
             case _:
@@ -1393,10 +1394,10 @@ class _SkillActionInputBufferProcessor:
 
 
 @dataclasses.dataclass(frozen=True)
-class _CreateGitWorktreeActionInputBufferProcessor:
-    """Preserve the worktree action boundary until durable claims replace it."""
+class _OperationActionInputBufferProcessor:
+    """Preserve an operation action boundary until durable claims replace it."""
 
-    action: CreateGitWorktreeAction
+    action: CreateGitWorktreeAction | CleanupOrphanGitWorktreesAction
 
     async def process(
         self,
@@ -1407,7 +1408,7 @@ class _CreateGitWorktreeActionInputBufferProcessor:
         return InputBufferPreparationOutcome(
             promoted=[],
             turn_effect=TurnEffect.NEUTRAL,
-            worktree_action=WorktreeActionInput(
+            operation_action=OperationActionInput(
                 buffer=buffer,
                 action=self.action,
                 execution=None,
@@ -1423,7 +1424,7 @@ def _preparation_outcome(
     return InputBufferPreparationOutcome(
         promoted=promoted,
         turn_effect=turn_effect,
-        worktree_action=None,
+        operation_action=None,
     )
 
 

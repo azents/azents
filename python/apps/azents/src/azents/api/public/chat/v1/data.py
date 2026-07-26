@@ -30,6 +30,7 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import Event, UserMessagePayload
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
+from azents.rdb.models.event import JSONValue
 from azents.repos.action_execution.data import (
     ActionExecution,
     ActionExecutionEvent,
@@ -490,6 +491,10 @@ class ActionExecutionResponse(BaseModel):
     )
     action_type: str = Field(description="Action discriminator")
     action: ChatAction = Field(description="Durable action payload")
+    result: dict[str, JSONValue] | None = Field(
+        default=None,
+        description="Action-specific structured result",
+    )
     status: str = Field(description="Execution status")
     owner_generation: int = Field(description="Admitting Session owner generation")
     failure_summary: str | None = Field(default=None, description="Failure summary")
@@ -520,6 +525,7 @@ class ActionExecutionResponse(BaseModel):
             sender_user_id=execution.sender_user_id,
             action_type=execution.action_type,
             action=_CHAT_ACTION_ADAPTER.validate_python(execution.action),
+            result=execution.result,
             status=execution.status.value,
             owner_generation=execution.owner_generation,
             failure_summary=execution.failure_summary,

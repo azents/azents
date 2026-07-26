@@ -56,12 +56,27 @@ class CreateGitWorktreeAction(BaseModel):
     )
 
 
+class CleanupOrphanGitWorktreesAction(BaseModel):
+    """Remove orphaned Git worktrees from the current Agent Runtime."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["cleanup_orphan_git_worktrees"] = "cleanup_orphan_git_worktrees"
+
+
 ChatAction = Annotated[
-    CommandAction | GoalAction | SkillAction | CreateGitWorktreeAction,
+    CommandAction
+    | GoalAction
+    | SkillAction
+    | CreateGitWorktreeAction
+    | CleanupOrphanGitWorktreesAction,
     Field(discriminator="type"),
 ]
 TurnAction = Annotated[
-    GoalAction | SkillAction | CreateGitWorktreeAction,
+    GoalAction
+    | SkillAction
+    | CreateGitWorktreeAction
+    | CleanupOrphanGitWorktreesAction,
     Field(discriminator="type"),
 ]
 

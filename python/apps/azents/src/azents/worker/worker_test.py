@@ -171,7 +171,7 @@ class _InputBufferService:
         self.calls.append((session_id, model))
         if self.consumed:
             return PromotedInputBuffers(
-                worktree_action=None,
+                operation_action=None,
                 turn_effect=TurnEffect.NEUTRAL,
                 requested_inference_profile=None,
                 user_messages=[],
@@ -1615,7 +1615,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
     )
     promotion = _InputBufferService(
         PromotedInputBuffers(
-            worktree_action=None,
+            operation_action=None,
             turn_effect=TurnEffect.ELIGIBLE,
             requested_inference_profile=RequestedInferenceProfile(
                 model_target_label="default",

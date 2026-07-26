@@ -442,6 +442,18 @@ function fallbackActionDefinition(action: ChatAction): InputActionDefinition {
         attachments: { policy: "unsupported" },
         availability_hint: null,
       };
+    case "cleanup_orphan_git_worktrees":
+      return {
+        id: "cleanup_orphan_git_worktrees",
+        keyword: "cleanup-worktrees",
+        label: "Clean up orphan worktrees",
+        description: "",
+        action,
+        category: "turn",
+        message: { policy: "optional", placeholder: null, max_length: null },
+        attachments: { policy: "unsupported" },
+        availability_hint: null,
+      };
   }
 }
 

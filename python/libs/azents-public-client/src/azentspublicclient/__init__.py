@@ -150,6 +150,7 @@ __all__ = [
     "ChatWriteAcceptedResponse",
     "ChatWriteResponse",
     "ChatWriteSnapshotResponse",
+    "CleanupOrphanGitWorktreesAction",
     "CleanupSessionGitWorktreeRequest",
     "CommandAction",
     "CreateGitWorktreeAction",
@@ -216,6 +217,8 @@ __all__ = [
     "InvitationListResponse",
     "InvitationResponse",
     "InvitationStatus",
+    "JSONScalar",
+    "JSONValue",
     "JoinRequestListResponse",
     "JoinRequestResponse",
     "JoinRequestStatus",
@@ -539,6 +542,7 @@ from azentspublicclient.models.chat_stop_response import ChatStopResponse as Cha
 from azentspublicclient.models.chat_write_accepted_response import ChatWriteAcceptedResponse as ChatWriteAcceptedResponse
 from azentspublicclient.models.chat_write_response import ChatWriteResponse as ChatWriteResponse
 from azentspublicclient.models.chat_write_snapshot_response import ChatWriteSnapshotResponse as ChatWriteSnapshotResponse
+from azentspublicclient.models.cleanup_orphan_git_worktrees_action import CleanupOrphanGitWorktreesAction as CleanupOrphanGitWorktreesAction
 from azentspublicclient.models.cleanup_session_git_worktree_request import CleanupSessionGitWorktreeRequest as CleanupSessionGitWorktreeRequest
 from azentspublicclient.models.command_action import CommandAction as CommandAction
 from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction as CreateGitWorktreeAction
@@ -605,6 +609,8 @@ from azentspublicclient.models.input_action_message_policy_response import Input
 from azentspublicclient.models.invitation_list_response import InvitationListResponse as InvitationListResponse
 from azentspublicclient.models.invitation_response import InvitationResponse as InvitationResponse
 from azentspublicclient.models.invitation_status import InvitationStatus as InvitationStatus
+from azentspublicclient.models.json_scalar import JSONScalar as JSONScalar
+from azentspublicclient.models.json_value import JSONValue as JSONValue
 from azentspublicclient.models.join_request_list_response import JoinRequestListResponse as JoinRequestListResponse
 from azentspublicclient.models.join_request_response import JoinRequestResponse as JoinRequestResponse
 from azentspublicclient.models.join_request_status import JoinRequestStatus as JoinRequestStatus

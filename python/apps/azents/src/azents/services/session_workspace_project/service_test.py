@@ -5,18 +5,28 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import pytest
+import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ActionExecutionStatus,
     AgentProjectCatalogStatus,
+    GitWorktreePathClaimState,
     LLMProvider,
     RuntimeRunnerState,
     WorkspaceUserRole,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.git_worktree_cleanup_claim import (
+    RDBGitWorktreePathClaim,
+)
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.repos.action_execution import ActionExecutionRepository
+from azents.repos.action_execution.data import ActionExecutionCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -38,6 +48,7 @@ from azents.testing.model_selection import make_test_model_selection_dict
 from . import (
     InvalidProjectPath,
     ProjectAccessDenied,
+    ProjectPathCleanupInProgress,
     ProjectPathConflict,
     SessionWorkspaceProjectService,
     normalize_session_workspace_path,
@@ -290,6 +301,280 @@ class TestSessionWorkspaceProjectService:
 
         assert isinstance(result, Failure)
         assert isinstance(result.error, ProjectPathConflict)
+
+    @pytest.mark.parametrize(
+        ("claim_suffix", "project_suffix"),
+        [
+            ("repo", "repo/nested"),
+            ("repo/nested", "repo"),
+        ],
+    )
+    async def test_create_project_rejects_overlapping_cleanup_claim(
+        self,
+        rdb_session: AsyncSession,
+        claim_suffix: str,
+        project_suffix: str,
+    ) -> None:
+        """Reject Project attachment while manual cleanup owns an ancestor path."""
+        workspace_id = await _create_workspace(rdb_session, "swp-svc-cleanup-claim")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-svc-cleanup-claim",
+        )
+        execution = await ActionExecutionRepository().create(
+            rdb_session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=fixture.session_id,
+                input_buffer_id="01900000000070008000000000000010",
+                sender_user_id=None,
+                action_type="cleanup_orphan_git_worktrees",
+                action={"type": "cleanup_orphan_git_worktrees"},
+                status=ActionExecutionStatus.RUNNING,
+                owner_generation=0,
+            ),
+        )
+        repository = SessionWorkspaceProjectRepository()
+        claim_path = f"/workspace/agent/.azents/worktrees/orphan/{claim_suffix}"
+        claim_result = await repository.try_claim_orphan_git_worktree(
+            rdb_session,
+            runtime_id=fixture.runtime_id,
+            action_execution_id=execution.id,
+            owner_generation=execution.owner_generation,
+            worktree_path=claim_path,
+            discovery_fingerprint="test-discovery-fingerprint",
+        )
+        assert claim_result == "claimed"
+
+        result = await _service(rdb_session).create_project(
+            session_id=fixture.session_id,
+            path=f"/workspace/agent/.azents/worktrees/orphan/{project_suffix}",
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, ProjectPathCleanupInProgress)
+        await repository.release_orphan_git_worktree_claim(
+            rdb_session,
+            action_execution_id=execution.id,
+            worktree_path=claim_path,
+            state=GitWorktreePathClaimState.UNRESOLVED,
+        )
+        after_release = await _service(rdb_session).create_project(
+            session_id=fixture.session_id,
+            path=f"/workspace/agent/.azents/worktrees/orphan/{project_suffix}",
+        )
+        assert isinstance(after_release, Success)
+
+    async def test_expired_cleanup_claim_with_current_owner_still_blocks_reclaim(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Keep an expired claim while its owning action remains current."""
+        workspace_id = await _create_workspace(rdb_session, "swp-svc-current-claim")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-svc-current-claim",
+        )
+        action_repository = ActionExecutionRepository()
+        owner = await action_repository.create(
+            rdb_session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=fixture.session_id,
+                input_buffer_id="01900000000070008000000000000011",
+                sender_user_id=None,
+                action_type="cleanup_orphan_git_worktrees",
+                action={"type": "cleanup_orphan_git_worktrees"},
+                status=ActionExecutionStatus.RUNNING,
+                owner_generation=0,
+            ),
+        )
+        repository = SessionWorkspaceProjectRepository()
+        path = "/workspace/agent/.azents/worktrees/orphan/current"
+        assert (
+            await repository.try_claim_orphan_git_worktree(
+                rdb_session,
+                runtime_id=fixture.runtime_id,
+                action_execution_id=owner.id,
+                owner_generation=owner.owner_generation,
+                worktree_path=path,
+                discovery_fingerprint="owner-fingerprint",
+            )
+            == "claimed"
+        )
+        claim = await rdb_session.scalar(
+            sa.select(RDBGitWorktreePathClaim).where(
+                RDBGitWorktreePathClaim.action_execution_id == owner.id
+            )
+        )
+        assert claim is not None
+        claim.lease_until = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+            seconds=1
+        )
+        contender = await action_repository.create(
+            rdb_session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=fixture.session_id,
+                input_buffer_id="01900000000070008000000000000012",
+                sender_user_id=None,
+                action_type="cleanup_orphan_git_worktrees",
+                action={"type": "cleanup_orphan_git_worktrees"},
+                status=ActionExecutionStatus.RUNNING,
+                owner_generation=0,
+            ),
+        )
+
+        result = await repository.try_claim_orphan_git_worktree(
+            rdb_session,
+            runtime_id=fixture.runtime_id,
+            action_execution_id=contender.id,
+            owner_generation=contender.owner_generation,
+            worktree_path=path,
+            discovery_fingerprint="contender-fingerprint",
+        )
+
+        assert result == "cleanup_in_progress"
+
+    async def test_expired_cleanup_claim_with_stale_owner_is_reassigned(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Reclaim an expired manual claim when ownership generation advanced."""
+        workspace_id = await _create_workspace(rdb_session, "swp-svc-stale-claim")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-svc-stale-claim",
+        )
+        action_repository = ActionExecutionRepository()
+        owner = await action_repository.create(
+            rdb_session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=fixture.session_id,
+                input_buffer_id="01900000000070008000000000000013",
+                sender_user_id=None,
+                action_type="cleanup_orphan_git_worktrees",
+                action={"type": "cleanup_orphan_git_worktrees"},
+                status=ActionExecutionStatus.RUNNING,
+                owner_generation=0,
+            ),
+        )
+        repository = SessionWorkspaceProjectRepository()
+        path = "/workspace/agent/.azents/worktrees/orphan/stale"
+        assert (
+            await repository.try_claim_orphan_git_worktree(
+                rdb_session,
+                runtime_id=fixture.runtime_id,
+                action_execution_id=owner.id,
+                owner_generation=owner.owner_generation,
+                worktree_path=path,
+                discovery_fingerprint="owner-fingerprint",
+            )
+            == "claimed"
+        )
+        claim = await rdb_session.scalar(
+            sa.select(RDBGitWorktreePathClaim).where(
+                RDBGitWorktreePathClaim.action_execution_id == owner.id
+            )
+        )
+        assert claim is not None
+        claim.lease_until = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+            seconds=1
+        )
+        agent_session = await rdb_session.get(RDBAgentSession, fixture.session_id)
+        assert agent_session is not None
+        agent_session.owner_generation = 1
+        contender = await action_repository.create(
+            rdb_session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=fixture.session_id,
+                input_buffer_id="01900000000070008000000000000014",
+                sender_user_id=None,
+                action_type="cleanup_orphan_git_worktrees",
+                action={"type": "cleanup_orphan_git_worktrees"},
+                status=ActionExecutionStatus.RUNNING,
+                owner_generation=1,
+            ),
+        )
+
+        result = await repository.try_claim_orphan_git_worktree(
+            rdb_session,
+            runtime_id=fixture.runtime_id,
+            action_execution_id=contender.id,
+            owner_generation=contender.owner_generation,
+            worktree_path=path,
+            discovery_fingerprint="contender-fingerprint",
+        )
+
+        assert result == "claimed"
+        await rdb_session.refresh(claim)
+        assert claim.action_execution_id == contender.id
+        assert claim.owner_generation == contender.owner_generation
+
+    async def test_cancellation_retains_removing_claim_after_action_handover(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Keep a bounded claim while a cancelled Runner removal may still settle."""
+        workspace_id = await _create_workspace(rdb_session, "swp-svc-removing-claim")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-svc-removing-claim",
+        )
+        action_repository = ActionExecutionRepository()
+        execution = await action_repository.create(
+            rdb_session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=fixture.session_id,
+                input_buffer_id="01900000000070008000000000000015",
+                sender_user_id=None,
+                action_type="cleanup_orphan_git_worktrees",
+                action={"type": "cleanup_orphan_git_worktrees"},
+                status=ActionExecutionStatus.RUNNING,
+                owner_generation=0,
+            ),
+        )
+        repository = SessionWorkspaceProjectRepository()
+        path = "/workspace/agent/.azents/worktrees/orphan/removing"
+        assert (
+            await repository.try_claim_orphan_git_worktree(
+                rdb_session,
+                runtime_id=fixture.runtime_id,
+                action_execution_id=execution.id,
+                owner_generation=execution.owner_generation,
+                worktree_path=path,
+                discovery_fingerprint="removing-fingerprint",
+            )
+            == "claimed"
+        )
+        await repository.mark_orphan_git_worktree_claim_removing(
+            rdb_session,
+            action_execution_id=execution.id,
+            worktree_path=path,
+        )
+
+        await repository.release_nonremoving_orphan_git_worktree_claims(
+            rdb_session,
+            action_execution_id=execution.id,
+        )
+        await action_repository.delete_by_id(
+            rdb_session,
+            action_execution_id=execution.id,
+        )
+        claim = await rdb_session.scalar(
+            sa.select(RDBGitWorktreePathClaim).where(
+                RDBGitWorktreePathClaim.worktree_path == path
+            )
+        )
+
+        assert claim is not None
+        assert claim.action_execution_id is None
+        assert claim.state == GitWorktreePathClaimState.REMOVING
+        assert claim.lease_until > datetime.datetime.now(datetime.UTC)
 
     async def test_register_existing_folder_rejects_invalid_path_before_runtime_check(
         self, rdb_session: AsyncSession

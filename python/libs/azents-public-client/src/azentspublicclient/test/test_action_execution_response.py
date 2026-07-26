@@ -40,6 +40,9 @@ class TestActionExecutionResponse(unittest.TestCase):
                 sender_user_id = '',
                 action_type = '',
                 action = None,
+                result = {
+                    'key' : null
+                    },
                 status = '',
                 owner_generation = 56,
                 failure_summary = '',

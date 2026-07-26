@@ -298,6 +298,20 @@ class ActionExecutionRepository:
         await session.refresh(rdb)
         return self._build_execution(rdb)
 
+    async def update_result(
+        self,
+        session: AsyncSession,
+        *,
+        action_execution_id: str,
+        result: dict[str, JSONValue],
+    ) -> ActionExecution:
+        """Persist an action-specific structured result."""
+        rdb = await self._get_required(session, action_execution_id)
+        rdb.result = result
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build_execution(rdb)
+
     async def _lock_action_execution(
         self,
         session: AsyncSession,
@@ -337,6 +351,11 @@ class ActionExecutionRepository:
             sender_user_id=rdb.sender_user_id,
             action_type=rdb.action_type,
             action=_JSON_OBJECT_ADAPTER.validate_python(rdb.action),
+            result=(
+                None
+                if rdb.result is None
+                else _JSON_OBJECT_ADAPTER.validate_python(rdb.result)
+            ),
             status=rdb.status,
             owner_generation=rdb.owner_generation,
             failure_summary=rdb.failure_summary,

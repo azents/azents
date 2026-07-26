@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-07-24
-spec_version: 28
+last_verified_at: 2026-07-26
+spec_version: 29
 ---
 
 # Agent Runtime Control
@@ -217,6 +217,15 @@ non-directory target return `worktree_ownership_ambiguous` without deletion.
 for non-Git paths, invalid refs, collisions, ownership ambiguity, and Git command failures so product
 services can persist bounded setup or cleanup classifications.
 
+`discover_managed_git_worktrees` and `remove_discovered_git_worktree` serve the explicit manual
+orphan-cleanup TurnAction only. Discovery is confined to the current Runtime's Azents worktree root
+and emits bounded identity metadata, including the canonical target, repository anchor, registration
+state, and Git identity fingerprint; it never exposes file contents, diffs, or status paths. Removal
+accepts that discovery identity, repeats registration and fingerprint checks immediately before
+`git worktree remove --force`, rejects target or repository-anchor drift, and never deletes the local
+branch. Runtime Control relays caller cancellation and deadline settlement to the same
+generation-scoped Runner operation before accepting a local terminal timeout or cancellation.
+
 Session archive is the only automatic Session lifecycle boundary that invokes these typed Git
 removal operations. It commits the database archive first and then makes one forced best-effort
 root-tree cleanup attempt. Cleanup failure is logged and recorded without changing archive success or
@@ -288,6 +297,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-26** (spec_version 29) — Added confined managed-worktree discovery and
+  identity-revalidated force removal for the explicit manual orphan-cleanup action, including
+  ordered cancellation and deadline relay.
 - **2026-07-23** (spec_version 26) — Replaced shared Runtime Control token and Secret-based Provider authentication wiring with explicit Provider method dispatch, durable binding authority, Kubernetes TokenReview, Runtime/desired-generation-bound Runner credentials, and secret-free Helm/PVC-preserving rollout boundaries.
 - **2026-07-23** (spec_version 25) — Restricted automatic Session lifecycle Git cleanup to one post-commit best-effort archive attempt and removed Runtime access from retention purge.
 - **2026-07-22** (spec_version 24) — Added content-free Git worktree inspection, branch-fenced removal, terminal missing-target and missing-branch outcomes, and non-destructive ambiguous-target rejection.
