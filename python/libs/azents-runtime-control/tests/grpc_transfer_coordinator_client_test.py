@@ -14,7 +14,9 @@ from google.protobuf.message import Message
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     COORDINATOR_OPERATION_ADMIT_TRANSFER,
     COORDINATOR_OPERATION_DISPATCH_TRANSFER,
+    COORDINATOR_OPERATION_RENEW_CONSUMER_LEASE,
     CoordinatorAdmitTransferRequest,
+    CoordinatorConsumerRequest,
     CoordinatorCredentialRequest,
     CoordinatorDispatchStatus,
     CoordinatorDispatchTransferRequest,
@@ -159,6 +161,15 @@ class FakeCoordinatorStub:
         :returns: status response
         """
         return self._status("ClaimConsumer", request, metadata)
+
+    async def RenewConsumerLease(
+        self,
+        request: Message,
+        *,
+        metadata: Sequence[tuple[str, str]],
+    ) -> Message:
+        """Return a status response."""
+        return self._status("RenewConsumerLease", request, metadata)
 
     async def AcknowledgeConsumer(
         self,
@@ -313,6 +324,36 @@ async def test_client_binds_digest_to_every_request_field() -> None:
     assert all(
         call[2] == (("authorization", "Bearer coordinator-token"),)
         for call in stub.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_client_renews_one_exact_consumer_claim() -> None:
+    """Renewal uses the closed consumer request shape and exact credential scope."""
+    supplier = RecordingCredentialSupplier()
+    stub = FakeCoordinatorStub()
+    client = GrpcRuntimeTransferCoordinatorClient(
+        stub,
+        credential_supplier=supplier,
+        channel=None,
+    )
+
+    status = await client.renew_consumer_lease(
+        CoordinatorConsumerRequest(
+            identity=_identity(),
+            expected_revision=7,
+            consumer_claim_id="consumer-1",
+        )
+    )
+
+    assert status.revision == 1
+    operation, request, metadata = stub.calls[-1]
+    assert operation == "RenewConsumerLease"
+    assert metadata == (("authorization", "Bearer coordinator-token"),)
+    assert supplier.requests[-1] == CoordinatorCredentialRequest(
+        operation=COORDINATOR_OPERATION_RENEW_CONSUMER_LEASE,
+        identity=_identity(),
+        request_sha256=coordinator_request_sha256(request),
     )
 
 

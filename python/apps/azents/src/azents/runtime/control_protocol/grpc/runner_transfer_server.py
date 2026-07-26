@@ -159,6 +159,15 @@ class RuntimeRunnerTransferObjectStore(Protocol):
         """Create one immutable multipart upload."""
         ...
 
+    async def create_preparation_multipart_upload(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        content_type: str | None,
+    ) -> S3MultipartUpload:
+        """Create one digest-unknown temporary multipart upload."""
+        ...
+
     async def upload_part(
         self,
         *,
@@ -178,6 +187,29 @@ class RuntimeRunnerTransferObjectStore(Protocol):
         expected_sha256: str,
     ) -> S3VerifiedObject:
         """Complete and verify one trusted multipart upload."""
+        ...
+
+    async def complete_preparation_multipart_upload(
+        self,
+        *,
+        upload: S3MultipartUpload,
+        completed_parts: tuple[S3CompletedPart, ...],
+        expected_size: int,
+    ) -> object:
+        """Complete one digest-unknown temporary multipart upload."""
+        ...
+
+    async def copy_immutable(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        destination: S3ObjectIdentity,
+        expected_size: int,
+        transfer_metadata: S3TransferObjectMetadata,
+        multipart_copy_threshold: int,
+        multipart_part_size: int,
+    ) -> S3VerifiedObject:
+        """Copy one temporary object into a verified immutable object."""
         ...
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
@@ -201,6 +233,10 @@ class RuntimeRunnerTransferObjectStore(Protocol):
         expected_sha256: str,
     ) -> None:
         """Delete one exact completed attempt object under trusted evidence."""
+        ...
+
+    async def delete(self, bucket: str, key: str) -> None:
+        """Delete one exact temporary object."""
         ...
 
 
@@ -334,6 +370,13 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 )
                 raise AssertionError("unreachable")
             transfer_object = claimed.object
+            if transfer_object.sha256 is None:
+                await self._fail(claimed)
+                await context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "Transfer object manifest is unavailable",
+                )
+                raise AssertionError("unreachable")
             identity = self._object_identity(transfer_object.key)
             try:
                 await self._object_store.verify_transfer_object(
@@ -572,10 +615,12 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 )
                 raise AssertionError("unreachable")
             identity = self._object_identity(transfer_object.key)
-            metadata = S3TransferObjectMetadata(
-                sha256=transfer_object.sha256,
-                content_type=None,
+            verified_object_handle = (
+                transfer_object.key
+                if transfer_object.sha256 is not None
+                else _verified_upload_object_handle(transfer_object.key)
             )
+            verified_identity = self._object_identity(verified_object_handle)
             offset = 0
             digest = hashlib.sha256()
             parts: list[S3CompletedPart] = []
@@ -628,10 +673,19 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                         )
                         raise AssertionError("unreachable")
                     if transfer_object.size > 0 and upload is None:
-                        upload = await self._object_store.create_multipart_upload(
-                            destination=identity,
-                            transfer_metadata=metadata,
-                        )
+                        if transfer_object.sha256 is None:
+                            upload = await self._object_store.create_preparation_multipart_upload(
+                                destination=identity,
+                                content_type=None,
+                            )
+                        else:
+                            upload = await self._object_store.create_multipart_upload(
+                                destination=identity,
+                                transfer_metadata=S3TransferObjectMetadata(
+                                    sha256=transfer_object.sha256,
+                                    content_type=None,
+                                ),
+                            )
                         handled = await self._state_store.record_multipart_cleanup_handle(
                             latest.admission.transfer_id,
                             attempt_id=latest.admission.attempt_id,
@@ -705,7 +759,10 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                         completion.actual_size != offset
                         or completion.sha256 != digest.hexdigest()
                         or offset != transfer_object.size
-                        or digest.hexdigest() != transfer_object.sha256
+                        or (
+                            transfer_object.sha256 is not None
+                            and digest.hexdigest() != transfer_object.sha256
+                        )
                     ):
                         await self._fail(
                             latest, failure=RuntimeTransferFailure.INTEGRITY
@@ -735,8 +792,9 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 context=context,
                 keeper=keeper,
                 transfer_object=transfer_object,
-                identity=identity,
-                metadata=metadata,
+                staging_identity=identity,
+                verified_identity=verified_identity,
+                verified_object_handle=verified_object_handle,
                 upload=upload,
                 parts=parts,
                 final_buffer=bytes(buffer),
@@ -1188,8 +1246,9 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         context: grpc.aio.ServicerContext[object, object],
         keeper: _StreamLeaseKeeper,
         transfer_object: RuntimeTransferObject,
-        identity: S3ObjectIdentity,
-        metadata: S3TransferObjectMetadata,
+        staging_identity: S3ObjectIdentity,
+        verified_identity: S3ObjectIdentity,
+        verified_object_handle: str,
         upload: S3MultipartUpload | None,
         parts: list[S3CompletedPart],
         final_buffer: bytes,
@@ -1231,7 +1290,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 upload=upload,
                 multipart_cleanup_required=upload is not None,
                 completed_object_cleanup_required=False,
-                identity=identity,
+                identity=staging_identity,
             )
             await self._settle_lost_upload_authority(cleaned)
             await context.abort(
@@ -1242,18 +1301,33 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         latest = responsibility
         try:
             if transfer_object.size == 0:
+                if transfer_object.sha256 is None:
+                    latest = await self._reserve_unknown_upload_final_object(
+                        latest,
+                        verified_object_handle=verified_object_handle,
+                    )
                 await self._object_store.create_empty_immutable(
-                    destination=identity,
-                    transfer_metadata=metadata,
+                    destination=verified_identity,
+                    transfer_metadata=S3TransferObjectMetadata(
+                        sha256=actual_sha256,
+                        content_type=None,
+                    ),
                 )
             else:
                 assert upload is not None
-                await self._object_store.complete_multipart_upload(
-                    upload=upload,
-                    completed_parts=tuple(parts),
-                    expected_size=actual_size,
-                    expected_sha256=actual_sha256,
-                )
+                if transfer_object.sha256 is None:
+                    await self._object_store.complete_preparation_multipart_upload(
+                        upload=upload,
+                        completed_parts=tuple(parts),
+                        expected_size=actual_size,
+                    )
+                else:
+                    await self._object_store.complete_multipart_upload(
+                        upload=upload,
+                        completed_parts=tuple(parts),
+                        expected_size=actual_size,
+                        expected_sha256=actual_sha256,
+                    )
         except (S3TransferCancelled, S3TransferCleanupRequired) as exc:
             retained = await self._state_store.record_completed_object_cleanup(
                 latest.admission.transfer_id,
@@ -1284,7 +1358,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     upload=upload,
                     multipart_cleanup_required=True,
                     completed_object_cleanup_required=True,
-                    identity=identity,
+                    identity=staging_identity,
                 )
                 await self._settle_lost_upload_authority(cleaned)
                 await context.abort(
@@ -1293,6 +1367,26 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 )
                 raise AssertionError("unreachable")
             latest = completed_only
+        if transfer_object.sha256 is None and transfer_object.size > 0:
+            latest = await self._reserve_unknown_upload_final_object(
+                latest,
+                verified_object_handle=verified_object_handle,
+            )
+            await self._object_store.copy_immutable(
+                source=staging_identity,
+                destination=verified_identity,
+                expected_size=actual_size,
+                transfer_metadata=S3TransferObjectMetadata(
+                    sha256=actual_sha256,
+                    content_type=None,
+                ),
+                multipart_copy_threshold=self._multipart_part_bytes,
+                multipart_part_size=self._multipart_part_bytes,
+            )
+            await self._object_store.delete(
+                bucket=staging_identity.bucket,
+                key=staging_identity.key,
+            )
         await keeper.stop()
         verifying = await self._state_store.begin_verification(
             latest.admission.transfer_id,
@@ -1345,7 +1439,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             upload=upload,
             multipart_cleanup_required=False,
             completed_object_cleanup_required=True,
-            identity=identity,
+            identity=verified_identity,
         )
         await self._settle_lost_upload_authority(cleaned)
         await context.abort(
@@ -1353,6 +1447,26 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             "Transfer upload response lost authority",
         )
         raise AssertionError("unreachable")
+
+    async def _reserve_unknown_upload_final_object(
+        self,
+        record: RuntimeTransferRecord,
+        *,
+        verified_object_handle: str,
+    ) -> RuntimeTransferRecord:
+        """Persist final-object cleanup authority before a native promotion copy."""
+        reserved = await self._state_store.record_pre_ready_object(
+            record.admission.transfer_id,
+            attempt_id=record.admission.attempt_id,
+            accepted_runner_generation=record.accepted_runner_generation or 0,
+            expected_revision=record.revision,
+            claim_id=record.stream_claim_id or "",
+            owner_replica_id=self._owner_replica_id,
+            object_handle=verified_object_handle,
+        )
+        if reserved is None:
+            raise RuntimeError("Transfer final-object reservation is fenced")
+        return reserved
 
     async def _upload_part(
         self,
@@ -1440,11 +1554,17 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             try:
                 if record.object is None:
                     raise ValueError("Completed object metadata is unavailable")
-                await self._object_store.delete_verified_transfer_object(
-                    identity=identity,
-                    expected_size=record.object.size,
-                    expected_sha256=record.object.sha256,
-                )
+                if record.object.sha256 is None:
+                    await self._object_store.delete(
+                        bucket=identity.bucket,
+                        key=identity.key,
+                    )
+                else:
+                    await self._object_store.delete_verified_transfer_object(
+                        identity=identity,
+                        expected_size=record.object.size,
+                        expected_sha256=record.object.sha256,
+                    )
             except Exception:
                 pass
             else:
@@ -1620,6 +1740,11 @@ def _claim_id() -> str:
 
 def _multipart_part_count(size: int, multipart_part_bytes: int) -> int:
     return (size + multipart_part_bytes - 1) // multipart_part_bytes
+
+
+def _verified_upload_object_handle(staging_handle: str) -> str:
+    """Return the state-owned immutable handle for one unknown-digest upload."""
+    return f"{staging_handle}:verified"
 
 
 def _is_abort_exception(exc: Exception) -> bool:

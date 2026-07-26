@@ -629,7 +629,7 @@ def _optional_object_from_value(value: object) -> RuntimeTransferObject | None:
     return RuntimeTransferObject(
         key=_require_string(object["key"], "object.key"),
         size=_require_int(object["size"], "object.size"),
-        sha256=_require_string(object["sha256"], "object.sha256"),
+        sha256=_optional_string(object["sha256"], "object.sha256"),
     )
 
 
@@ -1655,6 +1655,55 @@ class RedisRuntimeTransferStateStore:
             required_claim_id=claim_id,
         )
 
+    async def record_pre_ready_object(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+        object_handle: str,
+    ) -> RuntimeTransferRecord | None:
+        """Persist an upload final-object cleanup reservation before native copy."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            ) or (
+                envelope is not None
+                and (
+                    envelope.record.admission.direction
+                    is not RuntimeTransferDirection.UPLOAD
+                    or envelope.record.stream_owner_replica_id != owner_replica_id
+                    or envelope.record.pre_ready_object_handle is not None
+                )
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            updated = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                pre_ready_object_handle=object_handle,
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
+
     async def publish_available(
         self,
         transfer_id: str,
@@ -1948,6 +1997,49 @@ class RedisRuntimeTransferStateStore:
             entries[key] = dataclasses.replace(envelope, record=record)
             await self._commit(token, entries, now)
             return record
+
+    async def renew_consumer_lease(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Renew one revision-fenced live consumer claim."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            if not await self._active_matches(
+                transfer_id,
+                key,
+                envelope,
+                expected_revision,
+                RuntimeTransferPhase.CONSUMING,
+                now,
+            ) or (
+                envelope is not None
+                and (
+                    envelope.record.consumer_claim_id != claim_id
+                    or envelope.record.consumer_lease_expires_at is None
+                    or envelope.record.consumer_lease_expires_at <= now
+                )
+            ):
+                await self._commit(token, entries, now)
+                return None
+            assert key is not None and envelope is not None
+            updated = dataclasses.replace(
+                envelope.record,
+                revision=envelope.record.revision + 1,
+                updated_at=now,
+                consumer_lease_expires_at=now + self.config.consumer_lease,
+            )
+            entries[key] = dataclasses.replace(envelope, record=updated)
+            await self._commit(token, entries, now)
+            return updated
 
     async def acknowledge_consumer(
         self,
@@ -2579,7 +2671,10 @@ class RedisRuntimeTransferStateStore:
                     actual_size != envelope.record.admission.expected_size
                     or envelope.record.object is None
                     or actual_size != envelope.record.object.size
-                    or actual_sha256 != envelope.record.object.sha256
+                    or (
+                        envelope.record.object.sha256 is not None
+                        and actual_sha256 != envelope.record.object.sha256
+                    )
                     or (
                         envelope.record.admission.expected_sha256 is not None
                         and actual_sha256 != envelope.record.admission.expected_sha256
@@ -2594,6 +2689,7 @@ class RedisRuntimeTransferStateStore:
                 await self._commit(token, entries, now)
                 return None
             assert key is not None and envelope is not None
+            assert envelope.record.object is not None
             record = dataclasses.replace(
                 envelope.record,
                 phase=target,
@@ -2601,7 +2697,16 @@ class RedisRuntimeTransferStateStore:
                 updated_at=now,
                 actual_size=actual_size,
                 actual_sha256=actual_sha256,
+                object=RuntimeTransferObject(
+                    key=(
+                        envelope.record.pre_ready_object_handle
+                        or envelope.record.object.key
+                    ),
+                    size=actual_size,
+                    sha256=actual_sha256,
+                ),
                 multipart_cleanup_handle=None,
+                pre_ready_object_handle=None,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
             await self._commit(token, entries, now)

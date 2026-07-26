@@ -182,7 +182,7 @@ class RuntimeTransferObject:
 
     key: str
     size: int
-    sha256: str
+    sha256: str | None
 
     def __post_init__(self) -> None:
         _required(self.key, "key")
@@ -350,6 +350,23 @@ class RuntimeTransferRecord:
             raise ValueError(
                 "completed object cleanup requires retryable object evidence"
             )
+        if (
+            self.admission.direction is RuntimeTransferDirection.DOWNLOAD
+            and self.object is not None
+            and self.object.sha256 is None
+        ):
+            raise ValueError("download transfer objects require a SHA-256")
+        if (
+            self.phase
+            in {
+                RuntimeTransferPhase.AVAILABLE,
+                RuntimeTransferPhase.CONSUMING,
+                RuntimeTransferPhase.CONSUMED,
+            }
+            and self.object is not None
+            and self.object.sha256 is None
+        ):
+            raise ValueError("available transfer objects require a SHA-256")
         if self.upload_response_committed_at is not None:
             _aware(
                 self.upload_response_committed_at,

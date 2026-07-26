@@ -158,6 +158,51 @@ async def test_authenticated_transitions_preserve_state_and_dispatch_metadata() 
         await server.stop(None)
 
 
+@pytest.mark.asyncio
+async def test_upload_ready_allows_unknown_expected_digest() -> None:
+    """Upload readiness preserves absent SHA-256 until Runtime verification."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=None,
+        clock=lambda: _NOW,
+    )
+    server, channel, stub, supplier = await _server(coordinator)
+    try:
+        identity = _identity()
+        identity.direction = pb.COORDINATOR_TRANSFER_DIRECTION_UPLOAD
+        admit_request = _admit_request(identity=identity, sha256=None)
+        admitted = await stub.AdmitTransfer(
+            admit_request,
+            metadata=await _metadata(
+                supplier,
+                COORDINATOR_OPERATION_ADMIT_TRANSFER,
+                admit_request,
+            ),
+        )
+        ready_request = pb.MarkTransferReadyRequest(
+            identity=identity,
+            expected_revision=admitted.status.revision,
+            object_handle=admitted.admitted_object_handle,
+            object_manifest=pb.ObjectManifest(size=3),
+        )
+        ready = await stub.MarkTransferReady(
+            ready_request,
+            metadata=await _metadata(
+                supplier,
+                COORDINATOR_OPERATION_MARK_TRANSFER_READY,
+                ready_request,
+            ),
+        )
+
+        assert ready.status.phase == pb.COORDINATOR_TRANSFER_PHASE_READY
+        assert not ready.status.HasField("actual_manifest")
+    finally:
+        await channel.close()
+        await server.stop(None)
+
+
 class _TrackingTransferStateStore(InMemoryRuntimeTransferStateStore):
     """In-memory state store that records read attempts."""
 
@@ -245,22 +290,29 @@ async def _metadata(
     operation: str,
     request: pb.AdmitTransferRequest
     | pb.MarkTransferReadyRequest
-    | pb.DispatchTransferRequest,
+    | pb.DispatchTransferRequest
+    | pb.RenewConsumerLeaseRequest,
 ) -> tuple[tuple[str, str], ...]:
     credential_request = coordinator_credential_request(operation, request)
     credential = await supplier.issue(credential_request)
     return (("authorization", f"Bearer {credential}"),)
 
 
-def _admit_request() -> pb.AdmitTransferRequest:
+def _admit_request(
+    *,
+    identity: pb.CoordinatorTransferIdentity | None = None,
+    sha256: str | None = "a" * 64,
+) -> pb.AdmitTransferRequest:
     request = pb.AdmitTransferRequest(
-        identity=_identity(),
+        identity=identity or _identity(),
         lease_id="lease-1",
         runtime_path="/workspace/file.txt",
-        expected_manifest=pb.ExpectedManifest(size=3, sha256="a" * 64),
+        expected_manifest=pb.ExpectedManifest(size=3),
         deadline_at=_timestamp(_NOW + timedelta(minutes=5)),
         resource_class="file",
     )
+    if sha256 is not None:
+        request.expected_manifest.sha256 = sha256
     request.overwrite = False
     request.product_maximum_size = 10
     request.provider_maximum_size = 10

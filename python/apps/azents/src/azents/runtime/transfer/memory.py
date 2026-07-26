@@ -608,6 +608,45 @@ class InMemoryRuntimeTransferStateStore:
                 )
             )
 
+    async def record_pre_ready_object(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+        object_handle: str,
+    ) -> RuntimeTransferRecord | None:
+        """Persist an upload final-object cleanup reservation before native copy."""
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            )
+            if (
+                record is None
+                or record.admission.direction is not RuntimeTransferDirection.UPLOAD
+                or record.stream_owner_replica_id != owner_replica_id
+                or record.pre_ready_object_handle is not None
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    pre_ready_object_handle=object_handle,
+                )
+            )
+
     async def list_stale_stream_claims(
         self, *, cursor: str | None, limit: int
     ) -> RuntimeTransferPage:
@@ -1022,6 +1061,40 @@ class InMemoryRuntimeTransferStateStore:
                 consumer_lease_expires_at=now + self.config.consumer_lease,
             )
             return self._put(moved)
+
+    async def renew_consumer_lease(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None:
+        """Renew one revision-fenced live consumer claim."""
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.CONSUMING,
+                now,
+            )
+            if (
+                record is None
+                or record.consumer_claim_id != claim_id
+                or record.consumer_lease_expires_at is None
+                or record.consumer_lease_expires_at <= now
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    consumer_lease_expires_at=now + self.config.consumer_lease,
+                )
+            )
 
     async def acknowledge_consumer(
         self,
@@ -1485,7 +1558,10 @@ class InMemoryRuntimeTransferStateStore:
                 or actual_size != record.admission.expected_size
                 or record.object is None
                 or actual_size != record.object.size
-                or actual_sha256 != record.object.sha256
+                or (
+                    record.object.sha256 is not None
+                    and actual_sha256 != record.object.sha256
+                )
                 or (
                     record.admission.expected_sha256 is not None
                     and actual_sha256 != record.admission.expected_sha256
@@ -1503,7 +1579,13 @@ class InMemoryRuntimeTransferStateStore:
                     updated_at=now,
                     actual_size=actual_size,
                     actual_sha256=actual_sha256,
+                    object=RuntimeTransferObject(
+                        key=record.pre_ready_object_handle or record.object.key,
+                        size=actual_size,
+                        sha256=actual_sha256,
+                    ),
                     multipart_cleanup_handle=None,
+                    pre_ready_object_handle=None,
                 )
             )
 

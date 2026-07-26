@@ -108,11 +108,17 @@ class RuntimeTransferS3Cleanup:
                     "Stale transfer object cleanup evidence is unavailable"
                 )
             try:
-                await self._object_store.delete_verified_transfer_object(
-                    identity=identity,
-                    expected_size=object.size,
-                    expected_sha256=object.sha256,
-                )
+                if object.sha256 is None:
+                    await self._object_store.delete(
+                        bucket=identity.bucket,
+                        key=identity.key,
+                    )
+                else:
+                    await self._object_store.delete_verified_transfer_object(
+                        identity=identity,
+                        expected_size=object.size,
+                        expected_sha256=object.sha256,
+                    )
             except BaseException as exc:
                 if error is None:
                     error = exc

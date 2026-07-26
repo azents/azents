@@ -23,6 +23,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
     RuntimeTransferCleanupStatus,
+    RuntimeTransferDirection,
     RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
@@ -109,18 +110,23 @@ class RuntimeTransferCoordinator:
         expected_revision: int,
         object_handle: str,
         size: int,
-        sha256: str,
+        sha256: str | None,
     ) -> RuntimeTransferRecord | None:
         """Mark an admitted attempt ready with its deterministic opaque handle.
 
         :param record: transfer attempt selected by trusted identity
         :param expected_revision: optimistic state revision
         :param object_handle: deterministic opaque attempt handle
-        :param size: verified object size
-        :param sha256: verified object SHA-256
+        :param size: expected object size
+        :param sha256: expected object SHA-256, when known before upload
         :returns: updated record, or None when transition is invalid
         """
         if object_handle != object_handle_for(record):
+            return None
+        if (
+            record.admission.direction is RuntimeTransferDirection.DOWNLOAD
+            and sha256 is None
+        ):
             return None
         return await self._state_store.mark_ready(
             record.admission.transfer_id,

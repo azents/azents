@@ -34,6 +34,9 @@ COORDINATOR_OPERATION_GET_VERIFIED_OBJECT = (
     "RuntimeTransferCoordinator/GetVerifiedObject"
 )
 COORDINATOR_OPERATION_CLAIM_CONSUMER = "RuntimeTransferCoordinator/ClaimConsumer"
+COORDINATOR_OPERATION_RENEW_CONSUMER_LEASE = (
+    "RuntimeTransferCoordinator/RenewConsumerLease"
+)
 COORDINATOR_OPERATION_ACKNOWLEDGE_CONSUMER = (
     "RuntimeTransferCoordinator/AcknowledgeConsumer"
 )
@@ -147,17 +150,17 @@ class CoordinatorExpectedManifest:
 
 @dataclass(frozen=True)
 class CoordinatorObjectManifest:
-    """Verified metadata for a transfer object."""
+    """Metadata for a transfer object before or after verification."""
 
     size: int | None
-    sha256: str
+    sha256: str | None
 
     def __post_init__(self) -> None:
-        """Validate one complete verified manifest."""
+        """Validate one bounded object manifest."""
         if self.size is None:
             raise ValueError("Object manifest size is required")
         _optional_size(self.size)
-        _sha256(self.sha256)
+        _optional_sha256(self.sha256)
 
 
 @dataclass(frozen=True)
@@ -446,6 +449,7 @@ class RuntimeTransferCoordinatorStub(Protocol):
     CancelTransfer: CoordinatorUnaryUnaryCall
     GetVerifiedObject: CoordinatorUnaryUnaryCall
     ClaimConsumer: CoordinatorUnaryUnaryCall
+    RenewConsumerLease: CoordinatorUnaryUnaryCall
     AcknowledgeConsumer: CoordinatorUnaryUnaryCall
     AbandonConsumer: CoordinatorUnaryUnaryCall
     SettleTransfer: CoordinatorUnaryUnaryCall
@@ -624,6 +628,24 @@ class GrpcRuntimeTransferCoordinatorClient:
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_CLAIM_CONSUMER,
+                message,
+            ),
+        )
+        return transfer_status_response_from_message(response)
+
+    async def renew_consumer_lease(
+        self,
+        request: CoordinatorConsumerRequest,
+    ) -> CoordinatorTransferStatus:
+        """Renew one exact live consumer claim."""
+        message = consumer_request_to_message(
+            request,
+            request_type=runtime_transfer_coordinator_pb2.RenewConsumerLeaseRequest,
+        )
+        response = await self._stub.RenewConsumerLease(
+            message,
+            metadata=await self._metadata(
+                COORDINATOR_OPERATION_RENEW_CONSUMER_LEASE,
                 message,
             ),
         )
@@ -899,9 +921,11 @@ def object_manifest_to_message(
     :param value: verified transfer object metadata
     :returns: protobuf object manifest
     """
-    message = runtime_transfer_coordinator_pb2.ObjectManifest(sha256=value.sha256)
+    message = runtime_transfer_coordinator_pb2.ObjectManifest()
     if value.size is not None:
         message.size = value.size
+    if value.sha256 is not None:
+        message.sha256 = value.sha256
     return message
 
 
@@ -915,7 +939,7 @@ def object_manifest_from_message(
     """
     return CoordinatorObjectManifest(
         size=message.size if message.HasField("size") else None,
-        sha256=message.sha256,
+        sha256=message.sha256 if message.HasField("sha256") else None,
     )
 
 

@@ -120,12 +120,17 @@ class RuntimeTransferCoordinatorGrpcServicer(
             manifest = request.object_manifest
             if not manifest.HasField("size"):
                 raise ValueError("Object manifest size is required")
+            if (
+                record.admission.direction is RuntimeTransferDirection.DOWNLOAD
+                and not manifest.HasField("sha256")
+            ):
+                raise ValueError("Download object manifest SHA-256 is required")
             updated = await self._coordinator.mark_ready(
                 record,
                 expected_revision=request.expected_revision,
                 object_handle=request.object_handle.value,
                 size=manifest.size,
-                sha256=manifest.sha256,
+                sha256=(manifest.sha256 if manifest.HasField("sha256") else None),
             )
         except ValueError as exc:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
@@ -245,6 +250,28 @@ class RuntimeTransferCoordinatorGrpcServicer(
         record = await self._record(context, request.identity)
         await _validate_consumer_request(context, request)
         updated = await self._coordinator.state_store.claim_consumer(
+            record.admission.transfer_id,
+            attempt_id=record.admission.attempt_id,
+            expected_revision=request.expected_revision,
+            claim_id=request.consumer_claim_id,
+        )
+        return await _status_response_or_abort(context, updated)
+
+    async def RenewConsumerLease(
+        self,
+        request: pb.RenewConsumerLeaseRequest,
+        context: grpc.aio.ServicerContext[
+            pb.RenewConsumerLeaseRequest,
+            pb.TransferStatusResponse,
+        ],
+    ) -> pb.TransferStatusResponse:
+        """Renew one live revision-fenced consumer claim."""
+        await self._authenticate(
+            context, "RuntimeTransferCoordinator/RenewConsumerLease", request
+        )
+        record = await self._record(context, request.identity)
+        await _validate_consumer_request(context, request)
+        updated = await self._coordinator.state_store.renew_consumer_lease(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             expected_revision=request.expected_revision,
@@ -631,7 +658,7 @@ def _status_message(
         message.accepted_runner_generation = record.accepted_runner_generation
     if record.dispatch_id is not None:
         message.dispatch_id = record.dispatch_id
-    if record.object is not None:
+    if record.object is not None and record.object.sha256 is not None:
         message.actual_manifest.size = record.actual_size or record.object.size
         message.actual_manifest.sha256 = record.actual_sha256 or record.object.sha256
     if record.terminal_outcome is not None:

@@ -115,6 +115,9 @@ class _ObjectStore:
         self.verify_calls = 0
         self.closed = False
         self.multipart_creates = 0
+        self.preparation_multipart_creates = 0
+        self.preparation_completes = 0
+        self.copy_calls: list[tuple[S3ObjectIdentity, S3ObjectIdentity]] = []
         self.uploaded_parts: list[tuple[int, bytes]] = []
         self.completed_parts: tuple[S3CompletedPart, ...] | None = None
         self.abort_calls = 0
@@ -166,6 +169,16 @@ class _ObjectStore:
         self.multipart_creates += 1
         return S3MultipartUpload(identity=destination, upload_id="multipart-1")
 
+    async def create_preparation_multipart_upload(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        content_type: str | None,
+    ) -> S3MultipartUpload:
+        del content_type
+        self.preparation_multipart_creates += 1
+        return S3MultipartUpload(identity=destination, upload_id="preparation-1")
+
     async def upload_part(
         self,
         *,
@@ -189,6 +202,39 @@ class _ObjectStore:
         self.completed_parts = completed_parts
         if self.complete_error:
             raise RuntimeError("complete failed")
+        return object()  # type: ignore[return-value]
+
+    async def complete_preparation_multipart_upload(
+        self,
+        *,
+        upload: S3MultipartUpload,
+        completed_parts: tuple[S3CompletedPart, ...],
+        expected_size: int,
+    ) -> object:
+        del upload, expected_size
+        self.preparation_completes += 1
+        self.completed_parts = completed_parts
+        if self.complete_error:
+            raise RuntimeError("complete failed")
+        return object()
+
+    async def copy_immutable(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        destination: S3ObjectIdentity,
+        expected_size: int,
+        transfer_metadata: S3TransferObjectMetadata,
+        multipart_copy_threshold: int,
+        multipart_part_size: int,
+    ) -> S3VerifiedObject:
+        del (
+            expected_size,
+            transfer_metadata,
+            multipart_copy_threshold,
+            multipart_part_size,
+        )
+        self.copy_calls.append((source, destination))
         return object()  # type: ignore[return-value]
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
@@ -215,6 +261,10 @@ class _ObjectStore:
         expected_sha256: str,
     ) -> None:
         del identity, expected_size, expected_sha256
+        self.delete_calls += 1
+
+    async def delete(self, bucket: str, key: str) -> None:
+        del bucket, key
         self.delete_calls += 1
 
 
@@ -441,6 +491,36 @@ async def test_zero_byte_upload_uses_verified_empty_object_path() -> None:
     assert result.sha256 == empty_sha256
     assert harness.object_store.empty_creates == 1
     assert harness.object_store.multipart_creates == 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_digest_upload_promotes_preparation_object_after_verification() -> (
+    None
+):
+    """Upload accepts an unknown expected digest and publishes actual evidence."""
+    data = b"abc"
+    digest = hashlib.sha256(data).hexdigest()
+    harness = await _harness(
+        chunks=[],
+        size=len(data),
+        sha256=None,
+        direction=RuntimeTransferDirection.UPLOAD,
+    )
+
+    result = await harness.servicer.UploadTransfer(_upload_frames(data), _Context())
+
+    assert result.status == pb.UPLOAD_TRANSFER_STATUS_SUCCEEDED
+    assert result.sha256 == digest
+    assert harness.object_store.preparation_multipart_creates == 1
+    assert harness.object_store.preparation_completes == 1
+    assert len(harness.object_store.copy_calls) == 1
+    record = await harness.state.get("transfer-1")
+    assert record is not None
+    assert record.phase is RuntimeTransferPhase.AVAILABLE
+    assert record.object is not None
+    assert record.object.sha256 == digest
+    assert record.actual_sha256 == digest
+    assert record.pre_ready_object_handle is None
 
 
 @pytest.mark.asyncio
@@ -897,7 +977,7 @@ async def _harness(
     *,
     chunks: list[bytes],
     size: int = 3,
-    sha256: str = _DIGEST,
+    sha256: str | None = _DIGEST,
     direction: RuntimeTransferDirection = RuntimeTransferDirection.DOWNLOAD,
     desired_generation: int = 1,
     connection_registrations: int = 1,
@@ -1030,7 +1110,7 @@ def _upload_frames(*chunks: bytes) -> AsyncIterator[pb.UploadTransferFrame]:
 def _admission(
     direction: RuntimeTransferDirection,
     size: int,
-    sha256: str,
+    sha256: str | None,
     desired_generation: int,
 ) -> RuntimeTransferAdmission:
     return RuntimeTransferAdmission(

@@ -1265,10 +1265,29 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
     consuming = winners[0]
     assert consuming.consumer_claim_id in {"consumer-one", "consumer-two"}
     assert (
+        await store_harness.store.renew_consumer_lease(
+            "upload",
+            attempt_id="attempt",
+            expected_revision=consuming.revision - 1,
+            claim_id=consuming.consumer_claim_id or "",
+        )
+        is None
+    )
+    renewed = await store_harness.store.renew_consumer_lease(
+        "upload",
+        attempt_id="attempt",
+        expected_revision=consuming.revision,
+        claim_id=consuming.consumer_claim_id or "",
+    )
+    assert renewed is not None
+    assert renewed.consumer_lease_expires_at == (
+        store_harness.clock.now + store_harness.config.consumer_lease
+    )
+    assert (
         await store_harness.store.acknowledge_consumer(
             "upload",
             attempt_id="attempt",
-            expected_revision=consuming.revision,
+            expected_revision=renewed.revision,
             claim_id="wrong-consumer",
         )
         is None
@@ -1277,16 +1296,16 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
         await store_harness.store.acknowledge_consumer(
             "upload",
             attempt_id="attempt",
-            expected_revision=consuming.revision + 1,
-            claim_id=consuming.consumer_claim_id or "",
+            expected_revision=renewed.revision + 1,
+            claim_id=renewed.consumer_claim_id or "",
         )
         is None
     )
     abandoned = await store_harness.store.abandon_consumer(
         "upload",
         attempt_id="attempt",
-        expected_revision=consuming.revision,
-        claim_id=consuming.consumer_claim_id or "",
+        expected_revision=renewed.revision,
+        claim_id=renewed.consumer_claim_id or "",
     )
     assert abandoned is not None
     assert abandoned.phase is RuntimeTransferPhase.AVAILABLE
@@ -1542,6 +1561,79 @@ async def test_verified_object_requires_current_live_uncancelled_consumer_claim(
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_unknown_digest_upload_becomes_available_only_with_actual_manifest(
+    store_harness: _StoreHarness,
+) -> None:
+    """Both stores fence unknown-digest staging until actual verification succeeds."""
+    admitted = await store_harness.store.admit(
+        replace(
+            _admission(),
+            transfer_id="unknown-digest",
+            expected_sha256=None,
+        ),
+        lease_id="unknown-digest-lease",
+    )
+    assert admitted is not None
+    ready = await store_harness.store.mark_ready(
+        "unknown-digest",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("staging-object", 1, None),
+    )
+    assert ready is not None
+    streaming = await _claim_stream(
+        store_harness.store,
+        "unknown-digest",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        claim_id="unknown-digest-stream",
+    )
+    assert streaming is not None
+    reserved = await store_harness.store.record_pre_ready_object(
+        "unknown-digest",
+        attempt_id="attempt",
+        accepted_runner_generation=2,
+        expected_revision=streaming.revision,
+        claim_id="unknown-digest-stream",
+        owner_replica_id="test-replica",
+        object_handle="verified-object",
+    )
+    assert reserved is not None
+    verifying = await store_harness.store.begin_verification(
+        "unknown-digest",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="unknown-digest-stream",
+        expected_revision=reserved.revision,
+    )
+    assert verifying is not None
+    available = await store_harness.store.publish_available(
+        "unknown-digest",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="unknown-digest-stream",
+        expected_revision=verifying.revision,
+        actual_size=1,
+        actual_sha256="a" * 64,
+    )
+
+    assert available is not None
+    assert available.phase is RuntimeTransferPhase.AVAILABLE
+    assert available.object == RuntimeTransferObject("verified-object", 1, "a" * 64)
+    assert available.actual_sha256 == "a" * 64
+    assert available.pre_ready_object_handle is None
 
 
 @pytest.mark.asyncio
