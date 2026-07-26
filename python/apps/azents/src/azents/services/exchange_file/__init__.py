@@ -1224,13 +1224,13 @@ class ExchangeFileService:
                 if publication.created:
                     completed.append(file)
             elif file.body is not None:
+                completed.append(file)
                 await self.s3_service.upload(
                     bucket=self.config.workspace_s3.bucket,
                     key=file.object_key,
                     body=file.body,
                     content_type=file.create.media_type,
                 )
-                completed.append(file)
             else:
                 raise ValueError("Prepared ExchangeFile has no publishable source")
         return source_created_by_invocation

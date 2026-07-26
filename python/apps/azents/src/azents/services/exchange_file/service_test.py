@@ -292,6 +292,8 @@ class _FakeS3Service:
     def __init__(self, session_boundary: "_SessionBoundary") -> None:
         self.objects: dict[str, bytes] = {}
         self.fail_delete = False
+        self.raise_after_upload = False
+        self.uploaded_keys: list[str] = []
         self.product_copy_calls: list[
             tuple[S3ObjectIdentity, S3ObjectIdentity, int, S3ProductPublicationMetadata]
         ] = []
@@ -313,6 +315,9 @@ class _FakeS3Service:
         del bucket, content_type
         assert self.session_boundary.active == 0
         self.objects[key] = body
+        self.uploaded_keys.append(key)
+        if self.raise_after_upload:
+            raise OSError("upload response lost")
 
     async def download_bytes(self, bucket: str, key: str) -> bytes | None:
         """Fetch object bytes."""
@@ -702,6 +707,49 @@ async def test_authority_recovers_committed_verified_publication_without_copy() 
     assert isinstance(recovered, Success)
     assert recovered.value == created.value
     assert len(s3_service.product_copy_calls) == 1
+    assert s3_service.product_cleanup_calls == []
+
+
+@pytest.mark.asyncio
+async def test_authority_thumbnail_response_loss_cleans_registered_thumbnail_only() -> (
+    None
+):
+    """A thumbnail stored before its failed response is not left orphaned."""
+    service, repository, s3_service = _make_authority_service(authority_results=[True])
+    source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-image")
+    body = _jpeg_bytes()
+    s3_service.objects[source.key] = body
+    s3_service.raise_after_upload = True
+    authority = SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="root-session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=0,
+    )
+
+    with pytest.raises(OSError, match="upload response lost"):
+        await service.create_from_verified_object_for_authority(
+            authority=authority,
+            source=source,
+            size_bytes=len(body),
+            sha256=hashlib.sha256(body).hexdigest(),
+            publication_id="exchange-publication",
+            provenance_kind=ExchangeFileProvenanceKind.TOOL,
+            source_tool_name="present_file",
+            source_provider=None,
+            filename="image.jpg",
+            media_type="image/jpeg",
+        )
+
+    assert repository.files == {}
+    assert len(s3_service.product_copy_calls) == 1
+    original_key = s3_service.product_copy_calls[0][1].key
+    assert original_key in s3_service.objects
+    assert len(s3_service.uploaded_keys) == 1
+    assert s3_service.uploaded_keys[0] not in s3_service.objects
     assert s3_service.product_cleanup_calls == []
 
 
