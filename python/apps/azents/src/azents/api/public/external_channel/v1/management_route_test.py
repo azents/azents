@@ -32,6 +32,10 @@ from azents.repos.external_channel.management_data import (
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionStateChanged,
 )
+from azents.services.external_channel.data import (
+    ExternalChannelConnectionStatusSnapshot,
+    ExternalChannelCredentialSnapshot,
+)
 from azents.services.external_channel.management import (
     ExternalChannelManagementGenerationChanged,
     ExternalChannelManagementNotFound,
@@ -84,6 +88,22 @@ def _multi_connection() -> ManagedMultiConnection:
         generation=datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC),
         active_agent_count=2,
         configured_default_count=1,
+    )
+
+
+def _discord_status() -> ExternalChannelConnectionStatusSnapshot:
+    return ExternalChannelConnectionStatusSnapshot(
+        status=ExternalChannelConnectionStatus.ACTIVE,
+        code="valid",
+        message="Discord callback is configured.",
+        action_hint=None,
+        checked_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+        identity=None,
+        credentials=ExternalChannelCredentialSnapshot(
+            provider=ExternalChannelProvider.DISCORD,
+            configured_fields=("bot_token",),
+        ),
+        capabilities=None,
     )
 
 
@@ -330,6 +350,127 @@ def test_discord_creation_is_blocked_until_full_provider_rollout(path: str) -> N
 
 
 @pytest.mark.parametrize(
+    ("path", "service_method"),
+    [
+        (
+            "/external-channel/v1/workspaces/ws/agents/agent-1/"
+            "external-channels/connection-1/discord",
+            "update_discord",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1",
+            "update_multi_discord",
+        ),
+    ],
+)
+def test_discord_replacement_is_blocked_until_full_provider_rollout(
+    path: str,
+    service_method: str,
+) -> None:
+    """Discord replacement fails closed before it can persist a new secret."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+
+    response = _client(service).put(
+        path,
+        json={
+            "app_id": "discord-app-1",
+            "configuration": {
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+            },
+            "credentials": {
+                "provider": "discord",
+                "bot_token": "discord-bot-token",
+            },
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": (
+            "Discord External Channel creation is not enabled for this deployment."
+        )
+    }
+    getattr(service, service_method).assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("path", "service_method"),
+    [
+        (
+            "/external-channel/v1/workspaces/ws/agents/agent-1/"
+            "external-channels/connection-1/discord",
+            "update_discord",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1",
+            "update_multi_discord",
+        ),
+    ],
+)
+def test_discord_replacement_returns_redacted_status(
+    path: str,
+    service_method: str,
+) -> None:
+    """Successful replacement never echoes the supplied Discord Bot Token."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    getattr(service, service_method).return_value = _discord_status()
+
+    response = _client(service, discord_enabled=True).put(
+        path,
+        json={
+            "app_id": "discord-app-1",
+            "configuration": {
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+            },
+            "credentials": {
+                "provider": "discord",
+                "bot_token": "discord-bot-token",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["credentials"] == {
+        "provider": "discord",
+        "configured_fields": ["bot_token"],
+    }
+    assert "discord-bot-token" not in response.text
+    getattr(service, service_method).assert_awaited_once()
+
+
+def test_member_cannot_replace_workspace_discord_multi_app() -> None:
+    """Workspace Multi credential rotation retains Manager-or-Owner authority."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+
+    response = _client(
+        service,
+        role=WorkspaceUserRole.MEMBER,
+        discord_enabled=True,
+    ).put(
+        "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+        "connection-1",
+        json={
+            "app_id": "discord-app-1",
+            "configuration": {
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+            },
+            "credentials": {
+                "provider": "discord",
+                "bot_token": "discord-bot-token",
+            },
+        },
+    )
+
+    assert response.status_code == 403
+    service.update_multi_discord.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
     ("path", "payload", "service_method"),
     [
         (
@@ -483,6 +624,12 @@ def test_openapi_includes_management_but_excludes_provider_callback() -> None:
     assert "post" in paths[discord_single_path]
     assert discord_multi_path in paths
     assert "post" in paths[discord_multi_path]
+    discord_single_update_path = f"{connection_path}/discord"
+    assert discord_single_update_path in paths
+    assert "put" in paths[discord_single_update_path]
+    discord_multi_update_path = f"{discord_multi_path}/{{connection_id}}"
+    assert discord_multi_update_path in paths
+    assert "put" in paths[discord_multi_update_path]
     assert not any(
         "multi" in path and "/agents/{agent_id}/external-channels" in path
         for path in paths

@@ -5187,6 +5187,73 @@
         }
       }
     },
+    "/external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Update Multi Discord Connection",
+        "description": "Replace a Discord Multi App and reactivate its callback authority.",
+        "operationId": "external_channel_v1_update_multi_discord_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscordConnectionSetupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelConnectionStatusSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/validate": {
       "post": {
         "tags": [
@@ -6259,6 +6326,82 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SlackConnectionSetupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelConnectionStatusSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Update Discord Connection",
+        "description": "Replace a dedicated Discord App and reactivate callback authority.",
+        "operationId": "external_channel_v1_update_discord_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscordConnectionSetupRequest"
               }
             }
           }

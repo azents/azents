@@ -22,6 +22,8 @@ from azents.core.enums import (
     ExternalChannelTransport,
 )
 from azents.rdb.models.external_channel import (
+    RDBExternalChannelAgentRoute,
+    RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelWork,
 )
@@ -35,6 +37,9 @@ from azents.repos.external_channel.management import (
 from azents.repos.external_channel.management_data import (
     ManagedConnection,
     ManagedMultiRoute,
+)
+from azents.services.external_channel.connection import (
+    ExternalChannelConnectionService,
 )
 from azents.services.external_channel.data import (
     DiscordConnectionConfiguration,
@@ -140,6 +145,272 @@ async def test_setup_discord_commits_route_before_callback_activation() -> None:
     assert result.connection == managed
     assert events == ["route", "commit", "activate"]
     activation_service.activate.assert_awaited_once_with(connection_id="connection-1")
+
+
+async def test_update_discord_commits_reset_before_callback_activation() -> None:
+    """Dedicated replacement fences durable authority before provider mutation."""
+    events: list[str] = []
+    session = AsyncMock(spec=AsyncSession)
+
+    async def commit() -> None:
+        events.append("commit")
+
+    session.commit.side_effect = commit
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    repository = AsyncMock()
+    repository.get_connection.return_value = object()
+
+    async def replace(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        events.append("reset")
+        return object()
+
+    repository.replace_discord_configuration.side_effect = replace
+    activation_service = AsyncMock()
+
+    async def activate(*, connection_id: str) -> object:
+        assert connection_id == "connection-1"
+        events.append("activate")
+        return object()
+
+    activation_service.activate.side_effect = activate
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1"
+    )
+    agent_admin_repository = AsyncMock()
+    agent_admin_repository.is_admin.return_value = True
+    connection_service = cast(
+        ExternalChannelConnectionService,
+        SimpleNamespace(
+            credentials_codec=Mock(encrypt=Mock(return_value="encrypted-token"))
+        ),
+    )
+    service = ExternalChannelManagementService(
+        session_manager=session_manager,
+        repository=repository,
+        domain_repository=AsyncMock(),
+        lifecycle_repository=AsyncMock(),
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+        workspace_user_repository=AsyncMock(),
+        connection_service=connection_service,
+        discord_activation_service=activation_service,
+        action_service=AsyncMock(),
+        access_service=AsyncMock(),
+    )
+
+    await service.update_discord(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        workspace_user_id="workspace-user-1",
+        connection_id="connection-1",
+        app_id="discord-app-1",
+        configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+        credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
+    )
+
+    assert events == ["reset", "commit", "activate"]
+    repository.replace_discord_configuration.assert_awaited_once_with(
+        session,
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        connection_id="connection-1",
+        provider_app_id="discord-app-1",
+        encrypted_credentials="encrypted-token",
+        provider_config={"provider": "discord", "target_guild_id": "guild-1"},
+    )
+
+
+async def test_update_multi_discord_commits_reset_before_callback_activation() -> None:
+    """Multi replacement cannot invoke Discord before durable fencing commits."""
+    events: list[str] = []
+    session = AsyncMock(spec=AsyncSession)
+
+    async def commit() -> None:
+        events.append("commit")
+
+    session.commit.side_effect = commit
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    repository = AsyncMock()
+
+    async def replace(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        events.append("reset")
+        return object()
+
+    repository.replace_multi_discord_configuration.side_effect = replace
+    activation_service = AsyncMock()
+
+    async def activate(*, connection_id: str) -> object:
+        assert connection_id == "connection-1"
+        events.append("activate")
+        return object()
+
+    activation_service.activate.side_effect = activate
+    connection_service = cast(
+        ExternalChannelConnectionService,
+        SimpleNamespace(
+            credentials_codec=Mock(encrypt=Mock(return_value="encrypted-token"))
+        ),
+    )
+    service = ExternalChannelManagementService(
+        session_manager=session_manager,
+        repository=repository,
+        domain_repository=AsyncMock(),
+        lifecycle_repository=AsyncMock(),
+        agent_repository=AsyncMock(),
+        agent_admin_repository=AsyncMock(),
+        workspace_user_repository=AsyncMock(),
+        connection_service=connection_service,
+        discord_activation_service=activation_service,
+        action_service=AsyncMock(),
+        access_service=AsyncMock(),
+    )
+
+    await service.update_multi_discord(
+        workspace_id="workspace-1",
+        connection_id="connection-1",
+        app_id="discord-app-1",
+        configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+        credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
+    )
+
+    assert events == ["reset", "commit", "activate"]
+    repository.replace_multi_discord_configuration.assert_awaited_once_with(
+        session,
+        workspace_id="workspace-1",
+        connection_id="connection-1",
+        provider_app_id="discord-app-1",
+        encrypted_credentials="encrypted-token",
+        provider_config={"provider": "discord", "target_guild_id": "guild-1"},
+    )
+
+
+async def test_discord_replacement_failure_leaves_durable_fence_committed() -> None:
+    """Activation failure retains configuring state instead of restoring authority."""
+    session = AsyncMock(spec=AsyncSession)
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    repository = AsyncMock()
+    repository.replace_multi_discord_configuration.return_value = object()
+    activation_service = AsyncMock()
+    activation_service.activate.side_effect = ValueError("Discord callback failed.")
+    connection_service = cast(
+        ExternalChannelConnectionService,
+        SimpleNamespace(
+            credentials_codec=Mock(encrypt=Mock(return_value="encrypted-token"))
+        ),
+    )
+    service = ExternalChannelManagementService(
+        session_manager=session_manager,
+        repository=repository,
+        domain_repository=AsyncMock(),
+        lifecycle_repository=AsyncMock(),
+        agent_repository=AsyncMock(),
+        agent_admin_repository=AsyncMock(),
+        workspace_user_repository=AsyncMock(),
+        connection_service=connection_service,
+        discord_activation_service=activation_service,
+        action_service=AsyncMock(),
+        access_service=AsyncMock(),
+    )
+
+    with pytest.raises(ValueError, match="Discord callback failed"):
+        await service.update_multi_discord(
+            workspace_id="workspace-1",
+            connection_id="connection-1",
+            app_id="discord-app-1",
+            configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+            credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
+        )
+
+    session.commit.assert_awaited_once()
+    activation_service.activate.assert_awaited_once_with(connection_id="connection-1")
+
+
+async def test_replace_discord_configuration_invalidates_prior_authority() -> None:
+    """Credential replacement clears callback, identity, health, and lease state."""
+    connection = cast(
+        RDBExternalChannelConnection,
+        SimpleNamespace(
+            id="connection-1",
+            provider=ExternalChannelProvider.DISCORD,
+            transport=ExternalChannelTransport.HTTP,
+            provider_app_id="old-app",
+            provider_tenant_id="old-guild",
+            provider_bot_user_id="old-bot",
+            http_callback_selector_hash="old-selector",
+            encrypted_credentials="old-encrypted",
+            capabilities={"interaction_public_key": "old-key"},
+            provider_config={"target_guild_id": "old-guild"},
+            configuration_generation=7,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+            last_verified_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+            last_health_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+            disconnected_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+            socket_lease_owner="worker-1",
+            socket_lease_until=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+            socket_heartbeat_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+            socket_gap_detected_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+            socket_gap_reason="gap",
+        ),
+    )
+    route = cast(
+        RDBExternalChannelAgentRoute,
+        SimpleNamespace(
+            id="route-1",
+            agent_id="agent-1",
+        ),
+    )
+    session = AsyncMock(spec=AsyncSession)
+    repository = ExternalChannelManagementRepository()
+    repository.get_connection = AsyncMock(return_value=(connection, route))
+
+    result = await repository.replace_discord_configuration(
+        session,
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        connection_id="connection-1",
+        provider_app_id="discord-app-1",
+        encrypted_credentials="encrypted-token",
+        provider_config={"provider": "discord", "target_guild_id": "guild-1"},
+    )
+
+    assert result is not None
+    assert result.provider is ExternalChannelProvider.DISCORD
+    assert result.status is ExternalChannelConnectionStatus.CONFIGURING
+    assert result.provider_config == {
+        "provider": "discord",
+        "target_guild_id": "guild-1",
+    }
+    assert connection.provider_app_id == "discord-app-1"
+    assert connection.provider_tenant_id is None
+    assert connection.provider_bot_user_id is None
+    assert connection.http_callback_selector_hash is None
+    assert connection.encrypted_credentials == "encrypted-token"
+    assert connection.capabilities is None
+    assert connection.configuration_generation == 8
+    assert connection.status is ExternalChannelConnectionStatus.CONFIGURING
+    assert connection.last_verified_at is None
+    assert connection.last_health_at is None
+    assert connection.disconnected_at is None
+    assert connection.socket_lease_owner is None
+    assert connection.socket_lease_until is None
+    assert connection.socket_heartbeat_at is None
+    assert connection.socket_gap_detected_at is None
+    assert connection.socket_gap_reason is None
 
 
 def _multi_route(

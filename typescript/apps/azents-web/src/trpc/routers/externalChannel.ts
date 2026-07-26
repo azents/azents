@@ -22,8 +22,12 @@ import {
   externalChannelV1RemoveMultiSlackRoute,
   externalChannelV1ReplaceMultiSlackChannelDefault,
   externalChannelV1RevokeAccessGrant,
+  externalChannelV1SetupDiscordConnection,
+  externalChannelV1SetupMultiDiscordConnection,
   externalChannelV1SetupMultiSlackConnection,
   externalChannelV1SetupSlackConnection,
+  externalChannelV1UpdateDiscordConnection,
+  externalChannelV1UpdateMultiDiscordConnection,
   externalChannelV1UpdateMultiSlackConnection,
   externalChannelV1UpdateSlackConnection,
   externalChannelV1ValidateConnection,
@@ -44,6 +48,10 @@ const slackCredentialsSchema = z.object({
   botToken: z.string().min(1),
   signingSecret: z.string().min(1),
   appToken: z.string().nullable(),
+});
+const discordCredentialsSchema = z.object({
+  botToken: z.string().min(1),
+  targetGuildId: z.string().min(1),
 });
 
 function mapManagementError(error: unknown): unknown {
@@ -172,6 +180,32 @@ export const externalChannelRouter = router({
       }
     }),
 
+  setupMultiDiscordConnection: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        appId: z.string().min(1),
+        credentials: discordCredentialsSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1SetupMultiDiscordConnection({
+          client: ctx.apiClient,
+          path: { handle: input.handle },
+          body: {
+            app_id: input.appId,
+            configuration: { target_guild_id: input.credentials.targetGuildId },
+            credentials: { bot_token: input.credentials.botToken },
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
   updateMultiConnection: publicProcedure
     .input(
       z.object({
@@ -195,6 +229,33 @@ export const externalChannelRouter = router({
               signing_secret: input.credentials.signingSecret,
               app_token: input.credentials.appToken,
             },
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
+  updateMultiDiscordConnection: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        connectionId: z.string().min(1),
+        appId: z.string().min(1),
+        credentials: discordCredentialsSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1UpdateMultiDiscordConnection({
+          client: ctx.apiClient,
+          path: { handle: input.handle, connection_id: input.connectionId },
+          body: {
+            app_id: input.appId,
+            configuration: { target_guild_id: input.credentials.targetGuildId },
+            credentials: { bot_token: input.credentials.botToken },
           },
           throwOnError: true,
         });
@@ -525,6 +586,33 @@ export const externalChannelRouter = router({
       }
     }),
 
+  setupDiscordConnection: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        appId: z.string().min(1),
+        credentials: discordCredentialsSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1SetupDiscordConnection({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: {
+            app_id: input.appId,
+            configuration: { target_guild_id: input.credentials.targetGuildId },
+            credentials: { bot_token: input.credentials.botToken },
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
   validateConnection: publicProcedure
     .input(
       z.object({
@@ -578,6 +666,38 @@ export const externalChannelRouter = router({
               signing_secret: input.credentials.signingSecret,
               app_token: input.credentials.appToken,
             },
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
+  updateDiscordConnection: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        connectionId: z.string().min(1),
+        appId: z.string().min(1),
+        credentials: discordCredentialsSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1UpdateDiscordConnection({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            connection_id: input.connectionId,
+          },
+          body: {
+            app_id: input.appId,
+            configuration: { target_guild_id: input.credentials.targetGuildId },
+            credentials: { bot_token: input.credentials.botToken },
           },
           throwOnError: true,
         });

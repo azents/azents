@@ -66,6 +66,7 @@ from azents.services.external_channel.discord_activation import (
     DiscordConnectionActivationService,
 )
 from azents.services.external_channel.provider import (
+    DiscordExternalChannelProviderContract,
     SlackExternalChannelProviderContract,
 )
 from azents.services.external_channel.slack_http import (
@@ -447,6 +448,44 @@ class ExternalChannelManagementService:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
         return await self.connection_service.validate_connection(
+            connection_id=connection_id
+        )
+
+    async def update_multi_discord(
+        self,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        app_id: str,
+        configuration: DiscordConnectionConfiguration,
+        credentials: DiscordConnectionCredentials,
+    ) -> ExternalChannelConnectionStatusSnapshot:
+        """Fence Discord Multi credentials, then reactivate callback authority."""
+        if not app_id.strip():
+            raise ValueError("Discord App ID must not be blank.")
+        contract = DiscordExternalChannelProviderContract()
+        validated = contract.validate_connection_credentials(
+            ExternalChannelConnectionCredentialPayload(
+                provider=credentials.provider,
+                transport=ExternalChannelTransport.HTTP,
+                ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+                credentials=credentials,
+            )
+        )
+        encrypted = self.connection_service.credentials_codec.encrypt(validated)
+        async with self.session_manager() as session:
+            connection = await self.repository.replace_multi_discord_configuration(
+                session,
+                workspace_id=workspace_id,
+                connection_id=connection_id,
+                provider_app_id=app_id,
+                encrypted_credentials=encrypted,
+                provider_config=configuration.model_dump(mode="json"),
+            )
+            if connection is None:
+                raise ExternalChannelManagementNotFound(connection_id)
+            await session.commit()
+        return await self.discord_activation_service.activate(
             connection_id=connection_id
         )
 
@@ -881,6 +920,53 @@ class ExternalChannelManagementService:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
         return await self.connection_service.validate_connection(
+            connection_id=connection_id
+        )
+
+    async def update_discord(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+        connection_id: str,
+        app_id: str,
+        configuration: DiscordConnectionConfiguration,
+        credentials: DiscordConnectionCredentials,
+    ) -> ExternalChannelConnectionStatusSnapshot:
+        """Fence Discord credentials, then reactivate callback authority."""
+        await self._require_owned_connection(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            connection_id=connection_id,
+        )
+        if not app_id.strip():
+            raise ValueError("Discord App ID must not be blank.")
+        contract = DiscordExternalChannelProviderContract()
+        validated = contract.validate_connection_credentials(
+            ExternalChannelConnectionCredentialPayload(
+                provider=credentials.provider,
+                transport=ExternalChannelTransport.HTTP,
+                ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+                credentials=credentials,
+            )
+        )
+        encrypted = self.connection_service.credentials_codec.encrypt(validated)
+        async with self.session_manager() as session:
+            connection = await self.repository.replace_discord_configuration(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                connection_id=connection_id,
+                provider_app_id=app_id,
+                encrypted_credentials=encrypted,
+                provider_config=configuration.model_dump(mode="json"),
+            )
+            if connection is None:
+                raise ExternalChannelManagementNotFound(connection_id)
+            await session.commit()
+        return await self.discord_activation_service.activate(
             connection_id=connection_id
         )
 
