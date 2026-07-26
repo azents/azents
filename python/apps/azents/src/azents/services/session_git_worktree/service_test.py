@@ -923,7 +923,7 @@ class TestSessionGitWorktreeService:
                     sender_user_id=None,
                     id=None,
                     session_id=session_id,
-                    input_buffer_id="01900000000070008000000000000005",
+                    mailbox_item_id="01900000000070008000000000000005",
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
