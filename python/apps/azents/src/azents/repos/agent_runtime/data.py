@@ -37,6 +37,10 @@ class AgentRuntime(BaseModel):
     runtime_policy_snapshot_id: str | None = Field(
         default=None, description="Current immutable Runtime policy snapshot ID"
     )
+    applied_runtime_policy_snapshot_id: str | None = Field(
+        default=None,
+        description="Last Provider-acknowledged Runtime policy snapshot ID",
+    )
     provider_config: dict[str, Any] | None = Field(
         default=None, description="Runtime Provider config override"
     )
@@ -122,6 +126,10 @@ class AgentRuntimeCreate(BaseModel):
     )
     runtime_policy_snapshot_id: str | None = Field(
         default=None, description="Current immutable Runtime policy snapshot ID"
+    )
+    applied_runtime_policy_snapshot_id: str | None = Field(
+        default=None,
+        description="Last Provider-acknowledged Runtime policy snapshot ID",
     )
     provider_config: dict[str, Any] | None = Field(
         default=None, description="Runtime Provider config override"

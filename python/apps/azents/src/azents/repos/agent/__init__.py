@@ -12,10 +12,18 @@ from azents.core.agent import (
     SubagentSettings,
 )
 from azents.core.enums import AgentLifecycleStatus, AgentType
+from azents.core.runtime_execution_policy import (
+    SYSTEM_STANDARD_PROFILE_ID,
+    digest_runtime_execution_policy,
+    empty_runtime_execution_restriction,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
+)
+from azents.rdb.models.runtime_execution_policy import (
+    RDBAgentRuntimeExecutionSetting,
 )
 from azents.services.uploads.schema import StoredImage
 
@@ -78,6 +86,17 @@ class AgentRepository:
         session.add(rdb_agent)
         await session.flush()
         session.add(RDBAgentAutomaticProjectSetting(agent_id=rdb_agent.id))
+        empty_restriction = empty_runtime_execution_restriction()
+        session.add(
+            RDBAgentRuntimeExecutionSetting(
+                agent_id=rdb_agent.id,
+                profile_id=SYSTEM_STANDARD_PROFILE_ID,
+                version=1,
+                restriction=empty_restriction.model_dump(mode="json"),
+                digest=digest_runtime_execution_policy(empty_restriction),
+                updated_by_workspace_user_id=None,
+            )
+        )
         await session.flush()
         return self._build_row(rdb_agent)
 

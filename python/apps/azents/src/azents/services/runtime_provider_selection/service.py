@@ -146,6 +146,7 @@ class RuntimeProviderSelectionService:
                     provider_binding_origin=origin,
                     provider_binding_evidence=binding_evidence,
                     runtime_policy_snapshot_id=None,
+                    applied_runtime_policy_snapshot_id=None,
                     provider_config=None,
                 ),
             )
@@ -165,6 +166,16 @@ class RuntimeProviderSelectionService:
                     config_revision_id=active_config.id if active_config else None,
                     override_provider_id=None,
                     override_version=None,
+                    execution_profile_id=None,
+                    execution_platform_version=None,
+                    execution_profile_version=None,
+                    execution_workspace_version=None,
+                    execution_agent_version=None,
+                    resolved_execution_policy=None,
+                    execution_source_trace=None,
+                    execution_provider_compatibility=None,
+                    execution_target_digest=None,
+                    execution_reported_digest=None,
                     resolved_config=active_config.config if active_config else {},
                     encrypted_secrets=(
                         active_config.encrypted_secrets if active_config else None

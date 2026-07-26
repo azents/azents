@@ -116,6 +116,16 @@ class RuntimePolicySnapshot:
     config_revision_id: str | None
     override_provider_id: str | None
     override_version: int | None
+    execution_profile_id: str | None
+    execution_platform_version: int | None
+    execution_profile_version: int | None
+    execution_workspace_version: int | None
+    execution_agent_version: int | None
+    resolved_execution_policy: dict[str, Any] | None
+    execution_source_trace: dict[str, Any] | None
+    execution_provider_compatibility: dict[str, Any] | None
+    execution_target_digest: str | None
+    execution_reported_digest: str | None
     resolved_config: dict[str, Any]
     encrypted_secrets: str | None
     secret_metadata: dict[str, Any]
@@ -138,6 +148,16 @@ class RuntimePolicySnapshotCreate:
     config_revision_id: str | None
     override_provider_id: str | None
     override_version: int | None
+    execution_profile_id: str | None
+    execution_platform_version: int | None
+    execution_profile_version: int | None
+    execution_workspace_version: int | None
+    execution_agent_version: int | None
+    resolved_execution_policy: dict[str, Any] | None
+    execution_source_trace: dict[str, Any] | None
+    execution_provider_compatibility: dict[str, Any] | None
+    execution_target_digest: str | None
+    execution_reported_digest: str | None
     resolved_config: dict[str, Any]
     encrypted_secrets: str | None
     secret_metadata: dict[str, Any]

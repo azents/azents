@@ -9,9 +9,13 @@ from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     SelectableModelOption,
 )
+from azents.core.runtime_execution_policy import SYSTEM_STANDARD_PROFILE_ID
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
+)
+from azents.rdb.models.runtime_execution_policy import (
+    RDBAgentRuntimeExecutionSetting,
 )
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -94,6 +98,33 @@ async def test_create_adds_initial_empty_automatic_project_policy() -> None:
     assert policy_setting.agent_id == session.add.call_args_list[0].args[0].id
     assert policy_setting.revision == 1
     assert policy_setting.updated_by_workspace_user_id is None
+
+
+async def test_create_adds_system_standard_execution_setting() -> None:
+    """Persist explicit Standard execution intent with each new Agent."""
+    session = AsyncMock(spec=AsyncSession)
+    session.flush.side_effect = [None, _StopAfterWrite]
+
+    with pytest.raises(_StopAfterWrite):
+        await AgentRepository().create(
+            session,
+            _agent_create(),
+        )
+
+    execution_setting = session.add.call_args_list[2].args[0]
+    assert isinstance(execution_setting, RDBAgentRuntimeExecutionSetting)
+    assert execution_setting.agent_id == session.add.call_args_list[0].args[0].id
+    assert execution_setting.profile_id == SYSTEM_STANDARD_PROFILE_ID
+    assert execution_setting.version == 1
+    assert execution_setting.restriction == {
+        "schema_version": 1,
+        "image_build": None,
+        "container_run": None,
+        "compose": None,
+        "resources": None,
+        "engine_storage": None,
+        "network_egress": None,
+    }
 
 
 async def test_update_maps_tool_search_enabled_to_update_statement() -> None:

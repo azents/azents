@@ -9,6 +9,7 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+import azents.rdb.models.runtime_execution_policy as _runtime_execution_policy  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from azents.core.enums import (
     RuntimePolicySnapshotApplicationState,
     RuntimeProviderConfigRevisionState,
@@ -338,10 +339,11 @@ class RDBRuntimePolicySnapshot(RDBModel):
         "provider_id",
         "created_at",
     )
-    UQ_RUNTIME_DIGEST = sa.UniqueConstraint(
+    UQ_RUNTIME_DIGEST_GENERATION = sa.UniqueConstraint(
         "runtime_id",
         "digest",
-        name="uq_runtime_policy_snapshots_runtime_digest",
+        "target_desired_generation",
+        name="uq_runtime_policy_snapshots_runtime_digest_generation",
     )
 
     id: Mapped[str] = mapped_column(
@@ -389,6 +391,57 @@ class RDBRuntimePolicySnapshot(RDBModel):
         nullable=True,
         default=None,
     )
+    execution_profile_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("runtime_execution_profiles.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    execution_platform_version: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
+    )
+    execution_profile_version: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
+    )
+    execution_workspace_version: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
+    )
+    execution_agent_version: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
+    )
+    resolved_execution_policy: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
+    execution_source_trace: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
+    execution_provider_compatibility: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
+    execution_target_digest: Mapped[str | None] = mapped_column(
+        sa.String(64),
+        nullable=True,
+        default=None,
+    )
+    execution_reported_digest: Mapped[str | None] = mapped_column(
+        sa.String(64),
+        nullable=True,
+        default=None,
+    )
     encrypted_secrets: Mapped[str | None] = mapped_column(
         sa.Text,
         nullable=True,
@@ -416,4 +469,8 @@ class RDBRuntimePolicySnapshot(RDBModel):
         nullable=False,
     )
 
-    __table_args__ = (IX_RUNTIME_CREATED, IX_PROVIDER_CREATED, UQ_RUNTIME_DIGEST)
+    __table_args__ = (
+        IX_RUNTIME_CREATED,
+        IX_PROVIDER_CREATED,
+        UQ_RUNTIME_DIGEST_GENERATION,
+    )

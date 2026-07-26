@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    RuntimePolicySnapshotApplicationState,
     RuntimeProviderConfigRevisionState,
     RuntimeProviderConfigValidationStatus,
     RuntimeProviderContractStatus,
@@ -420,6 +421,16 @@ class RuntimeProviderPolicyRepository:
             config_revision_id=create.config_revision_id,
             override_provider_id=create.override_provider_id,
             override_version=create.override_version,
+            execution_profile_id=create.execution_profile_id,
+            execution_platform_version=create.execution_platform_version,
+            execution_profile_version=create.execution_profile_version,
+            execution_workspace_version=create.execution_workspace_version,
+            execution_agent_version=create.execution_agent_version,
+            resolved_execution_policy=create.resolved_execution_policy,
+            execution_source_trace=create.execution_source_trace,
+            execution_provider_compatibility=(create.execution_provider_compatibility),
+            execution_target_digest=create.execution_target_digest,
+            execution_reported_digest=create.execution_reported_digest,
             resolved_config=create.resolved_config,
             encrypted_secrets=create.encrypted_secrets,
             secret_metadata=create.secret_metadata,
@@ -446,6 +457,145 @@ class RuntimeProviderPolicyRepository:
             return None
         await session.flush()
         return self._build_snapshot(rdb)
+
+    async def create_and_attach_target_snapshot(
+        self,
+        session: AsyncSession,
+        *,
+        create: RuntimePolicySnapshotCreate,
+        expected_target_snapshot_id: str | None,
+    ) -> RuntimePolicySnapshot | None:
+        """Create and attach a new target while fencing a stale caller."""
+        rdb = RDBRuntimePolicySnapshot(
+            runtime_id=create.runtime_id,
+            provider_id=create.provider_id,
+            contract_revision_id=create.contract_revision_id,
+            config_revision_id=create.config_revision_id,
+            override_provider_id=create.override_provider_id,
+            override_version=create.override_version,
+            execution_profile_id=create.execution_profile_id,
+            execution_platform_version=create.execution_platform_version,
+            execution_profile_version=create.execution_profile_version,
+            execution_workspace_version=create.execution_workspace_version,
+            execution_agent_version=create.execution_agent_version,
+            resolved_execution_policy=create.resolved_execution_policy,
+            execution_source_trace=create.execution_source_trace,
+            execution_provider_compatibility=(create.execution_provider_compatibility),
+            execution_target_digest=create.execution_target_digest,
+            execution_reported_digest=create.execution_reported_digest,
+            resolved_config=create.resolved_config,
+            encrypted_secrets=create.encrypted_secrets,
+            secret_metadata=create.secret_metadata,
+            source_trace=create.source_trace,
+            digest=create.digest,
+            target_desired_generation=create.target_desired_generation,
+            application_state=create.application_state,
+        )
+        session.add(rdb)
+        await session.flush()
+        target_matches = (
+            RDBAgentRuntime.runtime_policy_snapshot_id.is_(None)
+            if expected_target_snapshot_id is None
+            else RDBAgentRuntime.runtime_policy_snapshot_id
+            == expected_target_snapshot_id
+        )
+        result = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == create.runtime_id,
+                RDBAgentRuntime.runtime_provider_resource_id == create.provider_id,
+                RDBAgentRuntime.desired_generation == create.target_desired_generation,
+                target_matches,
+            )
+            .values(runtime_policy_snapshot_id=rdb.id)
+            .returning(RDBAgentRuntime.id)
+        )
+        if result.scalar_one_or_none() is None:
+            await session.delete(rdb)
+            await session.flush()
+            return None
+        await session.flush()
+        return self._build_snapshot(rdb)
+
+    async def promote_target_snapshot_to_applied(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_id: str,
+        snapshot_id: str,
+        target_desired_generation: int,
+        reported_execution_digest: str,
+        provider_acknowledged_at: datetime.datetime,
+        runtime_observed_at: datetime.datetime,
+    ) -> RuntimePolicySnapshot | None:
+        """Promote only exact current target evidence to applied state."""
+        matching_snapshot = (
+            sa.select(RDBRuntimePolicySnapshot.id)
+            .where(
+                RDBRuntimePolicySnapshot.id == snapshot_id,
+                RDBRuntimePolicySnapshot.runtime_id == runtime_id,
+                RDBRuntimePolicySnapshot.provider_id == provider_id,
+                RDBRuntimePolicySnapshot.target_desired_generation
+                == target_desired_generation,
+                RDBRuntimePolicySnapshot.execution_target_digest
+                == reported_execution_digest,
+            )
+            .scalar_subquery()
+        )
+        runtime_result = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.runtime_provider_resource_id == provider_id,
+                RDBAgentRuntime.runtime_policy_snapshot_id == snapshot_id,
+                RDBAgentRuntime.desired_generation == target_desired_generation,
+                matching_snapshot == snapshot_id,
+            )
+            .values(applied_runtime_policy_snapshot_id=snapshot_id)
+            .returning(RDBAgentRuntime.id)
+        )
+        if runtime_result.scalar_one_or_none() is None:
+            return None
+        snapshot_result = await session.execute(
+            sa.update(RDBRuntimePolicySnapshot)
+            .where(
+                RDBRuntimePolicySnapshot.id == snapshot_id,
+                RDBRuntimePolicySnapshot.application_state
+                == RuntimePolicySnapshotApplicationState.PENDING,
+            )
+            .values(
+                application_state=RuntimePolicySnapshotApplicationState.APPLIED,
+                execution_reported_digest=reported_execution_digest,
+                provider_acknowledged_at=provider_acknowledged_at,
+                runtime_observed_at=runtime_observed_at,
+            )
+            .returning(RDBRuntimePolicySnapshot)
+        )
+        snapshot = snapshot_result.scalar_one_or_none()
+        if snapshot is None:
+            existing_result = await session.execute(
+                sa.select(RDBRuntimePolicySnapshot).where(
+                    RDBRuntimePolicySnapshot.id == snapshot_id,
+                    RDBRuntimePolicySnapshot.runtime_id == runtime_id,
+                    RDBRuntimePolicySnapshot.provider_id == provider_id,
+                    RDBRuntimePolicySnapshot.target_desired_generation
+                    == target_desired_generation,
+                    RDBRuntimePolicySnapshot.execution_target_digest
+                    == reported_execution_digest,
+                    RDBRuntimePolicySnapshot.execution_reported_digest
+                    == reported_execution_digest,
+                    RDBRuntimePolicySnapshot.application_state
+                    == RuntimePolicySnapshotApplicationState.APPLIED,
+                )
+            )
+            snapshot = existing_result.scalar_one_or_none()
+            if snapshot is None:
+                raise RuntimeError(
+                    "Target snapshot promotion lost its pending snapshot."
+                )
+        await session.flush()
+        return self._build_snapshot(snapshot)
 
     async def snapshot_matches_runtime_provider(
         self,
@@ -544,6 +694,16 @@ class RuntimeProviderPolicyRepository:
             config_revision_id=rdb.config_revision_id,
             override_provider_id=rdb.override_provider_id,
             override_version=rdb.override_version,
+            execution_profile_id=rdb.execution_profile_id,
+            execution_platform_version=rdb.execution_platform_version,
+            execution_profile_version=rdb.execution_profile_version,
+            execution_workspace_version=rdb.execution_workspace_version,
+            execution_agent_version=rdb.execution_agent_version,
+            resolved_execution_policy=rdb.resolved_execution_policy,
+            execution_source_trace=rdb.execution_source_trace,
+            execution_provider_compatibility=(rdb.execution_provider_compatibility),
+            execution_target_digest=rdb.execution_target_digest,
+            execution_reported_digest=rdb.execution_reported_digest,
             resolved_config=rdb.resolved_config,
             encrypted_secrets=rdb.encrypted_secrets,
             secret_metadata=rdb.secret_metadata,
