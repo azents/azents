@@ -69,6 +69,11 @@ async def get_discord_gateway_http_client() -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
+def get_discord_gateway_client() -> DiscordGatewayClient:
+    """Provide one Discord Gateway protocol client."""
+    return DiscordGatewayClient()
+
+
 @dataclasses.dataclass
 class DiscordGatewayManagerService:
     """Own Discord Gateway sessions separately from the Agent Worker role."""
@@ -92,9 +97,10 @@ class DiscordGatewayManagerService:
         Depends(get_discord_gateway_http_client),
     ]
     manager_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
-    gateway_client: DiscordGatewayClient = dataclasses.field(
-        default_factory=DiscordGatewayClient
-    )
+    gateway_client: Annotated[
+        DiscordGatewayClient,
+        Depends(get_discord_gateway_client),
+    ] = dataclasses.field(default_factory=DiscordGatewayClient)
     poll_interval: datetime.timedelta = _POLL_INTERVAL
     lease_duration: datetime.timedelta = _LEASE_DURATION
     renew_interval: datetime.timedelta = _RENEW_INTERVAL
