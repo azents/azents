@@ -1,13 +1,29 @@
 "use client";
 
-import { Badge, Box, Group, rem, Stack, Text } from "@mantine/core";
+import {
+  Badge,
+  Box,
+  Collapse,
+  Group,
+  Loader,
+  rem,
+  Stack,
+  Text,
+  UnstyledButton,
+} from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import {
   IconAlertCircle,
   IconCheck,
-  IconLoader2,
+  IconChevronRight,
   IconX,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import {
+  chatChevronTransition,
+  chatCollapseTransitionProps,
+  chatCollapsibleChevronSize,
+} from "./collapsiblePresentation";
 import type { ActionExecutionProjection } from "../types";
 import type { ReactNode } from "react";
 
@@ -61,7 +77,7 @@ function statusIcon(status: string): ReactNode {
     case "cancelled":
       return <IconX size={rem(14)} />;
     default:
-      return <IconLoader2 size={rem(14)} />;
+      return <Loader aria-hidden="true" size={rem(12)} />;
   }
 }
 
@@ -244,6 +260,8 @@ function CleanupActionExecutionTimelineCard({
   const result = cleanupResult(execution.result);
   const color = statusColor(execution.status);
   const latestEvent = events.at(-1);
+  const [detailsOpened, { close, toggle }] = useDisclosure(false);
+  const detailsId = `action-execution-details-${execution.id}`;
 
   return (
     <Box
@@ -255,107 +273,159 @@ function CleanupActionExecutionTimelineCard({
       }}
     >
       <Stack gap="xs">
-        <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
-          <Text size="xs" fw={700} c="dimmed" truncate>
-            {t("cleanup.title")}
-          </Text>
-          <Badge
-            size="xs"
-            color={color}
-            variant="light"
-            leftSection={statusIcon(execution.status)}
-          >
-            {statusLabel(execution.status, t)}
-          </Badge>
-        </Group>
-
-        <Text size="xs" c="dimmed">
-          {t("cleanup.phase", { phase: result?.phase ?? "pending" })}
-        </Text>
-
-        {result !== null ? (
-          <Group gap="xs">
-            <Badge size="xs" variant="light">
-              {t("cleanup.examined", { count: result.examined_count })}
-            </Badge>
-            <Badge size="xs" color="green" variant="light">
-              {t("cleanup.removed", { count: result.removed_count })}
-            </Badge>
-            <Badge size="xs" color="blue" variant="light">
-              {t("cleanup.protected", { count: result.protected_count })}
-            </Badge>
-            {result.already_absent_count > 0 ? (
-              <Badge size="xs" color="blue" variant="light">
-                {t("cleanup.alreadyAbsent", {
-                  count: result.already_absent_count,
-                })}
-              </Badge>
-            ) : null}
-            {result.failed_count > 0 || result.unresolved_count > 0 ? (
-              <Badge size="xs" color="red" variant="light">
-                {t("cleanup.attention", {
-                  count: result.failed_count + result.unresolved_count,
-                })}
-              </Badge>
-            ) : null}
-          </Group>
-        ) : null}
-
-        {latestEvent?.content ? (
-          <Text size="xs" c="dimmed">
-            {latestEvent.content}
-          </Text>
-        ) : null}
-
-        {result?.candidates.map((candidate) => (
-          <Box
-            key={`${candidate.path}:${candidate.outcome}`}
-            px="xs"
-            py={rem(5)}
-            style={{
-              borderRadius: rem(6),
-              background: "var(--mantine-color-default-hover)",
-            }}
-          >
+        <UnstyledButton
+          aria-controls={detailsId}
+          aria-expanded={detailsOpened}
+          onClick={toggle}
+          style={{ display: "block", textAlign: "left", width: "100%" }}
+        >
+          <Stack gap="xs">
             <Group
               justify="space-between"
-              align="flex-start"
+              align="center"
               gap="xs"
               wrap="nowrap"
             >
-              <Text
-                size="xs"
-                c="dimmed"
-                style={{ wordBreak: "break-all", minWidth: 0 }}
-              >
-                {candidate.path}
-              </Text>
+              <Group gap={rem(4)} miw={0} wrap="nowrap">
+                <IconChevronRight
+                  aria-hidden="true"
+                  color="var(--mantine-color-dimmed)"
+                  size={chatCollapsibleChevronSize}
+                  style={{
+                    flexShrink: 0,
+                    transform: detailsOpened ? "rotate(90deg)" : "none",
+                    transition: chatChevronTransition,
+                  }}
+                />
+                <Text size="xs" fw={700} c="dimmed" truncate>
+                  {t("cleanup.title")}
+                </Text>
+              </Group>
               <Badge
                 size="xs"
-                color={cleanupOutcomeColor(candidate.outcome)}
+                color={color}
                 variant="light"
+                leftSection={statusIcon(execution.status)}
+                style={{ flexShrink: 0 }}
               >
-                {candidate.outcome}
+                {statusLabel(execution.status, t)}
               </Badge>
             </Group>
-            {(candidate.summary ?? candidate.reason_code) ? (
-              <Text size="xs" c="dimmed" mt={rem(3)}>
-                {candidate.summary ?? candidate.reason_code}
+
+            <Text size="xs" c="dimmed">
+              {t("cleanup.phase", { phase: result?.phase ?? "pending" })}
+            </Text>
+
+            {result !== null ? (
+              <Group gap="xs" wrap="wrap">
+                <Badge size="xs" variant="light">
+                  {t("cleanup.examined", { count: result.examined_count })}
+                </Badge>
+                <Badge size="xs" color="green" variant="light">
+                  {t("cleanup.removed", { count: result.removed_count })}
+                </Badge>
+                <Badge size="xs" color="blue" variant="light">
+                  {t("cleanup.protected", { count: result.protected_count })}
+                </Badge>
+                {result.already_absent_count > 0 ? (
+                  <Badge size="xs" color="blue" variant="light">
+                    {t("cleanup.alreadyAbsent", {
+                      count: result.already_absent_count,
+                    })}
+                  </Badge>
+                ) : null}
+                {result.failed_count > 0 || result.unresolved_count > 0 ? (
+                  <Badge size="xs" color="red" variant="light">
+                    {t("cleanup.attention", {
+                      count: result.failed_count + result.unresolved_count,
+                    })}
+                  </Badge>
+                ) : null}
+              </Group>
+            ) : null}
+
+            {latestEvent?.content ? (
+              <Text size="xs" c="dimmed" lineClamp={2}>
+                {latestEvent.content}
               </Text>
             ) : null}
-          </Box>
-        ))}
+          </Stack>
+        </UnstyledButton>
 
-        {execution.failure_summary && isFailedStatus(execution.status) ? (
-          <Text size="xs" c="red" style={{ whiteSpace: "pre-wrap" }}>
-            {execution.failure_summary}
-          </Text>
-        ) : null}
-        {execution.cancellation_summary && execution.status === "cancelled" ? (
-          <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
-            {execution.cancellation_summary}
-          </Text>
-        ) : null}
+        <Collapse
+          expanded={detailsOpened}
+          id={detailsId}
+          keepMounted={false}
+          {...chatCollapseTransitionProps}
+        >
+          <Stack
+            aria-label={t("cleanup.title")}
+            gap="xs"
+            pt={rem(2)}
+            role="button"
+            tabIndex={0}
+            onClick={close}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                close();
+              }
+            }}
+            style={{ cursor: "pointer" }}
+          >
+            {result?.candidates.map((candidate) => (
+              <Box
+                key={`${candidate.path}:${candidate.outcome}`}
+                px="xs"
+                py={rem(5)}
+                style={{
+                  borderRadius: rem(6),
+                  background: "var(--mantine-color-default-hover)",
+                }}
+              >
+                <Group
+                  justify="space-between"
+                  align="flex-start"
+                  gap="xs"
+                  wrap="nowrap"
+                >
+                  <Text
+                    size="xs"
+                    c="dimmed"
+                    style={{ minWidth: 0, overflowWrap: "anywhere" }}
+                  >
+                    {candidate.path}
+                  </Text>
+                  <Badge
+                    size="xs"
+                    color={cleanupOutcomeColor(candidate.outcome)}
+                    variant="light"
+                    style={{ flexShrink: 0 }}
+                  >
+                    {candidate.outcome}
+                  </Badge>
+                </Group>
+                {(candidate.summary ?? candidate.reason_code) ? (
+                  <Text size="xs" c="dimmed" mt={rem(3)}>
+                    {candidate.summary ?? candidate.reason_code}
+                  </Text>
+                ) : null}
+              </Box>
+            ))}
+
+            {execution.failure_summary && isFailedStatus(execution.status) ? (
+              <Text size="xs" c="red" style={{ whiteSpace: "pre-wrap" }}>
+                {execution.failure_summary}
+              </Text>
+            ) : null}
+            {execution.cancellation_summary &&
+            execution.status === "cancelled" ? (
+              <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+                {execution.cancellation_summary}
+              </Text>
+            ) : null}
+          </Stack>
+        </Collapse>
       </Stack>
     </Box>
   );
