@@ -1,4 +1,4 @@
-{{- if and .Values.server.enabled .Values.server.discordGateway.enabled }}
+{{- if .Values.server.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -108,9 +108,6 @@ class DiscordGatewayManagerService:
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
         """Continuously claim configured Discord Gateway connections until shutdown."""
-        if not self.config.external_channel_discord_enabled:
-            await shutdown_event.wait()
-            return
         tasks: dict[str, asyncio.Task[None]] = {}
         try:
             while not shutdown_event.is_set():

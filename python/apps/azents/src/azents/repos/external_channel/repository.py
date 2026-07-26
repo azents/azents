@@ -241,6 +241,7 @@ class ExternalChannelRepository:
                     == selector_hash,
                     RDBExternalChannelConnection.status.in_(
                         (
+                            ExternalChannelConnectionStatus.CONFIGURING,
                             ExternalChannelConnectionStatus.ACTIVE,
                             ExternalChannelConnectionStatus.DEGRADED,
                         )
@@ -310,6 +311,7 @@ class ExternalChannelRepository:
         *,
         connection_id: str,
         expected_encrypted_credentials: str,
+        expected_configuration_generation: int,
         provider_app_id: str,
         provider_tenant_id: str,
         provider_bot_user_id: str | None,
@@ -326,6 +328,10 @@ class ExternalChannelRepository:
                 == ExternalChannelProvider.DISCORD,
                 RDBExternalChannelConnection.encrypted_credentials
                 == expected_encrypted_credentials,
+                RDBExternalChannelConnection.configuration_generation
+                == expected_configuration_generation,
+                RDBExternalChannelConnection.http_callback_selector_hash
+                == callback_selector_hash,
                 RDBExternalChannelConnection.status.not_in(
                     (
                         ExternalChannelConnectionStatus.DISCONNECTING,
@@ -373,6 +379,89 @@ class ExternalChannelRepository:
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return ExternalChannelConnection.model_validate(connection)
+
+    async def prepare_discord_callback(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        expected_encrypted_credentials: str,
+        expected_configuration_generation: int,
+        provider_app_id: str,
+        interaction_public_key: str,
+        callback_selector_hash: str,
+    ) -> bool:
+        """Persist PING-verification material before Discord verifies the callback."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.provider
+                == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelConnection.encrypted_credentials
+                == expected_encrypted_credentials,
+                RDBExternalChannelConnection.configuration_generation
+                == expected_configuration_generation,
+                RDBExternalChannelConnection.provider_app_id == provider_app_id,
+                RDBExternalChannelConnection.status.not_in(
+                    (
+                        ExternalChannelConnectionStatus.DISCONNECTING,
+                        ExternalChannelConnectionStatus.DISCONNECTED,
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+        if connection is None:
+            return False
+        connection.http_callback_selector_hash = callback_selector_hash
+        connection.capabilities = {
+            "interaction_public_key": interaction_public_key,
+        }
+        await session.flush()
+        return True
+
+    async def clear_prepared_discord_callback(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        expected_encrypted_credentials: str,
+        expected_configuration_generation: int,
+        callback_selector_hash: str,
+        checked_at: datetime.datetime,
+    ) -> bool:
+        """Remove callback verification material after provider registration fails."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.provider
+                == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelConnection.encrypted_credentials
+                == expected_encrypted_credentials,
+                RDBExternalChannelConnection.configuration_generation
+                == expected_configuration_generation,
+                RDBExternalChannelConnection.http_callback_selector_hash
+                == callback_selector_hash,
+                RDBExternalChannelConnection.status.not_in(
+                    (
+                        ExternalChannelConnectionStatus.DISCONNECTING,
+                        ExternalChannelConnectionStatus.DISCONNECTED,
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+        if connection is None:
+            return False
+        connection.http_callback_selector_hash = None
+        connection.capabilities = None
+        connection.configuration_generation += 1
+        connection.status = ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+        connection.last_health_at = checked_at
+        await session.flush()
+        return True
 
     async def list_socket_connection_ids(
         self,

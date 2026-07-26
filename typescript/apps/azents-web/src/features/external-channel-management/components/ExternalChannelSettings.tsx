@@ -25,10 +25,11 @@ import {
 } from "@mantine/core";
 import { useModals } from "@mantine/modals";
 import {
+  IconBrandDiscord,
+  IconBrandSlack,
   IconCheck,
   IconCopy,
   IconPencil,
-  IconPlugConnected,
   IconSettings,
   IconShieldCheck,
   IconShieldX,
@@ -684,7 +685,16 @@ function DiscordConnectionDialog({
     >
       {state && (
         <Stack gap="md">
-          <Alert color="blue">{t("discordGuide")}</Alert>
+          <Alert color="blue" title={t("discordGuideTitle")}>
+            <Text size="sm">{t("discordGuide")}</Text>
+            <List size="sm" spacing="xs" mt="xs">
+              <List.Item>{t("discordGuideStep1")}</List.Item>
+              <List.Item>{t("discordGuideStep2")}</List.Item>
+              <List.Item>{t("discordGuideStep3")}</List.Item>
+              <List.Item>{t("discordGuideStep4")}</List.Item>
+              <List.Item>{t("discordGuideStep5")}</List.Item>
+            </List>
+          </Alert>
           <TextInput
             label={t("discordAppId")}
             value={state.appId}
@@ -787,18 +797,20 @@ export function ExternalChannelSettings({
           </Stack>
           <Group gap="xs">
             <Button
-              leftSection={<IconPlugConnected size={rem(16)} />}
+              variant="light"
+              leftSection={<IconBrandSlack size={rem(16)} />}
               disabled={actionsBusy}
               onClick={onOpenSetup}
             >
-              {t("addConnection")}
+              {t("setupTitle")}
             </Button>
             <Button
               variant="light"
+              leftSection={<IconBrandDiscord size={rem(16)} />}
               disabled={actionsBusy}
               onClick={onOpenDiscordSetup}
             >
-              {t("addDiscordConnection")}
+              {t("discordSetupTitle")}
             </Button>
           </Group>
         </Group>
@@ -824,11 +836,19 @@ export function ExternalChannelSettings({
                     <Text size="sm" c="dimmed" ta="center">
                       {t("emptyConnectionsDescription")}
                     </Text>
-                    <Button variant="light" onClick={onOpenSetup}>
-                      {t("addConnection")}
+                    <Button
+                      leftSection={<IconBrandSlack size={rem(16)} />}
+                      variant="light"
+                      onClick={onOpenSetup}
+                    >
+                      {t("setupTitle")}
                     </Button>
-                    <Button variant="light" onClick={onOpenDiscordSetup}>
-                      {t("addDiscordConnection")}
+                    <Button
+                      leftSection={<IconBrandDiscord size={rem(16)} />}
+                      variant="light"
+                      onClick={onOpenDiscordSetup}
+                    >
+                      {t("discordSetupTitle")}
                     </Button>
                   </Stack>
                 </Paper>

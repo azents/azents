@@ -62,7 +62,6 @@ server:
     enabled: true
     resources: {}
   discordGateway:
-    enabled: false
     resources: {}
   scheduler:
     enabled: true

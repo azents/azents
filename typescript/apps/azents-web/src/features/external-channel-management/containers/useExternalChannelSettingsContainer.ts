@@ -15,6 +15,7 @@ import type {
 } from "../types";
 import type {
   AgentResponse,
+  ExternalChannelConnectionStatusSnapshot,
   ExternalChannelTransport,
   ManagedBlock,
   ManagedConnection,
@@ -62,6 +63,17 @@ const EMPTY_CREDENTIALS: SlackCredentialDraft = {
 
 function normalizeError(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+function validationMessage(
+  result: ExternalChannelConnectionStatusSnapshot,
+): string | null {
+  if (result.status === "active") {
+    return null;
+  }
+  return [result.message, result.action_hint]
+    .filter((value): value is string => value !== null && value !== "")
+    .join(" ");
 }
 
 export function useExternalChannelSettingsContainer({
@@ -155,23 +167,27 @@ export function useExternalChannelSettingsContainer({
       onError: (error) => failAction(error),
     });
   const validateMutation = trpc.externalChannel.validateConnection.useMutation({
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       try {
         await invalidate("validate");
       } finally {
-        clearAction();
+        actionLock.current = false;
+        setActionTarget(null);
+        setActionError(validationMessage(result));
       }
     },
     onError: (error) => failAction(error),
   });
   const updateMutation = trpc.externalChannel.updateSlackConnection.useMutation(
     {
-      onSuccess: async () => {
+      onSuccess: async (result) => {
         setDialogState(null);
         try {
           await invalidate("update");
         } finally {
-          clearAction();
+          actionLock.current = false;
+          setActionTarget(null);
+          setActionError(validationMessage(result));
         }
       },
       onError: (error) => failAction(error),
@@ -179,12 +195,14 @@ export function useExternalChannelSettingsContainer({
   );
   const updateDiscordMutation =
     trpc.externalChannel.updateDiscordConnection.useMutation({
-      onSuccess: async () => {
+      onSuccess: async (result) => {
         setDiscordDialogState(null);
         try {
           await invalidate("update");
         } finally {
-          clearAction();
+          actionLock.current = false;
+          setActionTarget(null);
+          setActionError(validationMessage(result));
         }
       },
       onError: (error) => failAction(error),
