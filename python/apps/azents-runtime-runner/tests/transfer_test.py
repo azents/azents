@@ -3,7 +3,9 @@
 import asyncio
 import dataclasses
 import hashlib
+import json
 import os
+import threading
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -426,4 +428,220 @@ async def test_conflicting_intent_for_active_identity_is_rejected_without_second
             reason=RunnerTransferCancelReason.CALLER,
         )
     )
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_upload_snapshot_keeps_control_work_and_cancellation_responsive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Slow snapshot I/O yields the event loop for Control work and cancellation."""
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"x" * (2 * 1024 * 1024))
+    entered_read = threading.Event()
+    release_read = threading.Event()
+    original_read = os.read
+
+    def block_first_read(fd: int, size: int) -> bytes:
+        if not entered_read.is_set():
+            entered_read.set()
+            release_read.wait(timeout=1)
+        return original_read(fd, size)
+
+    monkeypatch.setattr("azents_runtime_runner.transfer.os.read", block_first_read)
+    control = _Control()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_Transfer(),
+        accepted_generation=lambda: 1,
+    )
+    intent = _intent(
+        source,
+        direction=RunnerTransferDirection.UPLOAD,
+        data=b"x" * (2 * 1024 * 1024),
+    )
+
+    await manager.handle_intent(intent)
+    assert await asyncio.to_thread(entered_read.wait, 1)
+    heartbeat_completed = asyncio.Event()
+    ordinary_control_completed = asyncio.Event()
+
+    async def heartbeat() -> None:
+        heartbeat_completed.set()
+
+    async def ordinary_control_operation() -> None:
+        ordinary_control_completed.set()
+
+    await asyncio.wait_for(
+        asyncio.gather(
+            heartbeat(),
+            ordinary_control_operation(),
+            manager.handle_cancel(
+                RunnerTransferCancel(
+                    identity=intent.identity,
+                    operation_id=intent.operation_id,
+                    dispatch_id=intent.dispatch_id,
+                    reason=RunnerTransferCancelReason.CALLER,
+                )
+            ),
+        ),
+        timeout=0.1,
+    )
+    assert heartbeat_completed.is_set()
+    assert ordinary_control_completed.is_set()
+    release_read.set()
+
+    result = await _result(control)
+    assert result.outcome is RunnerTransferOutcome.CANCELLED
+    assert not list(tmp_path.glob(".azents-transfer-*"))
+    await manager.close()
+
+
+def _orphan_name(index: int) -> str:
+    return f".azents-transfer-download-{index:032x}-{index + 1:032x}"
+
+
+def _write_orphan_journal(
+    root: Path,
+    parent: Path,
+    name: str,
+    *,
+    device: int,
+    inode: int,
+    created_at: datetime,
+) -> None:
+    journal = root / ".azents-transfer-orphans"
+    journal.mkdir(mode=0o700, exist_ok=True)
+    (journal / f"{name}.json").write_text(
+        json.dumps(
+            {
+                "parent": str(parent),
+                "name": name,
+                "device": device,
+                "inode": inode,
+                "created_at": created_at.isoformat(),
+            },
+            separators=(",", ":"),
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_startup_orphan_reclaim_removes_only_verified_expired_file(
+    tmp_path: Path,
+) -> None:
+    """Startup reclaim removes one expired inode-bound regular staging file."""
+    parent = tmp_path / "target"
+    parent.mkdir()
+    name = _orphan_name(1)
+    candidate = parent / name
+    candidate.write_bytes(b"orphan")
+    identity = candidate.stat()
+    _write_orphan_journal(
+        tmp_path,
+        parent,
+        name,
+        device=identity.st_dev,
+        inode=identity.st_ino,
+        created_at=datetime.now(UTC) - timedelta(hours=1, seconds=1),
+    )
+    manager = RunnerTransferManager(
+        control=_Control(),
+        transfer=_Transfer(),
+        accepted_generation=lambda: 1,
+        orphan_root=str(tmp_path),
+    )
+
+    await manager.start()
+
+    assert not candidate.exists()
+    assert not list((tmp_path / ".azents-transfer-orphans").iterdir())
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_orphan_reclaim_preserves_forged_symlink_and_fresh_records(
+    tmp_path: Path,
+) -> None:
+    """Hostile journal input never follows a symlink or reclaims before one hour."""
+    parent = tmp_path / "target"
+    parent.mkdir()
+    target = tmp_path / "outside.bin"
+    target.write_bytes(b"outside")
+    symlink_name = _orphan_name(2)
+    symlink = parent / symlink_name
+    symlink.symlink_to(target)
+    target_identity = target.stat()
+    _write_orphan_journal(
+        tmp_path,
+        parent,
+        symlink_name,
+        device=target_identity.st_dev,
+        inode=target_identity.st_ino,
+        created_at=datetime.now(UTC) - timedelta(hours=1, seconds=1),
+    )
+    fresh_name = _orphan_name(3)
+    fresh = parent / fresh_name
+    fresh.write_bytes(b"fresh")
+    fresh_identity = fresh.stat()
+    _write_orphan_journal(
+        tmp_path,
+        parent,
+        fresh_name,
+        device=fresh_identity.st_dev,
+        inode=fresh_identity.st_ino,
+        created_at=datetime.now(UTC) - timedelta(minutes=59),
+    )
+    manager = RunnerTransferManager(
+        control=_Control(),
+        transfer=_Transfer(),
+        accepted_generation=lambda: 1,
+        orphan_root=str(tmp_path),
+    )
+
+    reclaimed = await manager.reclaim_orphans()
+
+    assert reclaimed == 0
+    assert symlink.is_symlink()
+    assert target.read_bytes() == b"outside"
+    assert fresh.read_bytes() == b"fresh"
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_background_orphan_reclaim_is_bounded_and_eventually_reclaims(
+    tmp_path: Path,
+) -> None:
+    """The background worker scans bounded pages and reclaims later records."""
+    parent = tmp_path / "target"
+    parent.mkdir()
+    for index in range(101):
+        name = _orphan_name(index + 10)
+        candidate = parent / name
+        candidate.write_bytes(b"orphan")
+        identity = candidate.stat()
+        _write_orphan_journal(
+            tmp_path,
+            parent,
+            name,
+            device=identity.st_dev,
+            inode=identity.st_ino,
+            created_at=datetime.now(UTC) - timedelta(hours=1, seconds=1),
+        )
+    manager = RunnerTransferManager(
+        control=_Control(),
+        transfer=_Transfer(),
+        accepted_generation=lambda: 1,
+        orphan_root=str(tmp_path),
+        orphan_reclaim_interval_seconds=0.01,
+    )
+
+    await manager.reclaim_orphans()
+
+    assert len(list(parent.iterdir())) == 1
+    await manager.start()
+    await asyncio.sleep(0.05)
+
+    assert list(parent.iterdir()) == []
     await manager.close()

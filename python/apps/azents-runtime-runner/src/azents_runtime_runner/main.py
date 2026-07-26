@@ -207,6 +207,7 @@ async def run_runtime_runner() -> None:
             control=client,
             transfer=transfer_client,
             accepted_generation=accepted_generation,
+            orphan_root=str(workspace.root),
         )
         client.set_transfer_intent_handler(transfer_manager.handle_intent)
         client.set_transfer_cancel_handler(transfer_manager.handle_cancel)
@@ -219,6 +220,7 @@ async def run_runtime_runner() -> None:
                     "connection_id": connection_id,
                 },
             )
+            await transfer_manager.start()
             await run_loop.run_forever()
         except asyncio.CancelledError:
             raise
