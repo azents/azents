@@ -9,6 +9,7 @@ from azents.services.external_channel.discord_gateway import (
     DISCORD_GATEWAY_INTENTS,
     DiscordGatewayCheckpoint,
     DiscordGatewayClient,
+    DiscordGatewayDispatch,
     DiscordGatewayInvalidPayload,
 )
 
@@ -71,6 +72,7 @@ async def test_identify_persists_ready_checkpoint_before_reconnect() -> None:
         bot_token="redacted-token",
         checkpoint=None,
         persist_checkpoint=_checkpoint_sink(checkpoints),
+        handle_dispatch=_dispatch_sink([]),
     )
 
     assert socket.sent[0] == {
@@ -123,6 +125,7 @@ async def test_resume_advances_existing_checkpoint() -> None:
         bot_token="redacted-token",
         checkpoint=checkpoint,
         persist_checkpoint=_checkpoint_sink(checkpoints),
+        handle_dispatch=_dispatch_sink([]),
     )
 
     assert socket.sent[0] == {
@@ -146,6 +149,57 @@ async def test_resume_advances_existing_checkpoint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_handler_finishes_before_checkpoint_persistence() -> None:
+    """A dispatched event is admitted by its callback before resume state advances."""
+    socket = _Socket(
+        [
+            {"op": 10, "d": {"heartbeat_interval": 60_000}},
+            {
+                "op": 0,
+                "s": 4,
+                "t": "READY",
+                "d": {
+                    "session_id": "session-1",
+                    "resume_gateway_url": "wss://gateway.discord.gg",
+                },
+            },
+            {
+                "op": 0,
+                "s": 5,
+                "t": "MESSAGE_CREATE",
+                "d": {"id": "message-1"},
+            },
+            {"op": 7, "d": None},
+        ]
+    )
+    events: list[str] = []
+    client = DiscordGatewayClient(
+        connector=lambda *args: _connector(socket, *args),
+    )
+
+    async def handle_dispatch(dispatch: DiscordGatewayDispatch) -> bool:
+        assert dispatch.session_id == "session-1"
+        assert dispatch.resume_gateway_url == "wss://gateway.discord.gg"
+        assert dispatch.sequence == 5
+        assert dispatch.event_name == "MESSAGE_CREATE"
+        events.append("dispatch")
+        return False
+
+    async def persist_checkpoint(checkpoint: DiscordGatewayCheckpoint) -> None:
+        events.append(f"checkpoint:{checkpoint.sequence}")
+
+    await client.run_connection(
+        endpoint_url="wss://gateway.discord.gg",
+        bot_token="redacted-token",
+        checkpoint=None,
+        persist_checkpoint=persist_checkpoint,
+        handle_dispatch=handle_dispatch,
+    )
+
+    assert events == ["checkpoint:4", "dispatch", "checkpoint:5"]
+
+
+@pytest.mark.asyncio
 async def test_rejects_dispatch_without_a_sequence() -> None:
     """Malformed Dispatches do not advance resumable state."""
     socket = _Socket(
@@ -164,6 +218,7 @@ async def test_rejects_dispatch_without_a_sequence() -> None:
             bot_token="redacted-token",
             checkpoint=None,
             persist_checkpoint=lambda _checkpoint: _unexpected_persist(),
+            handle_dispatch=_dispatch_sink([]),
         )
     assert socket.closed is True
 
@@ -181,3 +236,15 @@ def _checkpoint_sink(
         checkpoints.append(checkpoint)
 
     return persist
+
+
+def _dispatch_sink(
+    dispatches: list[DiscordGatewayDispatch],
+) -> Callable[[DiscordGatewayDispatch], Awaitable[bool]]:
+    """Build an async sink that records dispatched payloads."""
+
+    async def handle(dispatch: DiscordGatewayDispatch) -> bool:
+        dispatches.append(dispatch)
+        return False
+
+    return handle

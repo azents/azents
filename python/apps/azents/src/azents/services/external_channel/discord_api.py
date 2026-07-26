@@ -8,6 +8,7 @@ import httpx
 from fastapi import Depends
 
 _DISCORD_APPLICATION_URL = "https://discord.com/api/v10/oauth2/applications/@me"
+_DISCORD_CURRENT_USER_URL = "https://discord.com/api/v10/users/@me"
 
 
 class DiscordAPIError(RuntimeError):
@@ -76,6 +77,28 @@ class DiscordAPIClient:
             application_id=application_id,
             verify_key=verify_key,
         )
+
+    async def get_current_bot_user_id(self, *, bot_token: str) -> str:
+        """Return the current Bot user identity required for mention classification."""
+        try:
+            response = await self.http_client.get(
+                _DISCORD_CURRENT_USER_URL,
+                headers={"Authorization": f"Bot {bot_token}"},
+            )
+        except httpx.RequestError as error:
+            raise DiscordAPIUnavailable from error
+        if response.status_code in {401, 403}:
+            raise DiscordAPICredentialsInvalid
+        if response.status_code == 429 or response.status_code >= 500:
+            raise DiscordAPIUnavailable
+        try:
+            payload: object = response.json()
+        except ValueError as error:
+            raise DiscordAPIUnavailable from error
+        bot_user_id = payload.get("id") if isinstance(payload, dict) else None
+        if not isinstance(bot_user_id, str) or not bot_user_id.isdigit():
+            raise DiscordAPIUnavailable
+        return bot_user_id
 
     async def configure_interactions_endpoint(
         self,

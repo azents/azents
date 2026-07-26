@@ -635,6 +635,57 @@ class ExternalChannelRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def admit_discord_gateway_event(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        lease_generation: int,
+        now: datetime.datetime,
+        create: ExternalChannelEventCreate,
+        encrypted_checkpoint: str,
+        checkpoint_version: int,
+        sequence: int,
+    ) -> ExternalChannelEventAdmission | None:
+        """Atomically admit one Discord Dispatch and its fenced resume checkpoint."""
+        owned_lease = await session.scalar(
+            sa.select(RDBExternalChannelIngressLease)
+            .join(
+                RDBExternalChannelConnection,
+                RDBExternalChannelIngressLease.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .join(
+                RDBExternalChannelAppClaim,
+                RDBExternalChannelAppClaim.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .where(
+                _discord_gateway_lease_fence(
+                    connection_id=connection_id,
+                    lease_owner=lease_owner,
+                    lease_generation=lease_generation,
+                    now=now,
+                )
+            )
+            .with_for_update()
+        )
+        if owned_lease is None:
+            return None
+        if (
+            owned_lease.last_handled_dispatch_sequence is not None
+            and owned_lease.last_handled_dispatch_sequence > sequence
+        ):
+            return None
+        admission = await self.admit_event(session, create)
+        owned_lease.encrypted_checkpoint = encrypted_checkpoint
+        owned_lease.checkpoint_version = checkpoint_version
+        owned_lease.last_handled_dispatch_sequence = sequence
+        owned_lease.heartbeat_at = now
+        await session.flush()
+        return admission
+
     async def claim_socket_connection(
         self,
         session: AsyncSession,

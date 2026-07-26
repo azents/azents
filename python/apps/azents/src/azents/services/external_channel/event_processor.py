@@ -87,6 +87,13 @@ from azents.services.external_channel.connection import (
     get_slack_validation_http_client,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
+from azents.services.external_channel.discord_events import (
+    DiscordEventExcluded,
+    DiscordEventNormalizationError,
+    DiscordMessageContentUnavailable,
+    DiscordNormalizedMessage,
+    normalize_projected_discord_event,
+)
 from azents.services.external_channel.presentation import (
     normalize_slack_agent_name,
     prepend_agent_blocks,
@@ -695,7 +702,7 @@ class ExternalChannelEventProcessorService:
     ) -> None:
         try:
             await self._process_claimed_event(event)
-        except SlackEventExcluded as error:
+        except (SlackEventExcluded, DiscordEventExcluded) as error:
             await self._complete_event(
                 event,
                 eligibility_state=ExternalChannelEventEligibilityState.IGNORED,
@@ -709,7 +716,7 @@ class ExternalChannelEventProcessorService:
                     "reason": str(error),
                 },
             )
-        except SlackEventNormalizationError as error:
+        except (SlackEventNormalizationError, DiscordEventNormalizationError) as error:
             await self._complete_event(
                 event,
                 eligibility_state=ExternalChannelEventEligibilityState.IGNORED,
@@ -767,6 +774,12 @@ class ExternalChannelEventProcessorService:
 
     async def _process_claimed_event(self, event: ExternalChannelEvent) -> None:
         configuration = await self._connection_configuration(event.connection_id)
+        if configuration.provider is ExternalChannelProvider.DISCORD:
+            await self._process_discord_claimed_event(
+                event=event,
+                configuration=configuration,
+            )
+            return
         if configuration.provider is not ExternalChannelProvider.SLACK:
             raise SlackEventExcluded("External Channel provider is not supported.")
         if configuration.encrypted_credentials is None:
@@ -867,6 +880,129 @@ class ExternalChannelEventProcessorService:
                 )
                 raise _ConnectionUnavailable("credentials_invalid") from error
 
+        await self._complete_event(
+            event,
+            eligibility_state=ExternalChannelEventEligibilityState.PROCESSED,
+            status=ExternalChannelEventStatus.PROCESSED,
+            purge_envelope=False,
+        )
+
+    async def _process_discord_claimed_event(
+        self,
+        *,
+        event: ExternalChannelEvent,
+        configuration: ExternalChannelConnectionConfiguration,
+    ) -> None:
+        """Persist one Discord lifecycle event without Slack routing behavior."""
+        tenant_id = configuration.provider_tenant_id
+        if tenant_id is None:
+            raise DiscordEventNormalizationError(
+                "Discord connection Guild identity is missing."
+            )
+        try:
+            normalized = normalize_projected_discord_event(
+                event_type=event.event_type,
+                tenant_id=tenant_id,
+                envelope=event.envelope,
+                connected_bot_user_id=configuration.provider_bot_user_id,
+            )
+        except DiscordMessageContentUnavailable as error:
+            await self._mark_connection_reconnect_required(
+                connection_id=event.connection_id,
+                reason="discord_message_content_unavailable",
+            )
+            raise _ConnectionUnavailable(
+                "discord_message_content_unavailable"
+            ) from error
+        if normalized.author_type is not ExternalChannelPrincipalAuthorType.HUMAN:
+            raise DiscordEventExcluded("Discord bot and system messages are ignored.")
+        existing_resource_key = _discord_resource_key(
+            tenant_id=tenant_id,
+            thread_id=normalized.thread_id or normalized.channel_id,
+        )
+        now = _now()
+        async with self.session_manager() as session:
+            connection = await self.repository.lock_connection_for_routing(
+                session,
+                connection_id=event.connection_id,
+            )
+            if connection is None:
+                raise DiscordEventExcluded("Discord connection is unavailable.")
+            resource = await self.repository.get_resource_by_provider_key(
+                session,
+                connection_id=event.connection_id,
+                provider_resource_key=existing_resource_key,
+            )
+            if resource is None:
+                if not normalized.invocation:
+                    if now - event.received_at < _UNLINKED_EVENT_WAIT:
+                        raise _DeferredEvent(
+                            retry_at=now + datetime.timedelta(seconds=5),
+                            error_kind="awaiting_discord_thread_admission",
+                            error_summary=(
+                                "Waiting for a correlated Discord mention or binding."
+                            ),
+                        )
+                    raise DiscordEventExcluded(
+                        "Discord message is not linked to a tracked conversation."
+                    )
+                resource_key = _discord_resource_key(
+                    tenant_id=tenant_id,
+                    thread_id=normalized.thread_id or normalized.message_id,
+                )
+                if resource_key != existing_resource_key:
+                    resource = await self.repository.get_resource_by_provider_key(
+                        session,
+                        connection_id=event.connection_id,
+                        provider_resource_key=resource_key,
+                    )
+                if resource is None:
+                    resource = await self.repository.create_resource_idempotent(
+                        session,
+                        ExternalChannelResourceCreate(
+                            connection_id=event.connection_id,
+                            resource_type=ExternalChannelResourceType.THREAD,
+                            provider_resource_key=resource_key,
+                            labels={
+                                "provider": "discord",
+                                "guild_id": tenant_id,
+                                "thread_id": (
+                                    normalized.thread_id or normalized.message_id
+                                ),
+                                "parent_channel_id": (
+                                    normalized.parent_channel_id
+                                    or normalized.channel_id
+                                ),
+                                "root_message_id": normalized.message_id,
+                            },
+                            status=ExternalChannelResourceStatus.ACTIVE,
+                            hydration_status=ExternalChannelHydrationStatus.PENDING,
+                            hydration_cursor=None,
+                            hydration_high_watermark_position=None,
+                            reconciliation_boundary_received_at=None,
+                            reconciliation_boundary_event_id=None,
+                            hydration_error_kind=None,
+                            hydration_error_summary=None,
+                            hydration_started_at=None,
+                            hydration_completed_at=None,
+                            latest_activity_at=normalized.provider_created_at,
+                            unavailable_at=None,
+                            deleted_at=None,
+                        ),
+                    )
+            if resource.status is not ExternalChannelResourceStatus.ACTIVE:
+                raise DiscordEventExcluded("Discord conversation is unavailable.")
+            await self._persist_normalized_message(
+                session,
+                resource=resource,
+                message=normalized,
+                source_event_id=event.id,
+                now=now,
+                original_url=None,
+                reference_mappings={},
+                provider=ExternalChannelProvider.DISCORD,
+            )
+            await session.commit()
         await self._complete_event(
             event,
             eligibility_state=ExternalChannelEventEligibilityState.PROCESSED,
@@ -1422,18 +1558,19 @@ class ExternalChannelEventProcessorService:
         session: AsyncSession,
         *,
         resource: ExternalChannelResource,
-        message: SlackNormalizedMessage,
+        message: SlackNormalizedMessage | DiscordNormalizedMessage,
         source_event_id: str | None,
         now: datetime.datetime,
         original_url: str | None,
         reference_mappings: dict[str, dict[str, str]],
+        provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
     ) -> ExternalChannelPersistedRevision:
         principal_id = None
         if message.provider_user_id is not None:
             principal = await self.repository.create_principal_idempotent(
                 session,
                 ExternalChannelPrincipalCreate(
-                    provider=ExternalChannelProvider.SLACK,
+                    provider=provider,
                     provider_tenant_id=message.tenant_id,
                     provider_user_id=message.provider_user_id,
                     author_type=message.author_type,
@@ -3287,6 +3424,11 @@ def _resource_correlation_key(resource: ExternalChannelResource) -> str:
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
         raise RuntimeError("External Channel Slack resource labels are invalid.")
     return f"{channel_id}:{thread_ts}"
+
+
+def _discord_resource_key(*, tenant_id: str, thread_id: str) -> str:
+    """Return the canonical connection-scoped key for one Discord thread."""
+    return f"discord:{tenant_id}:{thread_id}"
 
 
 def _resource_reference_mappings(

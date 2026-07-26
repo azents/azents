@@ -22,7 +22,10 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
-from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_file import (
+    ExternalChannelOutboundFileManifest,
+    external_channel_file_metadata_items,
+)
 from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
 )
@@ -40,6 +43,8 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelMessage,
+    RDBExternalChannelMessageRevision,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
 )
@@ -50,6 +55,7 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkSnapshot,
     ChannelWorkTask,
     ExternalChannelFileAccessTarget,
+    ExternalChannelFileSource,
 )
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
@@ -135,6 +141,7 @@ class ExternalChannelWorkRepository:
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelConnection,
+                    RDBExternalChannelResource,
                 )
                 .join(
                     RDBAgentSession,
@@ -181,14 +188,62 @@ class ExternalChannelWorkRepository:
         ).one_or_none()
         if row is None:
             return None
-        binding, connection = row
+        binding, connection, resource = row
         return ExternalChannelFileAccessTarget(
             binding_id=binding.id,
             connection_id=connection.id,
+            resource_id=resource.id,
             provider=connection.provider,
             encrypted_credentials=connection.encrypted_credentials,
+            provider_tenant_id=connection.provider_tenant_id,
             capabilities=connection.capabilities,
+            resource_labels=resource.labels,
         )
+
+    async def get_file_source(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+        provider_file_id: str,
+    ) -> ExternalChannelFileSource | None:
+        """Locate one retained attachment source within a bound resource."""
+        rows = await session.execute(
+            sa.select(
+                RDBExternalChannelMessage.provider_message_key,
+                RDBExternalChannelMessageRevision.attachment_metadata,
+            )
+            .join(
+                RDBExternalChannelMessageRevision,
+                RDBExternalChannelMessageRevision.message_id
+                == RDBExternalChannelMessage.id,
+            )
+            .where(
+                RDBExternalChannelMessage.resource_id == resource_id,
+                RDBExternalChannelMessageRevision.attachment_metadata.is_not(None),
+            )
+            .order_by(
+                RDBExternalChannelMessageRevision.created_at.desc(),
+                RDBExternalChannelMessageRevision.id.desc(),
+            )
+        )
+        for provider_message_key, attachment_metadata in rows:
+            if not isinstance(attachment_metadata, dict):
+                continue
+            for metadata in external_channel_file_metadata_items(attachment_metadata):
+                if metadata.get("provider_file_id") != provider_file_id:
+                    continue
+                provider_channel_id = metadata.get("source_channel_id")
+                return ExternalChannelFileSource(
+                    provider_message_key=provider_message_key,
+                    provider_channel_id=(
+                        provider_channel_id
+                        if isinstance(provider_channel_id, str) and provider_channel_id
+                        else None
+                    ),
+                    metadata=metadata,
+                )
+        return None
 
     async def list_active_work(
         self,

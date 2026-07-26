@@ -70,7 +70,22 @@ type DiscordGatewayCheckpointSink = Callable[
     [DiscordGatewayCheckpoint],
     Awaitable[None],
 ]
+type DiscordGatewayDispatchHandler = Callable[
+    ["DiscordGatewayDispatch"],
+    Awaitable[bool],
+]
 type DiscordGatewayClock = Callable[[], datetime.datetime]
+
+
+@dataclasses.dataclass(frozen=True)
+class DiscordGatewayDispatch:
+    """One bounded Gateway Dispatch delivered before checkpoint persistence."""
+
+    session_id: str
+    resume_gateway_url: str
+    sequence: int
+    event_name: str
+    data: dict[str, object]
 
 
 async def _connect_gateway(
@@ -94,7 +109,7 @@ def _utc_now() -> datetime.datetime:
 
 
 class DiscordGatewayClient:
-    """Run one fenced Discord Gateway connection without domain routing logic."""
+    """Run one fenced Discord Gateway connection with callback-owned routing."""
 
     def __init__(
         self,
@@ -121,6 +136,7 @@ class DiscordGatewayClient:
         bot_token: str,
         checkpoint: DiscordGatewayCheckpoint | None,
         persist_checkpoint: DiscordGatewayCheckpointSink,
+        handle_dispatch: DiscordGatewayDispatchHandler,
     ) -> DiscordGatewayConnectionResult:
         """Run one Gateway session until Discord requests reconnection or closes it."""
         connection = await self.connector(
@@ -163,11 +179,25 @@ class DiscordGatewayClient:
                 payload = _parse_payload(message)
                 op = payload["op"]
                 if op == 0:
+                    dispatch = _dispatch(payload)
+                    checkpoint_persisted = False
+                    if dispatch.event_name != "READY":
+                        if active_checkpoint is None:
+                            raise DiscordGatewayInvalidPayload(
+                                "Discord Gateway Dispatch arrived before READY."
+                            )
+                        checkpoint_persisted = await handle_dispatch(
+                            dataclasses.replace(
+                                dispatch,
+                                session_id=active_checkpoint.session_id,
+                                resume_gateway_url=active_checkpoint.resume_gateway_url,
+                            )
+                        )
                     active_checkpoint = _advance_checkpoint(
                         payload=payload,
                         checkpoint=active_checkpoint,
                     )
-                    if active_checkpoint is not None:
+                    if active_checkpoint is not None and not checkpoint_persisted:
                         await persist_checkpoint(active_checkpoint)
                     continue
                 if op == 1:
@@ -324,3 +354,29 @@ def _advance_checkpoint(
     if checkpoint is None:
         return None
     return dataclasses.replace(checkpoint, sequence=sequence)
+
+
+def _dispatch(payload: dict[str, object]) -> DiscordGatewayDispatch:
+    """Extract one bounded Dispatch before it is acknowledged by checkpoint state."""
+    sequence = payload.get("s")
+    event_name = payload.get("t")
+    data = payload.get("d")
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+        raise DiscordGatewayInvalidPayload(
+            "Discord Gateway Dispatch has an invalid sequence."
+        )
+    if not isinstance(event_name, str) or not event_name:
+        raise DiscordGatewayInvalidPayload(
+            "Discord Gateway Dispatch has an invalid event name."
+        )
+    if not isinstance(data, dict):
+        raise DiscordGatewayInvalidPayload(
+            "Discord Gateway Dispatch data must be an object."
+        )
+    return DiscordGatewayDispatch(
+        session_id="",
+        resume_gateway_url="",
+        sequence=sequence,
+        event_name=event_name,
+        data=data,
+    )
