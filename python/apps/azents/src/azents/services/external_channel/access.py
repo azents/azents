@@ -16,10 +16,12 @@ from azents.core.enums import (
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConversationAdmissionStatus,
+    ExternalChannelProvider,
     ExternalChannelResourceStatus,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.external_channel_progress import checking_progress
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -308,10 +310,16 @@ class ExternalChannelAccessService:
                     agent_session_id=agent_session_id,
                     status=ExternalChannelBindingStatus.ACTIVE,
                     activation_status=(
-                        ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+                        ExternalChannelBindingActivationStatus.ACTIVE
+                        if connection.provider is ExternalChannelProvider.DISCORD
+                        else ExternalChannelBindingActivationStatus.WAITING_HYDRATION
                     ),
                     activation_trigger_message_id=request.source_message_id,
-                    activated_at=None,
+                    activated_at=(
+                        now
+                        if connection.provider is ExternalChannelProvider.DISCORD
+                        else None
+                    ),
                     projected_through_position=None,
                     truncated_message_count=(
                         snapshot_count if isinstance(snapshot_count, int) else 0
@@ -364,6 +372,13 @@ class ExternalChannelAccessService:
                 binding.activation_status
                 is ExternalChannelBindingActivationStatus.ACTIVE
             ):
+                await self.repository.ensure_active_work(
+                    session,
+                    binding_id=binding.id,
+                    desired_progress_payload=checking_progress().model_dump(
+                        mode="json"
+                    ),
+                )
                 wake_required = await self._release_allowed_request(
                     session,
                     binding=binding,

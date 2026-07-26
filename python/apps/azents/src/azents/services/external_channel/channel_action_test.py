@@ -583,6 +583,69 @@ async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> N
 
 
 @pytest.mark.asyncio
+async def test_discord_approval_control_delivery_uses_text_create() -> None:
+    """Discord approval controls use the same fenced create-message delivery path."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "agent_name": None,
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "request_payload": {
+                "guild_id": "111",
+                "channel_id": "333",
+                "text": (
+                    "Approval is required. "
+                    "[Review access](https://azents.example/request-1)"
+                ),
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.DELIVERED,
+            "discord:111:555",
+            None,
+        )
+    ]
+    assert discord_client.calls == [
+        (
+            "create",
+            {
+                "bot_token": "xoxb-secret",
+                "guild_id": "111",
+                "channel_id": "333",
+                "content": (
+                    "Approval is required. "
+                    "[Review access](https://azents.example/request-1)"
+                ),
+                "delivery_attempt_id": "delivery-1",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_discord_file_delivery_streams_the_current_runtime_source() -> None:
     """Discord multipart delivery reads only the bounded current Runtime source."""
     events: list[str] = []

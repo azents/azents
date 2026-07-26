@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-26
-spec_version: 14
+spec_version: 15
 ---
 
 # External Channel Delivery and Channel Work
@@ -178,10 +178,17 @@ and a provider Tracker identity exists. A Tracker delete that returns
 
 ## Approval Control Messages
 
-Authorization control messages use Block Kit with a URL button and accessible
+Slack authorization control messages use Block Kit with a URL button and accessible
 fallback text; they do not expose an approval URL as ordinary body text. Provider
 participant labels and IDs are rendered in Slack plain-text objects so untrusted
 mrkdwn cannot create mentions, links, or formatting.
+
+Discord authorization controls use the same durable `CONTROL_MESSAGE` create intent
+and Discord Create Message nonce fence as ordinary text output. They contain a bounded
+approval explanation with a labelled Markdown review link, never a bare URL. Discord
+control payloads retain only Guild/channel identifiers, the authenticated approval
+link, and bounded text; they retain no interaction token, credential, raw event, or
+attachment URL.
 
 Slack API validation responses for approval controls are confirmed
 `failed/provider_rejected` outcomes. Only transport or server ambiguity is
@@ -226,6 +233,9 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-26** (spec_version 15) — Added nonce-fenced Discord approval-control
+  creation and provider-aware post-decision control deletion through the normal
+  delivery ledger.
 - **2026-07-26** (spec_version 14) — Added nonce-fenced Discord message and
   multipart delivery, ordered bounded progress pages, and conservative
   classification of rate-limit, rejection, and ambiguous provider outcomes.
