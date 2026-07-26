@@ -1,7 +1,7 @@
 ---
 title: "External Channel Provider Ingress"
 created: 2026-07-22
-tags: [backend, external-channel, slack, ingress, security]
+tags: [backend, external-channel, slack, discord, ingress, security]
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
@@ -17,6 +17,11 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_blocks.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
+  - python/apps/azents/src/azents/services/external_channel/discord_http.py
+  - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
+  - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
+  - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
+  - python/apps/azents/src/azents/services/external_channel/discord_events.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
@@ -25,11 +30,13 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
   - python/apps/azents/src/azents/worker/worker.py
   - testenv/azents/e2e/src/support/slack_provider_fake.py
+  - testenv/azents/e2e/src/support/discord_provider_fake.py
   - testenv/azents/e2e/src/tests/azents/public/test_external_channels.py
 api_routes:
   - /external-channel/v1/slack/events
+  - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-07-26
-spec_version: 9
+spec_version: 10
 ---
 
 # External Channel Provider Ingress
@@ -37,11 +44,12 @@ spec_version: 9
 ## Scope
 
 The Slack adapter accepts app-member public or private channel traffic plus the
-supported message-shortcut and selector interaction callbacks. Slack Connect, DMs,
-group DMs, reactions, slash commands, and unrelated bot auto-triggers are outside
-the current scope. A tracked conversation is one Slack thread rooted by an eligible
-App mention or message shortcut and resolved to one available Agent route whose
-Agent lifecycle is active.
+supported message-shortcut and selector interaction callbacks. The Discord adapter
+accepts target-Guild Gateway message Dispatches and signed interaction callbacks. Slack
+Connect, Discord DMs/group DMs, reactions, slash commands, and unrelated bot
+auto-triggers are outside the current scope. A tracked conversation is one provider
+thread rooted by an eligible App mention or message shortcut and resolved to one
+available Agent route whose Agent lifecycle is active.
 
 ## HTTP Admission
 
@@ -66,6 +74,30 @@ ambiguous candidates fail closed, and ordinary events never pass admission witho
 successful HMAC verification.
 
 Duplicate `(connection_id, provider_event_id)` callbacks reuse the admitted event and still receive a successful acknowledgement.
+
+## Discord Interaction Admission
+
+Discord sends interactions to
+`POST /external-channel/v1/discord/interactions/{selector}`. The selector is an opaque
+per-connection callback capability configured during activation; only its hash is
+retained.
+
+1. The adapter reads a bounded raw body.
+2. It resolves exactly one current Discord configuration by selector hash.
+3. It verifies the Discord Ed25519 signature against that connection's stored
+   Application public key before parsing the body.
+4. It verifies the submitted Application and Guild identities against the selected
+   connection.
+5. A verified endpoint PING returns its provider acknowledgement without durable
+   admission.
+6. A supported command, component, autocomplete, or modal interaction creates or
+   reuses one token-free durable interaction admission before its provider
+   acknowledgement is returned.
+
+Unknown selectors, malformed bodies, invalid signatures, mismatched Application/Guild
+identity, and unsupported interaction types fail before durable admission. Discord
+interaction tokens, raw bodies, and signatures remain request-local and are neither
+persisted nor replayed.
 
 ## Interactive Admission and Selection
 
@@ -98,6 +130,25 @@ release, gap, and active-state writes. Shutdown and cancellation close the socke
 release ownership without exposing tokens.
 
 Production permits only secure Slack endpoints. Test-only HTTP and insecure WebSocket overrides require explicit `AZ_TESTENV_SLACK_*` configuration.
+
+## Discord Gateway Admission
+
+The dedicated Discord Gateway Worker, rather than an Agent Worker, owns Gateway
+protocol sessions. It claims a configured Discord connection with a lease owner,
+configuration generation, App-claim generation, and lease generation. A stale claim
+cannot renew, checkpoint, admit, record a gap, or release newer authority.
+
+The Worker discovers a secure Gateway endpoint, Identifies or Resumes from the last
+committed encrypted checkpoint, maintains heartbeats, and records reconnect, invalid
+session, close-code, and transport-gap outcomes. It accepts only eligible target-Guild
+message Dispatches. For each accepted Dispatch, canonical event admission and the
+session/sequence checkpoint commit together under the lease fence. The Worker advances
+no checkpoint after a failed admission. `READY` and `RESUMED` establish session state
+but are not canonical message events.
+
+Production requires `https` REST discovery and `wss` Gateway transport. A deterministic
+fake may use `http`/`ws` only with both explicit Discord test-origin and insecure
+Gateway opt-in configuration.
 
 ## Asynchronous Processing
 
@@ -157,10 +208,19 @@ declared size, and actual streamed bytes.
 
 ## Evidence and Redaction
 
-Deterministic E2E uses signed raw callbacks and a fake HTTP/WebSocket provider through public APIs. Provider evidence records operation names, bounded metadata, acknowledgements, and state transitions only. Authorization headers, signing secrets, bot/app tokens, and Slack message text are excluded.
+Deterministic E2E uses signed raw callbacks and fake HTTP/WebSocket providers through
+public APIs. Provider evidence records operation names, bounded metadata,
+acknowledgements, Gateway state transitions, file counts, aggregate bytes, and outcomes
+only. Authorization headers, signing secrets, bot/app tokens, callback URLs, raw
+payloads, message text, attachment names, attachment bytes, and transient URLs are
+excluded.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 10) — Added selector-scoped Ed25519 Discord
+  interaction admission and the dedicated lease-fenced Gateway Worker with
+  admission-coupled checkpoints, secure production transport, and sanitized
+  deterministic fake evidence.
 - **2026-07-26** (spec_version 9) — Added signed shortcut and selector interaction
   admission, transient trigger handling, durable selection scope, and deterministic
   binding/default/Single route resolution.

@@ -1,7 +1,7 @@
 ---
 title: "External Channel Authorization"
 created: 2026-07-22
-tags: [backend, frontend, external-channel, authorization, security]
+tags: [backend, frontend, external-channel, authorization, security, discord]
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
@@ -11,6 +11,9 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/interaction.py
   - python/apps/azents/src/azents/services/external_channel/selector.py
   - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
+  - python/apps/azents/src/azents/services/external_channel/discord_events.py
+  - python/apps/azents/src/azents/services/external_channel/discord_http.py
+  - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
@@ -27,14 +30,17 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-07-26
-spec_version: 7
+spec_version: 8
 ---
 
 # External Channel Authorization
 
 ## Principal Boundary
 
-A Slack participant is an `ExternalChannelPrincipal`, not an Azents User or WorkspaceUser. Provider identity is scoped by provider tenant and user ID. Human, bot, app, and system authors are retained separately; only eligible human invocation messages enter the access decision flow.
+An External Channel participant is an `ExternalChannelPrincipal`, not an Azents User
+or WorkspaceUser. Provider identity is scoped by provider tenant and user ID. Human,
+bot, app, and system authors are retained separately; only eligible human invocation
+messages enter the access decision flow.
 
 The authenticated Azents administrator who grants or revokes access is a requester for that public
 management operation only. Neither the administrator nor the ExternalChannelPrincipal becomes an
@@ -51,17 +57,20 @@ When the participant invokes the Agent:
 
 1. A bound thread or resolved Single/default route proceeds directly. An unresolved
    Multi App shortcut or mention first requires one explicit selector admission and
-   validates the chosen route.
+   validates the chosen route. Slack presents its selector through Block Kit; Discord
+   uses a verified command or component interaction.
 2. The event processor creates one idempotent access request for the selected route
    and original source message.
 3. The request snapshots truncation counters, expires after seven days, and contains an opaque ID.
-4. One Slack Block Kit control-message intent is persisted and attempted once with the participant display label, complete provider user ID, and an authenticated Azents approval URL rendered as a button plus accessible fallback text.
+4. One provider control-message intent is persisted and attempted once with the
+   participant display label, complete provider user ID, and an authenticated Azents
+   approval URL rendered through the provider's safe control shape.
 5. The approval page requires an authenticated user who is an administrator of the routed Agent. Unauthorized, cross-Agent, missing, and expired requests do not disclose the request and appear not found or unavailable.
 
 Selector completion does not grant access. It preserves the original sender and
 uploader provenance, then applies the chosen Agent's existing grant, block, and
-approval policy. The Slack callback actor can confirm interaction scope but never
-becomes the execution User or replaces the initiating principal.
+approval policy. The Slack or Discord callback actor can confirm interaction scope but
+never becomes the execution User or replaces the initiating principal.
 
 ## Decisions
 
@@ -105,6 +114,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 8) — Extended the provider-neutral principal,
+  source-retention, selector, and approval boundary to signed Discord interactions
+  without allowing a callback actor to replace source provenance.
 - **2026-07-26** (spec_version 7) — Inserted explicit Multi App selection before
   Agent-specific access evaluation while preserving source provenance, callback actor
   isolation, and duplicate selection/decision convergence.

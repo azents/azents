@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-07-23
-spec_version: 9
+last_verified_at: 2026-07-26
+spec_version: 10
 ---
 
 # E2E Primary Test Strategy
@@ -46,6 +46,22 @@ This spec defines boundaries connecting azents feature design, E2E location, fix
 | `testenv/azents/support/` | Promote only helpers confirmed to be repeatedly used in E2E/fixture/prerequisite. | Do not preemptively commonize. |
 
 Manual-only runbook, blocked placeholder, removed-feature residue check, legacy TC markdown, `run-tc`, verifier, and markdown bash fallback are not part of event azents verification path. Primary evidence for product behavior QA is E2E result, and it is not separated into long-term catalog files.
+
+## Deterministic Provider Boundaries
+
+Credential-free provider fakes model only the platform contract required by an E2E
+journey. The Discord fake supplies REST authority/delivery responses, a signed
+interaction relay, and Gateway HELLO, heartbeat, Identify, Resume, dispatch,
+reconnect, invalid-session, and close-code behavior. It is controlled only through
+bounded test endpoints and retains evidence limited to operation identifiers,
+provider-safe metadata, acknowledgements, state transitions, delivery outcomes, file
+count, and aggregate byte count.
+
+Fakes and test evidence never retain credentials, authorization headers, signatures,
+callback URLs, raw payloads, visible message bodies, attachment names, attachment
+bytes, or transient provider URLs. Production Discord remains on its real secure REST
+and Gateway endpoints; `http`/`ws` are permitted only for the explicit deterministic
+test origin with an explicit insecure-Gateway opt-in.
 
 ## Local Bootstrap and Fixture Flow
 
@@ -97,6 +113,10 @@ Always-on required CI does not depend on external credentials.
 
 - Python lint/type/unit and other deterministic checks.
 - Deterministic E2E runs `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src` in `testenv/azents/e2e`.
+- Discord Single/Multi journeys use the public APIs and the deterministic provider
+  fake; they do not create product rows directly. Focused fake contract tests cover
+  signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
+  REST failure outcomes, and multipart redaction.
 - Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks and provider-native External Channel progress.
 - Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src`.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
@@ -129,6 +149,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-07-26** — v10. Added the credential-free Discord REST/Gateway fake,
+  signed interaction relay, provider-evidence redaction contract, and public-API
+  Single/Multi deterministic E2E boundary.
 - **2026-07-23** — v9. Added the credential-free focused Runtime Provider lane and its bootstrap/enrollment boundary to required E2E CI.
 - **2026-07-17** — v8. Split real-browser journeys into the parallel Web Surface E2E lane while preserving the stable required E2E gate.
 - **2026-07-13** — v7. Added deterministic containerized Chromium journeys and worktree-built web images to the always-on E2E policy.

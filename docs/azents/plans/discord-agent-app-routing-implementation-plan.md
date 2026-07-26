@@ -43,18 +43,20 @@ transport or wake durable work.
 
 | PR | Branch role | Scope | Depends on | Primary validation |
 | --- | --- | --- | --- | --- |
-| 1/12 | Design baseline | Approved Requirements, ADR, Design, and generated docs index | `main` | Snapshot validation and docs hooks |
-| 2/12 | Implementation plan | This plan and stack/validation contracts | 1/12 | Snapshot validation and docs hooks |
-| 3/12 | Provider foundation | Provider enum, tagged Discord contracts, ingress profile, configuration/App-claim/lease and delivery-part schema foundation, adapter registry seams | 2/12 | Migration round trips, repository invariants, Slack regression |
-| 4/12 | Connection management | Discord Single/Multi setup contracts, validation, management API, permissions, OpenAPI/client generation, rollout-disabled lifecycle | 3/12 | API/service tests, generated-client drift, management regression |
-| 5/12 | Gateway Worker | Dedicated Worker entrypoint/deployment, claim capacity, generation fences, session checkpoint, Resume/Identify/gap health, deterministic Gateway fake | 4/12 | Lease/checkpoint tests and fake protocol tests |
-| 6/12 | Interactions and routing | Ed25519 endpoint, PING, message command, selector controls, opaque handoffs, route-resolved thread provisioning, approval continuation | 5/12 | Signed ingress, routing race, thread reconciliation tests |
-| 7/12 | Messages and files | Gateway normalization, history hydration, metadata-only attachments, explicit inbound download, permission and Message Content health | 6/12 | Message/revision, hydration, file authority, capability tests |
-| 8/12 | Delivery bundles | Ordered reply/control/progress parts, nonce-aware Discord writes, Channel Work projection pages, outbound files, cleanup outcomes | 7/12 | Bundle planning, partial/unknown, file batching, Slack delivery regression |
-| 9/12 | Web surfaces | Agent Single and Workspace Multi setup/repair/management UI, generated client integration, authority/secret-redaction states | 8/12 | Component tests and focused Web checks |
-| 10/12 | Deterministic E2E validation | Discord fake integration, essential product E2E, validation evidence, responsible fixes | 9/12 | Required E2E matrix and Docker-backed migrations |
-| 11/12 | Spec promotion | `/spec-review`, living-spec updates, snapshot implementation marker after complete verification | 10/12 | Spec review and final behavior comparison |
-| 12/12 | Cleanup | Remove temporary plans and compatibility readers after the stack is complete | 11/12 | Full regression and stale-reference search |
+| 1/14 | Design baseline | Approved Requirements, ADR, Design, and generated docs index | `main` | Snapshot validation and docs hooks |
+| 2/14 | Implementation plan | This plan and stack/validation contracts | 1/14 | Snapshot validation and docs hooks |
+| 3/14 | Provider foundation | Provider enum, tagged Discord contracts, ingress profile, configuration/App-claim/lease and delivery-part schema foundation, adapter registry seams | 2/14 | Migration round trips, repository invariants, Slack regression |
+| 4/14 | Connection management | Discord Single/Multi setup contracts, validation, management API, permissions, OpenAPI/client generation, rollout-disabled lifecycle | 3/14 | API/service tests, generated-client drift, management regression |
+| 5/14 | Gateway Worker | Dedicated Worker entrypoint/deployment, claim capacity, generation fences, session checkpoint, Resume/Identify/gap health, deterministic Gateway fake | 4/14 | Lease/checkpoint tests and fake protocol tests |
+| 6/14 | Interactions and routing | Ed25519 endpoint, PING, message command, selector controls, opaque handoffs, route-resolved thread provisioning, approval continuation | 5/14 | Signed ingress, routing race, thread reconciliation tests |
+| 7/14 | Messages and files | Gateway normalization, history hydration, metadata-only attachments, explicit inbound download, permission and Message Content health | 6/14 | Message/revision, hydration, file authority, capability tests |
+| 8/14 | Delivery bundles | Ordered reply/control/progress parts, nonce-aware Discord writes, Channel Work projection pages, outbound files, cleanup outcomes | 7/14 | Bundle planning, partial/unknown, file batching, Slack delivery regression |
+| 9/14 | Web surfaces — credential replacement | Shared management credential-replacement surface, generated client integration, authority/secret-redaction states | 8/14 | Component tests and management regression |
+| 10/14 | Web surfaces — Single connection forms | Agent-owned Discord Single setup and repair form | 9/14 | Component tests and focused Web checks |
+| 11/14 | Web surfaces — Multi connection forms | Workspace-owned Discord Multi setup and repair form | 10/14 | Component tests and focused Web checks |
+| 12/14 | Deterministic E2E validation | Discord fake integration, essential product E2E, validation evidence, responsible fixes | 11/14 | Required deterministic E2E matrix |
+| 13/14 | Spec promotion | `/spec-review`, living-spec updates, snapshot implementation marker after complete verification | 12/14 | Spec review and final behavior comparison |
+| 14/14 | Cleanup | Remove temporary plans and compatibility readers after the stack is complete | 13/14 | Full regression and stale-reference search |
 
 ## Phase Dependencies and Boundaries
 
@@ -119,16 +121,16 @@ phase, not a live-provider test substitute.
 
 | Area | Planned changes | First phase |
 | --- | --- | --- |
-| Persistence | Provider enum, configuration generation, App claim, ingress lease/checkpoint, provisioning attempts, delivery parts, work projection parts | 3/12 |
-| Provider contracts | Tagged credential/configuration/capability models and explicit adapter registry | 3/12 |
-| Public API | Discord Single and Multi setup, repair, route/default, health, and management operations | 4/12 |
-| Generated clients | Public OpenAPI dump plus Python and TypeScript regeneration | 4/12 |
-| Runtime | Dedicated Discord Gateway Worker and Helm deployment/rollout gate | 5/12 |
-| Ingress | Ed25519 interaction endpoint and Gateway Dispatch admission | 5/12, 6/12 |
-| Conversation | Message command, selector, thread provisioning, access continuation | 6/12 |
-| Files | Attachment metadata, current-URL materialization, outbound multipart planning | 7/12, 8/12 |
-| Delivery | Ordered parts, nonce-aware calls, progress pages, cleanup/recovery | 8/12 |
-| Web | Separate Single/Multi setup and repair/management surfaces | 9/12 |
+| Persistence | Provider enum, configuration generation, App claim, ingress lease/checkpoint, provisioning attempts, delivery parts, work projection parts | 3/14 |
+| Provider contracts | Tagged credential/configuration/capability models and explicit adapter registry | 3/14 |
+| Public API | Discord Single and Multi setup, repair, route/default, health, and management operations | 4/14 |
+| Generated clients | Public OpenAPI dump plus Python and TypeScript regeneration | 4/14 |
+| Runtime | Dedicated Discord Gateway Worker and Helm deployment/rollout gate | 5/14 |
+| Ingress | Ed25519 interaction endpoint and Gateway Dispatch admission | 5/14, 6/14 |
+| Conversation | Message command, selector, thread provisioning, access continuation | 6/14 |
+| Files | Attachment metadata, current-URL materialization, outbound multipart planning | 7/14, 8/14 |
+| Delivery | Ordered parts, nonce-aware calls, progress pages, cleanup/recovery | 8/14 |
+| Web | Credential replacement, separate Single/Multi setup, and repair/management surfaces | 9/14-11/14 |
 
 ## Test Strategy
 
@@ -148,10 +150,10 @@ unchanged HTTP/Socket ingress, selector, management, progress, and file behavior
 
 | Journey | Required evidence | Phase |
 | --- | --- | --- |
-| Single App core | Agent-admin setup/activation, sole route, thread provision, access continuation, one immutable binding/Session, follow-up, explicit reply | 10/12 |
-| Multi App primary | Workspace setup, two Agents, message command, private selector, access-required selection, retained inbound file, approval, duplicate convergence, binding continuity, explicit outbound file | 10/12 |
-| Management and lifecycle | Channel default, default routing, route removal/default invalidation without binding reroute, idempotent disconnect | 10/12 |
-| Compact Web setup and repair | Separate Single/Multi entry points, authority boundary, secret redaction, configuring/reconnect guidance | 9/12 and 10/12 |
+| Single App core | Agent-admin setup/activation, sole route, thread provision, access continuation, one immutable binding/Session, follow-up, explicit reply | 12/14 |
+| Multi App primary | Workspace setup, two Agents, message command, private selector, access-required selection, retained inbound file, approval, duplicate convergence, binding continuity, explicit outbound file | 12/14 |
+| Management and lifecycle | Channel default, default routing, route removal/default invalidation without binding reroute, idempotent disconnect | 12/14 |
+| Compact Web setup and repair | Separate Single/Multi entry points, authority boundary, secret redaction, configuring/reconnect guidance | 9/14-12/14 |
 
 ### Fixture and prerequisite requirements
 
@@ -174,7 +176,7 @@ message bodies, file bodies, and transient URLs.
 
 ## Rollout and CI Gates
 
-Discord creation is disabled until phase 10 evidence passes and every deployed API and
+Discord creation is disabled until phase 12 evidence passes and every deployed API and
 Worker can read provider-aware rows. Enablement additionally requires the Gateway
 Worker Deployment, public callback base URL configuration, and current living specs.
 
@@ -198,19 +200,19 @@ The following living specs are promoted only after verified implementation:
 | Risk or external action | Blocking phase | Handling |
 | --- | --- | --- |
 | No live Discord App/guild | None | Use the deterministic fake; do not add a live prerequisite |
-| Gateway library lacks durable Resume state hooks | 5/12 | Use a small protocol wrapper; Identify plus explicit gap reconciliation is the controlled fallback |
-| Discord permission overwrite changes | 6/12 onward | Recheck capability at admission, provisioning, history, file, and delivery boundaries |
-| Provider file limit varies by target context | 8/12 | Preflight only proven capability; classify unknown provider rejection as controlled failure |
-| Provider-neutral schema affects Slack readers | 3/12 onward | Keep compatibility readers, add targeted Slack regression, remove only in 12/12 |
+| Gateway library lacks durable Resume state hooks | 5/14 | Use a small protocol wrapper; Identify plus explicit gap reconciliation is the controlled fallback |
+| Discord permission overwrite changes | 6/14 onward | Recheck capability at admission, provisioning, history, file, and delivery boundaries |
+| Provider file limit varies by target context | 8/14 | Preflight only proven capability; classify unknown provider rejection as controlled failure |
+| Provider-neutral schema affects Slack readers | 3/14 onward | Keep compatibility readers, add targeted Slack regression, remove only in 14/14 |
 | Deployment callback base URL absent | Discord enablement only | Preserve rollout gate; deterministic E2E remains credential-free |
 
 ## Spec Promotion and Cleanup
 
-Phase 11 runs `/spec-review`, compares implementation to the living specs, and updates
+Phase 13 runs `/spec-review`, compares implementation to the living specs, and updates
 verified current behavior. Only after all required validation passes does it set the
 same `implemented` date in the Requirements and Design snapshots. The accepted ADR is
 not rewritten.
 
-Phase 12 removes this plan and any phase-specific plans, plus temporary compatibility
+Phase 14 removes this plan and any phase-specific plans, plus temporary compatibility
 readers and stale references that are no longer needed after all deployed readers have
 migrated. It contains no behavioral refactor.
