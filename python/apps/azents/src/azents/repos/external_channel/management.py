@@ -467,6 +467,40 @@ class ExternalChannelManagementRepository:
         ).one_or_none()
         return None if row is None else _multi_route(*row)
 
+    async def get_multi_route_by_agent(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        agent_id: str,
+    ) -> ManagedMultiRoute | None:
+        """Load the stable Multi App association for one Agent identity."""
+        row = (
+            await session.execute(
+                sa.select(RDBExternalChannelAgentRoute, RDBAgent.name)
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .outerjoin(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                )
+                .where(
+                    RDBExternalChannelConnection.id == connection_id,
+                    RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelAgentRoute.connection_app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelAgentRoute.agent_id_snapshot == agent_id,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else _multi_route(*row)
+
     async def list_multi_channel_defaults(
         self,
         session: AsyncSession,

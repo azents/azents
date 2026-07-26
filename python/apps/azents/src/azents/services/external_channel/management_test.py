@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
 )
 from azents.rdb.models.external_channel import (
@@ -31,7 +32,10 @@ from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
     progress_projection_state,
 )
-from azents.repos.external_channel.management_data import ManagedConnection
+from azents.repos.external_channel.management_data import (
+    ManagedConnection,
+    ManagedMultiRoute,
+)
 from azents.services.external_channel.management import (
     ExternalChannelManagementService,
     slack_manifest_guidance,
@@ -59,6 +63,25 @@ def _connection() -> ManagedConnection:
     )
 
 
+def _multi_route(
+    *,
+    status: ExternalChannelRouteCatalogStatus = (
+        ExternalChannelRouteCatalogStatus.AVAILABLE
+    ),
+) -> ManagedMultiRoute:
+    now = datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC)
+    return ManagedMultiRoute(
+        id="route-1",
+        agent_id="agent-1",
+        agent_id_snapshot="agent-1",
+        agent_name="Agent One",
+        catalog_status=status,
+        catalog_removed_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     """Socket Mode manifests still contain every subscribed Bot Event."""
     guidance = slack_manifest_guidance(
@@ -79,6 +102,53 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     assert "request_url" not in subscriptions
     assert guidance.callback_url is None
     assert "signing_secret" not in guidance.manifest_json
+
+
+async def test_add_multi_route_returns_existing_available_association() -> None:
+    """Repeated catalog addition is idempotent under the connection lock."""
+    session = AsyncMock(spec=AsyncSession)
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    repository = AsyncMock()
+    repository.get_multi_connection.return_value = SimpleNamespace(id="connection-1")
+    existing = _multi_route()
+    repository.get_multi_route_by_agent.return_value = existing
+    domain_repository = AsyncMock()
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1"
+    )
+    service = ExternalChannelManagementService(
+        session_manager=session_manager,
+        repository=repository,
+        domain_repository=domain_repository,
+        lifecycle_repository=AsyncMock(),
+        agent_repository=agent_repository,
+        agent_admin_repository=AsyncMock(),
+        workspace_user_repository=AsyncMock(),
+        connection_service=AsyncMock(),
+        action_service=AsyncMock(),
+        access_service=AsyncMock(),
+    )
+
+    result = await service.add_multi_route(
+        workspace_id="workspace-1",
+        connection_id="connection-1",
+        agent_id="agent-1",
+    )
+
+    assert result == existing
+    repository.get_multi_route_by_agent.assert_awaited_once_with(
+        session,
+        workspace_id="workspace-1",
+        connection_id="connection-1",
+        agent_id="agent-1",
+    )
+    domain_repository.create_agent_route.assert_not_awaited()
+    session.commit.assert_not_awaited()
 
 
 async def test_repeated_disconnect_reterminalizes_connection() -> None:

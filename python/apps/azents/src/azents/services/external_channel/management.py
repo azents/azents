@@ -398,6 +398,22 @@ class ExternalChannelManagementService:
                 or agent.workspace_id != workspace_id
             ):
                 raise ExternalChannelManagementNotFound(connection_id)
+            existing = await self.repository.get_multi_route_by_agent(
+                session,
+                workspace_id=workspace_id,
+                connection_id=connection.id,
+                agent_id=agent_id,
+            )
+            if existing is not None:
+                if (
+                    existing.catalog_status
+                    is ExternalChannelRouteCatalogStatus.AVAILABLE
+                    and existing.agent_id == agent_id
+                ):
+                    return existing
+                raise ValueError(
+                    "Removed Multi App Agent associations must be re-enabled."
+                )
             route = await self.domain_repository.create_agent_route(
                 session,
                 ExternalChannelAgentRouteCreate(
