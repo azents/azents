@@ -2,15 +2,16 @@
 
 import asyncio
 import contextlib
+import ctypes
+import errno
 import hashlib
-import json
+import logging
 import os
 import stat
-import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from pathlib import Path, PurePath
+from datetime import UTC, datetime
+from pathlib import PurePath
 from typing import Protocol
 
 import grpc
@@ -39,11 +40,18 @@ from azents_runtime_control.transfer import (
 _BUFFER_BYTES = MAX_TRANSFER_CHUNK_BYTES
 _DEFAULT_MAX_ACTIVE_TRANSFERS = 4
 _DEFAULT_MAX_TOMBSTONES = 256
-_ORPHAN_DIRECTORY_NAME = ".azents-transfer-orphans"
-_ORPHAN_RECORD_MAX_BYTES = 1024
-_ORPHAN_RECLAIM_LIMIT = 100
-_ORPHAN_RECLAIM_INTERVAL_SECONDS = 60.0
-_ORPHAN_MINIMUM_AGE = timedelta(hours=1)
+_LOGGER = logging.getLogger(__name__)
+_AT_EMPTY_PATH = 0x1000
+_LIBC = ctypes.CDLL(None, use_errno=True)
+_LINKAT = _LIBC.linkat
+_LINKAT.argtypes = (
+    ctypes.c_int,
+    ctypes.c_char_p,
+    ctypes.c_int,
+    ctypes.c_char_p,
+    ctypes.c_int,
+)
+_LINKAT.restype = ctypes.c_int
 
 
 class RunnerTransferResultSink(Protocol):
@@ -113,15 +121,9 @@ class RunnerTransferManager:
         accepted_generation: Callable[[], int | None],
         max_active_transfers: int = _DEFAULT_MAX_ACTIVE_TRANSFERS,
         max_tombstones: int = _DEFAULT_MAX_TOMBSTONES,
-        orphan_root: str | None = None,
-        orphan_reclaim_interval_seconds: float = (_ORPHAN_RECLAIM_INTERVAL_SECONDS),
     ) -> None:
         """Initialize independent data-task admission and result ownership."""
-        if (
-            max_active_transfers <= 0
-            or max_tombstones <= 0
-            or orphan_reclaim_interval_seconds <= 0
-        ):
+        if max_active_transfers <= 0 or max_tombstones <= 0:
             raise ValueError("Runner transfer limits must be positive")
         self._control = control
         self._transfer = transfer
@@ -133,32 +135,12 @@ class RunnerTransferManager:
         self._tombstones: dict[_TransferKey, _TransferTombstone] = {}
         self._completed_by_identity: dict[_TransferIdentityKey, _TransferKey] = {}
         self._pending_emits: set[asyncio.Task[None]] = set()
-        self._active_temporary_names: set[str] = set()
         self._lock = asyncio.Lock()
         self._commit_lock = asyncio.Lock()
-        self._orphan_root = None if orphan_root is None else Path(orphan_root)
-        self._orphan_reclaim_interval_seconds = orphan_reclaim_interval_seconds
-        self._orphan_task: asyncio.Task[None] | None = None
         self._closed = False
 
     async def start(self) -> None:
-        """Reclaim bounded stale files before accepting transfer instructions."""
-        if self._orphan_root is None:
-            return
-        await self.reclaim_orphans()
-        self._orphan_task = asyncio.create_task(self._reclaim_orphans_forever())
-
-    async def reclaim_orphans(self) -> int:
-        """Reclaim one bounded page of verified inactive local transfer files."""
-        if self._orphan_root is None:
-            return 0
-        active_names = frozenset(self._active_temporary_names)
-        return await asyncio.to_thread(
-            _reclaim_orphan_files,
-            self._orphan_root,
-            active_names,
-            datetime.now(UTC),
-        )
+        """Provide a lifecycle hook without pathname-backed transfer state."""
 
     async def handle_intent(self, intent: RunnerTransferIntent) -> None:
         """Validate and admit one intent without awaiting its transfer task."""
@@ -213,24 +195,17 @@ class RunnerTransferManager:
             self._closed = True
             active = tuple(self._active.values())
             pending_emits = tuple(self._pending_emits)
-            orphan_task = self._orphan_task
-            self._orphan_task = None
             for item in active:
                 item.cancelled.set()
                 item.task.cancel()
             for task in pending_emits:
                 task.cancel()
-            if orphan_task is not None:
-                orphan_task.cancel()
         for item in active:
             with contextlib.suppress(asyncio.CancelledError):
                 await item.task
         for task in pending_emits:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        if orphan_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await orphan_task
 
     async def _reap(self, key: "_TransferKey") -> None:
         async with self._lock:
@@ -248,8 +223,8 @@ class RunnerTransferManager:
                 result = await self._upload(intent, cancelled)
         except asyncio.CancelledError:
             result = _cancelled(intent)
-            await asyncio.shield(self._emit(result))
             self._remember(intent, result)
+            self._emit_later(result)
             raise
         except grpc.aio.AioRpcError as exc:
             result = _failed(intent, runner_transfer_failure_from_grpc(exc))
@@ -260,7 +235,7 @@ class RunnerTransferManager:
         except ValueError:
             result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
         self._remember(intent, result)
-        await self._emit(result)
+        self._emit_later(result)
 
     async def _download(
         self,
@@ -273,22 +248,9 @@ class RunnerTransferManager:
         if expected_sha256 is None or overwrite is None or expected_size is None:
             raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
         parent_fd, destination_name = _open_parent(intent.runtime_path, create=True)
-        stage_name = _temporary_name(intent, "download")
         stage_fd: int | None = None
-        stage_exists = False
-        stage_identity: _FileIdentity | None = None
-        published = False
         try:
-            await self._register_pending_orphan(intent.runtime_path, stage_name)
-            stage_fd = os.open(
-                stage_name,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=parent_fd,
-            )
-            stage_exists = True
-            stage_identity = _regular_identity(os.fstat(stage_fd))
-            await self._register_orphan(intent.runtime_path, stage_name, stage_fd)
+            stage_fd = _open_unnamed_temporary_file(parent_fd)
             offset = 0
             digest = hashlib.sha256()
             complete: RunnerDownloadComplete | None = None
@@ -322,28 +284,15 @@ class RunnerTransferManager:
             ):
                 raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
             await asyncio.to_thread(os.fsync, stage_fd)
-            os.close(stage_fd)
-            stage_fd = None
+            assert stage_fd is not None
             async with self._commit_lock:
                 _check_stop(intent, cancelled)
-                _assert_destination(parent_fd, destination_name, overwrite)
-                if overwrite:
-                    os.replace(
-                        stage_name,
-                        destination_name,
-                        src_dir_fd=parent_fd,
-                        dst_dir_fd=parent_fd,
-                    )
-                    stage_exists = False
-                else:
-                    os.link(
-                        stage_name,
-                        destination_name,
-                        src_dir_fd=parent_fd,
-                        dst_dir_fd=parent_fd,
-                    )
-                published = True
-            self._release_orphan_later(stage_name)
+                _assert_empty_destination(parent_fd, destination_name)
+                _link_from_file_descriptor(
+                    stage_fd,
+                    destination_name,
+                    dst_dir_fd=parent_fd,
+                )
             return RunnerTransferResult(
                 identity=intent.identity,
                 operation_id=intent.operation_id,
@@ -358,10 +307,6 @@ class RunnerTransferManager:
         finally:
             if stage_fd is not None:
                 os.close(stage_fd)
-            if stage_exists and stage_identity is not None:
-                _unlink_if_owned(parent_fd, stage_name, stage_identity)
-            if not published:
-                self._release_orphan_later(stage_name)
             os.close(parent_fd)
 
     async def _upload(
@@ -373,10 +318,8 @@ class RunnerTransferManager:
         if expected_size is None:
             raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
         parent_fd, source_name = _open_parent(intent.runtime_path, create=False)
-        snapshot_name = _temporary_name(intent, "upload")
         source_fd: int | None = None
         snapshot_fd: int | None = None
-        snapshot_identity: _FileIdentity | None = None
         try:
             source_fd = os.open(
                 source_name,
@@ -386,15 +329,7 @@ class RunnerTransferManager:
             before = _regular_identity(os.fstat(source_fd))
             if before.size != expected_size:
                 raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
-            await self._register_pending_orphan(intent.runtime_path, snapshot_name)
-            snapshot_fd = os.open(
-                snapshot_name,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=parent_fd,
-            )
-            snapshot_identity = _regular_identity(os.fstat(snapshot_fd))
-            await self._register_orphan(intent.runtime_path, snapshot_name, snapshot_fd)
+            snapshot_fd = _open_unnamed_temporary_file(parent_fd)
             digest = hashlib.sha256()
             copied = 0
             while True:
@@ -408,8 +343,6 @@ class RunnerTransferManager:
                 await asyncio.to_thread(_write_all, snapshot_fd, chunk)
                 digest.update(chunk)
             await asyncio.to_thread(os.fsync, snapshot_fd)
-            os.close(snapshot_fd)
-            snapshot_fd = None
             after_fd = _regular_identity(os.fstat(source_fd))
             after_path = _regular_identity(
                 os.stat(source_name, dir_fd=parent_fd, follow_symlinks=False)
@@ -422,14 +355,14 @@ class RunnerTransferManager:
                 and actual_sha256 != intent.expected_sha256
             ):
                 raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
+            assert snapshot_fd is not None
 
             async def frames() -> AsyncIterator[
                 RunnerDownloadChunk | RunnerUploadComplete
             ]:
-                snapshot_read = os.open(
-                    snapshot_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd
-                )
+                snapshot_read = os.dup(snapshot_fd)
                 try:
+                    os.lseek(snapshot_read, 0, os.SEEK_SET)
                     offset = 0
                     while True:
                         _check_stop(intent, cancelled)
@@ -472,9 +405,6 @@ class RunnerTransferManager:
                 os.close(source_fd)
             if snapshot_fd is not None:
                 os.close(snapshot_fd)
-            if snapshot_identity is not None:
-                _unlink_if_owned(parent_fd, snapshot_name, snapshot_identity)
-            self._release_orphan_later(snapshot_name)
             os.close(parent_fd)
 
     async def _emit(self, result: RunnerTransferResult) -> None:
@@ -485,73 +415,15 @@ class RunnerTransferManager:
             return
         task = asyncio.create_task(self._emit(result))
         self._pending_emits.add(task)
-        task.add_done_callback(self._pending_emits.discard)
+        task.add_done_callback(self._complete_emit)
 
-    async def _register_orphan(
-        self,
-        runtime_path: str,
-        temporary_name: str,
-        file_descriptor: int,
-    ) -> None:
-        self._active_temporary_names.add(temporary_name)
-        if self._orphan_root is None:
-            return
-        identity = os.fstat(file_descriptor)
-        parent = str(PurePath(runtime_path).parent)
-        await asyncio.to_thread(
-            _replace_orphan_record,
-            self._orphan_root,
-            parent,
-            temporary_name,
-            identity.st_dev,
-            identity.st_ino,
-            datetime.now(UTC),
-        )
-
-    async def _register_pending_orphan(
-        self,
-        runtime_path: str,
-        temporary_name: str,
-    ) -> None:
-        self._active_temporary_names.add(temporary_name)
-        if self._orphan_root is None:
-            return
-        await asyncio.to_thread(
-            _write_orphan_record,
-            self._orphan_root,
-            str(PurePath(runtime_path).parent),
-            temporary_name,
-            0,
-            0,
-            datetime.now(UTC),
-        )
-
-    async def _release_orphan(self, temporary_name: str) -> None:
-        self._active_temporary_names.discard(temporary_name)
-        if self._orphan_root is None:
-            return
-        await asyncio.to_thread(
-            _remove_orphan_record,
-            self._orphan_root,
-            temporary_name,
-        )
-
-    def _release_orphan_later(self, temporary_name: str) -> None:
-        self._active_temporary_names.discard(temporary_name)
-        if self._orphan_root is None:
-            return
-        asyncio.create_task(
-            asyncio.to_thread(
-                _remove_orphan_record,
-                self._orphan_root,
-                temporary_name,
-            )
-        )
-
-    async def _reclaim_orphans_forever(self) -> None:
-        while True:
-            await asyncio.sleep(self._orphan_reclaim_interval_seconds)
-            await self.reclaim_orphans()
+    def _complete_emit(self, task: asyncio.Task[None]) -> None:
+        self._pending_emits.discard(task)
+        with contextlib.suppress(asyncio.CancelledError):
+            try:
+                task.result()
+            except Exception:
+                _LOGGER.warning("Runner transfer result emission failed", exc_info=True)
 
     def _remember(
         self,
@@ -748,17 +620,12 @@ def _open_parent(path: str, *, create: bool) -> tuple[int, str]:
         raise
 
 
-def _assert_destination(parent_fd: int, name: str, overwrite: bool) -> None:
+def _assert_empty_destination(parent_fd: int, name: str) -> None:
     try:
-        observed = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     except FileNotFoundError:
         return
-    if (
-        stat.S_ISLNK(observed.st_mode)
-        or not stat.S_ISREG(observed.st_mode)
-        or not overwrite
-    ):
-        raise _TransferFailure(RunnerTransferFailure.DESTINATION_FAILED)
+    raise _TransferFailure(RunnerTransferFailure.DESTINATION_FAILED)
 
 
 def _regular_identity(value: os.stat_result) -> _FileIdentity:
@@ -769,28 +636,6 @@ def _regular_identity(value: os.stat_result) -> _FileIdentity:
     )
 
 
-def _temporary_name(intent: RunnerTransferIntent, direction: str) -> str:
-    identity = "\x00".join(
-        (
-            intent.identity.transfer_id,
-            intent.identity.attempt_id,
-            intent.identity.runtime_id,
-            str(intent.identity.runner_generation),
-            intent.operation_id,
-            intent.dispatch_id,
-        )
-    )
-    fingerprint = hashlib.sha256(identity.encode()).hexdigest()[:32]
-    return "-".join(
-        (
-            ".azents-transfer",
-            direction,
-            fingerprint,
-            uuid.uuid4().hex,
-        )
-    )
-
-
 def _write_all(fd: int, data: bytes) -> None:
     view = memoryview(data)
     while view:
@@ -798,247 +643,41 @@ def _write_all(fd: int, data: bytes) -> None:
         view = view[written:]
 
 
-def _unlink_if_owned(parent_fd: int, name: str, identity: _FileIdentity) -> None:
-    try:
-        observed = _regular_identity(
-            os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+def _open_unnamed_temporary_file(parent_fd: int) -> int:
+    return os.open(
+        ".",
+        os.O_RDWR | os.O_TMPFILE,
+        0o600,
+        dir_fd=parent_fd,
+    )
+
+
+def _link_from_file_descriptor(
+    file_descriptor: int,
+    destination_name: str,
+    *,
+    dst_dir_fd: int,
+) -> None:
+    result = _LINKAT(
+        file_descriptor,
+        b"",
+        dst_dir_fd,
+        os.fsencode(destination_name),
+        _AT_EMPTY_PATH,
+    )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        if error_number not in {errno.ENOENT, errno.EPERM}:
+            raise OSError(error_number, os.strerror(error_number), destination_name)
+        os.link(
+            f"/proc/self/fd/{file_descriptor}",
+            destination_name,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=True,
         )
-    except FileNotFoundError, _TransferFailure:
-        return
-    if observed == identity:
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(name, dir_fd=parent_fd)
 
 
 def _local_io_failure(intent: RunnerTransferIntent) -> RunnerTransferFailure:
     if intent.direction is RunnerTransferDirection.DOWNLOAD:
         return RunnerTransferFailure.DESTINATION_FAILED
     return RunnerTransferFailure.INTEGRITY_FAILED
-
-
-def _write_orphan_record(
-    root: Path,
-    parent: str,
-    temporary_name: str,
-    device: int,
-    inode: int,
-    created_at: datetime,
-) -> None:
-    directory_fd = _open_orphan_directory(root)
-    try:
-        record = {
-            "parent": parent,
-            "name": temporary_name,
-            "device": device,
-            "inode": inode,
-            "created_at": created_at.isoformat(),
-        }
-        encoded = json.dumps(record, separators=(",", ":"), sort_keys=True).encode()
-        if len(encoded) > _ORPHAN_RECORD_MAX_BYTES:
-            raise ValueError("Runner transfer orphan record exceeds its size limit")
-        descriptor = os.open(
-            _orphan_record_name(temporary_name),
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o600,
-            dir_fd=directory_fd,
-        )
-        try:
-            _write_all(descriptor, encoded)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)
-
-
-def _replace_orphan_record(
-    root: Path,
-    parent: str,
-    temporary_name: str,
-    device: int,
-    inode: int,
-    created_at: datetime,
-) -> None:
-    directory_fd = _open_orphan_directory(root)
-    try:
-        record_name = _orphan_record_name(temporary_name)
-        temporary_record_name = f".{record_name}.{uuid.uuid4().hex}"
-        record = {
-            "parent": parent,
-            "name": temporary_name,
-            "device": device,
-            "inode": inode,
-            "created_at": created_at.isoformat(),
-        }
-        encoded = json.dumps(record, separators=(",", ":"), sort_keys=True).encode()
-        descriptor = os.open(
-            temporary_record_name,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o600,
-            dir_fd=directory_fd,
-        )
-        try:
-            _write_all(descriptor, encoded)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        os.replace(
-            temporary_record_name,
-            record_name,
-            src_dir_fd=directory_fd,
-            dst_dir_fd=directory_fd,
-        )
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)
-
-
-def _remove_orphan_record(root: Path, temporary_name: str) -> None:
-    with contextlib.suppress(FileNotFoundError):
-        directory_fd = _open_orphan_directory(root)
-        try:
-            os.unlink(_orphan_record_name(temporary_name), dir_fd=directory_fd)
-        finally:
-            os.close(directory_fd)
-
-
-def _reclaim_orphan_files(
-    root: Path,
-    active_names: frozenset[str],
-    now: datetime,
-) -> int:
-    directory_fd = _open_orphan_directory(root)
-    reclaimed = 0
-    try:
-        names = sorted(os.listdir(directory_fd))[:_ORPHAN_RECLAIM_LIMIT]
-        for record_name in names:
-            if not record_name.endswith(".json"):
-                continue
-            record = _read_orphan_record(directory_fd, record_name)
-            if record is None:
-                with contextlib.suppress(FileNotFoundError):
-                    os.unlink(record_name, dir_fd=directory_fd)
-                continue
-            parent, temporary_name, device, inode, created_at = record
-            if temporary_name in active_names or now < created_at + _ORPHAN_MINIMUM_AGE:
-                continue
-            removed = _remove_owned_orphan(
-                root,
-                parent,
-                temporary_name,
-                device,
-                inode,
-                created_at,
-                now,
-            )
-            if removed:
-                reclaimed += 1
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(record_name, dir_fd=directory_fd)
-    finally:
-        os.close(directory_fd)
-    return reclaimed
-
-
-def _read_orphan_record(
-    directory_fd: int,
-    record_name: str,
-) -> tuple[str, str, int, int, datetime] | None:
-    try:
-        descriptor = os.open(
-            record_name,
-            os.O_RDONLY | os.O_NOFOLLOW,
-            dir_fd=directory_fd,
-        )
-    except OSError:
-        return None
-    try:
-        payload = os.read(descriptor, _ORPHAN_RECORD_MAX_BYTES + 1)
-    finally:
-        os.close(descriptor)
-    if len(payload) > _ORPHAN_RECORD_MAX_BYTES:
-        return None
-    try:
-        value = json.loads(payload.decode())
-        parent = value["parent"]
-        temporary_name = value["name"]
-        device = value["device"]
-        inode = value["inode"]
-        created_at = datetime.fromisoformat(value["created_at"])
-    except KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError:
-        return None
-    if not isinstance(temporary_name, str):
-        return None
-    try:
-        expected_record_name = _orphan_record_name(temporary_name)
-    except ValueError:
-        return None
-    if (
-        not isinstance(parent, str)
-        or not PurePath(parent).is_absolute()
-        or expected_record_name != record_name
-        or not isinstance(device, int)
-        or not isinstance(inode, int)
-        or created_at.tzinfo is None
-        or created_at.utcoffset() is None
-    ):
-        return None
-    return parent, temporary_name, device, inode, created_at
-
-
-def _remove_owned_orphan(
-    root: Path,
-    parent: str,
-    temporary_name: str,
-    device: int,
-    inode: int,
-    created_at: datetime,
-    now: datetime,
-) -> bool:
-    if not PurePath(parent).is_relative_to(root):
-        return False
-    try:
-        parent_fd, _name = _open_parent(
-            str(PurePath(parent) / "placeholder"),
-            create=False,
-        )
-    except OSError, _TransferFailure:
-        return False
-    try:
-        observed = os.stat(temporary_name, dir_fd=parent_fd, follow_symlinks=False)
-        if not stat.S_ISREG(observed.st_mode):
-            return False
-        if device == 0 and inode == 0:
-            if datetime.fromtimestamp(observed.st_mtime, UTC) > (
-                created_at + _ORPHAN_MINIMUM_AGE
-            ):
-                return False
-        elif observed.st_dev != device or observed.st_ino != inode:
-            return False
-        os.unlink(temporary_name, dir_fd=parent_fd)
-        return True
-    except FileNotFoundError:
-        return False
-    finally:
-        os.close(parent_fd)
-
-
-def _open_orphan_directory(root: Path) -> int:
-    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        with contextlib.suppress(FileExistsError):
-            os.mkdir(_ORPHAN_DIRECTORY_NAME, 0o700, dir_fd=root_fd)
-        return os.open(
-            _ORPHAN_DIRECTORY_NAME,
-            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-            dir_fd=root_fd,
-        )
-    finally:
-        os.close(root_fd)
-
-
-def _orphan_record_name(temporary_name: str) -> str:
-    if not temporary_name.startswith(".azents-transfer-") or "/" in temporary_name:
-        raise ValueError("Runner transfer orphan name is invalid")
-    return f"{temporary_name}.json"
