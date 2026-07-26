@@ -92,6 +92,13 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379"
 
+    # Trusted Runtime Transfer Coordinator client. The endpoint remains unset until
+    # the coordinated Runtime transfer deployment is enabled.
+    runtime_transfer_coordinator_endpoint: str | None = None
+    runtime_transfer_coordinator_tls_ca_file: Path | None = None
+    runtime_transfer_coordinator_allow_insecure: bool = False
+    runtime_transfer_coordinator_credential_lifetime_seconds: float = 30.0
+
     # Streaming model transport and watchdog
     openai_responses_websocket_enabled: bool = True
     model_stream_connect_timeout_seconds: float = 15.0
@@ -308,6 +315,24 @@ class RedisConfig(BaseModel):
     url: str
 
 
+class RuntimeTransferCoordinatorConfig(BaseModel):
+    """Trusted Runtime Transfer Coordinator client settings."""
+
+    endpoint: str | None
+    tls_ca_file: Path | None
+    allow_insecure: bool
+    credential_lifetime_seconds: float = Field(
+        gt=0,
+        le=60,
+        allow_inf_nan=False,
+    )
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether an internal Coordinator endpoint is configured."""
+        return self.endpoint is not None
+
+
 class ModelStreamTimeoutConfig(BaseModel):
     """Validated process-wide streaming model watchdog settings."""
 
@@ -372,6 +397,7 @@ class Config(BaseModel):
     email: EmailConfig | None
     credential_encryption: CredentialEncryptionConfig
     redis: RedisConfig
+    runtime_transfer_coordinator: RuntimeTransferCoordinatorConfig
     model_stream_timeout: ModelStreamTimeoutConfig
     openai_responses_websocket_enabled: bool
     web_url: str = ""
@@ -449,6 +475,14 @@ class Config(BaseModel):
             ),
             redis=RedisConfig(
                 url=settings.redis_url,
+            ),
+            runtime_transfer_coordinator=RuntimeTransferCoordinatorConfig(
+                endpoint=settings.runtime_transfer_coordinator_endpoint,
+                tls_ca_file=settings.runtime_transfer_coordinator_tls_ca_file,
+                allow_insecure=settings.runtime_transfer_coordinator_allow_insecure,
+                credential_lifetime_seconds=(
+                    settings.runtime_transfer_coordinator_credential_lifetime_seconds
+                ),
             ),
             model_stream_timeout=ModelStreamTimeoutConfig(
                 connect_timeout_seconds=(settings.model_stream_connect_timeout_seconds),

@@ -95,8 +95,8 @@ server:
       repairIntervalSeconds: 5
       objectPrefix: runtime-transfer
       lifecycleAcknowledgement:
-        prefixExpirationHours: 1
-        incompleteMultipartAbortHours: 1
+        prefixExpirationHours: null
+        incompleteMultipartAbortHours: null
         owner: ""
         evidenceTimestamp: ""
         rollbackOwner: ""

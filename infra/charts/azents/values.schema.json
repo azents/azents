@@ -947,19 +947,23 @@
                   "type": "object",
                   "additionalProperties": false,
                   "required": [
-                    "prefixExpirationHours",
-                    "incompleteMultipartAbortHours",
                     "owner",
                     "evidenceTimestamp",
                     "rollbackOwner"
                   ],
                   "properties": {
                     "prefixExpirationHours": {
-                      "type": "number",
+                      "type": [
+                        "number",
+                        "null"
+                      ],
                       "exclusiveMinimum": 0
                     },
                     "incompleteMultipartAbortHours": {
-                      "type": "number",
+                      "type": [
+                        "number",
+                        "null"
+                      ],
                       "exclusiveMinimum": 0
                     },
                     "owner": {

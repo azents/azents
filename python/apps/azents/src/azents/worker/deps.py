@@ -1,11 +1,15 @@
 """Worker dependency injection."""
 
+import datetime
 import os
 from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import uuid4
 
 from azcommon.infra.s3.service import S3Service
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    GrpcRuntimeTransferCoordinatorClient,
+)
 from fastapi import Depends
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +34,8 @@ from azents.engine.tools.claude_rules import (
     ToolkitClaudeRulesAppendixDedupeStateStore,
 )
 from azents.engine.tools.deps import get_vfs_projection_service
+from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
+from azents.engine.tools.import_file import ImportFileStagingConfiguration
 from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationClient as EngineRuntimeRunnerOperationClient,
 )
@@ -46,6 +52,7 @@ from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.toolkit import ToolkitRepository
@@ -53,16 +60,45 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient as ControlRuntimeRunnerOperationClient,
 )
-from azents.runtime.deps import get_runtime_runner_operation_client
+from azents.runtime.deps import (
+    get_runtime_runner_operation_client,
+    get_worker_runtime_transfer_coordinator_client,
+)
 from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operations
+from azents.runtime.transfer.present_file_publication import (
+    PresentFilePublicationService,
+    RuntimeTransferObjectResolver,
+)
+from azents.runtime.transfer.runtime_to_provider import (
+    RuntimeToProviderBatchService,
+    RuntimeToProviderDeliveryService,
+)
+from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferService
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTransferService
 from azents.services.artifact import ArtifactService
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.external_channel.channel_action import (
+    ExternalChannelActionService,
+)
+from azents.services.external_channel.connection import (
+    get_external_channel_credentials_codec,
+)
+from azents.services.external_channel.credentials import (
+    ExternalChannelCredentialsCodec,
+)
+from azents.services.external_channel.file_transfer import (
+    ExternalChannelFileTransferService,
+    ExternalChannelInboundStagingConfiguration,
+    get_slack_file_client,
+)
+from azents.services.external_channel.slack_events import SlackConversationClient
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
 from azents.services.runtime_execution_policy.application_service import (
     RuntimeExecutionPolicyApplicationService,
 )
+from azents.services.system_setting.service import SystemSettingsService
 from azents.services.vfs import VfsProjectionService
 from azents.utils.appctx import AppContext
 
@@ -70,6 +106,13 @@ from .config import AgentWorkerConfig
 from .health import HealthServer
 
 _DEFAULT_HEALTH_PORT = 8012
+_TRANSFER_OBJECT_PREFIX = "runtime-transfer"
+_TRANSFER_MAXIMUM_FILE_BYTES = 8 * 1024 * 1024
+_TRANSFER_CHUNK_BYTES = 256 * 1024
+_TRANSFER_MULTIPART_PART_BYTES = 5 * 1024 * 1024
+_TRANSFER_STATUS_POLL_INTERVAL = datetime.timedelta(milliseconds=250)
+_TRANSFER_CONSUMER_RENEW_INTERVAL = datetime.timedelta(seconds=10)
+_TRANSFER_DEADLINE = datetime.timedelta(minutes=5)
 
 
 def get_worker_id() -> str:
@@ -165,8 +208,20 @@ def get_builtin_toolkit_provider(
         RuntimeExecutionPolicyApplicationService,
         Depends(),
     ],
+    config: Annotated[Config, Depends(get_config)],
+    s3_service: Annotated[S3Service, Depends(get_s3_service)],
+    coordinator: Annotated[
+        GrpcRuntimeTransferCoordinatorClient | None,
+        Depends(get_worker_runtime_transfer_coordinator_client),
+    ],
 ) -> BuiltinToolkitProvider:
     """BuiltinToolkitProvider dependency for Worker."""
+    transfer = create_worker_transfer_services(
+        config=config,
+        coordinator=coordinator,
+        s3_service=s3_service,
+        exchange_file_service=exchange_file_service,
+    )
     return BuiltinToolkitProvider(
         exchange_file_service=exchange_file_service,
         artifact_service=artifact_service,
@@ -181,11 +236,195 @@ def get_builtin_toolkit_provider(
         execution_policy_application_service=execution_policy_application_service,
         runner_operations=runner_operations,
         project_repo=SessionWorkspaceProjectRepository(),
-        server_to_runtime_transfer_service=None,
-        runtime_to_server_publication_service=None,
-        runtime_to_provider_delivery_service=None,
-        import_file_staging_configuration=None,
+        server_to_runtime_transfer_service=transfer.server_to_runtime,
+        runtime_to_server_publication_service=transfer.present_file_publication,
+        runtime_to_provider_delivery_service=transfer.provider_delivery,
+        import_file_staging_configuration=transfer.import_staging,
     )
+
+
+def get_worker_external_channel_file_transfer_service(
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+    repository: Annotated[
+        ExternalChannelWorkRepository,
+        Depends(ExternalChannelWorkRepository),
+    ],
+    credentials_codec: Annotated[
+        ExternalChannelCredentialsCodec,
+        Depends(get_external_channel_credentials_codec),
+    ],
+    slack_client: Annotated[
+        SlackConversationClient,
+        Depends(get_slack_file_client),
+    ],
+    exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)],
+    system_settings: Annotated[SystemSettingsService, Depends(SystemSettingsService)],
+    config: Annotated[Config, Depends(get_config)],
+    s3_service: Annotated[S3Service, Depends(get_s3_service)],
+    coordinator: Annotated[
+        GrpcRuntimeTransferCoordinatorClient | None,
+        Depends(get_worker_runtime_transfer_coordinator_client),
+    ],
+) -> ExternalChannelFileTransferService:
+    """Compose the Worker-only inbound provider staging boundary."""
+    return ExternalChannelFileTransferService(
+        session_manager=session_manager,
+        repository=repository,
+        credentials_codec=credentials_codec,
+        slack_client=slack_client,
+        exchange_file_service=exchange_file_service,
+        system_settings=system_settings,
+        inbound_staging_configuration=(
+            create_worker_external_channel_inbound_staging_configuration(
+                config=config,
+                coordinator=coordinator,
+                s3_service=s3_service,
+            )
+        ),
+    )
+
+
+def get_worker_external_channel_toolkit_provider(
+    service: Annotated[ExternalChannelActionService, Depends()],
+    file_transfer_service: Annotated[
+        ExternalChannelFileTransferService,
+        Depends(get_worker_external_channel_file_transfer_service),
+    ],
+) -> ExternalChannelToolkitProvider:
+    """Provide External Channel tools with Worker transfer staging when available."""
+    return ExternalChannelToolkitProvider(
+        service=service,
+        file_transfer_service=file_transfer_service,
+    )
+
+
+class _WorkerTransferServices:
+    """Trusted Worker-only feature services sharing one Coordinator client."""
+
+    def __init__(
+        self,
+        *,
+        server_to_runtime: ServerToRuntimeTransferService | None,
+        present_file_publication: PresentFilePublicationService | None,
+        provider_delivery: RuntimeToProviderDeliveryService | None,
+        import_staging: ImportFileStagingConfiguration | None,
+    ) -> None:
+        self.server_to_runtime = server_to_runtime
+        self.present_file_publication = present_file_publication
+        self.provider_delivery = provider_delivery
+        self.import_staging = import_staging
+
+
+def create_worker_transfer_services(
+    *,
+    config: Config,
+    coordinator: GrpcRuntimeTransferCoordinatorClient | None,
+    s3_service: S3Service,
+    exchange_file_service: ExchangeFileService,
+) -> _WorkerTransferServices:
+    """Compose feature consumers without constructing transfer state locally."""
+    if coordinator is None:
+        return _WorkerTransferServices(
+            server_to_runtime=None,
+            present_file_publication=None,
+            provider_delivery=None,
+            import_staging=None,
+        )
+    bucket = config.workspace_s3.bucket
+    if not bucket:
+        raise ValueError("Runtime transfer requires a workspace S3 bucket")
+    object_prefix = _transfer_object_prefix(config)
+    resolver = RuntimeTransferObjectResolver(
+        bucket=bucket,
+        object_prefix=object_prefix,
+    )
+    server_to_runtime = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=_utc_now,
+        status_poll_interval=_TRANSFER_STATUS_POLL_INTERVAL,
+    )
+    runtime_to_server = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=_utc_now,
+        status_poll_interval=_TRANSFER_STATUS_POLL_INTERVAL,
+        consumer_lease_renew_interval=_TRANSFER_CONSUMER_RENEW_INTERVAL,
+    )
+    provider_delivery = RuntimeToProviderDeliveryService(
+        batch_service=RuntimeToProviderBatchService(
+            coordinator=coordinator,
+            resolver=resolver,
+            object_store=s3_service,
+            clock=_utc_now,
+            status_poll_interval=_TRANSFER_STATUS_POLL_INTERVAL,
+            consumer_lease_renew_interval=_TRANSFER_CONSUMER_RENEW_INTERVAL,
+            maximum_chunk_size=_TRANSFER_CHUNK_BYTES,
+        ),
+        product_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+        provider_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+        deadline=_TRANSFER_DEADLINE,
+        resource_class="external_channel",
+    )
+    return _WorkerTransferServices(
+        server_to_runtime=server_to_runtime,
+        present_file_publication=PresentFilePublicationService(
+            transfer_service=runtime_to_server,
+            resolver=resolver,
+            exchange_file_service=exchange_file_service,
+            product_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+            provider_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+            deadline=_TRANSFER_DEADLINE,
+        ),
+        provider_delivery=provider_delivery,
+        import_staging=ImportFileStagingConfiguration(
+            s3_service=s3_service,
+            workspace_bucket=bucket,
+            transfer_object_prefix=object_prefix,
+            multipart_copy_threshold=_TRANSFER_MULTIPART_PART_BYTES,
+            multipart_part_size=_TRANSFER_MULTIPART_PART_BYTES,
+            maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+            deadline_after=_TRANSFER_DEADLINE,
+        ),
+    )
+
+
+def create_worker_external_channel_inbound_staging_configuration(
+    *,
+    config: Config,
+    coordinator: GrpcRuntimeTransferCoordinatorClient | None,
+    s3_service: S3Service,
+) -> ExternalChannelInboundStagingConfiguration | None:
+    """Return trusted provider staging only with a configured Coordinator."""
+    if coordinator is None:
+        return None
+    bucket = config.workspace_s3.bucket
+    if not bucket:
+        raise ValueError("Runtime transfer requires a workspace S3 bucket")
+    return ExternalChannelInboundStagingConfiguration(
+        s3_service=s3_service,
+        workspace_bucket=bucket,
+        transfer_object_prefix=_transfer_object_prefix(config),
+        stream_chunk_size=_TRANSFER_CHUNK_BYTES,
+        multipart_part_size=_TRANSFER_MULTIPART_PART_BYTES,
+        multipart_copy_threshold=_TRANSFER_MULTIPART_PART_BYTES,
+        multipart_copy_part_size=_TRANSFER_MULTIPART_PART_BYTES,
+        deadline_after=_TRANSFER_DEADLINE,
+    )
+
+
+def _transfer_object_prefix(config: Config) -> str:
+    """Derive the fixed transfer namespace beneath the existing workspace prefix."""
+    return "/".join(
+        part.strip("/")
+        for part in (config.workspace_s3.prefix, _TRANSFER_OBJECT_PREFIX)
+        if part.strip("/")
+    )
+
+
+def _utc_now() -> datetime.datetime:
+    """Return the timezone-aware Worker clock for transfer deadlines."""
+    return datetime.datetime.now(datetime.UTC)
 
 
 async def get_worker_broker(

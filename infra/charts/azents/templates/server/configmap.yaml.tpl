@@ -37,6 +37,11 @@ data:
   AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT: {{ include "azents.runtimeControlEndpoint" . | quote }}
   AZ_RUNTIME_RUNNER_TRANSFER_ENDPOINT: {{ include "azents.runtimeControlEndpoint" . | quote }}
   {{- end }}
+  {{- if .Values.server.runtimeControl.enabled }}
+  AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT: {{ include "azents.runtimeControlEndpoint" . | quote }}
+  AZ_RUNTIME_TRANSFER_COORDINATOR_TLS_CA_FILE: "/var/run/secrets/azents/runtime-control-tls/ca.crt"
+  AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE: "false"
+  {{- end }}
   {{- if .Values.server.mcpEgressProxy.enabled }}
   AZ_MCP_PROXY_URL: {{ printf "http://mcp-egress-proxy.%s.svc.cluster.local:3128" (include "azents.serverNamespace" .) | quote }}
   {{- end }}

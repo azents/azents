@@ -3,8 +3,8 @@
 {{- if and (eq $transfer.stateBackend "memory") (or (ne (int .Values.server.runtimeControl.replicas) 1) .Values.server.runtimeControl.autoscaling.enabled) }}
 {{- fail "memory Runtime Transfer state requires exactly one runtime-control replica and disabled autoscaling" }}
 {{- end }}
-{{- if and (eq .Values.objectStorage.mode "external") (or (not $transfer.lifecycleAcknowledgement.owner) (not $transfer.lifecycleAcknowledgement.evidenceTimestamp) (not $transfer.lifecycleAcknowledgement.rollbackOwner)) }}
-{{- fail "external object storage requires Runtime Transfer lifecycle acknowledgement evidence" }}
+{{- if and (eq .Values.objectStorage.mode "external") (or (not $transfer.lifecycleAcknowledgement.prefixExpirationHours) (not $transfer.lifecycleAcknowledgement.incompleteMultipartAbortHours) (not $transfer.lifecycleAcknowledgement.owner) (not $transfer.lifecycleAcknowledgement.evidenceTimestamp) (not $transfer.lifecycleAcknowledgement.rollbackOwner)) }}
+{{- fail "external object storage requires Runtime Transfer lifecycle acknowledgement evidence for prefix expiration, incomplete multipart abort, owner, timestamp, and rollback owner" }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment

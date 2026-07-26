@@ -49,6 +49,12 @@ spec:
             {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
             {{- include "azents.platformGitHubAppSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}
+          {{- if .Values.server.runtimeControl.enabled }}
+          volumeMounts:
+            - name: runtime-control-tls
+              mountPath: /var/run/secrets/azents/runtime-control-tls
+              readOnly: true
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /health/v1/readiness
@@ -61,4 +67,13 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      {{- if .Values.server.runtimeControl.enabled }}
+      volumes:
+        - name: runtime-control-tls
+          secret:
+            secretName: {{ required "server.runtimeControl.tls.existingSecret is required when Runtime Control is enabled" .Values.server.runtimeControl.tls.existingSecret | quote }}
+            items:
+              - key: {{ .Values.server.runtimeControl.tls.caKey | quote }}
+                path: ca.crt
+      {{- end }}
 {{- end }}
