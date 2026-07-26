@@ -421,7 +421,8 @@ def _assert_split_rest_contract(
         live_payload.get("partial_history"), label="live partial_history"
     )
     assert isinstance(live_partial_history.get("items"), list)
-    assert isinstance(live_payload.get("input_buffers"), list)
+    assert isinstance(live_payload.get("mailbox_items"), list)
+    assert "input_buffers" not in live_payload
     assert "items" not in live_payload
     legacy_fields = {"run_state"}
     assert legacy_fields.isdisjoint(history_payload)
@@ -429,21 +430,27 @@ def _assert_split_rest_contract(
 
 
 def _pending_buffers(payload: dict[str, object]) -> list[_PendingBuffer]:
-    """Return pending user-message buffers from the live projection."""
-    raw_buffers = payload.get("input_buffers")
+    """Return pending user-message items from the mailbox projection."""
+    raw_envelopes = payload.get("mailbox_items")
     buffers: list[_PendingBuffer] = []
-    for raw_buffer in _object_items(raw_buffers, label="live input_buffers"):
-        if raw_buffer.get("kind") != "user_message":
-            continue
-        event_payload = _object_item(raw_buffer.get("payload"), label="live payload")
-        metadata = _object_item(event_payload.get("metadata"), label="live metadata")
-        if metadata.get("live_projection") != "input_buffer":
-            continue
-        buffer_id = raw_buffer.get("id")
-        content = event_payload.get("content")
-        if not isinstance(buffer_id, str) or not isinstance(content, str):
-            raise AssertionError(f"invalid input buffer projection: {raw_buffer!r}")
-        buffers.append(_PendingBuffer(id=buffer_id, content=content))
+    for envelope in _object_items(raw_envelopes, label="live mailbox_items"):
+        mailbox_item_id = envelope.get("mailbox_item_id")
+        if not isinstance(mailbox_item_id, str):
+            raise AssertionError(f"invalid mailbox envelope: {envelope!r}")
+        for item in _object_items(
+            envelope.get("items"),
+            label="live mailbox items",
+        ):
+            presentation = _object_item(
+                item.get("presentation"),
+                label="live mailbox presentation",
+            )
+            if presentation.get("type") != "user_message":
+                continue
+            content = presentation.get("content")
+            if not isinstance(content, str):
+                raise AssertionError(f"invalid mailbox item projection: {item!r}")
+            buffers.append(_PendingBuffer(id=mailbox_item_id, content=content))
     return buffers
 
 
@@ -735,16 +742,16 @@ def _set_release_file(
         )
 
 
-def _delete_input_buffer(
+def _delete_mailbox_item(
     *,
     server_url: str,
     token: str,
     session_id: str,
-    buffer_id: str,
+    mailbox_item_id: str,
 ) -> None:
-    """pending input buffer t public REST API t deletet."""
+    """Delete one pending mailbox item through the public REST API."""
     response = requests.delete(
-        f"{server_url}/chat/v1/sessions/{session_id}/input-buffers/{buffer_id}",
+        f"{server_url}/chat/v1/sessions/{session_id}/mailbox-items/{mailbox_item_id}",
         headers=_headers(token),
         timeout=10,
     )
@@ -994,11 +1001,11 @@ class TestChatInputBuffer:
                 session_id=session_id,
                 expected=deleted_buffer,
             )
-            _delete_input_buffer(
+            _delete_mailbox_item(
                 server_url=azents_public_server_url,
                 token=workspace.token,
                 session_id=session_id,
-                buffer_id=deleted_buffer.id,
+                mailbox_item_id=deleted_buffer.id,
             )
             pending_payload = _list_live(
                 server_url=azents_public_server_url,
