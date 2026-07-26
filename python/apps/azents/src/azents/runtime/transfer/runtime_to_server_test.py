@@ -62,6 +62,22 @@ class _DelayedCallback:
         self.uploads.append(upload)
 
 
+@dataclass
+class _CancellableCallback:
+    """Callback that records cooperative cancellation before its commit point."""
+
+    uploads: list[VerifiedRuntimeUpload]
+    cancelled: bool = False
+
+    async def publish(self, upload: VerifiedRuntimeUpload) -> None:
+        try:
+            await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        self.uploads.append(upload)
+
+
 class _Coordinator:
     def __init__(self, *, ack_fails: bool = False) -> None:
         self.calls: list[str] = []
@@ -213,6 +229,23 @@ class _RetryAcknowledgementCoordinator(_Coordinator):
         if self.acknowledgement_attempts == 1:
             raise OSError("acknowledgement transport failed")
         return _status(7, request.identity, CoordinatorTransferPhase.CONSUMED)
+
+
+class _LeaseFailureCoordinator(_Coordinator):
+    """Coordinator that loses the lease after the initial pre-publication renewal."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.renewals = 0
+
+    async def renew_consumer_lease(
+        self, request: CoordinatorConsumerRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("renew")
+        self.renewals += 1
+        if self.renewals > 1:
+            raise OSError("consumer lease renewal failed")
+        return _status(6, request.identity, CoordinatorTransferPhase.CONSUMING)
 
 
 def _status(
@@ -385,3 +418,22 @@ async def test_long_publication_renews_consumer_lease_until_callback_finishes() 
     await service.transfer(_request(_DelayedCallback([])))
 
     assert coordinator.calls.count("renew") > 1
+
+
+@pytest.mark.asyncio
+async def test_lease_loss_cancels_publication_before_its_commit_boundary() -> None:
+    """A failed renewal cancels the cooperative publisher before it commits."""
+    coordinator = _LeaseFailureCoordinator()
+    callback = _CancellableCallback([])
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(RuntimeError, match="lease renewal failed"):
+        await service.transfer(_request(callback))
+
+    assert callback.cancelled is True
+    assert callback.uploads == []

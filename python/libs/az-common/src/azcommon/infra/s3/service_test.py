@@ -593,9 +593,10 @@ async def test_product_publication_native_copy_fences_source_and_verifies_final(
         publication_metadata=publication,
     )
 
-    assert final.identity == destination
-    assert final.content_length == len(body)
-    assert final.content_type == "text/plain"
+    assert final.metadata.identity == destination
+    assert final.metadata.content_length == len(body)
+    assert final.metadata.content_type == "text/plain"
+    assert final.created is True
     assert client.bodies == []
     assert client.copy_requests == [
         {
@@ -633,7 +634,7 @@ async def test_product_publication_rejects_existing_final_key_without_cleanup() 
     )
     client.objects[(destination.bucket, destination.key)] = winner
 
-    with pytest.raises(FileExistsError):
+    with pytest.raises(ValueError, match="product object"):
         await _service(client).copy_verified_transfer_object_to_product(
             source=source,
             destination=destination,
@@ -646,6 +647,45 @@ async def test_product_publication_rejects_existing_final_key_without_cleanup() 
         )
 
     assert client.objects[(destination.bucket, destination.key)] == winner
+    assert client.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_product_publication_adopts_exact_existing_final_key() -> None:
+    """An exact orphaned final object is adoptable without overwriting it."""
+    body = b"verified transfer bytes"
+    digest = _sha256(body)
+    source = S3ObjectIdentity(bucket="bucket", key="source")
+    destination = S3ObjectIdentity(bucket="bucket", key="final-product")
+    publication = S3ProductPublicationMetadata(
+        sha256=digest,
+        content_type="text/plain",
+        publication_id="artifact-id",
+    )
+    client = _FakeS3Client()
+    client.objects[(source.bucket, source.key)] = _StoredObject(
+        body,
+        {"azents-transfer-sha256": digest},
+        None,
+    )
+    client.objects[(destination.bucket, destination.key)] = _StoredObject(
+        body,
+        {
+            "azents-product-publication-sha256": digest,
+            "azents-product-publication-id": "artifact-id",
+        },
+        "text/plain",
+    )
+
+    result = await _service(client).copy_verified_transfer_object_to_product(
+        source=source,
+        destination=destination,
+        expected_size=len(body),
+        publication_metadata=publication,
+    )
+
+    assert result.metadata.identity == destination
+    assert result.created is False
     assert client.delete_calls == []
 
 

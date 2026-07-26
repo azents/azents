@@ -235,35 +235,21 @@ class RuntimeToServerTransferService:
                 raise RuntimeToServerTransferError(
                     "Verified upload manifest is missing"
                 )
-            lease = _ConsumerLease(revision=revision)
-            renewal_task = asyncio.create_task(
-                self._renew_consumer_lease_while_publishing(
+            revision = await self._publish_with_consumer_lease(
+                callback=request.callback,
+                upload=VerifiedRuntimeUpload(
                     identity=identity,
-                    claim_id=claim_id,
-                    deadline_at=request.deadline_at,
-                    lease=lease,
-                )
+                    publication_id=request.publication_id,
+                    object_handle=verified.verified_object_handle,
+                    size=manifest.size,
+                    sha256=manifest.sha256,
+                ),
+                identity=identity,
+                claim_id=claim_id,
+                revision=revision,
+                deadline_at=request.deadline_at,
             )
-            try:
-                await request.callback.publish(
-                    VerifiedRuntimeUpload(
-                        identity=identity,
-                        publication_id=request.publication_id,
-                        object_handle=verified.verified_object_handle,
-                        size=manifest.size,
-                        sha256=manifest.sha256,
-                    )
-                )
-                committed = True
-            finally:
-                renewal_task.cancel()
-                try:
-                    await renewal_task
-                except asyncio.CancelledError:
-                    pass
-            if lease.failure is not None:
-                raise lease.failure
-            revision = lease.revision
+            committed = True
             acknowledged = await self._recover_acknowledgement(
                 identity,
                 claim_id,
@@ -330,8 +316,9 @@ class RuntimeToServerTransferService:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                status = await self.coordinator.get_transfer_status(
-                    CoordinatorGetTransferStatusRequest(identity=identity)
+                status = await self._observe_status(
+                    identity=identity,
+                    deadline_at=deadline_at,
                 )
             if status.phase is CoordinatorTransferPhase.CONSUMED:
                 return status
@@ -366,8 +353,9 @@ class RuntimeToServerTransferService:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                status = await self.coordinator.get_transfer_status(
-                    CoordinatorGetTransferStatusRequest(identity=identity)
+                status = await self._observe_status(
+                    identity=identity,
+                    deadline_at=deadline_at,
                 )
             if status.phase is CoordinatorTransferPhase.TERMINAL:
                 if status.outcome is CoordinatorTransferOutcome.SUCCEEDED:
@@ -380,6 +368,79 @@ class RuntimeToServerTransferService:
         raise RuntimeToServerTransferError(
             "Committed publication settlement was not confirmed"
         )
+
+    async def _publish_with_consumer_lease(
+        self,
+        *,
+        callback: RuntimeToServerPublicationCallback,
+        upload: VerifiedRuntimeUpload,
+        identity: CoordinatorTransferIdentity,
+        claim_id: str,
+        revision: int,
+        deadline_at: datetime,
+    ) -> int:
+        """Cancel publication before its commit boundary when the lease is lost."""
+        lease = _ConsumerLease(revision=revision)
+        publication_task = asyncio.create_task(callback.publish(upload))
+        renewal_task = asyncio.create_task(
+            self._renew_consumer_lease_while_publishing(
+                identity=identity,
+                claim_id=claim_id,
+                deadline_at=deadline_at,
+                lease=lease,
+            )
+        )
+        done, _ = await asyncio.wait(
+            {publication_task, renewal_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if renewal_task in done and lease.failure is not None:
+            if not publication_task.done():
+                publication_task.cancel()
+            try:
+                await publication_task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                renewal_task.cancel()
+                try:
+                    await renewal_task
+                except asyncio.CancelledError:
+                    pass
+            raise lease.failure
+        try:
+            await publication_task
+        finally:
+            renewal_task.cancel()
+            try:
+                await renewal_task
+            except asyncio.CancelledError:
+                pass
+        if lease.failure is not None:
+            raise lease.failure
+        return lease.revision
+
+    async def _observe_status(
+        self,
+        *,
+        identity: CoordinatorTransferIdentity,
+        deadline_at: datetime,
+    ) -> CoordinatorTransferStatus:
+        """Read authoritative status despite bounded observation transport errors."""
+        last_error: Exception | None = None
+        while self.clock() < deadline_at:
+            try:
+                return await self.coordinator.get_transfer_status(
+                    CoordinatorGetTransferStatusRequest(identity=identity)
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                last_error = err
+            await asyncio.sleep(self.status_poll_interval.total_seconds())
+        raise RuntimeToServerTransferError(
+            "Runtime upload status could not be observed"
+        ) from last_error
 
     async def _renew_consumer_lease_while_publishing(
         self,

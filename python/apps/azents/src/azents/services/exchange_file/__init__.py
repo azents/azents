@@ -1,5 +1,6 @@
 """Exchange file service."""
 
+import asyncio
 import dataclasses
 import datetime
 import hashlib
@@ -576,11 +577,10 @@ class ExchangeFileService:
             media_type=media_type,
             origin_type=origin_type,
         )
-        uploaded = False
+        source_created_by_invocation = False
         committed = False
         try:
-            await self._upload_prepared_files(prepared)
-            uploaded = True
+            source_created_by_invocation = await self._upload_prepared_files(prepared)
             async with self.session_manager() as session:
                 if not await self._has_valid_resource_authority(
                     session,
@@ -608,7 +608,17 @@ class ExchangeFileService:
             committed = True
             return Success(created)
         finally:
-            if uploaded and not committed:
+            if (
+                source_created_by_invocation
+                and not committed
+                and not await self._has_committed_verified_publication(
+                    authority=authority,
+                    size_bytes=size_bytes,
+                    sha256=sha256,
+                    media_type=media_type,
+                    publication_id=publication_id,
+                )
+            ):
                 await self._cleanup_prepared_verified_files(prepared)
 
     async def resolve_for_authority(
@@ -1195,19 +1205,23 @@ class ExchangeFileService:
     async def _upload_prepared_files(
         self,
         prepared: list[_PreparedExchangeFile],
-    ) -> None:
-        """Upload prepared blobs without an open DB session."""
+    ) -> bool:
+        """Upload prepared blobs and return source-object creation evidence."""
+        source_created_by_invocation = False
         for file in prepared:
             if file.source is not None and file.publication_metadata is not None:
-                await self.s3_service.copy_verified_transfer_object_to_product(
-                    source=file.source,
-                    destination=S3ObjectIdentity(
-                        bucket=self.config.workspace_s3.bucket,
-                        key=file.object_key,
-                    ),
-                    expected_size=file.create.size_bytes,
-                    publication_metadata=file.publication_metadata,
+                publication = (
+                    await self.s3_service.copy_verified_transfer_object_to_product(
+                        source=file.source,
+                        destination=S3ObjectIdentity(
+                            bucket=self.config.workspace_s3.bucket,
+                            key=file.object_key,
+                        ),
+                        expected_size=file.create.size_bytes,
+                        publication_metadata=file.publication_metadata,
+                    )
                 )
+                source_created_by_invocation = publication.created
             elif file.body is not None:
                 await self.s3_service.upload(
                     bucket=self.config.workspace_s3.bucket,
@@ -1217,6 +1231,7 @@ class ExchangeFileService:
                 )
             else:
                 raise ValueError("Prepared ExchangeFile has no publishable source")
+        return source_created_by_invocation
 
     async def _make_text_preview_from_object(
         self,
@@ -1344,6 +1359,41 @@ class ExchangeFileService:
         raise RuntimeError(
             "publication ID is already committed with different metadata"
         )
+
+    async def _has_committed_verified_publication(
+        self,
+        *,
+        authority: SessionResourceAuthority,
+        size_bytes: int,
+        sha256: str,
+        media_type: str,
+        publication_id: str,
+    ) -> bool:
+        """Preserve the final object when commit outcome cannot be disproven."""
+        try:
+            async with self.session_manager() as session:
+                existing = await self.exchange_file_repository.get_by_id(
+                    session,
+                    publication_id,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return True
+        if existing is None:
+            return False
+        try:
+            self._validated_existing_verified_publication(
+                existing=existing,
+                authority=authority,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                media_type=media_type,
+                publication_id=publication_id,
+            )
+        except RuntimeError:
+            return True
+        return True
 
     async def _persist_prepared_files(
         self,

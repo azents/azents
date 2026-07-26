@@ -5,6 +5,7 @@ import hashlib
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -335,13 +336,14 @@ class _FakeS3Service:
         destination: S3ObjectIdentity,
         expected_size: int,
         publication_metadata: S3ProductPublicationMetadata,
-    ) -> None:
+    ) -> object:
         """Record native final-object publication."""
         assert self.session_boundary.active == 0
         self.product_copy_calls.append(
             (source, destination, expected_size, publication_metadata)
         )
         self.objects[destination.key] = self.objects[source.key]
+        return SimpleNamespace(created=True)
 
     async def delete_uncommitted_product_object(
         self,

@@ -1,5 +1,6 @@
 """Artifact service."""
 
+import asyncio
 import dataclasses
 import datetime
 import hashlib
@@ -337,19 +338,21 @@ class ArtifactService:
             content_type=media_type,
             publication_id=artifact_id,
         )
-        uploaded = False
+        created_by_invocation = False
         committed = False
         try:
-            await self.s3_service.copy_verified_transfer_object_to_product(
-                source=source,
-                destination=S3ObjectIdentity(
-                    bucket=self.config.workspace_s3.bucket,
-                    key=object_key,
-                ),
-                expected_size=size_bytes,
-                publication_metadata=publication_metadata,
+            publication = (
+                await self.s3_service.copy_verified_transfer_object_to_product(
+                    source=source,
+                    destination=S3ObjectIdentity(
+                        bucket=self.config.workspace_s3.bucket,
+                        key=object_key,
+                    ),
+                    expected_size=size_bytes,
+                    publication_metadata=publication_metadata,
+                )
             )
-            uploaded = True
+            created_by_invocation = publication.created
             async with self.session_manager() as session:
                 if not await self._has_valid_resource_authority(
                     session,
@@ -398,7 +401,17 @@ class ArtifactService:
             committed = True
             return Success(created)
         finally:
-            if uploaded and not committed:
+            if (
+                created_by_invocation
+                and not committed
+                and not await self._has_committed_verified_publication(
+                    authority=authority,
+                    size_bytes=size_bytes,
+                    sha256=sha256,
+                    media_type=media_type,
+                    publication_id=publication_id,
+                )
+            ):
                 await self.s3_service.delete_uncommitted_product_object(
                     identity=S3ObjectIdentity(
                         bucket=self.config.workspace_s3.bucket,
@@ -442,6 +455,41 @@ class ArtifactService:
         raise RuntimeError(
             "publication ID is already committed with different metadata"
         )
+
+    async def _has_committed_verified_publication(
+        self,
+        *,
+        authority: SessionResourceAuthority,
+        size_bytes: int,
+        sha256: str,
+        media_type: str,
+        publication_id: str,
+    ) -> bool:
+        """Preserve the final object when commit outcome cannot be disproven."""
+        try:
+            async with self.session_manager() as session:
+                existing = await self.artifact_repository.get_by_id(
+                    session,
+                    publication_id,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return True
+        if existing is None:
+            return False
+        try:
+            self._validated_existing_verified_publication(
+                existing=existing,
+                authority=authority,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                media_type=media_type,
+                publication_id=publication_id,
+            )
+        except RuntimeError:
+            return True
+        return True
 
     async def resolve_for_authority(
         self,

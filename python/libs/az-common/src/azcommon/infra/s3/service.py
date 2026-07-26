@@ -73,6 +73,14 @@ class S3ProductPublicationMetadata:
 
 
 @dataclass(frozen=True)
+class S3ProductPublicationResult:
+    """Verified product publication with exact creation evidence."""
+
+    metadata: S3ObjectMetadata
+    created: bool
+
+
+@dataclass(frozen=True)
 class S3MultipartUpload:
     """Opaque multipart-upload identity for a trusted process."""
 
@@ -318,15 +326,15 @@ class S3Service:
         destination: S3ObjectIdentity,
         expected_size: int,
         publication_metadata: S3ProductPublicationMetadata,
-    ) -> S3ObjectMetadata:
-        """Native-copy a verified transfer object to one new product-object key.
+    ) -> S3ProductPublicationResult:
+        """Native-copy a verified transfer object to one product-object key.
 
         :param source: Verified transfer-object source.
         :param destination: Preallocated immutable product-object destination.
         :param expected_size: Exact verified transfer byte count.
         :param publication_metadata: Product content and cleanup ownership evidence.
-        :raises FileExistsError: If the final destination already exists.
-        :returns: Verified final product-object metadata.
+        :raises ValueError: If an existing final object does not match exactly.
+        :returns: Verified final object and whether this invocation created it.
         """
         source_verified = await self.verify_transfer_object(
             identity=source,
@@ -347,18 +355,29 @@ class S3Service:
                 Metadata=_product_publication_user_metadata(publication_metadata),
                 **_content_type_args(publication_metadata.content_type),
             )
-            return await self.verify_product_publication_object(
-                identity=destination,
-                expected_size=expected_size,
-                publication_metadata=publication_metadata,
+            return S3ProductPublicationResult(
+                metadata=await self.verify_product_publication_object(
+                    identity=destination,
+                    expected_size=expected_size,
+                    publication_metadata=publication_metadata,
+                ),
+                created=True,
             )
         except asyncio.CancelledError:
             raise
         except BotoClientError as exc:
             if _is_precondition_failed_error(exc):
-                destination_metadata = await self.head(destination)
-                if destination_metadata is not None:
-                    raise FileExistsError(destination.key) from exc
+                try:
+                    return S3ProductPublicationResult(
+                        metadata=await self.verify_product_publication_object(
+                            identity=destination,
+                            expected_size=expected_size,
+                            publication_metadata=publication_metadata,
+                        ),
+                        created=False,
+                    )
+                except FileNotFoundError:
+                    pass
             raise
 
     async def verify_product_publication_object(

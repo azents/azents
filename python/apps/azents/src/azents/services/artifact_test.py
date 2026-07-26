@@ -237,13 +237,14 @@ class _FakeS3Service:
         destination: S3ObjectIdentity,
         expected_size: int,
         publication_metadata: S3ProductPublicationMetadata,
-    ) -> None:
+    ) -> object:
         """Copy one trusted source into the final product key."""
         assert self.session_boundary.active == 0
         self.product_copy_calls.append(
             (source, destination, expected_size, publication_metadata)
         )
         self.objects[destination.key] = b"x" * expected_size
+        return SimpleNamespace(created=True)
 
     async def delete_uncommitted_product_object(
         self,
