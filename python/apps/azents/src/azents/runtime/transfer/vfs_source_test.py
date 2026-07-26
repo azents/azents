@@ -29,10 +29,14 @@ from azents.runtime.transfer.vfs_source import VfsServerToRuntimeSource
 
 
 class Store:
-    def __init__(self) -> None:
+    def __init__(self, events: list[str] | None = None) -> None:
         self.aborted = False
         self.parts: list[bytes] = []
         self.identity = S3ObjectIdentity("bucket", "transfer/admitted")
+        self.multipart_creations = 0
+        self.empty_calls: list[dict[str, object]] = []
+        self.deleted: list[tuple[str, str]] = []
+        self.events = events
 
     async def create_multipart_upload(
         self,
@@ -40,12 +44,17 @@ class Store:
         destination: S3ObjectIdentity,
         transfer_metadata: S3TransferObjectMetadata,
     ) -> S3MultipartUpload:
+        self.multipart_creations += 1
+        if self.events is not None:
+            self.events.append("create")
         self.identity = destination
         return S3MultipartUpload(destination, "upload")
 
     async def upload_part(
         self, *, upload: S3MultipartUpload, part_number: int, body: bytes
     ) -> S3CompletedPart:
+        if self.events is not None:
+            self.events.append("part")
         self.parts.append(body)
         return S3CompletedPart(part_number, f"etag-{part_number}")
 
@@ -66,6 +75,28 @@ class Store:
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
         self.aborted = True
+
+    async def create_empty_immutable(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        transfer_metadata: S3TransferObjectMetadata,
+    ) -> S3VerifiedObject:
+        self.empty_calls.append(
+            {
+                "destination": destination,
+                "transfer_metadata": transfer_metadata,
+            }
+        )
+        return S3VerifiedObject(
+            S3ObjectMetadata(
+                destination, 0, transfer_metadata.content_type, "etag", None, {}, None
+            ),
+            transfer_metadata.sha256,
+        )
+
+    async def delete(self, bucket: str, key: str) -> None:
+        self.deleted.append((bucket, key))
 
 
 def _entry(
@@ -97,32 +128,65 @@ async def test_vfs_stages_accepted_two_mebibyte_boundary_without_decode_body(
         "decode_body",
         lambda self: (_ for _ in ()).throw(AssertionError("eager decode")),
     )
-    store = Store()
+    events: list[str] = []
+    store = Store(events)
+    cleanup = CleanupCoordinator(events)
     source = VfsServerToRuntimeSource(
         entry, _true, store, "bucket", "transfer", 16 * 1024
     )
-    prepared = await source.prepare(preparation=_preparation())
+    prepared = await source.prepare(preparation=_preparation(cleanup))
     assert prepared.size == VFS_FILE_MAX_BYTES
     assert hashlib.sha256(b"".join(store.parts)).hexdigest() == entry.content_hash
+    assert [name for name, _ in cleanup.calls] == ["register", "promote"]
+    registration = cleanup.calls[0][1]
+    assert isinstance(registration, CoordinatorRegisterPreparationCleanupRequest)
+    assert registration.preparation_object_handle.value == "admitted"
+    assert registration.multipart_cleanup_handle.value == "upload"
+    assert events.index("register") < events.index("part")
 
 
 @pytest.mark.asyncio
 async def test_vfs_invalid_base64_aborts_without_ready_object() -> None:
     entry = _entry(b"abc", encoded="not-base64!")
     store = Store()
+    cleanup = CleanupCoordinator()
     source = VfsServerToRuntimeSource(
         entry, _true, store, "bucket", "transfer", 16 * 1024
     )
     with pytest.raises(ValueError, match="Base64"):
-        await source.prepare(preparation=_preparation())
+        await source.prepare(preparation=_preparation(cleanup))
     assert store.aborted
+    assert [name for name, _ in cleanup.calls] == ["register", "clear"]
+
+
+@pytest.mark.asyncio
+async def test_vfs_zero_byte_source_uses_verified_empty_object_without_multipart() -> (
+    None
+):
+    entry = _entry(b"")
+    store = Store()
+    cleanup = CleanupCoordinator()
+    source = VfsServerToRuntimeSource(
+        entry, _true, store, "bucket", "transfer", 16 * 1024
+    )
+
+    prepared = await source.prepare(preparation=_preparation(cleanup))
+
+    assert prepared.size == 0
+    assert prepared.sha256 == hashlib.sha256(b"").hexdigest()
+    assert store.multipart_creations == 0
+    assert store.parts == []
+    assert len(store.empty_calls) == 1
+    assert [name for name, _ in cleanup.calls] == ["promote"]
 
 
 async def _true() -> bool:
     return True
 
 
-def _preparation() -> ServerToRuntimePreparation:
+def _preparation(
+    cleanup: "CleanupCoordinator | None" = None,
+) -> ServerToRuntimePreparation:
     return ServerToRuntimePreparation(
         identity=CoordinatorTransferIdentity(
             transfer_id="transfer",
@@ -135,22 +199,33 @@ def _preparation() -> ServerToRuntimePreparation:
             agent_id="agent",
         ),
         admitted_object_handle=CoordinatorOpaqueObjectHandle("admitted"),
-        coordinator=_UnusedCleanupCoordinator(),
+        coordinator=cleanup or CleanupCoordinator(),
         revision=1,
     )
 
 
-class _UnusedCleanupCoordinator:
+class CleanupCoordinator:
+    def __init__(self, events: list[str] | None = None) -> None:
+        self.calls: list[tuple[str, object]] = []
+        self.events = events
+
     async def register_preparation_cleanup(
         self,
         request: CoordinatorRegisterPreparationCleanupRequest,
     ) -> CoordinatorTransferStatus:
-        raise AssertionError(f"Unexpected cleanup registration: {request}")
+        self.calls.append(("register", request))
+        if self.events is not None:
+            self.events.append("register")
+        return cast(
+            CoordinatorTransferStatus,
+            SimpleNamespace(revision=request.expected_revision + 1),
+        )
 
     async def promote_preparation_cleanup(
         self,
         request: CoordinatorPromotePreparationCleanupRequest,
     ) -> CoordinatorTransferStatus:
+        self.calls.append(("promote", request))
         return cast(
             CoordinatorTransferStatus,
             SimpleNamespace(revision=request.expected_revision + 1),
@@ -160,4 +235,8 @@ class _UnusedCleanupCoordinator:
         self,
         request: CoordinatorClearPreparationCleanupRequest,
     ) -> CoordinatorTransferStatus:
-        raise AssertionError(f"Unexpected cleanup clear: {request}")
+        self.calls.append(("clear", request))
+        return cast(
+            CoordinatorTransferStatus,
+            SimpleNamespace(revision=request.expected_revision + 1),
+        )

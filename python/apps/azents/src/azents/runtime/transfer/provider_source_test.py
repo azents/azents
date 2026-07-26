@@ -85,6 +85,7 @@ class Store:
         self.copy_calls: list[dict[str, object]] = []
         self.deleted: list[tuple[str, str]] = []
         self.preparation_identity: S3ObjectIdentity | None = None
+        self.empty_calls: list[dict[str, object]] = []
 
     async def create_preparation_multipart_upload(
         self,
@@ -125,6 +126,31 @@ class Store:
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
         self.aborted = True
+
+    async def create_empty_immutable(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        transfer_metadata: S3TransferObjectMetadata,
+    ) -> S3VerifiedObject:
+        self.empty_calls.append(
+            {
+                "destination": destination,
+                "transfer_metadata": transfer_metadata,
+            }
+        )
+        return S3VerifiedObject(
+            metadata=S3ObjectMetadata(
+                identity=destination,
+                content_length=0,
+                content_type=transfer_metadata.content_type,
+                etag="canonical-empty-etag",
+                checksum_sha256=None,
+                user_metadata={},
+                last_modified_at=None,
+            ),
+            sha256=transfer_metadata.sha256,
+        )
 
     async def copy_immutable(
         self,
@@ -315,6 +341,28 @@ async def test_provider_size_mismatch_aborts_and_clears_registered_cleanup() -> 
     assert store.aborted
     assert not store.copy_calls
     assert [name for name, _ in cleanup.calls] == ["register", "clear"]
+
+
+@pytest.mark.asyncio
+async def test_provider_zero_byte_source_uses_verified_empty_object() -> None:
+    source, store, stream = _source(body=b"")
+    cleanup = CleanupCoordinator()
+
+    prepared = await source.prepare(preparation=_preparation(cleanup))
+
+    assert prepared.size == 0
+    assert prepared.sha256 == hashlib.sha256(b"").hexdigest()
+    assert stream.opened == stream.closed == 1
+    assert store.preparation_identity is None
+    assert store.parts == []
+    assert store.copy_calls == []
+    assert len(store.empty_calls) == 1
+    empty = store.empty_calls[0]
+    assert empty["destination"] == S3ObjectIdentity(
+        "workspace",
+        "runtime-transfer/admitted",
+    )
+    assert [name for name, _ in cleanup.calls] == ["promote"]
 
 
 @pytest.mark.asyncio

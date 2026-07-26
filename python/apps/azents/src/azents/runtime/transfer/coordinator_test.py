@@ -42,12 +42,15 @@ class _Clock:
 class _Cleanup:
     def __init__(self) -> None:
         self.handles: list[str] = []
+        self.preparation_handles: list[str] = []
         self.records: list[RuntimeTransferRecord] = []
 
     async def cleanup(self, record: RuntimeTransferRecord) -> None:
         self.records.append(record)
         if record.multipart_cleanup_handle is not None:
             self.handles.append(record.multipart_cleanup_handle)
+        if record.preparation_multipart_cleanup_handle is not None:
+            self.preparation_handles.append(record.preparation_multipart_cleanup_handle)
 
 
 @pytest.mark.asyncio
@@ -424,6 +427,55 @@ async def test_pre_ready_canonical_cleanup_survives_revalidation_or_ready_failur
     assert cancelled.phase.value == "terminal"
     assert len(cleanup.records) == 1
     assert cleanup.records[0].preparation_object_handle == object_handle_for(admitted)
+
+
+@pytest.mark.asyncio
+async def test_worker_loss_reconciles_only_stale_vfs_multipart_cleanup() -> None:
+    """A replacement attempt cannot inherit stale VFS multipart cleanup."""
+    clock = _Clock(_NOW)
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=clock)
+    cleanup = _Cleanup()
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=cleanup,
+        clock=clock,
+    )
+    admitted = await coordinator.admit(_admission(), lease_id="lease-1")
+    assert admitted is not None
+    registered = await state.register_preparation_cleanup(
+        admitted.admission.transfer_id,
+        attempt_id=admitted.admission.attempt_id,
+        runtime_id=admitted.admission.runtime_id,
+        desired_generation=admitted.admission.desired_generation,
+        expected_revision=admitted.revision,
+        preparation_object_handle=object_handle_for(admitted),
+        multipart_cleanup_handle="vfs-upload-old",
+    )
+    assert registered is not None
+
+    clock.now = admitted.logical_expires_at
+    expired = await state.get(admitted.admission.transfer_id)
+    assert expired is not None
+    assert expired.phase.value == "terminal"
+    replacement = await coordinator.admit(
+        replace(
+            _admission(),
+            attempt_id="attempt-2",
+            operation_id="operation-2",
+            deadline_at=clock.now + timedelta(minutes=5),
+        ),
+        lease_id="lease-2",
+    )
+    assert replacement is not None
+
+    assert await coordinator.repair_terminal_correlations(page_size=10) == 1
+
+    assert cleanup.preparation_handles == ["vfs-upload-old"]
+    current = await state.get(admitted.admission.transfer_id)
+    assert current is not None
+    assert current.admission.attempt_id == "attempt-2"
+    assert current.preparation_multipart_cleanup_handle is None
 
 
 @pytest.mark.asyncio

@@ -67,6 +67,12 @@ class ProviderStagingStore(Protocol):
     ) -> S3ObjectMetadata: ...
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None: ...
+    async def create_empty_immutable(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        transfer_metadata: S3TransferObjectMetadata,
+    ) -> S3VerifiedObject: ...
 
     async def copy_immutable(
         self,
@@ -131,7 +137,7 @@ class DeferredProviderServerToRuntimeSource:
     ) -> PreparedServerToRuntimeObject:
         """Stage, verify, promote, and remove one deferred provider body."""
         if self.metadata.size == 0:
-            raise ValueError("Zero-byte provider staging is not supported by multipart")
+            return await self._prepare_empty(preparation=preparation)
         preparation_handle = self._preparation_handle(preparation)
         preparation_identity = self._object_identity(preparation_handle)
         upload = await self.s3_service.create_preparation_multipart_upload(
@@ -263,6 +269,41 @@ class DeferredProviderServerToRuntimeSource:
                 )
             )
         return actual_size, digest.hexdigest(), tuple(parts)
+
+    async def _prepare_empty(
+        self,
+        *,
+        preparation: ServerToRuntimePreparation,
+    ) -> PreparedServerToRuntimeObject:
+        """Verify one empty provider response without multipart staging."""
+        empty_sha256 = hashlib.sha256(b"").hexdigest()
+        async with self.open_stream(
+            maximum_chunk_size=self.stream_chunk_size
+        ) as chunks:
+            async for chunk in chunks:
+                if not isinstance(chunk, bytes):
+                    raise ValueError("Provider stream yielded a non-bytes chunk")
+                if len(chunk) > self.stream_chunk_size:
+                    raise ValueError("Provider stream chunk exceeds its bound")
+                if chunk:
+                    raise ValueError("Provider stream size does not match the manifest")
+        await preparation.promote_cleanup(
+            preparation_object_handle=preparation.admitted_object_handle,
+        )
+        verified = await self.s3_service.create_empty_immutable(
+            destination=self._object_identity(preparation.admitted_object_handle),
+            transfer_metadata=S3TransferObjectMetadata(
+                sha256=empty_sha256,
+                content_type=self.metadata.media_type,
+            ),
+        )
+        if verified.metadata.content_length != 0 or verified.sha256 != empty_sha256:
+            raise ValueError("Provider empty staging verification failed")
+        return PreparedServerToRuntimeObject(
+            object_handle=preparation.admitted_object_handle,
+            size=0,
+            sha256=empty_sha256,
+        )
 
     async def _cleanup_preparation(
         self,

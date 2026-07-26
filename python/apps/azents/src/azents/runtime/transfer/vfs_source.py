@@ -17,6 +17,9 @@ from azcommon.infra.s3.service import (
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorOpaqueObjectHandle,
+)
 
 from azents.core.vfs import VFS_FILE_MAX_BYTES, VfsFileEntry
 from azents.runtime.transfer.server_to_runtime import (
@@ -47,6 +50,13 @@ class VfsStagingStore(Protocol):
         expected_sha256: str,
     ) -> S3VerifiedObject: ...
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None: ...
+    async def create_empty_immutable(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        transfer_metadata: S3TransferObjectMetadata,
+    ) -> S3VerifiedObject: ...
+    async def delete(self, bucket: str, key: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -82,21 +92,22 @@ class VfsServerToRuntimeSource:
         self, *, preparation: ServerToRuntimePreparation
     ) -> PreparedServerToRuntimeObject:
         """Decode, hash, stage, and verify the exact VFS entry incrementally."""
-        if self.entry.size_bytes == 0:
-            raise ValueError("Zero-byte VFS staging is not supported by multipart")
-        await preparation.promote_cleanup(
-            preparation_object_handle=preparation.admitted_object_handle,
-        )
-        upload = await self.s3_service.create_multipart_upload(
-            destination=S3ObjectIdentity(
-                bucket=self.bucket,
-                key="/".join(
-                    (
-                        self.transfer_object_prefix.strip("/"),
-                        preparation.admitted_object_handle.value,
-                    )
-                ),
+        destination = S3ObjectIdentity(
+            bucket=self.bucket,
+            key="/".join(
+                (
+                    self.transfer_object_prefix.strip("/"),
+                    preparation.admitted_object_handle.value,
+                )
             ),
+        )
+        if self.entry.size_bytes == 0:
+            return await self._prepare_empty(
+                preparation=preparation,
+                destination=destination,
+            )
+        upload = await self.s3_service.create_multipart_upload(
+            destination=destination,
             transfer_metadata=S3TransferObjectMetadata(
                 sha256=self.entry.content_hash, content_type=self.entry.media_type
             ),
@@ -104,7 +115,14 @@ class VfsServerToRuntimeSource:
         digest = hashlib.sha256()
         decoded_size = 0
         parts: list[S3CompletedPart] = []
+        completed = False
         try:
+            await preparation.register_cleanup(
+                preparation_object_handle=preparation.admitted_object_handle,
+                multipart_cleanup_handle=CoordinatorOpaqueObjectHandle(
+                    upload.upload_id
+                ),
+            )
             for index, offset in enumerate(
                 range(0, len(self.entry.body_base64), self.decode_slice_chars), start=1
             ):
@@ -138,6 +156,10 @@ class VfsServerToRuntimeSource:
                 expected_size=decoded_size,
                 expected_sha256=actual_sha256,
             )
+            completed = True
+            await preparation.promote_cleanup(
+                preparation_object_handle=preparation.admitted_object_handle,
+            )
             if (
                 verified.metadata.content_length != decoded_size
                 or verified.sha256 != actual_sha256
@@ -147,11 +169,64 @@ class VfsServerToRuntimeSource:
                 preparation.admitted_object_handle, decoded_size, actual_sha256
             )
         except asyncio.CancelledError:
-            await self.s3_service.abort_multipart_upload(upload=upload)
+            await self._cleanup_preparation(
+                preparation=preparation,
+                upload=upload,
+                destination=destination,
+                completed=completed,
+            )
             raise
         except Exception:
-            await self.s3_service.abort_multipart_upload(upload=upload)
+            await self._cleanup_preparation(
+                preparation=preparation,
+                upload=upload,
+                destination=destination,
+                completed=completed,
+            )
             raise
+
+    async def _prepare_empty(
+        self,
+        *,
+        preparation: ServerToRuntimePreparation,
+        destination: S3ObjectIdentity,
+    ) -> PreparedServerToRuntimeObject:
+        """Create and verify the immutable empty object without multipart work."""
+        empty_sha256 = hashlib.sha256(b"").hexdigest()
+        if self.entry.body_base64 or self.entry.content_hash != empty_sha256:
+            raise ValueError("Zero-byte VFS file does not match the manifest")
+        await preparation.promote_cleanup(
+            preparation_object_handle=preparation.admitted_object_handle,
+        )
+        verified = await self.s3_service.create_empty_immutable(
+            destination=destination,
+            transfer_metadata=S3TransferObjectMetadata(
+                sha256=empty_sha256,
+                content_type=self.entry.media_type,
+            ),
+        )
+        if verified.metadata.content_length != 0 or verified.sha256 != empty_sha256:
+            raise ValueError("VFS empty staging verification failed")
+        return PreparedServerToRuntimeObject(
+            preparation.admitted_object_handle,
+            0,
+            empty_sha256,
+        )
+
+    async def _cleanup_preparation(
+        self,
+        *,
+        preparation: ServerToRuntimePreparation,
+        upload: S3MultipartUpload,
+        destination: S3ObjectIdentity,
+        completed: bool,
+    ) -> None:
+        """Clean exact local preparation work and clear its durable evidence."""
+        if completed:
+            await self.s3_service.delete(destination.bucket, destination.key)
+        else:
+            await self.s3_service.abort_multipart_upload(upload=upload)
+        await preparation.clear_cleanup()
 
     async def revalidate(self) -> bool:
         return await self.revalidate_authority()
