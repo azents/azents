@@ -1,5 +1,6 @@
 """Focused Runtime-to-server publication tests."""
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -28,6 +29,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 from azents.runtime.transfer.runtime_to_server import (
+    RuntimeToServerPublicationCallback,
     RuntimeToServerTransferRequest,
     RuntimeToServerTransferService,
     VerifiedRuntimeUpload,
@@ -49,10 +51,22 @@ class _Callback:
         self.uploads.append(upload)
 
 
+@dataclass
+class _DelayedCallback:
+    """Publication callback that holds the consumer lease across several ticks."""
+
+    uploads: list[VerifiedRuntimeUpload]
+
+    async def publish(self, upload: VerifiedRuntimeUpload) -> None:
+        await asyncio.sleep(0.01)
+        self.uploads.append(upload)
+
+
 class _Coordinator:
     def __init__(self, *, ack_fails: bool = False) -> None:
         self.calls: list[str] = []
         self.ack_fails = ack_fails
+        self.ack_attempted = False
 
     async def admit_transfer(
         self, request: CoordinatorAdmitTransferRequest
@@ -76,6 +90,8 @@ class _Coordinator:
         self, request: CoordinatorGetTransferStatusRequest
     ) -> CoordinatorTransferStatus:
         self.calls.append("status")
+        if self.ack_attempted:
+            return _status(7, request.identity, CoordinatorTransferPhase.CONSUMED)
         return _status(4, request.identity, CoordinatorTransferPhase.AVAILABLE)
 
     async def claim_consumer(
@@ -105,6 +121,7 @@ class _Coordinator:
     ) -> CoordinatorTransferStatus:
         self.calls.append("ack")
         if self.ack_fails:
+            self.ack_attempted = True
             raise OSError("ack transport failed")
         return _status(7, request.identity, CoordinatorTransferPhase.CONSUMED)
 
@@ -137,6 +154,67 @@ class _Coordinator:
         )
 
 
+class _StrictCleanupCoordinator(_Coordinator):
+    """Coordinator that rejects cleanup requests with stale revisions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.status_calls = 0
+
+    async def get_transfer_status(
+        self, request: CoordinatorGetTransferStatusRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("status")
+        self.status_calls += 1
+        if self.status_calls == 1:
+            return _status(4, request.identity, CoordinatorTransferPhase.AVAILABLE)
+        return _status(6, request.identity, CoordinatorTransferPhase.CONSUMING)
+
+    async def abandon_consumer(
+        self, request: CoordinatorConsumerRequest
+    ) -> CoordinatorTransferStatus:
+        assert request.expected_revision == 6
+        return await super().abandon_consumer(request)
+
+    async def cancel_transfer(
+        self, request: CoordinatorCancelTransferRequest
+    ) -> CoordinatorTransferStatus:
+        assert request.expected_revision == 7
+        return await super().cancel_transfer(request)
+
+
+class _FailedSettlementCoordinator(_Coordinator):
+    """Coordinator that authoritatively rejects a committed settlement."""
+
+    async def settle_transfer(
+        self, request: CoordinatorSettleTransferRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("settle")
+        return _status(
+            8,
+            request.identity,
+            CoordinatorTransferPhase.TERMINAL,
+            CoordinatorTransferOutcome.FAILED,
+        )
+
+
+class _RetryAcknowledgementCoordinator(_Coordinator):
+    """Coordinator that needs a retry after an uncertain acknowledgement."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.acknowledgement_attempts = 0
+
+    async def acknowledge_consumer(
+        self, request: CoordinatorConsumerRequest
+    ) -> CoordinatorTransferStatus:
+        self.calls.append("ack")
+        self.acknowledgement_attempts += 1
+        if self.acknowledgement_attempts == 1:
+            raise OSError("acknowledgement transport failed")
+        return _status(7, request.identity, CoordinatorTransferPhase.CONSUMED)
+
+
 def _status(
     revision: int,
     identity: CoordinatorTransferIdentity,
@@ -162,7 +240,9 @@ def _status(
     )
 
 
-def _request(callback: _Callback) -> RuntimeToServerTransferRequest:
+def _request(
+    callback: RuntimeToServerPublicationCallback,
+) -> RuntimeToServerTransferRequest:
     return RuntimeToServerTransferRequest(
         target=ServerToRuntimeTarget(runtime_id="runtime", desired_generation=1),
         agent_id="agent",
@@ -188,6 +268,7 @@ async def test_upload_orders_verified_claim_publish_ack_and_settlement() -> None
         coordinator=coordinator,
         clock=lambda: _NOW,
         status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(seconds=1),
     )
 
     await service.transfer(_request(callback))
@@ -215,6 +296,24 @@ async def test_callback_failure_abandons_and_cancels_uncommitted_claim() -> None
         coordinator=coordinator,
         clock=lambda: _NOW,
         status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+
+    with pytest.raises(RuntimeError, match="publication failed"):
+        await service.transfer(_request(_Callback([], fail=True)))
+
+    assert coordinator.calls[-2:] == ["abandon", "cancel"]
+
+
+@pytest.mark.asyncio
+async def test_callback_failure_uses_fresh_revision_for_cleanup() -> None:
+    """Cleanup observes the last consumer-fenced revision, not admission state."""
+    coordinator = _StrictCleanupCoordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(seconds=1),
     )
 
     with pytest.raises(RuntimeError, match="publication failed"):
@@ -230,9 +329,59 @@ async def test_ack_transport_recovery_does_not_cancel_committed_publication() ->
         coordinator=coordinator,
         clock=lambda: _NOW,
         status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(seconds=1),
     )
 
     await service.transfer(_request(_Callback([])))
 
     assert "cancel" not in coordinator.calls
     assert coordinator.calls[-3:] == ["ack", "status", "settle"]
+
+
+@pytest.mark.asyncio
+async def test_acknowledgement_retries_after_uncertain_available_status() -> None:
+    """An uncertain acknowledgement remains unresolved until it is confirmed."""
+    coordinator = _RetryAcknowledgementCoordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+
+    await service.transfer(_request(_Callback([])))
+
+    assert coordinator.calls[-4:] == ["ack", "status", "ack", "settle"]
+
+
+@pytest.mark.asyncio
+async def test_terminal_failed_settlement_is_not_reported_as_success() -> None:
+    """Only an authoritative terminal SUCCEEDED outcome completes publication."""
+    coordinator = _FailedSettlementCoordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(seconds=1),
+    )
+
+    with pytest.raises(RuntimeError, match="not settled"):
+        await service.transfer(_request(_Callback([])))
+
+    assert "cancel" not in coordinator.calls
+
+
+@pytest.mark.asyncio
+async def test_long_publication_renews_consumer_lease_until_callback_finishes() -> None:
+    """The product callback retains its consumer fence beyond its first renewal."""
+    coordinator = _Coordinator()
+    service = RuntimeToServerTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+        consumer_lease_renew_interval=timedelta(milliseconds=1),
+    )
+
+    await service.transfer(_request(_DelayedCallback([])))
+
+    assert coordinator.calls.count("renew") > 1

@@ -313,6 +313,19 @@ class ArtifactService:
             if not await self._has_valid_resource_authority(session, authority):
                 return Failure(ArtifactAccessDenied())
         artifact_id = publication_id
+        async with self.session_manager() as session:
+            existing = await self.artifact_repository.get_by_id(session, artifact_id)
+        if existing is not None:
+            return Success(
+                self._validated_existing_verified_publication(
+                    existing=existing,
+                    authority=authority,
+                    size_bytes=size_bytes,
+                    sha256=sha256,
+                    media_type=media_type,
+                    publication_id=publication_id,
+                )
+            )
         object_key = artifact_storage_key(
             workspace_id=authority.workspace_id,
             session_id=authority.session_id,
@@ -324,7 +337,8 @@ class ArtifactService:
             content_type=media_type,
             publication_id=artifact_id,
         )
-        succeeded = False
+        uploaded = False
+        committed = False
         try:
             await self.s3_service.copy_verified_transfer_object_to_product(
                 source=source,
@@ -335,6 +349,7 @@ class ArtifactService:
                 expected_size=size_bytes,
                 publication_metadata=publication_metadata,
             )
+            uploaded = True
             async with self.session_manager() as session:
                 if not await self._has_valid_resource_authority(
                     session,
@@ -342,6 +357,22 @@ class ArtifactService:
                     lock=True,
                 ):
                     return Failure(ArtifactAccessDenied())
+                existing = await self.artifact_repository.get_by_id(
+                    session,
+                    artifact_id,
+                )
+                if existing is not None:
+                    committed = True
+                    return Success(
+                        self._validated_existing_verified_publication(
+                            existing=existing,
+                            authority=authority,
+                            size_bytes=size_bytes,
+                            sha256=sha256,
+                            media_type=media_type,
+                            publication_id=publication_id,
+                        )
+                    )
                 now = datetime.datetime.now(datetime.UTC)
                 created = await self.artifact_repository.create(
                     session,
@@ -364,10 +395,10 @@ class ArtifactService:
                         metadata=_json_metadata(metadata),
                     ),
                 )
-            succeeded = True
+            committed = True
             return Success(created)
         finally:
-            if not succeeded:
+            if uploaded and not committed:
                 await self.s3_service.delete_uncommitted_product_object(
                     identity=S3ObjectIdentity(
                         bucket=self.config.workspace_s3.bucket,
@@ -376,6 +407,41 @@ class ArtifactService:
                     expected_size=size_bytes,
                     publication_metadata=publication_metadata,
                 )
+
+    def _validated_existing_verified_publication(
+        self,
+        *,
+        existing: Artifact,
+        authority: SessionResourceAuthority,
+        size_bytes: int,
+        sha256: str,
+        media_type: str,
+        publication_id: str,
+    ) -> Artifact:
+        """Return a committed stable publication only when its identity matches."""
+        if (
+            existing.id == publication_id
+            and existing.workspace_id == authority.workspace_id
+            and existing.session_id == authority.session_id
+            and existing.agent_id == authority.agent_id
+            and existing.created_run_id == authority.run_id
+            and existing.created_run_index == authority.run_index
+            and existing.storage_key
+            == artifact_storage_key(
+                workspace_id=authority.workspace_id,
+                session_id=authority.session_id,
+                created_run_index=authority.run_index,
+                artifact_id=publication_id,
+            )
+            and existing.status is ArtifactStatus.AVAILABLE
+            and existing.size_bytes == size_bytes
+            and existing.sha256 == sha256
+            and existing.media_type == media_type
+        ):
+            return existing
+        raise RuntimeError(
+            "publication ID is already committed with different metadata"
+        )
 
     async def resolve_for_authority(
         self,

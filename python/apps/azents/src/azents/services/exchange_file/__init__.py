@@ -548,6 +548,21 @@ class ExchangeFileService:
         async with self.session_manager() as session:
             if not await self._has_valid_resource_authority(session, authority):
                 return Failure(FileAccessDenied())
+            existing = await self.exchange_file_repository.get_by_id(
+                session,
+                publication_id,
+            )
+        if existing is not None:
+            return Success(
+                self._validated_existing_verified_publication(
+                    existing=existing,
+                    authority=authority,
+                    size_bytes=size_bytes,
+                    sha256=sha256,
+                    media_type=media_type,
+                    publication_id=publication_id,
+                )
+            )
         prepared = await self._prepare_verified_files(
             authority=authority,
             source=source,
@@ -561,9 +576,11 @@ class ExchangeFileService:
             media_type=media_type,
             origin_type=origin_type,
         )
-        succeeded = False
+        uploaded = False
+        committed = False
         try:
             await self._upload_prepared_files(prepared)
+            uploaded = True
             async with self.session_manager() as session:
                 if not await self._has_valid_resource_authority(
                     session,
@@ -571,11 +588,27 @@ class ExchangeFileService:
                     lock=True,
                 ):
                     return Failure(FileAccessDenied())
+                existing = await self.exchange_file_repository.get_by_id(
+                    session,
+                    publication_id,
+                )
+                if existing is not None:
+                    committed = True
+                    return Success(
+                        self._validated_existing_verified_publication(
+                            existing=existing,
+                            authority=authority,
+                            size_bytes=size_bytes,
+                            sha256=sha256,
+                            media_type=media_type,
+                            publication_id=publication_id,
+                        )
+                    )
                 created = await self._persist_prepared_files(session, prepared)
-            succeeded = True
+            committed = True
             return Success(created)
         finally:
-            if not succeeded:
+            if uploaded and not committed:
                 await self._cleanup_prepared_verified_files(prepared)
 
     async def resolve_for_authority(
@@ -1279,6 +1312,38 @@ class ExchangeFileService:
                     bucket=self.config.workspace_s3.bucket,
                     key=file.object_key,
                 )
+
+    def _validated_existing_verified_publication(
+        self,
+        *,
+        existing: ExchangeFile,
+        authority: SessionResourceAuthority,
+        size_bytes: int,
+        sha256: str,
+        media_type: str,
+        publication_id: str,
+    ) -> ExchangeFile:
+        """Return a committed stable publication only when its identity matches."""
+        if (
+            existing.id == publication_id
+            and existing.workspace_id == authority.workspace_id
+            and existing.agent_id == authority.agent_id
+            and existing.object_key
+            == exchange_file_object_key(
+                workspace_id=authority.workspace_id,
+                file_id=publication_id,
+            )
+            and existing.source_run_id == authority.run_id
+            and existing.retention_root_session_id == authority.root_session_id
+            and existing.status is ExchangeFileStatus.AVAILABLE
+            and existing.size_bytes == size_bytes
+            and existing.sha256 == sha256
+            and existing.media_type == media_type
+        ):
+            return existing
+        raise RuntimeError(
+            "publication ID is already committed with different metadata"
+        )
 
     async def _persist_prepared_files(
         self,

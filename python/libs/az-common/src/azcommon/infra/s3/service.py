@@ -359,18 +359,6 @@ class S3Service:
                 destination_metadata = await self.head(destination)
                 if destination_metadata is not None:
                     raise FileExistsError(destination.key) from exc
-            await self.delete_uncommitted_product_object(
-                identity=destination,
-                expected_size=expected_size,
-                publication_metadata=publication_metadata,
-            )
-            raise
-        except Exception:
-            await self.delete_uncommitted_product_object(
-                identity=destination,
-                expected_size=expected_size,
-                publication_metadata=publication_metadata,
-            )
             raise
 
     async def verify_product_publication_object(

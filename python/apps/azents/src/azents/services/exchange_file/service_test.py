@@ -661,6 +661,49 @@ async def test_authority_publishes_large_verified_object_without_body_relay() ->
 
 
 @pytest.mark.asyncio
+async def test_authority_recovers_committed_verified_publication_without_copy() -> None:
+    """A stable retry returns the committed ExchangeFile without touching its object."""
+    service, _repository, s3_service = _make_authority_service(
+        authority_results=[True, True, True]
+    )
+    source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-object")
+    body = b"published text"
+    s3_service.objects[source.key] = body
+    authority = SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="root-session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=0,
+    )
+
+    async def publish() -> Result[ExchangeFile, FileAccessDenied]:
+        return await service.create_from_verified_object_for_authority(
+            authority=authority,
+            source=source,
+            size_bytes=len(body),
+            sha256=hashlib.sha256(body).hexdigest(),
+            publication_id="exchange-publication",
+            provenance_kind=ExchangeFileProvenanceKind.TOOL,
+            source_tool_name="present_file",
+            source_provider=None,
+            filename="published.txt",
+            media_type="text/plain",
+        )
+
+    created = await publish()
+    recovered = await publish()
+
+    assert isinstance(created, Success)
+    assert isinstance(recovered, Success)
+    assert recovered.value == created.value
+    assert len(s3_service.product_copy_calls) == 1
+    assert s3_service.product_cleanup_calls == []
+
+
+@pytest.mark.asyncio
 async def test_authority_verified_publication_compensates_final_object() -> None:
     """A failed authority recheck conditionally cleans up the final Exchange object."""
     service, repository, s3_service = _make_authority_service(

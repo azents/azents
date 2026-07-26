@@ -124,6 +124,14 @@ class RuntimeToServerTransferRequest:
     callback: RuntimeToServerPublicationCallback
 
 
+@dataclass
+class _ConsumerLease:
+    """Mutable consumer fencing state owned by one publication callback."""
+
+    revision: int
+    failure: RuntimeToServerTransferError | None = None
+
+
 class RuntimeToServerTransferService:
     """Admit, receive, and publish one verified Runtime upload."""
 
@@ -133,10 +141,12 @@ class RuntimeToServerTransferService:
         coordinator: RuntimeToServerCoordinator,
         clock: Callable[[], datetime],
         status_poll_interval: timedelta,
+        consumer_lease_renew_interval: timedelta,
     ) -> None:
         self.coordinator = coordinator
         self.clock = clock
         self.status_poll_interval = status_poll_interval
+        self.consumer_lease_renew_interval = consumer_lease_renew_interval
 
     async def transfer(self, request: RuntimeToServerTransferRequest) -> None:
         """Return only after product commit and authoritative transfer success."""
@@ -184,64 +194,104 @@ class RuntimeToServerTransferService:
                     ),
                 )
             )
-            await self.coordinator.dispatch_transfer(
+            revision = ready.revision
+            dispatched = await self.coordinator.dispatch_transfer(
                 CoordinatorDispatchTransferRequest(
                     identity=identity,
-                    expected_revision=ready.revision,
+                    expected_revision=revision,
                     dispatch_id=uuid7().hex,
                 )
             )
+            revision = dispatched.revision
             available = await self._wait_available(identity, request.deadline_at)
+            revision = available.revision
             claim_id = uuid7().hex
             claimed = await self.coordinator.claim_consumer(
                 CoordinatorConsumerRequest(
                     identity=identity,
-                    expected_revision=available.revision,
+                    expected_revision=revision,
                     consumer_claim_id=claim_id,
                 )
             )
+            revision = claimed.revision
             verified = await self.coordinator.get_verified_object(
                 CoordinatorGetVerifiedObjectRequest(
                     identity=identity,
-                    expected_revision=claimed.revision,
+                    expected_revision=revision,
                     consumer_claim_id=claim_id,
                 )
             )
+            revision = verified.status.revision
             renewed = await self.coordinator.renew_consumer_lease(
                 CoordinatorConsumerRequest(
                     identity=identity,
-                    expected_revision=verified.status.revision,
+                    expected_revision=revision,
                     consumer_claim_id=claim_id,
                 )
             )
+            revision = renewed.revision
             manifest = verified.actual_manifest
             if manifest.size is None or manifest.sha256 is None:
                 raise RuntimeToServerTransferError(
                     "Verified upload manifest is missing"
                 )
-            await request.callback.publish(
-                VerifiedRuntimeUpload(
+            lease = _ConsumerLease(revision=revision)
+            renewal_task = asyncio.create_task(
+                self._renew_consumer_lease_while_publishing(
                     identity=identity,
-                    publication_id=request.publication_id,
-                    object_handle=verified.verified_object_handle,
-                    size=manifest.size,
-                    sha256=manifest.sha256,
+                    claim_id=claim_id,
+                    deadline_at=request.deadline_at,
+                    lease=lease,
                 )
             )
-            committed = True
+            try:
+                await request.callback.publish(
+                    VerifiedRuntimeUpload(
+                        identity=identity,
+                        publication_id=request.publication_id,
+                        object_handle=verified.verified_object_handle,
+                        size=manifest.size,
+                        sha256=manifest.sha256,
+                    )
+                )
+                committed = True
+            finally:
+                renewal_task.cancel()
+                try:
+                    await renewal_task
+                except asyncio.CancelledError:
+                    pass
+            if lease.failure is not None:
+                raise lease.failure
+            revision = lease.revision
             acknowledged = await self._recover_acknowledgement(
                 identity,
                 claim_id,
-                renewed.revision,
+                revision,
+                request.deadline_at,
             )
-            await self._recover_settlement(identity, acknowledged.revision)
+            await self._recover_settlement(
+                identity,
+                acknowledged.revision,
+                request.deadline_at,
+            )
         except asyncio.CancelledError:
             if not committed:
-                await self._abandon_and_cancel(identity, claim_id, revision)
+                await self._abandon_and_cancel(
+                    identity,
+                    claim_id,
+                    revision,
+                    request.deadline_at,
+                )
             raise
         except Exception:
             if not committed:
-                await self._abandon_and_cancel(identity, claim_id, revision)
+                await self._abandon_and_cancel(
+                    identity,
+                    claim_id,
+                    revision,
+                    request.deadline_at,
+                )
             raise
 
     async def _wait_available(
@@ -266,52 +316,129 @@ class RuntimeToServerTransferService:
         identity: CoordinatorTransferIdentity,
         claim_id: str,
         revision: int,
+        deadline_at: datetime,
     ) -> CoordinatorTransferStatus:
-        try:
-            return await self.coordinator.acknowledge_consumer(
-                CoordinatorConsumerRequest(
-                    identity=identity,
-                    expected_revision=revision,
-                    consumer_claim_id=claim_id,
+        while self.clock() < deadline_at:
+            try:
+                status = await self.coordinator.acknowledge_consumer(
+                    CoordinatorConsumerRequest(
+                        identity=identity,
+                        expected_revision=revision,
+                        consumer_claim_id=claim_id,
+                    )
                 )
-            )
-        except Exception:
-            return await self.coordinator.get_transfer_status(
-                CoordinatorGetTransferStatusRequest(identity=identity)
-            )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                status = await self.coordinator.get_transfer_status(
+                    CoordinatorGetTransferStatusRequest(identity=identity)
+                )
+            if status.phase is CoordinatorTransferPhase.CONSUMED:
+                return status
+            if status.phase is CoordinatorTransferPhase.TERMINAL:
+                if status.outcome is CoordinatorTransferOutcome.SUCCEEDED:
+                    return status
+                raise RuntimeToServerTransferError(
+                    "Committed publication acknowledgement was rejected"
+                )
+            revision = status.revision
+            await asyncio.sleep(self.status_poll_interval.total_seconds())
+        raise RuntimeToServerTransferError(
+            "Committed publication acknowledgement was not confirmed"
+        )
 
     async def _recover_settlement(
         self,
         identity: CoordinatorTransferIdentity,
         revision: int,
+        deadline_at: datetime,
     ) -> None:
-        try:
-            status = await self.coordinator.settle_transfer(
-                CoordinatorSettleTransferRequest(
-                    identity=identity,
-                    expected_revision=revision,
-                    outcome=CoordinatorTransferOutcome.SUCCEEDED,
-                    failure=None,
+        while self.clock() < deadline_at:
+            try:
+                status = await self.coordinator.settle_transfer(
+                    CoordinatorSettleTransferRequest(
+                        identity=identity,
+                        expected_revision=revision,
+                        outcome=CoordinatorTransferOutcome.SUCCEEDED,
+                        failure=None,
+                    )
                 )
-            )
-        except Exception:
-            status = await self.coordinator.get_transfer_status(
-                CoordinatorGetTransferStatusRequest(identity=identity)
-            )
-        if (
-            status.phase is CoordinatorTransferPhase.TERMINAL
-            and status.outcome is not CoordinatorTransferOutcome.SUCCEEDED
-        ):
-            raise RuntimeToServerTransferError("Committed publication was not settled")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                status = await self.coordinator.get_transfer_status(
+                    CoordinatorGetTransferStatusRequest(identity=identity)
+                )
+            if status.phase is CoordinatorTransferPhase.TERMINAL:
+                if status.outcome is CoordinatorTransferOutcome.SUCCEEDED:
+                    return
+                raise RuntimeToServerTransferError(
+                    "Committed publication was not settled"
+                )
+            revision = status.revision
+            await asyncio.sleep(self.status_poll_interval.total_seconds())
+        raise RuntimeToServerTransferError(
+            "Committed publication settlement was not confirmed"
+        )
+
+    async def _renew_consumer_lease_while_publishing(
+        self,
+        *,
+        identity: CoordinatorTransferIdentity,
+        claim_id: str,
+        deadline_at: datetime,
+        lease: _ConsumerLease,
+    ) -> None:
+        """Renew the consumer fence until product publication completes."""
+        while True:
+            await asyncio.sleep(self.consumer_lease_renew_interval.total_seconds())
+            if self.clock() >= deadline_at:
+                lease.failure = RuntimeToServerTransferError(
+                    "Runtime upload deadline expired during publication"
+                )
+                return
+            try:
+                status = await self.coordinator.renew_consumer_lease(
+                    CoordinatorConsumerRequest(
+                        identity=identity,
+                        expected_revision=lease.revision,
+                        consumer_claim_id=claim_id,
+                    )
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                lease.failure = RuntimeToServerTransferError(
+                    "Runtime upload consumer lease renewal failed"
+                )
+                return
+            if status.phase is not CoordinatorTransferPhase.CONSUMING:
+                lease.failure = RuntimeToServerTransferError(
+                    "Runtime upload consumer lease was lost"
+                )
+                return
+            lease.revision = status.revision
 
     async def _abandon_and_cancel(
         self,
         identity: CoordinatorTransferIdentity,
         claim_id: str | None,
         revision: int | None,
+        deadline_at: datetime,
     ) -> None:
         if revision is None:
             return
+        try:
+            status = await self.coordinator.get_transfer_status(
+                CoordinatorGetTransferStatusRequest(identity=identity)
+            )
+            revision = status.revision
+            if status.phase is CoordinatorTransferPhase.TERMINAL:
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
         if claim_id is not None:
             try:
                 status = await self.coordinator.abandon_consumer(
@@ -322,18 +449,42 @@ class RuntimeToServerTransferService:
                     )
                 )
                 revision = status.revision
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                pass
-        try:
-            await self.coordinator.cancel_transfer(
-                CoordinatorCancelTransferRequest(
-                    identity=identity,
-                    expected_revision=revision,
-                    reason=CoordinatorCancellationReason.CALLER,
+                try:
+                    status = await self.coordinator.get_transfer_status(
+                        CoordinatorGetTransferStatusRequest(identity=identity)
+                    )
+                    revision = status.revision
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    pass
+        while self.clock() < deadline_at:
+            try:
+                status = await self.coordinator.cancel_transfer(
+                    CoordinatorCancelTransferRequest(
+                        identity=identity,
+                        expected_revision=revision,
+                        reason=CoordinatorCancellationReason.CALLER,
+                    )
                 )
-            )
-        except Exception:
-            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                try:
+                    status = await self.coordinator.get_transfer_status(
+                        CoordinatorGetTransferStatusRequest(identity=identity)
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    return
+            if status.phase is CoordinatorTransferPhase.TERMINAL:
+                return
+            revision = status.revision
+            await asyncio.sleep(self.status_poll_interval.total_seconds())
 
     def _validate(self, request: RuntimeToServerTransferRequest) -> None:
         if not request.runtime_path.startswith("/"):
@@ -342,3 +493,7 @@ class RuntimeToServerTransferService:
             raise ValueError("Runtime upload size must not be negative")
         if request.deadline_at <= self.clock():
             raise RuntimeToServerTransferError("Runtime upload deadline expired")
+        if self.consumer_lease_renew_interval <= timedelta():
+            raise ValueError(
+                "Runtime upload consumer lease renewal interval must be positive"
+            )

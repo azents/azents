@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.infra.s3.service import S3ObjectIdentity, S3ProductPublicationMetadata
-from azcommon.result import Failure, Success
+from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -26,6 +26,7 @@ from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 from .artifact import (
+    ArtifactAccessDenied,
     ArtifactDownload,
     ArtifactExpired,
     ArtifactService,
@@ -559,6 +560,46 @@ async def test_authority_publishes_verified_object_without_body_relay() -> None:
             ),
         )
     ]
+    assert s3.product_cleanup_calls == []
+
+
+@pytest.mark.asyncio
+async def test_authority_recovers_committed_verified_publication_without_copy() -> None:
+    """A stable retry returns the committed Artifact without touching its object."""
+    service, _artifact_repo, s3 = _make_authority_service(
+        authority_results=[True, True, True]
+    )
+    authority = SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=3,
+        owner_generation=0,
+    )
+
+    async def publish() -> Result[Artifact, ArtifactAccessDenied]:
+        return await service.create_from_verified_object_for_authority(
+            authority=authority,
+            source=S3ObjectIdentity(
+                bucket="transfer-bucket",
+                key="verified-object",
+            ),
+            size_bytes=5 * 1024 * 1024,
+            sha256="a" * 64,
+            publication_id="artifact-publication",
+            filename="report.txt",
+            media_type="text/plain",
+        )
+
+    created = await publish()
+    recovered = await publish()
+
+    assert isinstance(created, Success)
+    assert isinstance(recovered, Success)
+    assert recovered.value == created.value
+    assert len(s3.product_copy_calls) == 1
     assert s3.product_cleanup_calls == []
 
 
