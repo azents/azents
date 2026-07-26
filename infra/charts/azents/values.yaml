@@ -14,7 +14,7 @@ secrets:
   existingSecrets:
     auth: ""
     database: azents-database
-    redis: ""
+    redis: azents-redis
     objectStorage: azents-object-storage
 
 ingress:

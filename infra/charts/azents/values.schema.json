@@ -791,7 +791,7 @@
           "additionalProperties": false,
           "properties": {
             "resources": {
-              "$ref": "#/definitions/resources"
+              "type": "object"
             }
           }
         },
