@@ -49,6 +49,9 @@ class AgentRuntimeRepository:
             provider_binding_origin=create.provider_binding_origin,
             provider_binding_evidence=create.provider_binding_evidence,
             runtime_policy_snapshot_id=create.runtime_policy_snapshot_id,
+            applied_runtime_policy_snapshot_id=(
+                create.applied_runtime_policy_snapshot_id
+            ),
             provider_config=create.provider_config,
         )
         session.add(rdb)
@@ -148,6 +151,9 @@ class AgentRuntimeRepository:
                 provider_binding_origin=create.provider_binding_origin,
                 provider_binding_evidence=create.provider_binding_evidence,
                 runtime_policy_snapshot_id=create.runtime_policy_snapshot_id,
+                applied_runtime_policy_snapshot_id=(
+                    create.applied_runtime_policy_snapshot_id
+                ),
                 provider_config=create.provider_config,
             )
             .on_conflict_do_nothing(index_elements=["agent_id"])
@@ -899,6 +905,7 @@ class AgentRuntimeRepository:
             provider_binding_origin=rdb.provider_binding_origin,
             provider_binding_evidence=rdb.provider_binding_evidence,
             runtime_policy_snapshot_id=rdb.runtime_policy_snapshot_id,
+            applied_runtime_policy_snapshot_id=(rdb.applied_runtime_policy_snapshot_id),
             provider_config=rdb.provider_config,
             desired_state=rdb.desired_state,
             desired_generation=rdb.desired_generation,
