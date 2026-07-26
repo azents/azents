@@ -227,7 +227,7 @@ def _seed_external_graph(connection: sa.Connection) -> None:
                     'v1',
                     'original',
                     'Context from migration',
-                    '{"files":[]}'::jsonb,
+                    '{}'::jsonb,
                     '{}'::jsonb
                 ),
                 (
@@ -236,7 +236,7 @@ def _seed_external_graph(connection: sa.Connection) -> None:
                     'v1',
                     'original',
                     'Trigger from migration',
-                    '{"files":[]}'::jsonb,
+                    '{}'::jsonb,
                     '{}'::jsonb
                 )
             """

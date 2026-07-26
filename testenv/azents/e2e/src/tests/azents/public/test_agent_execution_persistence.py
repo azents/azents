@@ -64,8 +64,6 @@ _CANONICAL_WS_ACTION_TYPES = frozenset(
         "live_event_upserted",
         "live_run_cleared",
         "live_run_updated",
-        "mailbox_item_removed",
-        "mailbox_item_upserted",
         "subagent_tree_changed",
         "subscribed",
         "subscription_health_check_ack",
