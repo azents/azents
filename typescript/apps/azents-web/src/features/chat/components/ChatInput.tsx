@@ -221,6 +221,13 @@ interface RankedInputAction {
   ranges: number[];
 }
 
+type DesktopProfileSection = "model" | "effort";
+
+interface DesktopProfileFocusTarget {
+  section: DesktopProfileSection;
+  optionIndex: number | null;
+}
+
 function normalizeStoredAction(value: unknown): ChatAction | null {
   if (typeof value !== "object" || value === null || !("type" in value)) {
     return null;
@@ -668,6 +675,8 @@ export const ChatInput = memo(function ChatInput({
   const [desktopProfileSection, setDesktopProfileSection] = useState<
     "model" | "effort" | null
   >(null);
+  const [desktopProfileFocusTarget, setDesktopProfileFocusTarget] =
+    useState<DesktopProfileFocusTarget | null>(null);
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
@@ -680,6 +689,15 @@ export const ChatInput = memo(function ChatInput({
   const [activeInputActionIndex, setActiveInputActionIndex] = useState(0);
   const inputActionListboxId = useId();
   const inputActionOptionRefs = useRef(new Map<number, HTMLButtonElement>());
+  const desktopProfileDialogId = useId();
+  const desktopProfileModelPanelId = useId();
+  const desktopProfileEffortPanelId = useId();
+  const profileTriggerRef = useRef<HTMLButtonElement>(null);
+  const desktopProfileSectionRefs = useRef(
+    new Map<DesktopProfileSection, HTMLButtonElement>(),
+  );
+  const desktopModelOptionRefs = useRef(new Map<number, HTMLButtonElement>());
+  const desktopEffortOptionRefs = useRef(new Map<number, HTMLButtonElement>());
   const selectableEfforts = useMemo(
     () =>
       effortLevelsForTarget(
@@ -1206,20 +1224,238 @@ export const ChatInput = memo(function ChatInput({
     return () => cancelAnimationFrame(frame);
   }, [isMobile, profilePickerOpened, scrollToContextUsageOnOpen]);
 
+  const desktopProfileSections = useMemo<DesktopProfileSection[]>(
+    () => (selectableEfforts.length > 0 ? ["model", "effort"] : ["model"]),
+    [selectableEfforts.length],
+  );
+
+  const focusDesktopProfileSection = useCallback(
+    (section: DesktopProfileSection): void => {
+      setDesktopProfileFocusTarget({ section, optionIndex: null });
+    },
+    [],
+  );
+
+  const closeDesktopProfilePicker = useCallback((): void => {
+    setProfilePickerOpened(false);
+    setDesktopProfileSection(null);
+    setDesktopProfileFocusTarget(null);
+    profileTriggerRef.current?.focus();
+  }, []);
+
+  const focusDesktopProfileOption = useCallback(
+    (section: DesktopProfileSection, index: number): void => {
+      setDesktopProfileFocusTarget({ section, optionIndex: index });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (isMobile || desktopProfileFocusTarget === null) {
+      return;
+    }
+    let frame = 0;
+    let attempts = 0;
+    const focusTarget = (): void => {
+      const target =
+        desktopProfileFocusTarget.optionIndex === null
+          ? desktopProfileSectionRefs.current.get(
+              desktopProfileFocusTarget.section,
+            )
+          : desktopProfileFocusTarget.section === "model"
+            ? desktopModelOptionRefs.current.get(
+                desktopProfileFocusTarget.optionIndex,
+              )
+            : desktopEffortOptionRefs.current.get(
+                desktopProfileFocusTarget.optionIndex,
+              );
+      if (target) {
+        target.focus();
+        setDesktopProfileFocusTarget(null);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 4) {
+        frame = requestAnimationFrame(focusTarget);
+      } else {
+        setDesktopProfileFocusTarget(null);
+      }
+    };
+    frame = requestAnimationFrame(focusTarget);
+    return () => cancelAnimationFrame(frame);
+  }, [desktopProfileFocusTarget, isMobile]);
+
+  const openDesktopProfileSection = useCallback(
+    (section: DesktopProfileSection): void => {
+      setDesktopProfileSection(section);
+      const selectedIndex =
+        section === "model"
+          ? Math.max(
+              0,
+              selectableModelOptions.findIndex(
+                (option) =>
+                  option.label === inferenceProfile.model_target_label,
+              ),
+            )
+          : Math.max(
+              0,
+              selectableEfforts.findIndex(
+                (effort) => effort === inferenceProfile.reasoning_effort,
+              ),
+            );
+      focusDesktopProfileOption(section, selectedIndex);
+    },
+    [
+      focusDesktopProfileOption,
+      inferenceProfile.model_target_label,
+      inferenceProfile.reasoning_effort,
+      selectableEfforts,
+      selectableModelOptions,
+    ],
+  );
+
+  const handleDesktopProfileSectionKeyDown = useCallback(
+    (
+      section: DesktopProfileSection,
+      event: React.KeyboardEvent<HTMLButtonElement>,
+    ): void => {
+      const index = desktopProfileSections.indexOf(section);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const nextIndex =
+          (index + direction + desktopProfileSections.length) %
+          desktopProfileSections.length;
+        const nextSection = desktopProfileSections.at(nextIndex);
+        if (nextSection) {
+          focusDesktopProfileSection(nextSection);
+        }
+        return;
+      }
+      if (
+        event.key === "ArrowRight" ||
+        event.key === "Enter" ||
+        event.key === " "
+      ) {
+        event.preventDefault();
+        openDesktopProfileSection(section);
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "Escape") {
+        event.preventDefault();
+        closeDesktopProfilePicker();
+      }
+    },
+    [
+      closeDesktopProfilePicker,
+      desktopProfileSections,
+      focusDesktopProfileSection,
+      openDesktopProfileSection,
+    ],
+  );
+
+  const handleDesktopProfileOptionKeyDown = useCallback(
+    (
+      section: DesktopProfileSection,
+      index: number,
+      event: React.KeyboardEvent<HTMLButtonElement>,
+    ): void => {
+      const count =
+        section === "model"
+          ? selectableModelOptions.length
+          : selectableEfforts.length;
+      if (count === 0) {
+        return;
+      }
+      if (
+        event.key === "ArrowDown" ||
+        event.key === "ArrowUp" ||
+        event.key === "Home" ||
+        event.key === "End"
+      ) {
+        event.preventDefault();
+        const nextIndex =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? count - 1
+              : (index + (event.key === "ArrowDown" ? 1 : -1) + count) % count;
+        focusDesktopProfileOption(section, nextIndex);
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "Escape") {
+        event.preventDefault();
+        setDesktopProfileSection(null);
+        focusDesktopProfileSection(section);
+      }
+    },
+    [
+      focusDesktopProfileOption,
+      focusDesktopProfileSection,
+      selectableEfforts.length,
+      selectableModelOptions.length,
+    ],
+  );
+
+  const handleProfileTriggerKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+      if (isMobile) {
+        return;
+      }
+      if (event.key === "Escape" && profilePickerOpened) {
+        event.preventDefault();
+        closeDesktopProfilePicker();
+        return;
+      }
+      if (
+        event.key !== "ArrowDown" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "Enter" &&
+        event.key !== " "
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setProfilePickerOpened(true);
+      setDesktopProfileSection(null);
+      focusDesktopProfileSection(
+        event.key === "ArrowUp" && selectableEfforts.length > 0
+          ? "effort"
+          : "model",
+      );
+    },
+    [
+      closeDesktopProfilePicker,
+      focusDesktopProfileSection,
+      isMobile,
+      profilePickerOpened,
+      selectableEfforts.length,
+    ],
+  );
+
   const profileTrigger = (
     <Button
       variant="light"
       size="compact-sm"
       radius={rem(12)}
       disabled={inputDisabled || selectableModelOptions.length === 0}
+      ref={profileTriggerRef}
       onClick={() => {
         setProfilePickerOpened(!profilePickerOpened);
         if (profilePickerOpened) {
           setDesktopProfileSection(null);
         }
       }}
+      onKeyDown={handleProfileTriggerKeyDown}
       rightSection={<IconChevronDown aria-hidden="true" size={14} />}
       aria-label={t("composerProfile.model")}
+      {...(!isMobile
+        ? {
+            "aria-controls": desktopProfileDialogId,
+            "aria-expanded": profilePickerOpened,
+            "aria-haspopup": "dialog" as const,
+          }
+        : {})}
       style={{
         minWidth: rem(128),
         maxWidth: rem(224),
@@ -1241,7 +1477,19 @@ export const ChatInput = memo(function ChatInput({
     return (
       <UnstyledButton
         key={option.label}
+        ref={(node) => {
+          if (node === null) {
+            desktopModelOptionRefs.current.delete(index);
+          } else {
+            desktopModelOptionRefs.current.set(index, node);
+          }
+        }}
         onClick={() => handleModelChange(option.label)}
+        onKeyDown={(event) => {
+          if (!isMobile) {
+            handleDesktopProfileOptionKeyDown("model", index, event);
+          }
+        }}
         aria-pressed={selected}
         style={{
           background: selected
@@ -1283,7 +1531,19 @@ export const ChatInput = memo(function ChatInput({
     return (
       <UnstyledButton
         key={effort}
+        ref={(node) => {
+          if (node === null) {
+            desktopEffortOptionRefs.current.delete(index);
+          } else {
+            desktopEffortOptionRefs.current.set(index, node);
+          }
+        }}
         onClick={() => handleEffortChange(effort)}
+        onKeyDown={(event) => {
+          if (!isMobile) {
+            handleDesktopProfileOptionKeyDown("effort", index, event);
+          }
+        }}
         aria-pressed={selected}
         style={{
           background: selected
@@ -1362,6 +1622,9 @@ export const ChatInput = memo(function ChatInput({
   const desktopProfileMenu = (
     <Group gap={rem(4)} align="flex-end" wrap="nowrap">
       <Paper
+        id={desktopProfileDialogId}
+        role="dialog"
+        aria-label={t("composerProfile.model")}
         withBorder
         radius={rem(12)}
         shadow="md"
@@ -1370,13 +1633,35 @@ export const ChatInput = memo(function ChatInput({
         style={{ maxHeight: "70dvh", overflowY: "auto" }}
       >
         <Stack gap={rem(2)}>
+          {contextUsageEnabled ? (
+            <>
+              <Box ref={contextUsageDetailsRef} px={rem(10)} pb={rem(6)}>
+                <TokenUsageDetails
+                  activeRun={contextUsageActiveRun}
+                  usage={contextUsage}
+                />
+              </Box>
+              {inferenceProfileSelectionEnabled ? <Divider my="xs" /> : null}
+            </>
+          ) : null}
           {inferenceProfileSelectionEnabled ? (
             <>
               <UnstyledButton
+                ref={(node) => {
+                  if (node === null) {
+                    desktopProfileSectionRefs.current.delete("model");
+                  } else {
+                    desktopProfileSectionRefs.current.set("model", node);
+                  }
+                }}
                 onMouseEnter={() => setDesktopProfileSection("model")}
-                onFocus={() => setDesktopProfileSection("model")}
                 onClick={() => setDesktopProfileSection("model")}
+                onKeyDown={(event) =>
+                  handleDesktopProfileSectionKeyDown("model", event)
+                }
                 aria-expanded={desktopProfileSection === "model"}
+                aria-controls={desktopProfileModelPanelId}
+                aria-haspopup="true"
                 style={{
                   background:
                     desktopProfileSection === "model"
@@ -1406,10 +1691,21 @@ export const ChatInput = memo(function ChatInput({
               </UnstyledButton>
               {selectableEfforts.length > 0 && (
                 <UnstyledButton
+                  ref={(node) => {
+                    if (node === null) {
+                      desktopProfileSectionRefs.current.delete("effort");
+                    } else {
+                      desktopProfileSectionRefs.current.set("effort", node);
+                    }
+                  }}
                   onMouseEnter={() => setDesktopProfileSection("effort")}
-                  onFocus={() => setDesktopProfileSection("effort")}
                   onClick={() => setDesktopProfileSection("effort")}
+                  onKeyDown={(event) =>
+                    handleDesktopProfileSectionKeyDown("effort", event)
+                  }
                   aria-expanded={desktopProfileSection === "effort"}
+                  aria-controls={desktopProfileEffortPanelId}
+                  aria-haspopup="true"
                   style={{
                     background:
                       desktopProfileSection === "effort"
@@ -1439,20 +1735,14 @@ export const ChatInput = memo(function ChatInput({
               )}
             </>
           ) : null}
-          {contextUsageEnabled ? (
-            <Box ref={contextUsageDetailsRef} px={rem(10)} pb={rem(6)}>
-              {inferenceProfileSelectionEnabled ? <Divider my="xs" /> : null}
-              <TokenUsageDetails
-                activeRun={contextUsageActiveRun}
-                usage={contextUsage}
-              />
-            </Box>
-          ) : null}
         </Stack>
       </Paper>
       {inferenceProfileSelectionEnabled &&
         desktopProfileSection === "model" && (
           <Paper
+            id={desktopProfileModelPanelId}
+            role="group"
+            aria-label={t("composerProfile.model")}
             withBorder
             radius={rem(12)}
             shadow="md"
@@ -1466,6 +1756,9 @@ export const ChatInput = memo(function ChatInput({
         desktopProfileSection === "effort" &&
         selectableEfforts.length > 0 && (
           <Paper
+            id={desktopProfileEffortPanelId}
+            role="group"
+            aria-label={t("composerProfile.effortLabel")}
             withBorder
             radius={rem(12)}
             shadow="md"
@@ -1476,12 +1769,22 @@ export const ChatInput = memo(function ChatInput({
               {t("composerProfile.effortLabel")}
             </Text>
             <Stack gap={rem(2)}>
-              {selectableEfforts.map((effort) => {
+              {selectableEfforts.map((effort, index) => {
                 const selected = effort === inferenceProfile.reasoning_effort;
                 return (
                   <UnstyledButton
                     key={effort}
+                    ref={(node) => {
+                      if (node === null) {
+                        desktopEffortOptionRefs.current.delete(index);
+                      } else {
+                        desktopEffortOptionRefs.current.set(index, node);
+                      }
+                    }}
                     onClick={() => handleEffortChange(effort)}
+                    onKeyDown={(event) =>
+                      handleDesktopProfileOptionKeyDown("effort", index, event)
+                    }
                     aria-pressed={selected}
                     style={{
                       background: selected

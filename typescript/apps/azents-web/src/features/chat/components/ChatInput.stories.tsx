@@ -682,6 +682,83 @@ export const DesktopFullReasoningEffort = {
   },
 } satisfies Story;
 
+export const DesktopProfileKeyboardNavigation = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-desktop-profile-keyboard-navigation",
+    selectableModelOptions: [
+      {
+        label: "Default",
+        model_selection: fullReasoningModel,
+        settings: settingsForModel(fullReasoningModel),
+      },
+      {
+        label: "Fast",
+        model_selection: noEffortModel,
+        settings: settingsForModel(noEffortModel),
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const trigger = page.getByRole("button", { name: /^Model$/ });
+    trigger.focus();
+
+    await userEvent.keyboard("{ArrowDown}");
+    const modelSection = await waitFor(() =>
+      page.getByRole("button", { name: /Model Default/ }),
+    );
+    await waitFor(() => expect(modelSection).toHaveFocus());
+    await expect(
+      page
+        .getByRole("region", { name: "Token usage" })
+        .compareDocumentPosition(modelSection),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    await userEvent.keyboard("{ArrowRight}");
+    const defaultModel = await waitFor(() =>
+      page.getByRole("button", { name: /Default gpt-5\.6/ }),
+    );
+    await waitFor(() => expect(defaultModel).toHaveFocus());
+    await userEvent.keyboard("{ArrowDown}");
+    const fastModel = page.getByRole("button", {
+      name: /Fast gpt-5\.5-mini/,
+    });
+    await waitFor(() => expect(fastModel).toHaveFocus());
+    await userEvent.keyboard("{ArrowUp}");
+    await waitFor(() => expect(defaultModel).toHaveFocus());
+    await userEvent.keyboard("{Enter}");
+    await expect(defaultModel).toHaveAttribute("aria-pressed", "true");
+
+    await userEvent.keyboard("{ArrowLeft}");
+    await waitFor(() => expect(modelSection).toHaveFocus());
+    await userEvent.keyboard("{ArrowDown}");
+    const effortSection = await waitFor(() =>
+      page.getByRole("button", { name: /Reasoning effort medium/ }),
+    );
+    await waitFor(() => expect(effortSection).toHaveFocus());
+
+    await userEvent.keyboard("{ArrowRight}");
+    const mediumEffort = await waitFor(() =>
+      page.getByRole("button", { name: "medium" }),
+    );
+    await waitFor(() => expect(mediumEffort).toHaveFocus());
+    await userEvent.keyboard("{ArrowDown}");
+    const highEffort = page.getByRole("button", { name: "high" });
+    await waitFor(() => expect(highEffort).toHaveFocus());
+    await userEvent.keyboard("{Enter}");
+    await expect(highEffort).toHaveAttribute("aria-pressed", "true");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(effortSection).toHaveFocus());
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(page.queryByRole("dialog", { name: "Model" })).toBeNull(),
+    );
+    await waitFor(() => expect(trigger).toHaveFocus());
+  },
+} satisfies Story;
+
 export const Mobile = {
   args: {
     ...baseArgs,
@@ -846,6 +923,13 @@ export const MobileFullReasoningEffort = {
     await userEvent.click(page.getByRole("button", { name: /^Model$/ }));
     await waitFor(() => expect(page.getByText("gpt-5.6")).toBeVisible());
     await expect(page.getByText("gpt-5.5-mini")).toBeVisible();
+    await expect(
+      page
+        .getByText("gpt-5.6")
+        .compareDocumentPosition(
+          page.getByRole("region", { name: "Token usage" }),
+        ),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     await expect(page.getByText("Reasoning effort")).toBeVisible();
     await expect(page.getByRole("button", { name: "medium" })).toHaveAttribute(
       "aria-pressed",
