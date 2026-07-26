@@ -6,6 +6,7 @@ tags: [agent, mailbox, engine, backend, frontend]
 document_role: primary
 document_type: design
 snapshot_id: mailbox-260726
+implemented: 2026-07-26
 ---
 
 # Unified Agent Input Mailbox Design

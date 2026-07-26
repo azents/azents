@@ -29,7 +29,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run_input_event.py
   - python/apps/azents/src/azents/rdb/models/inference_profile_types.py
   - python/apps/azents/src/azents/rdb/models/event.py
-  - python/apps/azents/src/azents/rdb/models/input_buffer.py
+  - python/apps/azents/src/azents/rdb/models/mailbox_item.py
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
   - python/apps/azents/src/azents/rdb/models/chat_write_request.py
@@ -41,7 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_execution/**
   - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/message/**
-  - python/apps/azents/src/azents/repos/input_buffer/**
+  - python/apps/azents/src/azents/repos/mailbox/**
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/chat_write_request/**
@@ -53,7 +53,7 @@ code_paths:
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/chat_write.py
-  - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
@@ -82,6 +82,7 @@ code_paths:
 api_routes:
   - /chat/v1
   - /chat/v1/sessions/{session_id}/inputs
+  - /chat/v1/sessions/{session_id}/mailbox-items/{mailbox_item_id}
   - /chat/v1/sessions/{session_id}/edit-message
   - /chat/v1/sessions/{session_id}/commands
   - /chat/v1/agents/{agent_id}/team-primary-session
@@ -103,18 +104,17 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
-  - /chat/v1/sessions/{session_id}/input-buffers/{buffer_id}
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-24
-spec_version: 132
+last_verified_at: 2026-07-26
+spec_version: 133
 ---
 
 # Conversation & Events
 
 The `conversation` domain owns `AgentSession`, event transcript events, durable
-`agent_runs`, input buffers, exchange files, and scheduled task dispatch.
+`agent_runs`, mailbox items, exchange files, and scheduled task dispatch.
 
 Production agent execution now uses the event runtime. OpenAI Agents SDK `RunState` and legacy
 raw `runtime/llm.py` are not production conversation state.
@@ -159,7 +159,7 @@ command, stop intent, or run heartbeat.
 
 `SessionAgent` is the session-scoped participant tree used by subagents. It does not replace
 `AgentSession`; every participant links one-to-one to an `AgentSession`, and the linked session owns
-that participant's transcript, runs, input buffers, Goal, Todo, Toolkit State, Skill projection,
+that participant's transcript, runs, mailbox items, Goal, Todo, Toolkit State, Skill projection,
 ModelFiles, artifacts, and exchange files.
 
 `SessionAgentContext` is the shared root-tree working-context boundary. The root
@@ -340,7 +340,7 @@ apply only to newly fenced jobs. Persisted keys, policy versions, and dependenci
 supported, and an unsupported snapshot remains retryable rather than silently changing its required
 work.
 
-Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
+Direct session writes are session-scoped. When a route contains `session_id`, mailbox items, live
 projections, broker wake-up, and the REST response use that same session id. Runtime current/active
 session lookup is invalid for that direct write path and for default team session selection. If any
 internal write helper produces a different session id from the REST boundary's resolved target, the
@@ -401,16 +401,17 @@ project prompt selection fall back to a parent, team-primary, or runtime session
 ### ActionExecution and SessionGitWorktree
 
 The legacy setup lifecycle tables are no longer part of the current conversation model. Setup work that affects a session is represented by
-operation TurnActions carried through FIFO `action_message` input buffers, and ordinary sessions have
+operation TurnActions carried through FIFO `action_message` mailbox envelopes, and ordinary sessions have
 no separate setup baseline row. An action input remains queue transport rather than becoming a durable
 `action_message` transcript event. Goal and Skill actions atomically apply their side effects and
 append their canonical model-visible events during preparation. A `create_git_worktree` action is
-atomically claimed as an `ActionExecution` before its source buffer is deleted. A Project-mutating
+atomically claimed as an `ActionExecution` before its source mailbox envelope is deleted. A Project-mutating
 action that succeeds invalidates the prepared context; the same active `AgentRun` rebuilds its
 turn-local request from the updated Session inference snapshot before the next model call. Failed
 actions are terminal and do not block later FIFO input.
 
-`action_executions` stores live operation TurnAction state keyed by the source `input_buffer_id` and
+`action_executions` stores live operation TurnAction state keyed by the source
+`source_mailbox_item_id` and
 includes the typed action payload plus the admitting Session `owner_generation`.
 `action_execution_events` stores its ordered live progress records such as step start, command
 start/completion, stdout/stderr text, warning, failure, and completion. `GET
@@ -451,7 +452,7 @@ before destructive cleanup can remove a path or branch.
 | `terminal_result_event_id`      | `str(32)` \| null       | Terminal assistant/error event used for the terminal mailbox result and Subagent Tree preview.                                                               |
 | `terminal_result_message`       | text \| null            | User-safe terminal message delivered through `agent_result` and projected in the Subagent Tree.                                                              |
 | `parent_result_delivery_state`  | enum \| null            | `suppressed` for historical results or `enqueued` after durable direct-parent mailbox delivery; null means a current eligible result has not been finalized. |
-| `parent_result_input_buffer_id` | `str(32)` \| null       | Durable identity of the terminal result buffer even after promotion deletes the buffer row.                                                                  |
+| `parent_result_mailbox_item_id` | `str(32)` \| null       | Durable identity of the terminal result mailbox envelope even after promotion deletes the mailbox row.                                                        |
 | `parent_result_enqueued_at`     | timestamptz \| null     | Time the terminal result and delivery marker committed atomically.                                                                                           |
 | `created_at` / `updated_at`     | timestamptz             | Durable lifecycle timestamps                                                                                                                                 |
 
@@ -474,22 +475,23 @@ typed provider failure. An unclassified provider outcome does not create provide
 instead follows the ordinary internal-error path.
 
 A run is precreated as `pending` and associated with its ordered durable input events through
-`agent_run_input_events`. Normal buffered input resolves its requested profile before activation, then
+`agent_run_input_events`. Normal mailbox-item input resolves its requested profile before activation, then
 atomically writes the complete Session inference snapshot, canonical transcript events, run-input
-associations, Goal/Skill side effects, and buffer deletion. A handled preparation failure consumes the
-buffer, appends a deterministic `system_error`, preserves the previous Session inference snapshot,
+associations, Goal/Skill side effects, and mailbox-item deletion. A handled preparation failure consumes the
+mailbox item, appends a deterministic `system_error`, preserves the previous Session inference snapshot,
 and completes the active run without retry. Only one pending run may exist for a session. Pending and
 running runs are active recovery state.
 
 The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. `AgentRun` stores lifecycle, parentage, activity, retry, terminal-result state, and its immutable managed-file projection; it does not own or restore model selection. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, and re-resolves the Session's requested profile against current Agent routing before execution. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving model state from the parent run row. Each child run independently owns its VFS projection row rather than inheriting the parent run's projection.
 
 Every current subagent Run that reaches `completed`, `failed`, `stopped`, `interrupted`, or
-`cancelled` is eligible for one queue-only terminal result to its direct parent's mailbox. Delivery
-locks the Run, validates direct-parent ownership, creates an idempotent `agent_result:{run_id}` buffer,
-and updates the Run delivery marker in one transaction. Normal terminal handling attempts delivery;
-parent `wait_agent` polling and later source-session reuse repair a terminal Run that committed before
-the mailbox side effect. Delivery failure does not roll back terminal Run state or prevent the child
-session from becoming idle.
+`cancelled` is eligible for one queue-only terminal result to its direct parent. Terminal state,
+validated direct-parent ownership, the typed queue-only `agent_result:{run_id}` mailbox envelope,
+and the Run delivery marker commit atomically in one transaction. If that transaction fails, the
+complete terminal-and-delivery transaction is retried; no partial terminal state or mailbox side effect
+is treated as authoritative. `wait` is a pure observer and later source-session reuse has no authority
+to repair or complete parent delivery. Delivery failure therefore does not leave terminal state
+committed without its corresponding mailbox envelope and delivery marker.
 
 ## 4. Event Transcript Events
 
@@ -527,16 +529,16 @@ provider lowering renders instructions as `NEW_TASK` or `MESSAGE` envelopes and 
 `AGENT_RESULT` envelopes. Terminal content is the Run's user-safe result projection or a fixed status
 fallback; internal exception text and provider diagnostics are not mailbox content.
 
-A terminal `agent_result` remains unread while merely enqueued or observed by `wait_agent`. Promotion
+A terminal `agent_result` remains unread while merely enqueued or observed by `wait`. Promotion
 into the direct parent's durable transcript validates the actual source child and terminal Run metadata,
 then advances the child's observation cursor monotonically in the same transaction that appends or
-deduplicates the event and deletes the buffer. After commit, the execution layer publishes a
+deduplicates the event and deletes the mailbox envelope. After commit, the execution layer publishes a
 `subagent_tree_changed` invalidation for every cursor that advanced.
 
-`action_message` is an InputBuffer kind for user-selected TurnActions, not a newly appended transcript
+`action_message` is a mailbox kind for user-selected TurnActions, not a newly appended transcript
 event. `skill` actions load Skill context by appending `skill_loaded` and an optional normal
-`user_message`. `create_git_worktree` actions create buffer-keyed live execution state before the
-source buffer is consumed. `action_execution_result` is a durable transcript event containing the complete terminal action
+`user_message`. `create_git_worktree` actions create mailbox-item-keyed live execution state before the
+source mailbox envelope is consumed. `action_execution_result` is a durable transcript event containing the complete terminal action
 execution projection after a worktree action completes, fails, or is cancelled; it lets history
 reloads render operation logs without treating them as model input or ordinary chat bubbles.
 
@@ -544,7 +546,7 @@ reloads render operation logs without treating them as model input or ordinary c
 exact `skill_path`, full Skill body, original user action message, content hash, source label, and
 relative hint. Model lowering injects `skill_loaded` as a required user-role instruction to read and
 follow the embedded Skill body; the original user action message is promoted as the following normal
-`user_message` event when non-empty. The UI renders `skill_loaded` as an expandable control event, while the consumed Skill input buffer
+`user_message` event when non-empty. The UI renders `skill_loaded` as an expandable control event, while the consumed Skill mailbox item
 does not create a duplicate action-message bubble.
 
 `system_error` payloads may include optional user-safe failed-run metadata under `failure`. The
@@ -639,7 +641,7 @@ event-list APIs:
   clients advance those cursors even when every event on a page is hidden by the render projection.
 - `GET /chat/v1/sessions/{session_id}/live` returns current non-durable live state such as
   streaming assistant text, streaming reasoning, provider-hosted tool activity, PostgreSQL-backed active
-  client tool calls, pending input buffers, run state, session todo snapshot, and action execution
+  client tool calls, pending mailbox items, run state, session todo snapshot, and action execution
   projections. Redis stores streaming assistant/reasoning partials and attempt-local provider-tool
   activity; active client-tool events are reconstructed from the running `AgentRun`.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree` returns the durable
@@ -649,8 +651,7 @@ event-list APIs:
   preview, and unread terminal result indicator.
 
 Durable human `user_message` events preserve their immutable requested profile intent. They do not
-embed an associated AgentRun summary and do not change when later run provenance changes. Pending
-buffers likewise expose only requested intent. The dedicated live Run projection carries the current
+embed an associated AgentRun summary and do not change when later run provenance changes. Pending mailbox items likewise expose only requested intent and source-safe presentation data. The dedicated live Run projection carries the current
 Session inference snapshot's allowlisted physical provenance; clients never infer it from Composer or
 Agent defaults.
 
@@ -739,14 +740,14 @@ the live projection without a duplicate or disappearance.
 
 Both responses use the same event transport shape as the durable transcript. The removed
 `/chat/v1/sessions/{session_id}/messages` aggregate endpoint is not part of the public contract:
-history, live state, pending input, and activity state must not be recombined into a message-list
-schema at the API boundary.
+history, live state, typed pending mailbox items, and activity state must not be recombined into a
+message-list schema at the API boundary.
 
 Live projections are stored behind a `LiveEventStore` abstraction. The production implementation uses
-Redis, while tests may use the in-memory implementation. Pending input buffers are persisted in the
-input-buffer table and are exposed through `/live` as projections with metadata marking the projection
-source. Goal continuation starts as a pending `goal_continuation` input buffer and becomes a durable
-`goal_continuation` event only when the session runner flushes buffers into the next model input.
+Redis, while tests may use the in-memory implementation. Pending mailbox items are persisted in the
+`mailbox_items` table and are exposed through `/live` as typed envelope/item projections. Goal
+continuation starts as a pending `goal_continuation` mailbox envelope and becomes a durable
+`goal_continuation` event only when the session runner flushes mailbox items into the next model input.
 The `/live` reader obtains access, pending input, active Run, Goal/Todo Toolkit state, and action
 execution projections in one short PostgreSQL session. It closes that session before reading Redis
 live projections and performs no nested database session reads inside the snapshot.
@@ -811,7 +812,7 @@ provider delta. A failed non-Stop model attempt removes its assistant, reasoning
 live projections before retry state is published. A matching durable provider-tool call or result is
 broadcast first and then removes the live projection by `call_id`.
 
-Legacy chat UI deltas and input-buffer notifications such as `content_delta`,
+Legacy chat UI deltas and superseded input-buffer notifications such as `content_delta`,
 `reasoning_delta`, `function_call_delta`, `run_started`, `run_phase_changed`, `input_buffered`, and
 `input_buffer_deleted` are not frontend state contracts.
 
@@ -824,19 +825,21 @@ The Mermaid renderer is client-side, lazy-loads the Mermaid package, uses strict
 settings for untrusted chat content, and falls back to the original source block with a user-visible
 error message when diagram rendering fails.
 
-## 6. Input Buffers And Session Inputs
+## 6. Mailbox And Session Inputs
 
 Chat route and collaboration inputs are prepared before model-call boundaries. The supported
-InputBuffer kinds are `user_message`, `goal_continuation`, `action_message`, and `agent_message`.
+Mailbox kinds are `user_message`, `goal_continuation`, `action_message`, `agent_message`, and
+`external_channel_invocation`. Every mailbox envelope carries explicit scheduling intent and an
+immutable typed payload whose ordered items use stable `(mailbox_item_id, item_key)` identity.
 Broker wake-ups are payload-free signals and never carry model input.
 
-Input buffers are session-bound. The `input_buffers` table stores `session_id`, not
+Mailbox items are session-bound. The `mailbox_items` table stores `session_id`, not
 `agent_runtime_id`. Every row also stores required scheduling intent as `queue_only` or
-`wake_session`. Inference-producing buffers store optional requested target label and nullable
+`wake_session`. Inference-producing items store optional requested target label and nullable
 reasoning effort. If the head has no explicit profile, preparation uses the current Session requested
 profile, then the Agent default when the Session has no snapshot.
 
-`InputBufferService` owns input-buffer reads and writes. Enqueue commits only the pending row;
+`MailboxService` owns mailbox reads and writes. Enqueue commits only the pending row;
 producers own wake-up and run-state transitions. User, Goal, action, spawn, and follow-up inputs use
 `wake_session`; ordinary `send_message` and terminal `agent_result` inputs use `queue_only` and do not
 mark or wake the target session. Queue-only rows remain in FIFO order and are promoted with a later
@@ -845,21 +848,21 @@ active Run from becoming idle. Preparation handles exactly one FIFO head per tra
 first reads the head's identity and inference requirement, resolves the profile and attachment metadata outside any database session when needed, then locks the Session and
 the same FIFO head. Attachment resolution is metadata-only during promotion: it never downloads the
 Exchange file or creates a replacement ModelFile, and model rich input comes only from FileParts
-stored on the buffer at its creation boundary. If the identity changed while external preparation
+stored on the mailbox item at its creation boundary. If the identity changed while external preparation
 ran, the worker discards the stale result and starts again. Successful preparation atomically updates
 the complete Session inference snapshot, applies Goal/Skill state changes, appends canonical events,
-associates input events with the active run, and deletes the source buffer.
+associates input events with the active run, and deletes the source mailbox item.
 
 Canonical outcomes are:
 
-| Input buffer kind         | Preparation result                                                                                                     |
+| Mailbox kind              | Preparation result                                                                                                     |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `user_message`            | Durable `user_message` event.                                                                                          |
 | `goal_continuation`       | Durable `goal_continuation` event.                                                                                     |
 | `agent_message`           | Durable `agent_message` event.                                                                                         |
 | Goal `action_message`     | Goal side effect plus canonical goal/user events; no `action_message` event.                                           |
 | Skill `action_message`    | `skill_loaded` plus optional `user_message`; no `action_message` event.                                                |
-| Worktree `action_message` | Buffer-keyed live `ActionExecution` claim with action payload and current owner generation; no `action_message` event. |
+| Worktree `action_message` | Mailbox-item-keyed live `ActionExecution` claim with action payload and current owner generation; no `action_message` event. |
 
 A handled preparation failure consumes only the failing head, appends a deterministic `system_error`,
 preserves the previous Session inference snapshot, and is never retried. FIFO draining may continue
@@ -874,7 +877,7 @@ to the path agent and is visible to the requester; session missing, agent/sessio
 denied all return 404. Child subagent sessions are directly readable through this route and through
 history/live routes, but they are read-only for human chat writes.
 `POST /chat/v1/sessions/{session_id}/inputs` appends a user message input to an existing root
-session and rejects `session_kind = subagent` before creating a chat write request, input buffer, live
+session and rejects `session_kind = subagent` before creating a chat write request, mailbox item, live
 projection, or broker wake-up.
 `POST /chat/v1/sessions/{session_id}/edit-message`,
 `POST /chat/v1/sessions/{session_id}/commands`, and
@@ -886,22 +889,22 @@ requests require `client_request_id`; accepted writes are recorded in `chat_writ
 retries with the same key return the same accepted target instead of creating duplicate side effects.
 REST write idempotency is scoped to `(session_id, requester_user_id, client_request_id)`. The same
 `client_request_id` may be reused independently for different explicit session routes because the URL
-session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` input buffer
+session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` mailbox envelope
 to the explicit path session only after the admission transaction locks and reauthorizes the current
 requester against the active Session, Agent, Workspace, root lineage, idempotency record, and any
-claimed ExchangeFiles. The new Human buffer records the authenticated `sender_user_id`; command and
+claimed ExchangeFiles. The new Human mailbox envelope records the authenticated `sender_user_id`; command and
 stop rows retain requester audit separately and do not become a sender or execution identity. The
 transaction marks the same session running before commit. After commit, the producer may send only
 `SessionWakeUp(session_id)`; a notification failure delays delivery but does not revoke, delete, or
 recreate accepted work. The message path must not
 resolve runtime current/active session state to replace the requested `session_id`. Edit writes
-rewrite durable history state, clear pending input buffers, commit a
-`user_message` input buffer, mark the session running in the producer transaction, and send a
-wake-up for the explicit path session. Command writes do not enter the input buffer; they store a
+rewrite durable history state, clear pending mailbox items, commit a
+`user_message` mailbox envelope, mark the session running in the producer transaction, and send a
+wake-up for the explicit path session. Command writes do not enter the mailbox; they store a
 single pending command on `agent_sessions`, mark the explicit path session running, and send a wake-up
 for that session. Failed-run retry writes target the latest visible failed-run `system_error`; they
 are rejected with `409 Conflict` if any newer visible durable event exists, if the session is running,
-or if pending input/command state exists. Accepted retry writes soft-revert the failed event and later
+or if pending mailbox item/command state exists. Accepted retry writes soft-revert the failed event and later
 visible events, mark the session running, send a normal wake-up, return accepted type
 `failed_run_retry`, and set `history_reload_required = true`. Signal delivery is not the persistence source of truth. REST write
 responses include `session_id`, `client_request_id`, an accepted target, an authoritative live
@@ -922,8 +925,7 @@ target-scoped and does not automatically stop descendants.
 the team primary session through `GET /chat/v1/agents/{agent_id}/team-primary-session`, navigate to
 `/w/{handle}/agents/{agent_id}/sessions/{session_id}`, and then write through
 `POST /chat/v1/sessions/{session_id}/inputs`. Legacy message/edit/command/stop
-WebSocket compatibility paths are not part of the public contract and must not create input buffers,
-edits, commands, stop requests, or compatibility error responses.
+WebSocket compatibility paths are not part of the public contract and must not create mailbox items, edits, commands, stop requests, or compatibility error responses.
 
 User messages preserve durable `content`, payload-specific `attachments`, and `metadata` in event
 `user_message` payloads. Adapter lowerers may render headers or attachment context into model input,
@@ -975,22 +977,22 @@ remain as an unbounded raw tail or storage JSON dump.
 - Web chat message/edit/command writes have a single REST commit boundary; WebSocket is not a fallback write path.
 - Web chat stop has a single REST control boundary; WebSocket is not a fallback stop/control path.
 - `client_request_id` retry for chat writes must converge to the same accepted target without duplicate side effects.
-- Input buffers are session-bound and must not store or require `agent_runtime_id`.
+- Mailbox items are session-bound and must not store or require `agent_runtime_id`.
 - Run-producing human inputs carry an explicit requested profile, and preparation processes exactly one FIFO head per transaction before folding its effect into the next turn.
 - Requested profile intent and ordered run-input associations are durable; the Session's complete prepared inference snapshot is authoritative for the next turn and may change at a later boundary within the same active run.
 - `SessionAgent` is the subagent tree source of truth; `AgentSession` remains the transcript/run/input boundary.
 - Child sessions are hidden from ordinary Agent session lists by `session_kind = subagent`, not by access-control bypass.
 - Child subagent sessions are human read-only: REST message/edit/command/failed-run retry writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
-- `wait_agent` observes the current agent's pending mailbox and descendant activity without consuming input or advancing observation cursors; it never scans child transcript history for result content.
-- Terminal child results enter the direct parent's mailbox exactly once through durable Run-level delivery markers and queue-only `agent_result` buffers.
+- `wait` observes the current agent's pending mailbox and descendant activity without consuming input or advancing observation cursors; it never scans child transcript history for result content.
+- Terminal child results enter the direct parent's mailbox exactly once through durable Run-level delivery markers and queue-only typed `agent_result` mailbox envelopes/items.
 - A child result becomes observed only when its validated `agent_result` is promoted into the direct parent's durable transcript; cursor advancement is monotonic and transactional with promotion.
-- Every InputBuffer producer records explicit scheduling intent. Only `wake_session` input marks or wakes an idle session; `queue_only` input preserves FIFO delivery without blocking idle.
+- Every mailbox producer records explicit scheduling intent. Only `wake_session` items mark or wake an idle session; `queue_only` items preserve FIFO delivery without blocking idle.
 - A broker wake-up and stop signal are routing-only `session_id` notifications. They do not carry or
   override requester, sender, User, Agent, Workspace, prompt, interface, capability, or resource
   authority.
 - A canonical Postgres snapshot is loaded only after the Session owner-generation claim. It validates
   the active Session, Agent, Workspace, current/root `SessionAgent` tree and context, exact owner
-  generation, and expected FIFO buffer, pending command, recoverable Run, or idle continuation.
+  generation, and expected FIFO mailbox item, pending command, recoverable Run, or idle continuation.
   Mutable promotion and control paths re-lock their exact durable rows before commit.
 - `sender_user_id` and requester audit fields are provenance/audit only. They never authorize model,
   Toolkit, credential, resource, Run, recovery, continuation, or subagent execution.
@@ -1014,10 +1016,10 @@ Current verification:
 ## 11. External Channel Conversation Projection
 
 An authorized External Channel invocation enters a Session through a batch
-InputBuffer that stores only the invocation-batch reference. Promotion resolves
+mailbox envelope that stores only the invocation-batch reference. Promotion resolves
 the immutable ordered batch items and appends contiguous
 `external_channel_message` events; provider text is not duplicated in the
-InputBuffer payload.
+mailbox payload.
 
 Each event retains provider, resource/binding, canonical message and revision,
 sender, author type, provider timestamp, authorization state, lifecycle, and

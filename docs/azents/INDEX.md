@@ -16,9 +16,9 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-26 | 55 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-24 | 132 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-26 | 133 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-26 | 17 |
-| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-23 | 11 |
+| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-26 | 12 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-23 | 3 |
@@ -34,7 +34,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-26 | 133 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-26 | 30 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-26 | 5 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-22 | 41 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-26 | 8 |
@@ -224,7 +224,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Move LLM Model Catalog to External Sources and Local Overrides Historical Requirements Reconstruction](requirements/llm-260513-llm-catalog-source.md) | llm-260513 | 2026-05-13 | - |
 | [Full-Stack Local Test Environment — Discussion Record Historical Requirements Reconstruction](requirements/local-260406-local-fullstack-test-env.md) | local-260406 | 2026-04-06 | 2026-04-06 |
 | [Account Language Preference Requirements](requirements/locale-260721-account-language-preference.md) | locale-260721 | 2026-07-21 | - |
-| [Unified Agent Input Mailbox Requirements](requirements/mailbox-260726-unified-agent-input-mailbox.md) | mailbox-260726 | 2026-07-26 | - |
+| [Unified Agent Input Mailbox Requirements](requirements/mailbox-260726-unified-agent-input-mailbox.md) | mailbox-260726 | 2026-07-26 | 2026-07-26 |
 | [MCP Toolkit Historical Requirements Reconstruction](requirements/mcp-260228-mcp-toolkit.md) | mcp-260228 | 2026-02-28 | 2026-03-12 |
 | [MCP Egress Proxy Historical Requirements Reconstruction](requirements/mcp-260319-mcp-egress-proxy.md) | mcp-260319 | 2026-03-19 | 2026-03-19 |
 | [Agent Home Sidecar Discussion (MCP stdio + File ops) Historical Requirements Reconstruction](requirements/mcp-260325-mcp-stdio-sidecar.md) | mcp-260325 | 2026-03-25 | 2026-03-25 |
