@@ -187,6 +187,7 @@ Class | Method | HTTP request | Description
  - [RuntimeExecutionAuditEventType](azentsadminclient/docs/RuntimeExecutionAuditEventType.md)
  - [RuntimeExecutionBooleanModule](azentsadminclient/docs/RuntimeExecutionBooleanModule.md)
  - [RuntimeExecutionChangeDirection](azentsadminclient/docs/RuntimeExecutionChangeDirection.md)
+ - [RuntimeExecutionManagementCapabilitiesResponse](azentsadminclient/docs/RuntimeExecutionManagementCapabilitiesResponse.md)
  - [RuntimeExecutionManagementLayer](azentsadminclient/docs/RuntimeExecutionManagementLayer.md)
  - [RuntimeExecutionNetworkMode](azentsadminclient/docs/RuntimeExecutionNetworkMode.md)
  - [RuntimeExecutionNetworkModule](azentsadminclient/docs/RuntimeExecutionNetworkModule.md)

@@ -12,6 +12,7 @@ import {
   IconLayoutGrid,
   IconPlugConnected,
   IconSettings,
+  IconShieldCog,
   IconTool,
   IconUserEdit,
   IconUsers,
@@ -42,6 +43,7 @@ export function WorkspaceSidebar({
     `${basePath}/integrations/slack`,
   );
   const isSettings = pathname === `${basePath}/settings`;
+  const isRuntimeExecution = pathname === `${basePath}/runtime-execution`;
   const isProfile = pathname === `${basePath}/profile`;
 
   return (
@@ -96,6 +98,14 @@ export function WorkspaceSidebar({
         label={t("slackApps")}
         leftSection={<IconPlugConnected size={18} />}
         active={isExternalChannels}
+        onClick={onNavigate}
+      />
+      <NavLink
+        component={Link}
+        href={`${basePath}/runtime-execution`}
+        label={t("runtimeExecution")}
+        leftSection={<IconShieldCog size={18} />}
+        active={isRuntimeExecution}
         onClick={onNavigate}
       />
       <NavLink

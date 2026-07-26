@@ -10,10 +10,12 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionAvailabilityReason,
     RuntimeExecutionChangeDirection,
     RuntimeExecutionManagementLayer,
+    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionPolicyRestriction,
     RuntimeExecutionProfileLifecycle,
     RuntimeExecutionResolution,
+    RuntimeExecutionStorageMode,
 )
 from azents.repos.runtime_execution_policy.data import (
     RuntimeExecutionPolicyAuditEvent,
@@ -23,9 +25,31 @@ from azents.services.runtime_execution_policy.application_service import (
 )
 from azents.services.runtime_execution_policy.service import (
     AgentRuntimeExecutionPolicyView,
+    RuntimeExecutionManagementCapabilities,
     RuntimeExecutionProfileAvailability,
     WorkspaceRuntimeExecutionPolicyView,
 )
+
+
+class RuntimeExecutionManagementCapabilitiesResponse(BaseModel):
+    """Safe server-owned policy management capability gate."""
+
+    image_build: bool
+    container_run: bool
+    compose: bool
+    storage_modes: list[RuntimeExecutionStorageMode]
+    network_modes: list[RuntimeExecutionNetworkMode]
+
+    @classmethod
+    def convert_from(cls, data: RuntimeExecutionManagementCapabilities) -> Self:
+        """Convert the current server capability gate."""
+        return cls(
+            image_build=data.image_build,
+            container_run=data.container_run,
+            compose=data.compose,
+            storage_modes=list(data.storage_modes),
+            network_modes=list(data.network_modes),
+        )
 
 
 class WorkspaceRuntimeExecutionPolicyResponse(BaseModel):
@@ -37,9 +61,15 @@ class WorkspaceRuntimeExecutionPolicyResponse(BaseModel):
     digest: str
     allowed_profile_ids: list[str]
     updated_at: datetime.datetime | None
+    capabilities: RuntimeExecutionManagementCapabilitiesResponse
 
     @classmethod
-    def convert_from(cls, data: WorkspaceRuntimeExecutionPolicyView) -> Self:
+    def convert_from(
+        cls,
+        data: WorkspaceRuntimeExecutionPolicyView,
+        *,
+        capabilities: RuntimeExecutionManagementCapabilities,
+    ) -> Self:
         """Convert the safe Workspace policy projection."""
         return cls(
             workspace_id=data.workspace_id,
@@ -48,6 +78,9 @@ class WorkspaceRuntimeExecutionPolicyResponse(BaseModel):
             digest=data.digest,
             allowed_profile_ids=sorted(data.allowed_profile_ids),
             updated_at=data.updated_at,
+            capabilities=RuntimeExecutionManagementCapabilitiesResponse.convert_from(
+                capabilities
+            ),
         )
 
 
@@ -112,6 +145,7 @@ class AgentRuntimeExecutionPolicyResponse(BaseModel):
     effective_preview: RuntimeExecutionResolution
     provider_compatibility_evaluated: bool
     updated_at: datetime.datetime
+    capabilities: RuntimeExecutionManagementCapabilitiesResponse
 
     @classmethod
     def convert_from(cls, data: AgentRuntimeExecutionPolicyView) -> Self:
@@ -127,6 +161,9 @@ class AgentRuntimeExecutionPolicyResponse(BaseModel):
             effective_preview=data.resolution,
             provider_compatibility_evaluated=data.provider_compatibility_evaluated,
             updated_at=data.setting.updated_at,
+            capabilities=RuntimeExecutionManagementCapabilitiesResponse.convert_from(
+                data.capabilities
+            ),
         )
 
 

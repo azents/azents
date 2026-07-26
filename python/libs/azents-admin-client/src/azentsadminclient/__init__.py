@@ -77,6 +77,7 @@ __all__ = [
     "RuntimeExecutionAuditEventType",
     "RuntimeExecutionBooleanModule",
     "RuntimeExecutionChangeDirection",
+    "RuntimeExecutionManagementCapabilitiesResponse",
     "RuntimeExecutionManagementLayer",
     "RuntimeExecutionNetworkMode",
     "RuntimeExecutionNetworkModule",
@@ -225,6 +226,7 @@ from azentsadminclient.models.platform_git_hub_app_patch_request import Platform
 from azentsadminclient.models.runtime_execution_audit_event_type import RuntimeExecutionAuditEventType as RuntimeExecutionAuditEventType
 from azentsadminclient.models.runtime_execution_boolean_module import RuntimeExecutionBooleanModule as RuntimeExecutionBooleanModule
 from azentsadminclient.models.runtime_execution_change_direction import RuntimeExecutionChangeDirection as RuntimeExecutionChangeDirection
+from azentsadminclient.models.runtime_execution_management_capabilities_response import RuntimeExecutionManagementCapabilitiesResponse as RuntimeExecutionManagementCapabilitiesResponse
 from azentsadminclient.models.runtime_execution_management_layer import RuntimeExecutionManagementLayer as RuntimeExecutionManagementLayer
 from azentsadminclient.models.runtime_execution_network_mode import RuntimeExecutionNetworkMode as RuntimeExecutionNetworkMode
 from azentsadminclient.models.runtime_execution_network_module import RuntimeExecutionNetworkModule as RuntimeExecutionNetworkModule

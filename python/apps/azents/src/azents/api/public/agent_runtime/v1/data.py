@@ -13,9 +13,23 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeSummary,
 )
+from azents.core.runtime_execution_policy import (
+    RuntimeExecutionModuleId,
+    RuntimeExecutionNetworkMode,
+    RuntimeExecutionPolicyLayer,
+    RuntimeExecutionPolicyStatus,
+    RuntimeExecutionRequiredAction,
+    RuntimeExecutionStorageMode,
+)
 from azents.services.agent_runtime.lifecycle_data import (
     AgentRuntimeLifecycleOutput,
     AgentRuntimeOutput,
+)
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionCapabilitySummary,
+    RuntimeExecutionConfiguredSummary,
+    RuntimeExecutionPolicyStatusProjection,
+    RuntimeExecutionSnapshotSummary,
 )
 
 
@@ -43,6 +57,114 @@ class AgentRuntimeSummaryResponse(BaseModel):
     summary: RuntimeSummary
     actions: AgentRuntimeActionsResponse
     failure: AgentRuntimeFailureResponse | None
+
+
+class RuntimeExecutionCapabilitySummaryResponse(BaseModel):
+    """One safe Runtime execution capability summary."""
+
+    module_id: RuntimeExecutionModuleId
+    version: int
+    enabled: bool
+
+    @classmethod
+    def convert_from(cls, data: RuntimeExecutionCapabilitySummary) -> Self:
+        """Convert one capability summary."""
+        return cls(
+            module_id=data.module_id,
+            version=data.version,
+            enabled=data.enabled,
+        )
+
+
+class RuntimeExecutionConfiguredSummaryResponse(BaseModel):
+    """Safe configured Runtime execution-policy summary."""
+
+    profile_id: str
+    digest: str
+    capabilities: list[RuntimeExecutionCapabilitySummaryResponse]
+    storage_mode: RuntimeExecutionStorageMode
+    storage_capacity_bytes: int | None
+    network_mode: RuntimeExecutionNetworkMode
+
+    @classmethod
+    def convert_from(cls, data: RuntimeExecutionConfiguredSummary) -> Self:
+        """Convert configured policy without implementation details."""
+        return cls(
+            profile_id=data.profile_id,
+            digest=data.digest,
+            capabilities=[
+                RuntimeExecutionCapabilitySummaryResponse.convert_from(item)
+                for item in data.capabilities
+            ],
+            storage_mode=data.storage_mode,
+            storage_capacity_bytes=data.storage_capacity_bytes,
+            network_mode=data.network_mode,
+        )
+
+
+class RuntimeExecutionSnapshotSummaryResponse(BaseModel):
+    """Safe target or applied Runtime execution-policy summary."""
+
+    profile_id: str
+    digest: str
+    desired_generation: int
+    capabilities: list[RuntimeExecutionCapabilitySummaryResponse]
+    storage_mode: RuntimeExecutionStorageMode
+    storage_capacity_bytes: int | None
+    network_mode: RuntimeExecutionNetworkMode
+
+    @classmethod
+    def convert_from(cls, data: RuntimeExecutionSnapshotSummary) -> Self:
+        """Convert one immutable snapshot summary."""
+        return cls(
+            profile_id=data.profile_id,
+            digest=data.digest,
+            desired_generation=data.desired_generation,
+            capabilities=[
+                RuntimeExecutionCapabilitySummaryResponse.convert_from(item)
+                for item in data.capabilities
+            ],
+            storage_mode=data.storage_mode,
+            storage_capacity_bytes=data.storage_capacity_bytes,
+            network_mode=data.network_mode,
+        )
+
+
+class AgentRuntimeExecutionPolicyStatusResponse(BaseModel):
+    """Safe server-authoritative Runtime execution-policy status."""
+
+    status: RuntimeExecutionPolicyStatus
+    configured: RuntimeExecutionConfiguredSummaryResponse
+    target: RuntimeExecutionSnapshotSummaryResponse | None
+    applied: RuntimeExecutionSnapshotSummaryResponse | None
+    desired_generation: int
+    governing_layers: dict[str, RuntimeExecutionPolicyLayer]
+    reason_codes: list[str]
+    required_action: RuntimeExecutionRequiredAction
+
+    @classmethod
+    def convert_from(cls, data: RuntimeExecutionPolicyStatusProjection) -> Self:
+        """Convert the read-only execution-policy projection."""
+        return cls(
+            status=data.status,
+            configured=RuntimeExecutionConfiguredSummaryResponse.convert_from(
+                data.configured
+            ),
+            target=(
+                RuntimeExecutionSnapshotSummaryResponse.convert_from(data.target)
+                if data.target is not None
+                else None
+            ),
+            applied=(
+                RuntimeExecutionSnapshotSummaryResponse.convert_from(data.applied)
+                if data.applied is not None
+                else None
+            ),
+            desired_generation=data.desired_generation,
+            governing_layers=data.governing_layers,
+            reason_codes=list(data.reason_codes),
+            required_action=data.required_action,
+        )
 
 
 class AgentRuntimeRawStateResponse(BaseModel):
@@ -76,6 +198,7 @@ class AgentRuntimeResponse(BaseModel):
 
     runtime: AgentRuntimeRawStateResponse
     state: AgentRuntimeSummaryResponse
+    execution_policy: AgentRuntimeExecutionPolicyStatusResponse
 
     @classmethod
     def convert_from(cls, data: AgentRuntimeOutput) -> Self:
@@ -117,6 +240,9 @@ class AgentRuntimeResponse(BaseModel):
                     else None
                 ),
             ),
+            execution_policy=AgentRuntimeExecutionPolicyStatusResponse.convert_from(
+                data.execution_policy
+            ),
         )
 
 
@@ -130,11 +256,16 @@ class AgentRuntimeLifecycleResponse(AgentRuntimeResponse):
     def convert_from_lifecycle(cls, data: AgentRuntimeLifecycleOutput) -> Self:
         """Convert service lifecycle output to a response object."""
         base = AgentRuntimeResponse.convert_from(
-            AgentRuntimeOutput(runtime=data.runtime, state=data.state)
+            AgentRuntimeOutput(
+                runtime=data.runtime,
+                state=data.state,
+                execution_policy=data.execution_policy,
+            )
         )
         return cls(
             runtime=base.runtime,
             state=base.state,
+            execution_policy=base.execution_policy,
             command_type=data.command_type,
             desired_generation=data.desired_generation,
         )

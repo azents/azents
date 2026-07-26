@@ -68,7 +68,50 @@ class TestAgentRuntimeResponse(unittest.TestCase):
                     failure = azentspublicclient.models.agent_runtime_failure_response.AgentRuntimeFailureResponse(
                         generation = 56, 
                         code = '', 
-                        message = '', ), )
+                        message = '', ), ),
+                execution_policy = azentspublicclient.models.agent_runtime_execution_policy_status_response.AgentRuntimeExecutionPolicyStatusResponse(
+                    status = 'configured', 
+                    configured = azentspublicclient.models.runtime_execution_configured_summary_response.RuntimeExecutionConfiguredSummaryResponse(
+                        profile_id = '', 
+                        digest = '', 
+                        capabilities = [
+                            azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
+                                module_id = 'container.image_build', 
+                                version = 56, 
+                                enabled = True, )
+                            ], 
+                        storage_mode = 'none', 
+                        storage_capacity_bytes = 56, 
+                        network_mode = 'none', ), 
+                    target = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
+                        profile_id = '', 
+                        digest = '', 
+                        desired_generation = 56, 
+                        capabilities = [
+                            azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
+                                module_id = 'container.image_build', 
+                                version = 56, 
+                                enabled = True, )
+                            ], 
+                        storage_mode = 'none', 
+                        storage_capacity_bytes = 56, 
+                        network_mode = 'none', ), 
+                    applied = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
+                        profile_id = '', 
+                        digest = '', 
+                        desired_generation = 56, 
+                        capabilities = , 
+                        storage_mode = , 
+                        storage_capacity_bytes = 56, 
+                        network_mode = , ), 
+                    desired_generation = 56, 
+                    governing_layers = {
+                        'key' : 'platform'
+                        }, 
+                    reason_codes = [
+                        ''
+                        ], 
+                    required_action = 'none', )
             )
         else:
             return AgentRuntimeResponse(
@@ -106,6 +149,49 @@ class TestAgentRuntimeResponse(unittest.TestCase):
                         generation = 56, 
                         code = '', 
                         message = '', ), ),
+                execution_policy = azentspublicclient.models.agent_runtime_execution_policy_status_response.AgentRuntimeExecutionPolicyStatusResponse(
+                    status = 'configured', 
+                    configured = azentspublicclient.models.runtime_execution_configured_summary_response.RuntimeExecutionConfiguredSummaryResponse(
+                        profile_id = '', 
+                        digest = '', 
+                        capabilities = [
+                            azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
+                                module_id = 'container.image_build', 
+                                version = 56, 
+                                enabled = True, )
+                            ], 
+                        storage_mode = 'none', 
+                        storage_capacity_bytes = 56, 
+                        network_mode = 'none', ), 
+                    target = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
+                        profile_id = '', 
+                        digest = '', 
+                        desired_generation = 56, 
+                        capabilities = [
+                            azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
+                                module_id = 'container.image_build', 
+                                version = 56, 
+                                enabled = True, )
+                            ], 
+                        storage_mode = 'none', 
+                        storage_capacity_bytes = 56, 
+                        network_mode = 'none', ), 
+                    applied = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
+                        profile_id = '', 
+                        digest = '', 
+                        desired_generation = 56, 
+                        capabilities = , 
+                        storage_mode = , 
+                        storage_capacity_bytes = 56, 
+                        network_mode = , ), 
+                    desired_generation = 56, 
+                    governing_layers = {
+                        'key' : 'platform'
+                        }, 
+                    reason_codes = [
+                        ''
+                        ], 
+                    required_action = 'none', ),
         )
         """
 

@@ -44,7 +44,17 @@ class TestAgentRuntimeExecutionPolicyResponse(unittest.TestCase):
                 digest = '',
                 effective_preview = { },
                 provider_compatibility_evaluated = True,
-                updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
+                updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                capabilities = azentspublicclient.models.runtime_execution_management_capabilities_response.RuntimeExecutionManagementCapabilitiesResponse(
+                    image_build = True, 
+                    container_run = True, 
+                    compose = True, 
+                    storage_modes = [
+                        'none'
+                        ], 
+                    network_modes = [
+                        'none'
+                        ], )
             )
         else:
             return AgentRuntimeExecutionPolicyResponse(
@@ -58,6 +68,16 @@ class TestAgentRuntimeExecutionPolicyResponse(unittest.TestCase):
                 effective_preview = { },
                 provider_compatibility_evaluated = True,
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                capabilities = azentspublicclient.models.runtime_execution_management_capabilities_response.RuntimeExecutionManagementCapabilitiesResponse(
+                    image_build = True, 
+                    container_run = True, 
+                    compose = True, 
+                    storage_modes = [
+                        'none'
+                        ], 
+                    network_modes = [
+                        'none'
+                        ], ),
         )
         """
 

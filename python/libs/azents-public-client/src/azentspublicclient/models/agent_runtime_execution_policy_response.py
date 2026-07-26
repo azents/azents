@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List
+from azentspublicclient.models.runtime_execution_management_capabilities_response import RuntimeExecutionManagementCapabilitiesResponse
 from azentspublicclient.models.runtime_execution_policy_restriction import RuntimeExecutionPolicyRestriction
 from azentspublicclient.models.runtime_execution_profile_lifecycle import RuntimeExecutionProfileLifecycle
 from azentspublicclient.models.runtime_execution_resolution import RuntimeExecutionResolution
@@ -40,8 +41,9 @@ class AgentRuntimeExecutionPolicyResponse(BaseModel):
     effective_preview: RuntimeExecutionResolution
     provider_compatibility_evaluated: StrictBool
     updated_at: datetime
+    capabilities: RuntimeExecutionManagementCapabilitiesResponse
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_id", "version", "profile_id", "profile_version", "profile_lifecycle", "restriction", "digest", "effective_preview", "provider_compatibility_evaluated", "updated_at"]
+    __properties: ClassVar[List[str]] = ["agent_id", "version", "profile_id", "profile_version", "profile_lifecycle", "restriction", "digest", "effective_preview", "provider_compatibility_evaluated", "updated_at", "capabilities"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -90,6 +92,9 @@ class AgentRuntimeExecutionPolicyResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of effective_preview
         if self.effective_preview:
             _dict['effective_preview'] = self.effective_preview.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of capabilities
+        if self.capabilities:
+            _dict['capabilities'] = self.capabilities.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -116,7 +121,8 @@ class AgentRuntimeExecutionPolicyResponse(BaseModel):
             "digest": obj.get("digest"),
             "effective_preview": RuntimeExecutionResolution.from_dict(obj["effective_preview"]) if obj.get("effective_preview") is not None else None,
             "provider_compatibility_evaluated": obj.get("provider_compatibility_evaluated"),
-            "updated_at": obj.get("updated_at")
+            "updated_at": obj.get("updated_at"),
+            "capabilities": RuntimeExecutionManagementCapabilitiesResponse.from_dict(obj["capabilities"]) if obj.get("capabilities") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

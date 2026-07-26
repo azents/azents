@@ -1,5 +1,6 @@
 """Runtime Execution v1 Public API tests."""
 
+import datetime
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
@@ -12,8 +13,19 @@ from azents.core.auth.roles import get_permissions_for_role
 from azents.core.enums import WorkspaceUserRole
 from azents.core.runtime_execution_policy import (
     SYSTEM_STANDARD_PROFILE_ID,
+    RuntimeExecutionNetworkMode,
+    RuntimeExecutionProfileLifecycle,
+    RuntimeExecutionProviderCapabilities,
+    RuntimeExecutionSourceVersions,
+    RuntimeExecutionStorageMode,
     digest_runtime_execution_policy,
     empty_runtime_execution_restriction,
+    resolve_runtime_execution_policy,
+    standard_runtime_execution_policy,
+)
+from azents.repos.runtime_execution_policy.data import (
+    AgentRuntimeExecutionSetting,
+    RuntimeExecutionProfile,
 )
 from azents.repos.runtime_provider_policy.data import RuntimePolicySnapshot
 from azents.services.runtime_execution_policy.application_service import (
@@ -22,6 +34,8 @@ from azents.services.runtime_execution_policy.application_service import (
     RuntimeExecutionPolicyApplicationUnavailable,
 )
 from azents.services.runtime_execution_policy.service import (
+    AgentRuntimeExecutionPolicyView,
+    RuntimeExecutionManagementCapabilities,
     RuntimeExecutionPolicyService,
     RuntimeExecutionPolicyUnavailable,
     WorkspaceRuntimeExecutionPolicyView,
@@ -40,6 +54,71 @@ def _workspace_view(*, version: int) -> WorkspaceRuntimeExecutionPolicyView:
     )
 
 
+def _agent_policy_view() -> AgentRuntimeExecutionPolicyView:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    policy = standard_runtime_execution_policy()
+    restriction = empty_runtime_execution_restriction()
+    setting = AgentRuntimeExecutionSetting(
+        agent_id="agent-1",
+        profile_id=SYSTEM_STANDARD_PROFILE_ID,
+        version=2,
+        restriction=restriction,
+        digest=digest_runtime_execution_policy(restriction),
+        updated_by_workspace_user_id="workspace-user-1",
+        created_at=now,
+        updated_at=now,
+    )
+    profile = RuntimeExecutionProfile(
+        id=SYSTEM_STANDARD_PROFILE_ID,
+        display_name="Standard",
+        description="Standard execution environment",
+        lifecycle=RuntimeExecutionProfileLifecycle.ACTIVE,
+        version=1,
+        policy=policy,
+        digest=digest_runtime_execution_policy(policy),
+        reserved=True,
+        system_key=SYSTEM_STANDARD_PROFILE_ID,
+        updated_by_user_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+    resolution = resolve_runtime_execution_policy(
+        platform_policy=policy,
+        profile_policy=policy,
+        workspace_restriction=restriction,
+        agent_restriction=restriction,
+        source_versions=RuntimeExecutionSourceVersions(
+            platform=1,
+            profile=1,
+            workspace=1,
+            agent=2,
+        ),
+        provider_capabilities=RuntimeExecutionProviderCapabilities(
+            supported_modules=frozenset(),
+            privileged_engine=False,
+            storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
+            network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
+            resource_maxima=None,
+        ),
+        profile_active=True,
+        profile_allowed=True,
+        applied_policy=None,
+    )
+    return AgentRuntimeExecutionPolicyView(
+        setting=setting,
+        profile=profile,
+        resolution=resolution,
+        provider_compatibility_evaluated=True,
+        capabilities=RuntimeExecutionManagementCapabilities(
+            image_build=False,
+            container_run=False,
+            compose=False,
+            storage_modes=(RuntimeExecutionStorageMode.NONE,),
+            network_modes=(RuntimeExecutionNetworkMode.NONE,),
+        ),
+    )
+
+
 def _client(
     service: AsyncMock,
     *,
@@ -47,6 +126,15 @@ def _client(
     application_service: AsyncMock | None = None,
 ) -> TestClient:
     app = create_dummy_public_app()
+    service.get_management_capabilities.return_value = (
+        RuntimeExecutionManagementCapabilities(
+            image_build=False,
+            container_run=False,
+            compose=False,
+            storage_modes=(RuntimeExecutionStorageMode.NONE,),
+            network_modes=(RuntimeExecutionNetworkMode.NONE,),
+        )
+    )
     app.dependency_overrides[RuntimeExecutionPolicyService] = lambda: service
     if application_service is not None:
         app.dependency_overrides[RuntimeExecutionPolicyApplicationService] = lambda: (
@@ -163,6 +251,33 @@ def test_agent_apply_returns_exact_target_snapshot() -> None:
         "created": True,
     }
     application_service.apply_agent_for_manager.assert_awaited_once()
+
+
+def test_agent_save_does_not_apply_or_advance_runtime() -> None:
+    """Saving Agent intent remains separate from explicit Runtime Apply."""
+    service = AsyncMock(spec=RuntimeExecutionPolicyService)
+    service.replace_agent_setting_for_manager.return_value = _agent_policy_view()
+    application_service = AsyncMock(spec=RuntimeExecutionPolicyApplicationService)
+
+    response = _client(
+        service,
+        role=WorkspaceUserRole.MANAGER,
+        application_service=application_service,
+    ).put(
+        "/runtime-execution/v1/workspaces/example/agents/agent-1/settings",
+        json={
+            "expected_version": 1,
+            "profile_id": SYSTEM_STANDARD_PROFILE_ID,
+            "restriction": empty_runtime_execution_restriction().model_dump(
+                mode="json"
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["version"] == 2
+    service.replace_agent_setting_for_manager.assert_awaited_once()
+    application_service.apply_agent_for_manager.assert_not_awaited()
 
 
 def test_agent_apply_maps_agent_management_denial() -> None:

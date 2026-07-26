@@ -22,6 +22,8 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionModuleId,
     RuntimeExecutionNetworkMode,
     RuntimeExecutionNetworkModule,
+    RuntimeExecutionPolicyStatus,
+    RuntimeExecutionRequiredAction,
     RuntimeExecutionSourceVersions,
     RuntimeExecutionStorageMode,
     classify_runtime_execution_change,
@@ -37,6 +39,7 @@ from .application_service import (
     RuntimeExecutionPolicyApplicationService,
     RuntimeExecutionPolicyApplicationUnavailable,
     _automatic_convergence_source_allowed,
+    _build_status_projection,
     _phase_three_provider_capabilities,
     _ResolvedRuntimePolicy,
     _restrictive_projection,
@@ -161,6 +164,272 @@ def _unavailable_resolved() -> _ResolvedRuntimePolicy:
         ),
         resolution=unavailable,
     )
+
+
+def _targeted_resolved(
+    *,
+    state: RuntimePolicySnapshotApplicationState,
+    applied: bool,
+) -> _ResolvedRuntimePolicy:
+    resolved = _resolved()
+    policy = resolved.resolution.effective_policy
+    snapshot = dataclasses.replace(
+        resolved.target_snapshot,
+        execution_profile_id=resolved.profile_id,
+        execution_platform_version=resolved.resolution.source_versions.platform,
+        execution_profile_version=resolved.resolution.source_versions.profile,
+        execution_workspace_version=resolved.resolution.source_versions.workspace,
+        execution_agent_version=resolved.resolution.source_versions.agent,
+        resolved_execution_policy=policy.model_dump(mode="json"),
+        execution_source_trace={},
+        execution_provider_compatibility={},
+        execution_target_digest=resolved.resolution.digest,
+        execution_reported_digest=(
+            resolved.resolution.digest
+            if state is RuntimePolicySnapshotApplicationState.APPLIED
+            else None
+        ),
+        application_state=state,
+    )
+    runtime = resolved.runtime.model_copy(
+        update={
+            "applied_runtime_policy_snapshot_id": snapshot.id if applied else None,
+        }
+    )
+    return dataclasses.replace(
+        resolved,
+        runtime=runtime,
+        target_snapshot=snapshot,
+        applied_snapshot=snapshot if applied else None,
+    )
+
+
+def _upper_layer_change_resolved(
+    *,
+    current_cpu: int,
+    current_memory: int,
+    source_versions: RuntimeExecutionSourceVersions,
+    target_source_versions: RuntimeExecutionSourceVersions,
+) -> _ResolvedRuntimePolicy:
+    baseline = standard_runtime_execution_policy()
+    baseline = baseline.model_copy(
+        update={
+            "resources": baseline.resources.model_copy(
+                update={
+                    "cpu_millicores": 500,
+                    "memory_bytes": 1_000,
+                }
+            )
+        }
+    )
+    current = baseline.model_copy(
+        update={
+            "resources": baseline.resources.model_copy(
+                update={
+                    "cpu_millicores": current_cpu,
+                    "memory_bytes": current_memory,
+                }
+            )
+        }
+    )
+    resolution = resolve_runtime_execution_policy(
+        platform_policy=current,
+        profile_policy=current,
+        workspace_restriction=empty_runtime_execution_restriction(),
+        agent_restriction=empty_runtime_execution_restriction(),
+        source_versions=source_versions,
+        provider_capabilities=_phase_three_provider_capabilities(),
+        profile_active=True,
+        profile_allowed=True,
+        applied_policy=baseline,
+    )
+    target_digest = digest_runtime_execution_policy(baseline)
+    target = dataclasses.replace(
+        _snapshot(),
+        execution_profile_id="system-standard",
+        execution_platform_version=target_source_versions.platform,
+        execution_profile_version=target_source_versions.profile,
+        execution_workspace_version=target_source_versions.workspace,
+        execution_agent_version=target_source_versions.agent,
+        resolved_execution_policy=baseline.model_dump(mode="json"),
+        execution_source_trace={},
+        execution_provider_compatibility={},
+        execution_target_digest=target_digest,
+        execution_reported_digest=target_digest,
+        application_state=RuntimePolicySnapshotApplicationState.APPLIED,
+    )
+    runtime = _runtime().model_copy(
+        update={"applied_runtime_policy_snapshot_id": target.id}
+    )
+    return _ResolvedRuntimePolicy(
+        runtime=runtime,
+        target_snapshot=target,
+        applied_snapshot=target,
+        profile_id="system-standard",
+        resolution=resolution,
+    )
+
+
+def test_status_projection_requires_explicit_apply_for_saved_intent() -> None:
+    """A configured intent mismatch is not presented as applied."""
+    status = _build_status_projection(_resolved())
+
+    assert status.status is RuntimeExecutionPolicyStatus.CONFIGURED
+    assert status.required_action is RuntimeExecutionRequiredAction.APPLY
+    assert status.reason_codes == ("explicit_apply_required",)
+
+
+@pytest.mark.parametrize(
+    ("source_versions", "target_source_versions"),
+    [
+        (
+            RuntimeExecutionSourceVersions(
+                platform=2,
+                profile=2,
+                workspace=3,
+                agent=4,
+            ),
+            RuntimeExecutionSourceVersions(
+                platform=1,
+                profile=2,
+                workspace=3,
+                agent=4,
+            ),
+        ),
+        (
+            RuntimeExecutionSourceVersions(
+                platform=1,
+                profile=2,
+                workspace=4,
+                agent=4,
+            ),
+            RuntimeExecutionSourceVersions(
+                platform=1,
+                profile=2,
+                workspace=3,
+                agent=4,
+            ),
+        ),
+    ],
+)
+def test_status_projection_requires_apply_for_upper_layer_expansion(
+    source_versions: RuntimeExecutionSourceVersions,
+    target_source_versions: RuntimeExecutionSourceVersions,
+) -> None:
+    """Platform or Workspace expansion never waits for automatic convergence."""
+    status = _build_status_projection(
+        _upper_layer_change_resolved(
+            current_cpu=1_000,
+            current_memory=1_000,
+            source_versions=source_versions,
+            target_source_versions=target_source_versions,
+        )
+    )
+
+    assert status.status is RuntimeExecutionPolicyStatus.CONFIGURED
+    assert status.required_action is RuntimeExecutionRequiredAction.APPLY
+    assert status.reason_codes == ("explicit_apply_required",)
+
+
+def test_status_projection_requires_apply_for_mixed_upper_layer_change() -> None:
+    """Mixed changes cannot hide their remaining expansion behind Wait."""
+    status = _build_status_projection(
+        _upper_layer_change_resolved(
+            current_cpu=1_000,
+            current_memory=500,
+            source_versions=RuntimeExecutionSourceVersions(
+                platform=2,
+                profile=2,
+                workspace=3,
+                agent=4,
+            ),
+            target_source_versions=RuntimeExecutionSourceVersions(
+                platform=1,
+                profile=2,
+                workspace=3,
+                agent=4,
+            ),
+        )
+    )
+
+    assert status.status is RuntimeExecutionPolicyStatus.CONFIGURED
+    assert status.required_action is RuntimeExecutionRequiredAction.APPLY
+
+
+def test_status_projection_marks_exact_target_pending_until_evidence() -> None:
+    """An exact target remains pending before Provider and Runner evidence."""
+    status = _build_status_projection(
+        _targeted_resolved(
+            state=RuntimePolicySnapshotApplicationState.PENDING,
+            applied=False,
+        )
+    )
+
+    assert status.status is RuntimeExecutionPolicyStatus.PENDING
+    assert status.required_action is RuntimeExecutionRequiredAction.WAIT
+    assert status.target is not None
+    assert status.applied is None
+
+
+def test_status_projection_marks_only_promoted_exact_target_applied() -> None:
+    """Applied status requires the exact promoted target pointer."""
+    status = _build_status_projection(
+        _targeted_resolved(
+            state=RuntimePolicySnapshotApplicationState.APPLIED,
+            applied=True,
+        )
+    )
+
+    assert status.status is RuntimeExecutionPolicyStatus.APPLIED
+    assert status.required_action is RuntimeExecutionRequiredAction.NONE
+    assert status.applied is not None
+    assert status.applied.digest == status.configured.digest
+
+
+def test_status_projection_preserves_bounded_unavailability_reason() -> None:
+    """Unavailable configured intent exposes only a bounded reason code."""
+    status = _build_status_projection(_unavailable_resolved())
+
+    assert status.status is RuntimeExecutionPolicyStatus.UNAVAILABLE
+    assert status.required_action is RuntimeExecutionRequiredAction.ADMINISTRATOR_ACTION
+    assert status.reason_codes == ("profile_retired",)
+
+
+def test_status_projection_marks_snapshot_divergence() -> None:
+    """A divergent target is never presented as pending or applied."""
+    resolved = _targeted_resolved(
+        state=RuntimePolicySnapshotApplicationState.DIVERGENT,
+        applied=False,
+    )
+
+    status = _build_status_projection(resolved)
+
+    assert status.status is RuntimeExecutionPolicyStatus.DIVERGENT
+    assert status.required_action is RuntimeExecutionRequiredAction.ADMINISTRATOR_ACTION
+    assert status.reason_codes == ("target_divergent",)
+
+
+async def test_status_read_uses_read_resolver_without_target_mutation() -> None:
+    """Status reads never call target creation or convergence paths."""
+    snapshot_repository = Mock()
+    snapshot_repository.create_and_advance_target_snapshot = AsyncMock()
+    policy_repository = Mock()
+    policy_repository.append_audit_event = AsyncMock()
+    service = RuntimeExecutionPolicyApplicationService(
+        session_manager=_session_manager,
+        policy_repository=policy_repository,
+        snapshot_repository=snapshot_repository,
+        runtime_repository=Mock(),
+        agent_admin_repository=Mock(),
+    )
+    service._resolve_read = AsyncMock(return_value=_resolved())
+
+    status = await service.get_status(agent_id="agent-1")
+
+    assert status.status is RuntimeExecutionPolicyStatus.CONFIGURED
+    service._resolve_read.assert_awaited_once()
+    snapshot_repository.create_and_advance_target_snapshot.assert_not_awaited()
+    policy_repository.append_audit_event.assert_not_awaited()
 
 
 async def test_apply_requires_existing_agent_management_authority() -> None:

@@ -21,6 +21,7 @@ from azents.services.runtime_execution_policy.service import (
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    RuntimeExecutionManagementCapabilitiesResponse,
     RuntimeExecutionPlatformPolicyReplaceRequest,
     RuntimeExecutionPlatformPolicyResponse,
     RuntimeExecutionPolicyAuditEventResponse,
@@ -44,7 +45,10 @@ async def get_platform_policy(
         platform = await service.get_platform()
     except RuntimeExecutionPolicyUnavailable as error:
         _raise_policy_error(error)
-    return RuntimeExecutionPlatformPolicyResponse.convert_from(platform)
+    return RuntimeExecutionPlatformPolicyResponse.convert_from(
+        platform,
+        capabilities=service.get_management_capabilities(),
+    )
 
 
 @router.put("/platform-policy")
@@ -69,7 +73,10 @@ async def replace_platform_policy(
         RuntimeExecutionRestrictionExpansion,
     ) as error:
         _raise_policy_error(error)
-    return RuntimeExecutionPlatformPolicyResponse.convert_from(platform)
+    return RuntimeExecutionPlatformPolicyResponse.convert_from(
+        platform,
+        capabilities=service.get_management_capabilities(),
+    )
 
 
 @router.get("/profiles")
@@ -87,7 +94,12 @@ async def list_profiles(
         limit=limit,
     )
     return RuntimeExecutionProfileListResponse(
-        items=[RuntimeExecutionProfileResponse.convert_from(item) for item in profiles]
+        items=[RuntimeExecutionProfileResponse.convert_from(item) for item in profiles],
+        capabilities=(
+            RuntimeExecutionManagementCapabilitiesResponse.convert_from(
+                service.get_management_capabilities()
+            )
+        ),
     )
 
 

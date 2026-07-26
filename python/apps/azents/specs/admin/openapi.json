@@ -4949,6 +4949,46 @@
         "title": "RuntimeExecutionChangeDirection",
         "description": "Security direction for one policy change."
       },
+      "RuntimeExecutionManagementCapabilitiesResponse": {
+        "properties": {
+          "image_build": {
+            "type": "boolean",
+            "title": "Image Build"
+          },
+          "container_run": {
+            "type": "boolean",
+            "title": "Container Run"
+          },
+          "compose": {
+            "type": "boolean",
+            "title": "Compose"
+          },
+          "storage_modes": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
+            },
+            "type": "array",
+            "title": "Storage Modes"
+          },
+          "network_modes": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeExecutionNetworkMode"
+            },
+            "type": "array",
+            "title": "Network Modes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_build",
+          "container_run",
+          "compose",
+          "storage_modes",
+          "network_modes"
+        ],
+        "title": "RuntimeExecutionManagementCapabilitiesResponse",
+        "description": "Safe server-owned policy management capability gate."
+      },
       "RuntimeExecutionManagementLayer": {
         "type": "string",
         "enum": [
@@ -5076,6 +5116,9 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/RuntimeExecutionManagementCapabilitiesResponse"
           }
         },
         "type": "object",
@@ -5086,7 +5129,8 @@
           "digest",
           "updated_by_user_id",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "capabilities"
         ],
         "title": "RuntimeExecutionPlatformPolicyResponse",
         "description": "Current Platform execution-policy ceiling."
@@ -5356,11 +5400,15 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/RuntimeExecutionManagementCapabilitiesResponse"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "capabilities"
         ],
         "title": "RuntimeExecutionProfileListResponse",
         "description": "Paginated Profile collection."

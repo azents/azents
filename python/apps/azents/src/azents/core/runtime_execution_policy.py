@@ -60,6 +60,25 @@ class RuntimeExecutionChangeDirection(enum.StrEnum):
     APPLICATION = "application"
 
 
+class RuntimeExecutionPolicyStatus(enum.StrEnum):
+    """Server-derived relationship between configured and applied policy."""
+
+    CONFIGURED = "configured"
+    PENDING = "pending"
+    APPLIED = "applied"
+    UNAVAILABLE = "unavailable"
+    DIVERGENT = "divergent"
+
+
+class RuntimeExecutionRequiredAction(enum.StrEnum):
+    """Bounded next action for one Runtime execution-policy status."""
+
+    NONE = "none"
+    APPLY = "apply"
+    WAIT = "wait"
+    ADMINISTRATOR_ACTION = "administrator_action"
+
+
 class RuntimeExecutionManagementLayer(enum.StrEnum):
     """Management authority that produced one metadata audit event."""
 

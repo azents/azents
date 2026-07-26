@@ -9,14 +9,40 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionAuditEventType,
     RuntimeExecutionChangeDirection,
     RuntimeExecutionManagementLayer,
+    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionProfileLifecycle,
+    RuntimeExecutionStorageMode,
 )
 from azents.repos.runtime_execution_policy.data import (
     RuntimeExecutionPlatformPolicy,
     RuntimeExecutionPolicyAuditEvent,
     RuntimeExecutionProfile,
 )
+from azents.services.runtime_execution_policy.service import (
+    RuntimeExecutionManagementCapabilities,
+)
+
+
+class RuntimeExecutionManagementCapabilitiesResponse(BaseModel):
+    """Safe server-owned policy management capability gate."""
+
+    image_build: bool
+    container_run: bool
+    compose: bool
+    storage_modes: list[RuntimeExecutionStorageMode]
+    network_modes: list[RuntimeExecutionNetworkMode]
+
+    @classmethod
+    def convert_from(cls, data: RuntimeExecutionManagementCapabilities) -> Self:
+        """Convert the current server capability gate."""
+        return cls(
+            image_build=data.image_build,
+            container_run=data.container_run,
+            compose=data.compose,
+            storage_modes=list(data.storage_modes),
+            network_modes=list(data.network_modes),
+        )
 
 
 class RuntimeExecutionPlatformPolicyResponse(BaseModel):
@@ -29,9 +55,15 @@ class RuntimeExecutionPlatformPolicyResponse(BaseModel):
     updated_by_user_id: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    capabilities: RuntimeExecutionManagementCapabilitiesResponse
 
     @classmethod
-    def convert_from(cls, data: RuntimeExecutionPlatformPolicy) -> Self:
+    def convert_from(
+        cls,
+        data: RuntimeExecutionPlatformPolicy,
+        *,
+        capabilities: RuntimeExecutionManagementCapabilities,
+    ) -> Self:
         """Convert the persistence projection to a safe API response."""
         return cls(
             id=data.id,
@@ -41,6 +73,9 @@ class RuntimeExecutionPlatformPolicyResponse(BaseModel):
             updated_by_user_id=data.updated_by_user_id,
             created_at=data.created_at,
             updated_at=data.updated_at,
+            capabilities=RuntimeExecutionManagementCapabilitiesResponse.convert_from(
+                capabilities
+            ),
         )
 
 
@@ -90,6 +125,7 @@ class RuntimeExecutionProfileListResponse(BaseModel):
     """Paginated Profile collection."""
 
     items: list[RuntimeExecutionProfileResponse]
+    capabilities: RuntimeExecutionManagementCapabilitiesResponse
 
 
 class RuntimeExecutionProfileCreateRequest(BaseModel):

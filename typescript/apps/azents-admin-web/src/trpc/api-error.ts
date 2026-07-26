@@ -51,6 +51,7 @@ function extractDetail(error: unknown): string {
       if (typeof msg === "string") {
         return JSON.stringify(detail);
       }
+      return JSON.stringify(detail);
     }
   }
   if (error instanceof Error) {

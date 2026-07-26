@@ -74,7 +74,17 @@ class TestRuntimeExecutionPlatformPolicyResponse(unittest.TestCase):
                 digest = '',
                 updated_by_user_id = '',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
+                updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                capabilities = azentsadminclient.models.runtime_execution_management_capabilities_response.RuntimeExecutionManagementCapabilitiesResponse(
+                    image_build = True, 
+                    container_run = True, 
+                    compose = True, 
+                    storage_modes = [
+                        'none'
+                        ], 
+                    network_modes = [
+                        'none'
+                        ], )
             )
         else:
             return RuntimeExecutionPlatformPolicyResponse(
@@ -118,6 +128,16 @@ class TestRuntimeExecutionPlatformPolicyResponse(unittest.TestCase):
                 updated_by_user_id = '',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                capabilities = azentsadminclient.models.runtime_execution_management_capabilities_response.RuntimeExecutionManagementCapabilitiesResponse(
+                    image_build = True, 
+                    container_run = True, 
+                    compose = True, 
+                    storage_modes = [
+                        'none'
+                        ], 
+                    network_modes = [
+                        'none'
+                        ], ),
         )
         """
 

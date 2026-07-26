@@ -12,6 +12,7 @@ Name | Type | Description | Notes
 **digest** | **str** |  | 
 **allowed_profile_ids** | **List[str]** |  | 
 **updated_at** | **datetime** |  | 
+**capabilities** | [**RuntimeExecutionManagementCapabilitiesResponse**](RuntimeExecutionManagementCapabilitiesResponse.md) |  | 
 
 ## Example
 
