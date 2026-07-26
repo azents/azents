@@ -337,8 +337,8 @@ def mailbox_item_to_live_event(mailbox_item: MailboxItem) -> Event | None:
         metadata = {
             key: str(value) for key, value in mailbox_item.presentation.metadata.items()
         }
-        metadata["mailbox_item_id"] = mailbox_item.id
-        metadata["live_projection"] = "mailbox_item"
+        metadata["input_buffer_id"] = mailbox_item.id
+        metadata["live_projection"] = "input_buffer"
         requested_profile = _mailbox_item_requested_profile(mailbox_item)
         payload = UserMessagePayload(
             sender_user_id=mailbox_item.sender_user_id,

@@ -20,8 +20,8 @@ _EMAIL_ID = "email-migration"
 _WORKSPACE_ID = "workspace-migration"
 _AGENT_ID = "agent-migration"
 _SESSION_ID = "session-migration"
-_MAILBOX_ITEM_ID = "input-buffer-migration"
-_AGENT_MAILBOX_ITEM_ID = "input-buffer-agent-migration"
+_INPUT_BUFFER_ID = "input-buffer-migration"
+_AGENT_INPUT_BUFFER_ID = "input-buffer-agent-migration"
 _ACTION_EXECUTION_ID = "action-execution-migration"
 
 
@@ -171,7 +171,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
     connection.execute(
         sa.text(
             """
-            INSERT INTO mailbox_items (
+            INSERT INTO input_buffers (
                 id,
                 session_id,
                 kind,
@@ -187,7 +187,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
                 file_parts
             )
             VALUES (
-                :mailbox_item_id,
+                :input_buffer_id,
                 :session_id,
                 'user_message',
                 'wake_session',
@@ -204,7 +204,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
             """
         ),
         {
-            "mailbox_item_id": _MAILBOX_ITEM_ID,
+            "input_buffer_id": _INPUT_BUFFER_ID,
             "session_id": _SESSION_ID,
             "user_id": _USER_ID,
         },
@@ -212,7 +212,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
     connection.execute(
         sa.text(
             """
-            INSERT INTO mailbox_items (
+            INSERT INTO input_buffers (
                 id,
                 session_id,
                 kind,
@@ -228,7 +228,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
                 file_parts
             )
             VALUES (
-                :mailbox_item_id,
+                :input_buffer_id,
                 :session_id,
                 'agent_message',
                 'wake_session',
@@ -245,7 +245,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
             """
         ),
         {
-            "mailbox_item_id": _AGENT_MAILBOX_ITEM_ID,
+            "input_buffer_id": _AGENT_INPUT_BUFFER_ID,
             "session_id": _SESSION_ID,
             "user_id": _USER_ID,
         },
@@ -285,7 +285,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
             INSERT INTO action_executions (
                 id,
                 session_id,
-                mailbox_item_id,
+                input_buffer_id,
                 action_type,
                 action,
                 owner_generation,
@@ -295,7 +295,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
             VALUES (
                 :action_execution_id,
                 :session_id,
-                :mailbox_item_id,
+                :input_buffer_id,
                 'create_git_worktree',
                 '{
                     "type": "create_git_worktree",
@@ -310,7 +310,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
         ),
         {
             "action_execution_id": _ACTION_EXECUTION_ID,
-            "mailbox_item_id": _MAILBOX_ITEM_ID,
+            "input_buffer_id": _INPUT_BUFFER_ID,
             "session_id": _SESSION_ID,
         },
     )
@@ -341,7 +341,7 @@ def _seed_legacy_graph(connection: sa.Connection) -> None:
         )
 
 
-def _insert_mailbox_item(
+def _insert_input_buffer(
     connection: sa.Connection,
     *,
     buffer_id: str,
@@ -352,7 +352,7 @@ def _insert_mailbox_item(
     connection.execute(
         sa.text(
             """
-            INSERT INTO mailbox_items (
+            INSERT INTO input_buffers (
                 id,
                 session_id,
                 kind,
@@ -408,25 +408,25 @@ def test_team_session_admission_provenance_migration(
         alembic_command.upgrade(config, _PROVENANCE_REVISION)
 
         with engine.connect() as connection:
-            mailbox_item_sender = connection.scalar(
+            input_buffer_sender = connection.scalar(
                 sa.text(
                     """
                     SELECT sender_user_id
-                    FROM mailbox_items
-                    WHERE id = :mailbox_item_id
+                    FROM input_buffers
+                    WHERE id = :input_buffer_id
                     """
                 ),
-                {"mailbox_item_id": _MAILBOX_ITEM_ID},
+                {"input_buffer_id": _INPUT_BUFFER_ID},
             )
-            agent_mailbox_item_sender = connection.scalar(
+            agent_input_buffer_sender = connection.scalar(
                 sa.text(
                     """
                     SELECT sender_user_id
-                    FROM mailbox_items
-                    WHERE id = :mailbox_item_id
+                    FROM input_buffers
+                    WHERE id = :input_buffer_id
                     """
                 ),
-                {"mailbox_item_id": _AGENT_MAILBOX_ITEM_ID},
+                {"input_buffer_id": _AGENT_INPUT_BUFFER_ID},
             )
             chat_write_requester = connection.scalar(
                 sa.text(
@@ -473,13 +473,13 @@ def test_team_session_admission_provenance_migration(
                     {"session_id": _SESSION_ID},
                 ).mappings()
             }
-            mailbox_item_columns = set(
+            input_buffer_columns = set(
                 connection.scalars(
                     sa.text(
                         """
                         SELECT column_name
                         FROM information_schema.columns
-                        WHERE table_name = 'mailbox_items'
+                        WHERE table_name = 'input_buffers'
                         """
                     )
                 )
@@ -536,7 +536,7 @@ def test_team_session_admission_provenance_migration(
                         SELECT conname AS name, pg_get_constraintdef(oid) AS definition
                         FROM pg_constraint
                         WHERE conrelid IN (
-                            'mailbox_items'::regclass,
+                            'input_buffers'::regclass,
                             'chat_write_requests'::regclass,
                             'agent_sessions'::regclass,
                             'action_executions'::regclass
@@ -546,14 +546,14 @@ def test_team_session_admission_provenance_migration(
                 ).mappings()
             }
 
-        assert mailbox_item_sender == _USER_ID
-        assert agent_mailbox_item_sender is None
+        assert input_buffer_sender == _USER_ID
+        assert agent_input_buffer_sender is None
         assert chat_write_requester == _USER_ID
         assert session_provenance.pending_command_requester_user_id == _USER_ID
         assert session_provenance.stop_requester_user_id == _USER_ID
         assert action_sender is None
-        assert mailbox_item_columns >= {"sender_user_id"}
-        assert "actor_user_id" not in mailbox_item_columns
+        assert input_buffer_columns >= {"sender_user_id"}
+        assert "actor_user_id" not in input_buffer_columns
         assert "creation_agent_id" in chat_write_request_columns
         assert (
             "uq_chat_write_requests_creation_agent_requester_client"
@@ -570,8 +570,8 @@ def test_team_session_admission_provenance_migration(
         assert all(
             payload["sender_user_id"] is None for payload in event_payloads.values()
         )
-        assert "fk_mailbox_items_sender_user_id_users" in constraints
-        assert "ck_mailbox_items_sender_user_kind" in constraints
+        assert "fk_input_buffers_sender_user_id_users" in constraints
+        assert "ck_input_buffers_sender_user_kind" in constraints
         assert "fk_chat_write_requests_requester_user_id_users" in constraints
         assert "fk_chat_write_requests_creation_agent_id_agents" in constraints
         assert "uq_chat_write_requests_session_requester_client_request" in constraints
@@ -580,7 +580,7 @@ def test_team_session_admission_provenance_migration(
         )
         assert "fk_agent_sessions_stop_requester_user_id_users" in constraints
         assert "fk_action_executions_sender_user_id_users" in constraints
-        assert "sender_user_id" in constraints["ck_mailbox_items_sender_user_kind"]
+        assert "sender_user_id" in constraints["ck_input_buffers_sender_user_kind"]
         assert (
             "requester_user_id"
             in constraints["uq_chat_write_requests_session_requester_client_request"]
@@ -588,7 +588,7 @@ def test_team_session_admission_provenance_migration(
 
         with pytest.raises(IntegrityError):
             with engine.begin() as connection:
-                _insert_mailbox_item(
+                _insert_input_buffer(
                     connection,
                     buffer_id="input-buffer-invalid-kind",
                     kind="goal_continuation",
@@ -597,7 +597,7 @@ def test_team_session_admission_provenance_migration(
 
         with pytest.raises(IntegrityError):
             with engine.begin() as connection:
-                _insert_mailbox_item(
+                _insert_input_buffer(
                     connection,
                     buffer_id="input-buffer-invalid-sender",
                     kind="user_message",
@@ -646,7 +646,7 @@ def test_team_session_admission_provenance_migration(
                     INSERT INTO action_executions (
                         id,
                         session_id,
-                        mailbox_item_id,
+                        input_buffer_id,
                         action_type,
                         action,
                         owner_generation,

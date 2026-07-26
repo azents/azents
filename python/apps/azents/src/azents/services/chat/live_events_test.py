@@ -62,6 +62,8 @@ def test_user_mailbox_item_live_event_preserves_nullable_requested_profile() -> 
     assert event.payload.requested_inference_profile is not None
     assert event.payload.requested_inference_profile.model_target_label == "quality"
     assert event.payload.requested_inference_profile.reasoning_effort is None
+    assert event.payload.metadata["input_buffer_id"] == event.id
+    assert event.payload.metadata["live_projection"] == "input_buffer"
 
 
 def test_agent_result_mailbox_item_live_event_restores_terminal_metadata() -> None:
