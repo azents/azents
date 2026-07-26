@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Annotated, Literal, assert_never
 
+from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
@@ -466,6 +467,20 @@ class SessionGitWorktreeService:
             execution=execution,
             on_projection_updated=on_projection_updated,
         )
+        L = bind_extra(
+            logger,
+            {
+                "operation": "cleanup_orphan_git_worktrees",
+                "action_execution_id": execution.id,
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "runtime_id": context_runtime_id,
+            },
+        )
+        L.info(
+            "Manual orphan Git worktree cleanup started",
+            extra={"stage": "initializing"},
+        )
 
         if (
             agent_session is None
@@ -473,6 +488,14 @@ class SessionGitWorktreeService:
             or agent_session.session_kind is not AgentSessionKind.ROOT
             or agent_session.status is not AgentSessionStatus.ACTIVE
         ):
+            L.warning(
+                "Manual orphan Git worktree cleanup failed",
+                extra=_cleanup_log_summary(
+                    stage="terminal",
+                    reason_code="session_invalid",
+                    candidates=[],
+                ),
+            )
             await self._mark_cleanup_action_failed(
                 execution=execution,
                 result=_cleanup_result(phase="failed", candidates=[]),
@@ -490,6 +513,17 @@ class SessionGitWorktreeService:
             or runtime.runner_state != RuntimeRunnerState.READY
             or runtime.id != context_runtime_id
         ):
+            L.warning(
+                "Manual orphan Git worktree cleanup failed",
+                extra={
+                    **_cleanup_log_summary(
+                        stage="terminal",
+                        reason_code="runtime_unavailable",
+                        candidates=[],
+                    ),
+                    "current_runtime_id": runtime.id if runtime is not None else None,
+                },
+            )
             await self._mark_cleanup_action_failed(
                 execution=execution,
                 result=_cleanup_result(phase="failed", candidates=[]),
@@ -502,6 +536,14 @@ class SessionGitWorktreeService:
                 context_invalidated=False,
             )
         if self.runner_operations is None:
+            L.warning(
+                "Manual orphan Git worktree cleanup failed",
+                extra=_cleanup_log_summary(
+                    stage="terminal",
+                    reason_code="runner_operations_unavailable",
+                    candidates=[],
+                ),
+            )
             await self._mark_cleanup_action_failed(
                 execution=execution,
                 result=_cleanup_result(phase="failed", candidates=[]),
@@ -533,7 +575,24 @@ class SessionGitWorktreeService:
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
-        ):
+        ) as exc:
+            L.warning(
+                "Manual orphan Git worktree discovery failed",
+                exc_info=True,
+                extra={
+                    "stage": "discovery",
+                    "reason_code": "runtime_unavailable",
+                    "runner_error_code": type(exc).__name__,
+                },
+            )
+            L.warning(
+                "Manual orphan Git worktree cleanup failed",
+                extra=_cleanup_log_summary(
+                    stage="terminal",
+                    reason_code="runtime_unavailable",
+                    candidates=[],
+                ),
+            )
             await self._mark_cleanup_action_failed(
                 execution=execution,
                 result=_cleanup_result(phase="failed", candidates=[]),
@@ -545,7 +604,24 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
-        except RuntimeRunnerOperationFailedError:
+        except RuntimeRunnerOperationFailedError as exc:
+            L.warning(
+                "Manual orphan Git worktree discovery failed",
+                exc_info=True,
+                extra={
+                    "stage": "discovery",
+                    "reason_code": "runner_operation_failed",
+                    "runner_error_code": exc.code or "runner_operation_failed",
+                },
+            )
+            L.warning(
+                "Manual orphan Git worktree cleanup failed",
+                extra=_cleanup_log_summary(
+                    stage="terminal",
+                    reason_code="runner_operation_failed",
+                    candidates=[],
+                ),
+            )
             await self._mark_cleanup_action_failed(
                 execution=execution,
                 result=_cleanup_result(phase="failed", candidates=[]),
@@ -558,6 +634,22 @@ class SessionGitWorktreeService:
                 context_invalidated=False,
             )
 
+        L.info(
+            "Managed Git worktree discovery completed",
+            extra={
+                "stage": "discovery",
+                "candidate_count": len(discovery.entries),
+                "registered_candidate_count": sum(
+                    entry.registered for entry in discovery.entries
+                ),
+                "unidentified_candidate_count": sum(
+                    not entry.registered
+                    or entry.repository_anchor_path is None
+                    or entry.failure_code is not None
+                    for entry in discovery.entries
+                ),
+            },
+        )
         candidates = [
             _cleanup_candidate(
                 path=entry.worktree_path,
@@ -596,6 +688,15 @@ class SessionGitWorktreeService:
                     execution=execution,
                     result=result,
                     on_projection_updated=on_projection_updated,
+                )
+                L.warning(
+                    "Manual orphan Git worktree cleanup candidate failed",
+                    extra={
+                        "stage": "candidate_validation",
+                        "worktree_path": discovered.worktree_path,
+                        "reason_code": discovered.failure_code
+                        or "worktree_ownership_ambiguous",
+                    },
                 )
                 await self._append_action_execution_event(
                     execution=execution,
@@ -636,6 +737,24 @@ class SessionGitWorktreeService:
                     result=result,
                     on_projection_updated=on_projection_updated,
                 )
+                if claim_outcome == "active_connection":
+                    L.info(
+                        "Manual orphan Git worktree cleanup candidate protected",
+                        extra={
+                            "stage": "claim",
+                            "worktree_path": discovered.worktree_path,
+                            "reason_code": claim_outcome,
+                        },
+                    )
+                else:
+                    L.warning(
+                        "Manual orphan Git worktree cleanup candidate failed",
+                        extra={
+                            "stage": "claim",
+                            "worktree_path": discovered.worktree_path,
+                            "reason_code": claim_outcome,
+                        },
+                    )
                 await self._append_action_execution_event(
                     execution=execution,
                     kind=(
@@ -687,16 +806,36 @@ class SessionGitWorktreeService:
                 except (
                     RuntimeRunnerOperationUnavailable,
                     RuntimeRunnerOperationGenerationError,
-                ):
+                ) as exc:
                     outcome = "failed"
                     reason_code = "runtime_unavailable"
                     summary = "Runtime runner is not ready."
                     claim_state = GitWorktreePathClaimState.FAILED
+                    L.warning(
+                        "Manual orphan Git worktree removal failed",
+                        exc_info=True,
+                        extra={
+                            "stage": "removal",
+                            "worktree_path": discovered.worktree_path,
+                            "reason_code": reason_code,
+                            "runner_error_code": type(exc).__name__,
+                        },
+                    )
                 except RuntimeRunnerOperationFailedError as exc:
                     outcome = "failed"
                     reason_code = exc.code or "runner_operation_failed"
                     summary = "Git worktree removal failed."
                     claim_state = GitWorktreePathClaimState.FAILED
+                    L.warning(
+                        "Manual orphan Git worktree removal failed",
+                        exc_info=True,
+                        extra={
+                            "stage": "removal",
+                            "worktree_path": discovered.worktree_path,
+                            "reason_code": reason_code,
+                            "runner_error_code": reason_code,
+                        },
+                    )
                 else:
                     outcome = removal.outcome
                     reason_code = None
@@ -748,6 +887,14 @@ class SessionGitWorktreeService:
 
         failed_count = _cleanup_candidate_count(candidates, "failed")
         if failed_count:
+            L.warning(
+                "Manual orphan Git worktree cleanup completed with failures",
+                extra=_cleanup_log_summary(
+                    stage="terminal",
+                    reason_code="candidate_failures",
+                    candidates=candidates,
+                ),
+            )
             result = _cleanup_result(phase="failed", candidates=candidates)
             await self._release_cleanup_claims(action_execution_id=execution.id)
             await self._mark_cleanup_action_failed(
@@ -758,6 +905,14 @@ class SessionGitWorktreeService:
                 on_history_event_appended=on_history_event_appended,
             )
         else:
+            L.info(
+                "Manual orphan Git worktree cleanup completed",
+                extra=_cleanup_log_summary(
+                    stage="terminal",
+                    reason_code=None,
+                    candidates=candidates,
+                ),
+            )
             result = _cleanup_result(phase="completed", candidates=candidates)
             execution = await self._update_cleanup_result(
                 execution=execution,
@@ -2544,6 +2699,27 @@ def _cleanup_candidate_count(
 ) -> int:
     """Count one candidate outcome without exposing candidate contents."""
     return sum(1 for candidate in candidates if candidate.get("outcome") == outcome)
+
+
+def _cleanup_log_summary(
+    *,
+    stage: str,
+    reason_code: str | None,
+    candidates: list[dict[str, JSONValue]],
+) -> dict[str, str | int | None]:
+    """Return structured cleanup summary fields for operational logs."""
+    return {
+        "stage": stage,
+        "reason_code": reason_code,
+        "candidate_count": len(candidates),
+        "failed_count": _cleanup_candidate_count(candidates, "failed"),
+        "protected_count": _cleanup_candidate_count(candidates, "protected"),
+        "removed_count": _cleanup_candidate_count(candidates, "removed"),
+        "already_absent_count": _cleanup_candidate_count(
+            candidates,
+            "already_absent",
+        ),
+    }
 
 
 def _collision_kind(message: str) -> Literal["branch", "path"] | None:
