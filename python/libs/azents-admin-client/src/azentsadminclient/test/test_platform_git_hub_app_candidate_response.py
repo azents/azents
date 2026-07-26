@@ -41,7 +41,7 @@ class TestPlatformGitHubAppCandidateResponse(unittest.TestCase):
                 validation_code = '',
                 validation_message = '',
                 action_hint = '',
-                impact = { },
+                impact = None,
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
@@ -54,7 +54,7 @@ class TestPlatformGitHubAppCandidateResponse(unittest.TestCase):
                 validation_code = '',
                 validation_message = '',
                 action_hint = '',
-                impact = { },
+                impact = None,
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),

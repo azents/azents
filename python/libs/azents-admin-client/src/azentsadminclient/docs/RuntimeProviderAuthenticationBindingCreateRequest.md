@@ -8,7 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **auth_method** | [**RuntimeProviderAuthMethod**](RuntimeProviderAuthMethod.md) |  | 
 **subject** | **str** |  | 
-**config** | **Dict[str, object]** |  | 
+**config** | **object** |  | 
 
 ## Example
 

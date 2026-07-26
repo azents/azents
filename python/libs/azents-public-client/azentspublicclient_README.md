@@ -220,6 +220,13 @@ Class | Method | HTTP request | Description
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integrations**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integrations) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | List Integrations
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_sync_integration_catalog**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_sync_integration_catalog) | **POST** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-sync | Sync Integration Catalog
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_update_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_update_integration) | **PATCH** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Update Integration
+*RuntimeExecutionV1Api* | [**runtime_execution_v1_get_agent_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_get_agent_policy) | **GET** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/settings | Get Agent Policy
+*RuntimeExecutionV1Api* | [**runtime_execution_v1_get_workspace_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_get_workspace_policy) | **GET** /runtime-execution/v1/workspaces/{handle}/policy | Get Workspace Policy
+*RuntimeExecutionV1Api* | [**runtime_execution_v1_list_agent_audit_events**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_agent_audit_events) | **GET** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/audit-events | List Agent Audit Events
+*RuntimeExecutionV1Api* | [**runtime_execution_v1_list_workspace_audit_events**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_workspace_audit_events) | **GET** /runtime-execution/v1/workspaces/{handle}/policy/audit-events | List Workspace Audit Events
+*RuntimeExecutionV1Api* | [**runtime_execution_v1_list_workspace_profiles**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_workspace_profiles) | **GET** /runtime-execution/v1/workspaces/{handle}/profiles | List Workspace Profiles
+*RuntimeExecutionV1Api* | [**runtime_execution_v1_replace_agent_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_replace_agent_policy) | **PUT** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/settings | Replace Agent Policy
+*RuntimeExecutionV1Api* | [**runtime_execution_v1_replace_workspace_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_replace_workspace_policy) | **PUT** /runtime-execution/v1/workspaces/{handle}/policy | Replace Workspace Policy
 *RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_exchange_credential**](azentspublicclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_exchange_credential) | **POST** /runtime-provider-enrollment/v1/credentials/exchange | Exchange Credential
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_workspace_runtime_providers**](azentspublicclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_workspace_runtime_providers) | **GET** /runtime-provider/v1/workspaces/{handle}/providers | List Workspace Runtime Providers
 *SecurityV1Api* | [**security_v1_elevate_with_email**](azentspublicclient/docs/SecurityV1Api.md#security_v1_elevate_with_email) | **POST** /security/v1/elevate/email | Elevate With Email
@@ -292,6 +299,8 @@ Class | Method | HTTP request | Description
  - [AgentRunPhase](azentspublicclient/docs/AgentRunPhase.md)
  - [AgentRunStatus](azentspublicclient/docs/AgentRunStatus.md)
  - [AgentRuntimeActionsResponse](azentspublicclient/docs/AgentRuntimeActionsResponse.md)
+ - [AgentRuntimeExecutionPolicyReplaceRequest](azentspublicclient/docs/AgentRuntimeExecutionPolicyReplaceRequest.md)
+ - [AgentRuntimeExecutionPolicyResponse](azentspublicclient/docs/AgentRuntimeExecutionPolicyResponse.md)
  - [AgentRuntimeFailureResponse](azentspublicclient/docs/AgentRuntimeFailureResponse.md)
  - [AgentRuntimeLifecycleResponse](azentspublicclient/docs/AgentRuntimeLifecycleResponse.md)
  - [AgentRuntimeRawStateResponse](azentspublicclient/docs/AgentRuntimeRawStateResponse.md)
@@ -559,6 +568,32 @@ Class | Method | HTTP request | Description
  - [ResponseChatV1ReadAgentWorkspacePath](azentspublicclient/docs/ResponseChatV1ReadAgentWorkspacePath.md)
  - [ResponseLlmProviderIntegrationV1GetSubscriptionUsage](azentspublicclient/docs/ResponseLlmProviderIntegrationV1GetSubscriptionUsage.md)
  - [RuntimeDesiredState](azentspublicclient/docs/RuntimeDesiredState.md)
+ - [RuntimeExecutionAuditEventType](azentspublicclient/docs/RuntimeExecutionAuditEventType.md)
+ - [RuntimeExecutionAvailabilityReason](azentspublicclient/docs/RuntimeExecutionAvailabilityReason.md)
+ - [RuntimeExecutionBooleanModule](azentspublicclient/docs/RuntimeExecutionBooleanModule.md)
+ - [RuntimeExecutionBooleanRestriction](azentspublicclient/docs/RuntimeExecutionBooleanRestriction.md)
+ - [RuntimeExecutionChangeDirection](azentspublicclient/docs/RuntimeExecutionChangeDirection.md)
+ - [RuntimeExecutionChangeSummary](azentspublicclient/docs/RuntimeExecutionChangeSummary.md)
+ - [RuntimeExecutionFieldChange](azentspublicclient/docs/RuntimeExecutionFieldChange.md)
+ - [RuntimeExecutionManagementLayer](azentspublicclient/docs/RuntimeExecutionManagementLayer.md)
+ - [RuntimeExecutionNetworkMode](azentspublicclient/docs/RuntimeExecutionNetworkMode.md)
+ - [RuntimeExecutionNetworkModule](azentspublicclient/docs/RuntimeExecutionNetworkModule.md)
+ - [RuntimeExecutionNetworkRestriction](azentspublicclient/docs/RuntimeExecutionNetworkRestriction.md)
+ - [RuntimeExecutionPolicyAuditEventResponse](azentspublicclient/docs/RuntimeExecutionPolicyAuditEventResponse.md)
+ - [RuntimeExecutionPolicyAuditListResponse](azentspublicclient/docs/RuntimeExecutionPolicyAuditListResponse.md)
+ - [RuntimeExecutionPolicyDocument](azentspublicclient/docs/RuntimeExecutionPolicyDocument.md)
+ - [RuntimeExecutionPolicyLayer](azentspublicclient/docs/RuntimeExecutionPolicyLayer.md)
+ - [RuntimeExecutionPolicyRestriction](azentspublicclient/docs/RuntimeExecutionPolicyRestriction.md)
+ - [RuntimeExecutionProfileLifecycle](azentspublicclient/docs/RuntimeExecutionProfileLifecycle.md)
+ - [RuntimeExecutionReduction](azentspublicclient/docs/RuntimeExecutionReduction.md)
+ - [RuntimeExecutionReductionReason](azentspublicclient/docs/RuntimeExecutionReductionReason.md)
+ - [RuntimeExecutionResolution](azentspublicclient/docs/RuntimeExecutionResolution.md)
+ - [RuntimeExecutionResourceModule](azentspublicclient/docs/RuntimeExecutionResourceModule.md)
+ - [RuntimeExecutionResourceRestriction](azentspublicclient/docs/RuntimeExecutionResourceRestriction.md)
+ - [RuntimeExecutionSourceVersions](azentspublicclient/docs/RuntimeExecutionSourceVersions.md)
+ - [RuntimeExecutionStorageMode](azentspublicclient/docs/RuntimeExecutionStorageMode.md)
+ - [RuntimeExecutionStorageModule](azentspublicclient/docs/RuntimeExecutionStorageModule.md)
+ - [RuntimeExecutionStorageRestriction](azentspublicclient/docs/RuntimeExecutionStorageRestriction.md)
  - [RuntimeLifecycleCommandType](azentspublicclient/docs/RuntimeLifecycleCommandType.md)
  - [RuntimeProviderConnectionState](azentspublicclient/docs/RuntimeProviderConnectionState.md)
  - [RuntimeProviderCredentialExchangeRequest](azentspublicclient/docs/RuntimeProviderCredentialExchangeRequest.md)
@@ -631,6 +666,10 @@ Class | Method | HTTP request | Description
  - [WorkspaceModelSettingsResponse](azentspublicclient/docs/WorkspaceModelSettingsResponse.md)
  - [WorkspaceModelSettingsUpdateRequest](azentspublicclient/docs/WorkspaceModelSettingsUpdateRequest.md)
  - [WorkspaceResponse](azentspublicclient/docs/WorkspaceResponse.md)
+ - [WorkspaceRuntimeExecutionPolicyReplaceRequest](azentspublicclient/docs/WorkspaceRuntimeExecutionPolicyReplaceRequest.md)
+ - [WorkspaceRuntimeExecutionPolicyResponse](azentspublicclient/docs/WorkspaceRuntimeExecutionPolicyResponse.md)
+ - [WorkspaceRuntimeExecutionProfileListResponse](azentspublicclient/docs/WorkspaceRuntimeExecutionProfileListResponse.md)
+ - [WorkspaceRuntimeExecutionProfileResponse](azentspublicclient/docs/WorkspaceRuntimeExecutionProfileResponse.md)
  - [WorkspaceUserListResponse](azentspublicclient/docs/WorkspaceUserListResponse.md)
  - [WorkspaceUserResponse](azentspublicclient/docs/WorkspaceUserResponse.md)
  - [WorkspaceUserRole](azentspublicclient/docs/WorkspaceUserRole.md)

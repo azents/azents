@@ -10,7 +10,7 @@ Name | Type | Description | Notes
 **code** | **str** |  | 
 **message** | **str** |  | 
 **action_hint** | **str** |  | 
-**metadata** | **Dict[str, object]** |  | 
+**metadata** | **object** |  | 
 **checked_at** | **datetime** |  | 
 
 ## Example

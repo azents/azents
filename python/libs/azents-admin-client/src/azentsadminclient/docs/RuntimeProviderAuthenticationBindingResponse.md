@@ -13,7 +13,7 @@ Name | Type | Description | Notes
 **state** | [**RuntimeProviderBindingState**](RuntimeProviderBindingState.md) |  | 
 **owner** | [**RuntimeProviderBindingOwner**](RuntimeProviderBindingOwner.md) |  | 
 **bootstrap_declaration_id** | **str** |  | 
-**config** | **Dict[str, object]** |  | 
+**config** | **object** |  | 
 **admin_version** | **int** |  | 
 **connected** | **bool** |  | 
 **last_authenticated_at** | **datetime** |  | 

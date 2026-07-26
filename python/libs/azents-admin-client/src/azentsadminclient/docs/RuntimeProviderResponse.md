@@ -19,9 +19,9 @@ Name | Type | Description | Notes
 **accepted_contract_revision_id** | **str** |  | 
 **active_config_revision_id** | **str** |  | 
 **admin_version** | **int** |  | 
-**capabilities** | **Dict[str, object]** |  | 
-**config_schema** | **Dict[str, object]** |  | 
-**metadata** | **Dict[str, object]** |  | 
+**capabilities** | **object** |  | 
+**config_schema** | **object** |  | 
+**metadata** | **object** |  | 
 
 ## Example
 

@@ -23,6 +23,8 @@ ROLE_PERMISSIONS: dict[WorkspaceUserRole, set[Permission]] = {
         Permissions.TOOLKITS_WRITE,
         Permissions.EXTERNAL_CHANNELS_READ,
         Permissions.EXTERNAL_CHANNELS_WRITE,
+        Permissions.RUNTIME_EXECUTION_POLICY_READ,
+        Permissions.RUNTIME_EXECUTION_POLICY_WRITE,
     },
     WorkspaceUserRole.MEMBER: {
         Permissions.WORKSPACE_READ,
@@ -30,6 +32,7 @@ ROLE_PERMISSIONS: dict[WorkspaceUserRole, set[Permission]] = {
         Permissions.WORKSPACE_INVITATIONS_READ,
         Permissions.LLM_INTEGRATIONS_READ,
         Permissions.TOOLKITS_READ,
+        Permissions.RUNTIME_EXECUTION_POLICY_READ,
     },
 }
 

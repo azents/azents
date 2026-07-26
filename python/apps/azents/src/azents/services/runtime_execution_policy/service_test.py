@@ -8,12 +8,14 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import WorkspaceUserRole
 from azents.core.runtime_execution_policy import (
     RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
     SYSTEM_STANDARD_PROFILE_ID,
     RuntimeExecutionBooleanModule,
     RuntimeExecutionBooleanRestriction,
     RuntimeExecutionChangeDirection,
+    RuntimeExecutionManagementLayer,
     RuntimeExecutionModuleId,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionPolicyRestriction,
@@ -26,6 +28,7 @@ from azents.core.runtime_execution_policy import (
     standard_runtime_execution_policy,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.runtime_execution_policy.data import (
     AgentRuntimeExecutionSetting,
     RuntimeExecutionPlatformPolicy,
@@ -118,7 +121,10 @@ def _workspace(
     )
 
 
-def _service(repository: Mock) -> RuntimeExecutionPolicyService:
+def _service(
+    repository: Mock,
+    agent_admin_repository: Mock | None = None,
+) -> RuntimeExecutionPolicyService:
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[AsyncSession]:
         yield cast(AsyncSession, Mock())
@@ -126,6 +132,10 @@ def _service(repository: Mock) -> RuntimeExecutionPolicyService:
     return RuntimeExecutionPolicyService(
         session_manager=cast(SessionManager[AsyncSession], session_manager),
         repository=cast(RuntimeExecutionPolicyRepository, repository),
+        agent_admin_repository=cast(
+            AgentAdminRepository,
+            agent_admin_repository or Mock(),
+        ),
     )
 
 
@@ -500,3 +510,124 @@ async def test_workspace_first_materialization_uses_implicit_standard_allowance(
     audit = repository.append_audit_event.await_args.kwargs["create"]
     assert audit.classification is expected
     assert audit.changed_paths == expected_paths
+
+
+@pytest.mark.asyncio
+async def test_missing_workspace_read_projects_safe_version_zero_policy() -> None:
+    """The first Workspace write can use the version returned by its read."""
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.get_workspace = AsyncMock(return_value=None)
+    service = _service(repository)
+
+    policy = await service.get_workspace_policy("workspace-1")
+
+    assert policy.version == 0
+    assert policy.allowed_profile_ids == frozenset({SYSTEM_STANDARD_PROFILE_ID})
+    assert policy.restriction == empty_runtime_execution_restriction()
+    assert policy.updated_at is None
+
+
+@pytest.mark.asyncio
+async def test_workspace_service_rejects_member_mutation() -> None:
+    """Workspace mutation authority is enforced below the HTTP route."""
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.get_workspace = AsyncMock()
+    service = _service(repository)
+
+    with pytest.raises(
+        RuntimeExecutionPolicyUnavailable,
+        match="workspace_policy_access_denied",
+    ):
+        await service.replace_workspace_for_manager(
+            "workspace-1",
+            WorkspaceRuntimeExecutionPolicyMutation(
+                expected_version=0,
+                restriction=empty_runtime_execution_restriction(),
+                allowed_profile_ids=frozenset({SYSTEM_STANDARD_PROFILE_ID}),
+                actor_workspace_user_id="workspace-user-1",
+                correlation_id="correlation-1",
+            ),
+            role=WorkspaceUserRole.MEMBER,
+        )
+
+    repository.get_workspace.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_workspace_audit_read_is_limited_to_workspace_layer() -> None:
+    """Workspace audit does not expose Agent-layer events in the same Workspace."""
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.list_audit_events = AsyncMock(return_value=[])
+    service = _service(repository)
+
+    assert (
+        await service.list_workspace_audit_events(
+            "workspace-1",
+            offset=0,
+            limit=50,
+        )
+        == []
+    )
+    repository.list_audit_events.assert_awaited_once_with(
+        repository.list_audit_events.await_args.args[0],
+        management_layer=RuntimeExecutionManagementLayer.WORKSPACE,
+        target_id=None,
+        workspace_id="workspace-1",
+        agent_id=None,
+        offset=0,
+        limit=50,
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_policy_read_rejects_non_admin_workspace_manager() -> None:
+    """Workspace Manager role alone does not grant Agent administration."""
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.get_agent_workspace_id = AsyncMock(return_value="workspace-1")
+    agent_admin_repository = Mock(spec=AgentAdminRepository)
+    agent_admin_repository.is_admin = AsyncMock(return_value=False)
+    service = _service(repository, agent_admin_repository)
+
+    with pytest.raises(RuntimeExecutionPolicyUnavailable, match="agent_access_denied"):
+        await service.get_agent_policy_for_manager(
+            "agent-1",
+            workspace_id="workspace-1",
+            workspace_user_id="workspace-user-1",
+            role=WorkspaceUserRole.MANAGER,
+        )
+
+
+@pytest.mark.asyncio
+async def test_agent_admin_receives_hierarchy_preview_without_provider_claim() -> None:
+    """Agent administrators receive safe hierarchy state without fake compatibility."""
+    restriction = empty_runtime_execution_restriction()
+    setting = AgentRuntimeExecutionSetting(
+        agent_id="agent-1",
+        profile_id=SYSTEM_STANDARD_PROFILE_ID,
+        version=1,
+        restriction=restriction,
+        digest=digest_runtime_execution_policy(restriction),
+        updated_by_workspace_user_id=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.get_agent_workspace_id = AsyncMock(return_value="workspace-1")
+    repository.get_platform = AsyncMock(return_value=_platform())
+    repository.get_agent_setting = AsyncMock(return_value=setting)
+    repository.get_workspace = AsyncMock(return_value=None)
+    repository.get_profile = AsyncMock(return_value=_profile(reserved=True))
+    agent_admin_repository = Mock(spec=AgentAdminRepository)
+    agent_admin_repository.is_admin = AsyncMock(return_value=True)
+    service = _service(repository, agent_admin_repository)
+
+    policy = await service.get_agent_policy_for_manager(
+        "agent-1",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.MEMBER,
+    )
+
+    assert policy.setting == setting
+    assert policy.resolution.available
+    assert policy.provider_compatibility_evaluated is False

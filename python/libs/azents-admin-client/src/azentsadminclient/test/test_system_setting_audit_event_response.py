@@ -52,7 +52,7 @@ class TestSystemSettingAuditEventResponse(unittest.TestCase):
                 candidate_id = '',
                 impact_confirmed = True,
                 confirmation_action = '',
-                metadata = { },
+                metadata = azentsadminclient.models.metadata.metadata(),
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
         else:
@@ -74,7 +74,7 @@ class TestSystemSettingAuditEventResponse(unittest.TestCase):
                 candidate_id = '',
                 impact_confirmed = True,
                 confirmation_action = '',
-                metadata = { },
+                metadata = azentsadminclient.models.metadata.metadata(),
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """

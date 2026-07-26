@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_execution_policy import (
     RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
+    RuntimeExecutionManagementLayer,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionPolicyRestriction,
     RuntimeExecutionProfileLifecycle,
@@ -92,6 +93,35 @@ class RuntimeExecutionPolicyRepository:
             statement = statement.with_for_update()
         row = (await session.execute(statement)).scalar_one_or_none()
         return self._build_profile(row) if row is not None else None
+
+    async def list_profiles(
+        self,
+        session: AsyncSession,
+        *,
+        include_retired: bool,
+        profile_ids: frozenset[str] | None,
+        offset: int,
+        limit: int,
+    ) -> list[RuntimeExecutionProfile]:
+        """List stable Profiles with optional lifecycle and identity filters."""
+        if profile_ids is not None and not profile_ids:
+            return []
+        statement = sa.select(RDBRuntimeExecutionProfile)
+        if not include_retired:
+            statement = statement.where(
+                RDBRuntimeExecutionProfile.lifecycle
+                == RuntimeExecutionProfileLifecycle.ACTIVE
+            )
+        if profile_ids is not None:
+            statement = statement.where(RDBRuntimeExecutionProfile.id.in_(profile_ids))
+        rows = (
+            await session.scalars(
+                statement.order_by(RDBRuntimeExecutionProfile.id.asc())
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+        return [self._build_profile(row) for row in rows]
 
     async def create_profile(
         self,
@@ -363,6 +393,47 @@ class RuntimeExecutionPolicyRepository:
         session.add(row)
         await session.flush()
         return self._build_audit(row)
+
+    async def list_audit_events(
+        self,
+        session: AsyncSession,
+        *,
+        management_layer: RuntimeExecutionManagementLayer | None,
+        target_id: str | None,
+        workspace_id: str | None,
+        agent_id: str | None,
+        offset: int,
+        limit: int,
+    ) -> list[RuntimeExecutionPolicyAuditEvent]:
+        """List metadata-only audit events within an authorization scope."""
+        statement = sa.select(RDBRuntimeExecutionPolicyAuditEvent)
+        if management_layer is not None:
+            statement = statement.where(
+                RDBRuntimeExecutionPolicyAuditEvent.management_layer == management_layer
+            )
+        if target_id is not None:
+            statement = statement.where(
+                RDBRuntimeExecutionPolicyAuditEvent.target_id == target_id
+            )
+        if workspace_id is not None:
+            statement = statement.where(
+                RDBRuntimeExecutionPolicyAuditEvent.workspace_id == workspace_id
+            )
+        if agent_id is not None:
+            statement = statement.where(
+                RDBRuntimeExecutionPolicyAuditEvent.agent_id == agent_id
+            )
+        rows = (
+            await session.scalars(
+                statement.order_by(
+                    RDBRuntimeExecutionPolicyAuditEvent.created_at.desc(),
+                    RDBRuntimeExecutionPolicyAuditEvent.id.desc(),
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+        return [self._build_audit(row) for row in rows]
 
     @staticmethod
     def _build_platform(

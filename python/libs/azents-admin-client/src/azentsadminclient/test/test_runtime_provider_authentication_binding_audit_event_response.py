@@ -41,7 +41,7 @@ class TestRuntimeProviderAuthenticationBindingAuditEventResponse(unittest.TestCa
                 actor_user_id = '',
                 previous_admin_version = 56,
                 new_admin_version = 56,
-                metadata = { },
+                metadata = None,
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
         else:
@@ -52,7 +52,7 @@ class TestRuntimeProviderAuthenticationBindingAuditEventResponse(unittest.TestCa
                 actor_user_id = '',
                 previous_admin_version = 56,
                 new_admin_version = 56,
-                metadata = { },
+                metadata = None,
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """

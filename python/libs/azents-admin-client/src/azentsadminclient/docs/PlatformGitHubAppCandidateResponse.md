@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **validation_code** | **str** |  | 
 **validation_message** | **str** |  | 
 **action_hint** | **str** |  | 
-**impact** | **Dict[str, object]** |  | 
+**impact** | **object** |  | 
 **created_at** | **datetime** |  | 
 **updated_at** | **datetime** |  | 
 **expires_at** | **datetime** |  | 

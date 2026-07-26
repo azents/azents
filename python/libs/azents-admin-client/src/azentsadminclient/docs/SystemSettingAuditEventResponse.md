@@ -19,7 +19,7 @@ Name | Type | Description | Notes
 **candidate_id** | **str** |  | 
 **impact_confirmed** | **bool** |  | 
 **confirmation_action** | **str** |  | 
-**metadata** | **Dict[str, object]** |  | 
+**metadata** | **object** |  | 
 **created_at** | **datetime** |  | 
 
 ## Example

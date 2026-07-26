@@ -19,6 +19,7 @@ class Resource(StrEnum):
     TOOLKITS = "toolkits"
     WORKSPACE_JOIN_REQUESTS = "workspace_join_requests"
     EXTERNAL_CHANNELS = "external_channels"
+    RUNTIME_EXECUTION_POLICY = "runtime_execution_policy"
 
 
 class Action(StrEnum):
@@ -137,6 +138,16 @@ class Permissions:
     # Workspace External Channels
     EXTERNAL_CHANNELS_READ = Permission(Resource.EXTERNAL_CHANNELS, Action.READ)
     EXTERNAL_CHANNELS_WRITE = Permission(Resource.EXTERNAL_CHANNELS, Action.WRITE)
+
+    # Workspace Runtime Execution Policy
+    RUNTIME_EXECUTION_POLICY_READ = Permission(
+        Resource.RUNTIME_EXECUTION_POLICY,
+        Action.READ,
+    )
+    RUNTIME_EXECUTION_POLICY_WRITE = Permission(
+        Resource.RUNTIME_EXECUTION_POLICY,
+        Action.WRITE,
+    )
 
 
 def has_permission(granted: set[Permission], required: Permission) -> bool:

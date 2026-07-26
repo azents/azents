@@ -23,6 +23,7 @@ __all__ = [
     "HealthV1Api",
     "InvitationV1Api",
     "ModelCatalogV1Api",
+    "RuntimeExecutionV1Api",
     "RuntimeProviderV1Api",
     "SystemBootstrapV1Api",
     "SystemSettingsV1Api",
@@ -73,6 +74,26 @@ __all__ = [
     "PlatformGitHubAppFieldResponse",
     "PlatformGitHubAppHealthResponse",
     "PlatformGitHubAppPatchRequest",
+    "RuntimeExecutionAuditEventType",
+    "RuntimeExecutionBooleanModule",
+    "RuntimeExecutionChangeDirection",
+    "RuntimeExecutionManagementLayer",
+    "RuntimeExecutionNetworkMode",
+    "RuntimeExecutionNetworkModule",
+    "RuntimeExecutionPlatformPolicyReplaceRequest",
+    "RuntimeExecutionPlatformPolicyResponse",
+    "RuntimeExecutionPolicyAuditEventResponse",
+    "RuntimeExecutionPolicyAuditListResponse",
+    "RuntimeExecutionPolicyDocument",
+    "RuntimeExecutionProfileCreateRequest",
+    "RuntimeExecutionProfileLifecycle",
+    "RuntimeExecutionProfileListResponse",
+    "RuntimeExecutionProfileReplaceRequest",
+    "RuntimeExecutionProfileResponse",
+    "RuntimeExecutionProfileRetireRequest",
+    "RuntimeExecutionResourceModule",
+    "RuntimeExecutionStorageMode",
+    "RuntimeExecutionStorageModule",
     "RuntimeProviderAuthMethod",
     "RuntimeProviderAuthenticationBindingAuditEventResponse",
     "RuntimeProviderAuthenticationBindingAuditListResponse",
@@ -146,6 +167,7 @@ from azentsadminclient.api.debug_v1_api import DebugV1Api as DebugV1Api
 from azentsadminclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api as ModelCatalogV1Api
+from azentsadminclient.api.runtime_execution_v1_api import RuntimeExecutionV1Api as RuntimeExecutionV1Api
 from azentsadminclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
 from azentsadminclient.api.system_bootstrap_v1_api import SystemBootstrapV1Api as SystemBootstrapV1Api
 from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api as SystemSettingsV1Api
@@ -200,6 +222,26 @@ from azentsadminclient.models.platform_git_hub_app_effective_status import Platf
 from azentsadminclient.models.platform_git_hub_app_field_response import PlatformGitHubAppFieldResponse as PlatformGitHubAppFieldResponse
 from azentsadminclient.models.platform_git_hub_app_health_response import PlatformGitHubAppHealthResponse as PlatformGitHubAppHealthResponse
 from azentsadminclient.models.platform_git_hub_app_patch_request import PlatformGitHubAppPatchRequest as PlatformGitHubAppPatchRequest
+from azentsadminclient.models.runtime_execution_audit_event_type import RuntimeExecutionAuditEventType as RuntimeExecutionAuditEventType
+from azentsadminclient.models.runtime_execution_boolean_module import RuntimeExecutionBooleanModule as RuntimeExecutionBooleanModule
+from azentsadminclient.models.runtime_execution_change_direction import RuntimeExecutionChangeDirection as RuntimeExecutionChangeDirection
+from azentsadminclient.models.runtime_execution_management_layer import RuntimeExecutionManagementLayer as RuntimeExecutionManagementLayer
+from azentsadminclient.models.runtime_execution_network_mode import RuntimeExecutionNetworkMode as RuntimeExecutionNetworkMode
+from azentsadminclient.models.runtime_execution_network_module import RuntimeExecutionNetworkModule as RuntimeExecutionNetworkModule
+from azentsadminclient.models.runtime_execution_platform_policy_replace_request import RuntimeExecutionPlatformPolicyReplaceRequest as RuntimeExecutionPlatformPolicyReplaceRequest
+from azentsadminclient.models.runtime_execution_platform_policy_response import RuntimeExecutionPlatformPolicyResponse as RuntimeExecutionPlatformPolicyResponse
+from azentsadminclient.models.runtime_execution_policy_audit_event_response import RuntimeExecutionPolicyAuditEventResponse as RuntimeExecutionPolicyAuditEventResponse
+from azentsadminclient.models.runtime_execution_policy_audit_list_response import RuntimeExecutionPolicyAuditListResponse as RuntimeExecutionPolicyAuditListResponse
+from azentsadminclient.models.runtime_execution_policy_document import RuntimeExecutionPolicyDocument as RuntimeExecutionPolicyDocument
+from azentsadminclient.models.runtime_execution_profile_create_request import RuntimeExecutionProfileCreateRequest as RuntimeExecutionProfileCreateRequest
+from azentsadminclient.models.runtime_execution_profile_lifecycle import RuntimeExecutionProfileLifecycle as RuntimeExecutionProfileLifecycle
+from azentsadminclient.models.runtime_execution_profile_list_response import RuntimeExecutionProfileListResponse as RuntimeExecutionProfileListResponse
+from azentsadminclient.models.runtime_execution_profile_replace_request import RuntimeExecutionProfileReplaceRequest as RuntimeExecutionProfileReplaceRequest
+from azentsadminclient.models.runtime_execution_profile_response import RuntimeExecutionProfileResponse as RuntimeExecutionProfileResponse
+from azentsadminclient.models.runtime_execution_profile_retire_request import RuntimeExecutionProfileRetireRequest as RuntimeExecutionProfileRetireRequest
+from azentsadminclient.models.runtime_execution_resource_module import RuntimeExecutionResourceModule as RuntimeExecutionResourceModule
+from azentsadminclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode as RuntimeExecutionStorageMode
+from azentsadminclient.models.runtime_execution_storage_module import RuntimeExecutionStorageModule as RuntimeExecutionStorageModule
 from azentsadminclient.models.runtime_provider_auth_method import RuntimeProviderAuthMethod as RuntimeProviderAuthMethod
 from azentsadminclient.models.runtime_provider_authentication_binding_audit_event_response import RuntimeProviderAuthenticationBindingAuditEventResponse as RuntimeProviderAuthenticationBindingAuditEventResponse
 from azentsadminclient.models.runtime_provider_authentication_binding_audit_list_response import RuntimeProviderAuthenticationBindingAuditListResponse as RuntimeProviderAuthenticationBindingAuditListResponse

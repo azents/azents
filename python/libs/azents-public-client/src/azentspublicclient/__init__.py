@@ -29,6 +29,7 @@ __all__ = [
     "JoinRequestV1Api",
     "KimiOAuthV1Api",
     "LLMProviderIntegrationV1Api",
+    "RuntimeExecutionV1Api",
     "RuntimeProviderEnrollmentV1Api",
     "RuntimeProviderV1Api",
     "SecurityV1Api",
@@ -69,6 +70,8 @@ __all__ = [
     "AgentRunPhase",
     "AgentRunStatus",
     "AgentRuntimeActionsResponse",
+    "AgentRuntimeExecutionPolicyReplaceRequest",
+    "AgentRuntimeExecutionPolicyResponse",
     "AgentRuntimeFailureResponse",
     "AgentRuntimeLifecycleResponse",
     "AgentRuntimeRawStateResponse",
@@ -336,6 +339,32 @@ __all__ = [
     "ResponseChatV1ReadAgentWorkspacePath",
     "ResponseLlmProviderIntegrationV1GetSubscriptionUsage",
     "RuntimeDesiredState",
+    "RuntimeExecutionAuditEventType",
+    "RuntimeExecutionAvailabilityReason",
+    "RuntimeExecutionBooleanModule",
+    "RuntimeExecutionBooleanRestriction",
+    "RuntimeExecutionChangeDirection",
+    "RuntimeExecutionChangeSummary",
+    "RuntimeExecutionFieldChange",
+    "RuntimeExecutionManagementLayer",
+    "RuntimeExecutionNetworkMode",
+    "RuntimeExecutionNetworkModule",
+    "RuntimeExecutionNetworkRestriction",
+    "RuntimeExecutionPolicyAuditEventResponse",
+    "RuntimeExecutionPolicyAuditListResponse",
+    "RuntimeExecutionPolicyDocument",
+    "RuntimeExecutionPolicyLayer",
+    "RuntimeExecutionPolicyRestriction",
+    "RuntimeExecutionProfileLifecycle",
+    "RuntimeExecutionReduction",
+    "RuntimeExecutionReductionReason",
+    "RuntimeExecutionResolution",
+    "RuntimeExecutionResourceModule",
+    "RuntimeExecutionResourceRestriction",
+    "RuntimeExecutionSourceVersions",
+    "RuntimeExecutionStorageMode",
+    "RuntimeExecutionStorageModule",
+    "RuntimeExecutionStorageRestriction",
     "RuntimeLifecycleCommandType",
     "RuntimeProviderConnectionState",
     "RuntimeProviderCredentialExchangeRequest",
@@ -408,6 +437,10 @@ __all__ = [
     "WorkspaceModelSettingsResponse",
     "WorkspaceModelSettingsUpdateRequest",
     "WorkspaceResponse",
+    "WorkspaceRuntimeExecutionPolicyReplaceRequest",
+    "WorkspaceRuntimeExecutionPolicyResponse",
+    "WorkspaceRuntimeExecutionProfileListResponse",
+    "WorkspaceRuntimeExecutionProfileResponse",
     "WorkspaceUserListResponse",
     "WorkspaceUserResponse",
     "WorkspaceUserRole",
@@ -431,6 +464,7 @@ from azentspublicclient.api.invitation_v1_api import InvitationV1Api as Invitati
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api as JoinRequestV1Api
 from azentspublicclient.api.kimi_o_auth_v1_api import KimiOAuthV1Api as KimiOAuthV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import LLMProviderIntegrationV1Api as LLMProviderIntegrationV1Api
+from azentspublicclient.api.runtime_execution_v1_api import RuntimeExecutionV1Api as RuntimeExecutionV1Api
 from azentspublicclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api as RuntimeProviderEnrollmentV1Api
 from azentspublicclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
 from azentspublicclient.api.security_v1_api import SecurityV1Api as SecurityV1Api
@@ -475,6 +509,8 @@ from azentspublicclient.models.agent_response import AgentResponse as AgentRespo
 from azentspublicclient.models.agent_run_phase import AgentRunPhase as AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus as AgentRunStatus
 from azentspublicclient.models.agent_runtime_actions_response import AgentRuntimeActionsResponse as AgentRuntimeActionsResponse
+from azentspublicclient.models.agent_runtime_execution_policy_replace_request import AgentRuntimeExecutionPolicyReplaceRequest as AgentRuntimeExecutionPolicyReplaceRequest
+from azentspublicclient.models.agent_runtime_execution_policy_response import AgentRuntimeExecutionPolicyResponse as AgentRuntimeExecutionPolicyResponse
 from azentspublicclient.models.agent_runtime_failure_response import AgentRuntimeFailureResponse as AgentRuntimeFailureResponse
 from azentspublicclient.models.agent_runtime_lifecycle_response import AgentRuntimeLifecycleResponse as AgentRuntimeLifecycleResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse as AgentRuntimeRawStateResponse
@@ -742,6 +778,32 @@ from azentspublicclient.models.reset_agent_runtime_request import ResetAgentRunt
 from azentspublicclient.models.response_chat_v1_read_agent_workspace_path import ResponseChatV1ReadAgentWorkspacePath as ResponseChatV1ReadAgentWorkspacePath
 from azentspublicclient.models.response_llm_provider_integration_v1_get_subscription_usage import ResponseLlmProviderIntegrationV1GetSubscriptionUsage as ResponseLlmProviderIntegrationV1GetSubscriptionUsage
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState as RuntimeDesiredState
+from azentspublicclient.models.runtime_execution_audit_event_type import RuntimeExecutionAuditEventType as RuntimeExecutionAuditEventType
+from azentspublicclient.models.runtime_execution_availability_reason import RuntimeExecutionAvailabilityReason as RuntimeExecutionAvailabilityReason
+from azentspublicclient.models.runtime_execution_boolean_module import RuntimeExecutionBooleanModule as RuntimeExecutionBooleanModule
+from azentspublicclient.models.runtime_execution_boolean_restriction import RuntimeExecutionBooleanRestriction as RuntimeExecutionBooleanRestriction
+from azentspublicclient.models.runtime_execution_change_direction import RuntimeExecutionChangeDirection as RuntimeExecutionChangeDirection
+from azentspublicclient.models.runtime_execution_change_summary import RuntimeExecutionChangeSummary as RuntimeExecutionChangeSummary
+from azentspublicclient.models.runtime_execution_field_change import RuntimeExecutionFieldChange as RuntimeExecutionFieldChange
+from azentspublicclient.models.runtime_execution_management_layer import RuntimeExecutionManagementLayer as RuntimeExecutionManagementLayer
+from azentspublicclient.models.runtime_execution_network_mode import RuntimeExecutionNetworkMode as RuntimeExecutionNetworkMode
+from azentspublicclient.models.runtime_execution_network_module import RuntimeExecutionNetworkModule as RuntimeExecutionNetworkModule
+from azentspublicclient.models.runtime_execution_network_restriction import RuntimeExecutionNetworkRestriction as RuntimeExecutionNetworkRestriction
+from azentspublicclient.models.runtime_execution_policy_audit_event_response import RuntimeExecutionPolicyAuditEventResponse as RuntimeExecutionPolicyAuditEventResponse
+from azentspublicclient.models.runtime_execution_policy_audit_list_response import RuntimeExecutionPolicyAuditListResponse as RuntimeExecutionPolicyAuditListResponse
+from azentspublicclient.models.runtime_execution_policy_document import RuntimeExecutionPolicyDocument as RuntimeExecutionPolicyDocument
+from azentspublicclient.models.runtime_execution_policy_layer import RuntimeExecutionPolicyLayer as RuntimeExecutionPolicyLayer
+from azentspublicclient.models.runtime_execution_policy_restriction import RuntimeExecutionPolicyRestriction as RuntimeExecutionPolicyRestriction
+from azentspublicclient.models.runtime_execution_profile_lifecycle import RuntimeExecutionProfileLifecycle as RuntimeExecutionProfileLifecycle
+from azentspublicclient.models.runtime_execution_reduction import RuntimeExecutionReduction as RuntimeExecutionReduction
+from azentspublicclient.models.runtime_execution_reduction_reason import RuntimeExecutionReductionReason as RuntimeExecutionReductionReason
+from azentspublicclient.models.runtime_execution_resolution import RuntimeExecutionResolution as RuntimeExecutionResolution
+from azentspublicclient.models.runtime_execution_resource_module import RuntimeExecutionResourceModule as RuntimeExecutionResourceModule
+from azentspublicclient.models.runtime_execution_resource_restriction import RuntimeExecutionResourceRestriction as RuntimeExecutionResourceRestriction
+from azentspublicclient.models.runtime_execution_source_versions import RuntimeExecutionSourceVersions as RuntimeExecutionSourceVersions
+from azentspublicclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode as RuntimeExecutionStorageMode
+from azentspublicclient.models.runtime_execution_storage_module import RuntimeExecutionStorageModule as RuntimeExecutionStorageModule
+from azentspublicclient.models.runtime_execution_storage_restriction import RuntimeExecutionStorageRestriction as RuntimeExecutionStorageRestriction
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType as RuntimeLifecycleCommandType
 from azentspublicclient.models.runtime_provider_connection_state import RuntimeProviderConnectionState as RuntimeProviderConnectionState
 from azentspublicclient.models.runtime_provider_credential_exchange_request import RuntimeProviderCredentialExchangeRequest as RuntimeProviderCredentialExchangeRequest
@@ -814,6 +876,10 @@ from azentspublicclient.models.workspace_list_response import WorkspaceListRespo
 from azentspublicclient.models.workspace_model_settings_response import WorkspaceModelSettingsResponse as WorkspaceModelSettingsResponse
 from azentspublicclient.models.workspace_model_settings_update_request import WorkspaceModelSettingsUpdateRequest as WorkspaceModelSettingsUpdateRequest
 from azentspublicclient.models.workspace_response import WorkspaceResponse as WorkspaceResponse
+from azentspublicclient.models.workspace_runtime_execution_policy_replace_request import WorkspaceRuntimeExecutionPolicyReplaceRequest as WorkspaceRuntimeExecutionPolicyReplaceRequest
+from azentspublicclient.models.workspace_runtime_execution_policy_response import WorkspaceRuntimeExecutionPolicyResponse as WorkspaceRuntimeExecutionPolicyResponse
+from azentspublicclient.models.workspace_runtime_execution_profile_list_response import WorkspaceRuntimeExecutionProfileListResponse as WorkspaceRuntimeExecutionProfileListResponse
+from azentspublicclient.models.workspace_runtime_execution_profile_response import WorkspaceRuntimeExecutionProfileResponse as WorkspaceRuntimeExecutionProfileResponse
 from azentspublicclient.models.workspace_user_list_response import WorkspaceUserListResponse as WorkspaceUserListResponse
 from azentspublicclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole

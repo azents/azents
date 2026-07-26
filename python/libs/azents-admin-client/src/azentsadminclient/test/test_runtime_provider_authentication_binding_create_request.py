@@ -37,13 +37,13 @@ class TestRuntimeProviderAuthenticationBindingCreateRequest(unittest.TestCase):
             return RuntimeProviderAuthenticationBindingCreateRequest(
                 auth_method = 'azents_issued_token',
                 subject = '0',
-                config = { }
+                config = azentsadminclient.models.metadata.metadata()
             )
         else:
             return RuntimeProviderAuthenticationBindingCreateRequest(
                 auth_method = 'azents_issued_token',
                 subject = '0',
-                config = { },
+                config = azentsadminclient.models.metadata.metadata(),
         )
         """
 
