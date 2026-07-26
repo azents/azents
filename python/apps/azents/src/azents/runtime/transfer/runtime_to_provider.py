@@ -43,6 +43,19 @@ class RuntimeToProviderCleanupError(RuntimeToProviderTransferError):
     """Raised when pre-provider Runtime cleanup cannot be confirmed."""
 
 
+class RuntimeToProviderRecoveryError(RuntimeToProviderTransferError):
+    """Raised when settlement recovery must persist a newer exact claim revision."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        recoveries: tuple[RuntimeToProviderRecovery, ...],
+    ) -> None:
+        super().__init__(message)
+        self.recoveries = recoveries
+
+
 class RuntimeToProviderDeliveryExecutor(Protocol):
     """Prepare one trusted Runtime upload batch for a provider-owned delivery."""
 
@@ -423,6 +436,7 @@ class RuntimeToProviderBatch:
     async def _acknowledge(self, source: _PreparedRuntimeSource) -> int:
         revision = source.revision
         claim_id = _required_claim_id(source)
+        recovery_retry_available = self._settlement_recovery
         while self._settlement_recovery or self._clock() < self._deadline_at:
             try:
                 status = await self._coordinator.acknowledge_consumer(
@@ -445,7 +459,14 @@ class RuntimeToProviderBatch:
                     "Provider-completed Runtime source acknowledgement was rejected"
                 )
             revision = status.revision
+            source.revision = revision
             if self._settlement_recovery:
+                if (
+                    status.phase is CoordinatorTransferPhase.CONSUMING
+                    and recovery_retry_available
+                ):
+                    recovery_retry_available = False
+                    continue
                 raise RuntimeToProviderTransferError(
                     "Provider-completed Runtime source acknowledgement is pending"
                 )
@@ -456,6 +477,7 @@ class RuntimeToProviderBatch:
 
     async def _settle(self, source: _PreparedRuntimeSource) -> None:
         revision = source.revision
+        recovery_retry_available = self._settlement_recovery
         while self._settlement_recovery or self._clock() < self._deadline_at:
             try:
                 status = await self._coordinator.settle_transfer(
@@ -477,7 +499,14 @@ class RuntimeToProviderBatch:
                     "Provider-completed Runtime source was not settled"
                 )
             revision = status.revision
+            source.revision = revision
             if self._settlement_recovery:
+                if (
+                    status.phase is CoordinatorTransferPhase.CONSUMED
+                    and recovery_retry_available
+                ):
+                    recovery_retry_available = False
+                    continue
                 raise RuntimeToProviderTransferError(
                     "Provider-completed Runtime source settlement is pending"
                 )
@@ -701,7 +730,15 @@ class RuntimeToProviderBatchService:
             settlement_recovery=True,
         )
         batch.restore_provider_completed()
-        await batch.acknowledge_and_settle()
+        try:
+            await batch.acknowledge_and_settle()
+        except asyncio.CancelledError:
+            raise
+        except RuntimeToProviderTransferError as error:
+            raise RuntimeToProviderRecoveryError(
+                "Provider-completed Runtime settlement recovery is pending",
+                recoveries=batch.recovery_evidence(),
+            ) from error
 
     async def _prepare_source(
         self,

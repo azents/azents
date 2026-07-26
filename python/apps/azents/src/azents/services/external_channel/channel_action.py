@@ -41,6 +41,7 @@ from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderCleanupError,
     RuntimeToProviderDeliveryCapability,
     RuntimeToProviderRecovery,
+    RuntimeToProviderRecoveryError,
     RuntimeToProviderSource,
     RuntimeToProviderTransferError,
 )
@@ -470,6 +471,16 @@ class ExternalChannelActionService:
             await provider_delivery_capability.recover(recoveries=recoveries)
         except asyncio.CancelledError:
             raise
+        except RuntimeToProviderRecoveryError as error:
+            await self._record_runtime_provider_state(
+                delivery_attempt_id=target.delivery_attempt_id,
+                state="provider_completed",
+                recoveries=error.recoveries,
+                provider_message_key=_runtime_provider_message_key(
+                    target.request_payload
+                ),
+            )
+            return target.status
         except RuntimeToProviderTransferError:
             return target.status
         if target.status is ExternalChannelDeliveryStatus.DELIVERED:
@@ -593,6 +604,7 @@ class ExternalChannelActionService:
         *,
         delivery_attempt_id: str,
         provider_delivery_capability: RuntimeToProviderDeliveryCapability,
+        provider_started: bool,
     ) -> None:
         """Fence Runtime admission and provider mutation against current authority."""
         async with self.session_manager() as session:
@@ -600,6 +612,7 @@ class ExternalChannelActionService:
                 session,
                 delivery_attempt_id=delivery_attempt_id,
                 runtime_target=provider_delivery_capability.target,
+                provider_started=provider_started,
                 now=datetime.datetime.now(datetime.UTC),
             )
             await session.commit()
@@ -983,6 +996,7 @@ class ExternalChannelActionService:
                     await self._revalidate_runtime_delivery_authority(
                         delivery_attempt_id=delivery_attempt_id,
                         provider_delivery_capability=provider_delivery_capability,
+                        provider_started=False,
                     )
 
                 batch = await provider_delivery_capability.prepare(
@@ -1075,6 +1089,7 @@ class ExternalChannelActionService:
                 await self._revalidate_runtime_delivery_authority(
                     delivery_attempt_id=delivery_attempt_id,
                     provider_delivery_capability=provider_delivery_capability,
+                    provider_started=provider_started,
                 )
                 await batch.ensure_active()
                 if not provider_started:

@@ -1249,9 +1249,14 @@ class ExternalChannelWorkRepository:
         error_kind: str,
         error_summary: str,
         now: datetime.datetime,
+        provider_started: bool = False,
     ) -> None:
-        """Terminalize a provider request that failed before provider mutation."""
-        attempt.status = ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+        """Terminalize one rejected delivery with its known provider-work boundary."""
+        attempt.status = (
+            ExternalChannelDeliveryStatus.UNKNOWN
+            if provider_started
+            else ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+        )
         attempt.error_kind = error_kind
         attempt.error_summary = error_summary
         attempt.completed_at = now
@@ -1263,6 +1268,7 @@ class ExternalChannelWorkRepository:
         *,
         delivery_attempt_id: str,
         runtime_target: ServerToRuntimeTarget,
+        provider_started: bool,
         now: datetime.datetime,
     ) -> bool:
         """Fence one pre-provider Runtime operation against current authority."""
@@ -1277,6 +1283,10 @@ class ExternalChannelWorkRepository:
         )
         if attempt is None or attempt.binding_id is None:
             return False
+        recovery = attempt.request_payload.get("runtime_provider_recovery")
+        provider_started = provider_started or (
+            isinstance(recovery, dict) and recovery.get("state") == "provider_started"
+        )
         binding = await session.scalar(
             sa.select(RDBExternalChannelBinding)
             .where(RDBExternalChannelBinding.id == attempt.binding_id)
@@ -1288,6 +1298,7 @@ class ExternalChannelWorkRepository:
                 error_kind="binding_unavailable",
                 error_summary="The current External Channel binding is unavailable.",
                 now=now,
+                provider_started=provider_started,
             )
             return False
         agent_session = await session.scalar(
@@ -1311,6 +1322,7 @@ class ExternalChannelWorkRepository:
                 error_kind="delivery_authority_unavailable",
                 error_summary="The current External Channel authority is unavailable.",
                 now=now,
+                provider_started=provider_started,
             )
             return False
         agent = await session.scalar(
@@ -1345,6 +1357,7 @@ class ExternalChannelWorkRepository:
                     "The current External Channel authority is no longer active."
                 ),
                 now=now,
+                provider_started=provider_started,
             )
             return False
         if attempt.channel_action_id is not None:
@@ -1364,6 +1377,7 @@ class ExternalChannelWorkRepository:
                     error_kind="delivery_action_unavailable",
                     error_summary="The original Channel Action is unavailable.",
                     now=now,
+                    provider_started=provider_started,
                 )
                 return False
             if action.agent_run_id is not None:
@@ -1385,6 +1399,7 @@ class ExternalChannelWorkRepository:
                             "The original Channel Action is no longer active."
                         ),
                         now=now,
+                        provider_started=provider_started,
                     )
                     return False
         files = attempt.request_payload.get("files")
@@ -1400,6 +1415,7 @@ class ExternalChannelWorkRepository:
                     "The current provider file-upload capability is unavailable."
                 ),
                 now=now,
+                provider_started=provider_started,
             )
             return False
         runtime = await session.scalar(
@@ -1424,6 +1440,7 @@ class ExternalChannelWorkRepository:
                 error_kind="runtime_delivery_authority_revoked",
                 error_summary="The current Runtime delivery authority is unavailable.",
                 now=now,
+                provider_started=provider_started,
             )
             return False
         await session.flush()

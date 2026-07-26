@@ -48,6 +48,7 @@ class _Coordinator:
 
     ack_fails: bool = False
     abandon_fails: bool = False
+    recovery_stale_revision: bool = False
     second_admit_started: asyncio.Event | None = None
     release_second_admit: asyncio.Event | None = None
 
@@ -56,6 +57,8 @@ class _Coordinator:
         self.sizes: dict[str, int] = {}
         self.ack_attempted: set[str] = set()
         self.claimed: set[str] = set()
+        self.ack_revisions: list[int] = []
+        self.stale_recovery_revisions: dict[str, int] = {}
 
     async def admit_transfer(
         self,
@@ -103,8 +106,12 @@ class _Coordinator:
                 phase=CoordinatorTransferPhase.CONSUMED,
             )
         if request.identity.transfer_id in self.claimed:
-            return _status(
+            revision = self.stale_recovery_revisions.get(
+                request.identity.transfer_id,
                 6,
+            )
+            return _status(
+                revision,
                 request.identity,
                 size,
                 phase=CoordinatorTransferPhase.CONSUMING,
@@ -165,6 +172,10 @@ class _Coordinator:
         request: CoordinatorConsumerRequest,
     ) -> CoordinatorTransferStatus:
         self.calls.append(("ack", request.identity.transfer_id))
+        self.ack_revisions.append(request.expected_revision)
+        if self.recovery_stale_revision and request.expected_revision == 6:
+            self.stale_recovery_revisions[request.identity.transfer_id] = 7
+            raise OSError("acknowledgement revision is stale")
         if self.ack_fails and request.identity.transfer_id not in self.ack_attempted:
             self.ack_attempted.add(request.identity.transfer_id)
             raise OSError("acknowledgement transport failed")
@@ -463,6 +474,31 @@ async def test_recovery_settles_persisted_completion_without_provider_replay() -
     assert [call for call in coordinator.calls if call[0] == "admit"] == [
         call for call in calls_before_recovery if call[0] == "admit"
     ]
+    assert object_store.opened == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_retries_observed_renewed_claim_revision_once() -> None:
+    """Recovery uses the latest live claim revision without replaying provider I/O."""
+    body = b"payload"
+    coordinator = _Coordinator(recovery_stale_revision=True)
+    object_store = _ObjectStore((body,))
+    service = _service(coordinator, object_store)
+    batch = await service.prepare(
+        _request(_source("/workspace/agent/payload.bin", len(body)))
+    )
+
+    assert b"".join([chunk async for chunk in batch.iter_source_chunks(0)]) == body
+    recoveries = await batch.provider_completed()
+    assert recoveries[0].revision == 6
+    await batch.close()
+    calls_before_recovery = list(coordinator.calls)
+
+    await service.recover(recoveries=recoveries)
+
+    recovery_calls = coordinator.calls[len(calls_before_recovery) :]
+    assert [call[0] for call in recovery_calls] == ["ack", "status", "ack", "settle"]
+    assert coordinator.ack_revisions[-2:] == [6, 7]
     assert object_store.opened == 1
 
 
