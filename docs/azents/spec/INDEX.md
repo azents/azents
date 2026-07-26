@@ -22,14 +22,14 @@ Details of all living specs. Synchronized from frontmatter.
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-23 | 4 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-24 | 74 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-20 | 8 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-26 | 48 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-26 | 49 |
 
 ## Flow Specs
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-24 | 132 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-24 | 28 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-26 | 133 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-26 | 29 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-24 | 4 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-22 | 41 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |

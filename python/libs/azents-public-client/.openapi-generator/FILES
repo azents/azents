@@ -131,6 +131,7 @@ azentspublicclient/docs/ChatV1Api.md
 azentspublicclient/docs/ChatWriteAcceptedResponse.md
 azentspublicclient/docs/ChatWriteResponse.md
 azentspublicclient/docs/ChatWriteSnapshotResponse.md
+azentspublicclient/docs/CleanupOrphanGitWorktreesAction.md
 azentspublicclient/docs/CleanupSessionGitWorktreeRequest.md
 azentspublicclient/docs/CommandAction.md
 azentspublicclient/docs/CreateGitWorktreeAction.md
@@ -200,6 +201,8 @@ azentspublicclient/docs/InvitationListResponse.md
 azentspublicclient/docs/InvitationResponse.md
 azentspublicclient/docs/InvitationStatus.md
 azentspublicclient/docs/InvitationV1Api.md
+azentspublicclient/docs/JSONScalar.md
+azentspublicclient/docs/JSONValue.md
 azentspublicclient/docs/JoinRequestListResponse.md
 azentspublicclient/docs/JoinRequestResponse.md
 azentspublicclient/docs/JoinRequestStatus.md
@@ -501,6 +504,7 @@ azentspublicclient/models/chat_stop_response.py
 azentspublicclient/models/chat_write_accepted_response.py
 azentspublicclient/models/chat_write_response.py
 azentspublicclient/models/chat_write_snapshot_response.py
+azentspublicclient/models/cleanup_orphan_git_worktrees_action.py
 azentspublicclient/models/cleanup_session_git_worktree_request.py
 azentspublicclient/models/command_action.py
 azentspublicclient/models/create_git_worktree_action.py
@@ -570,6 +574,8 @@ azentspublicclient/models/invitation_status.py
 azentspublicclient/models/join_request_list_response.py
 azentspublicclient/models/join_request_response.py
 azentspublicclient/models/join_request_status.py
+azentspublicclient/models/json_scalar.py
+azentspublicclient/models/json_value.py
 azentspublicclient/models/kimi_o_auth_config.py
 azentspublicclient/models/kimi_o_auth_device_start_response.py
 azentspublicclient/models/kimi_o_auth_device_status_response.py
@@ -860,6 +866,7 @@ azentspublicclient/test/test_chat_v1_api.py
 azentspublicclient/test/test_chat_write_accepted_response.py
 azentspublicclient/test/test_chat_write_response.py
 azentspublicclient/test/test_chat_write_snapshot_response.py
+azentspublicclient/test/test_cleanup_orphan_git_worktrees_action.py
 azentspublicclient/test/test_cleanup_session_git_worktree_request.py
 azentspublicclient/test/test_command_action.py
 azentspublicclient/test/test_create_git_worktree_action.py
@@ -933,6 +940,8 @@ azentspublicclient/test/test_join_request_list_response.py
 azentspublicclient/test/test_join_request_response.py
 azentspublicclient/test/test_join_request_status.py
 azentspublicclient/test/test_join_request_v1_api.py
+azentspublicclient/test/test_json_scalar.py
+azentspublicclient/test/test_json_value.py
 azentspublicclient/test/test_kimi_o_auth_config.py
 azentspublicclient/test/test_kimi_o_auth_device_start_response.py
 azentspublicclient/test/test_kimi_o_auth_device_status_response.py

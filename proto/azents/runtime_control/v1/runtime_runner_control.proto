@@ -125,6 +125,8 @@ message RunnerOperationRequest {
     FileApplyPatchOperationPayload file_apply_patch = 39;
     FileEditOperationPayload file_edit = 40;
     GitInspectWorktreeOperationPayload git_inspect_worktree = 41;
+    GitDiscoverManagedWorktreesOperationPayload git_discover_managed_worktrees = 42;
+    GitRemoveDiscoveredWorktreeOperationPayload git_remove_discovered_worktree = 43;
   }
 }
 
@@ -250,6 +252,16 @@ message GitInspectWorktreeOperationPayload {
   string branch_name = 3;
 }
 
+message GitDiscoverManagedWorktreesOperationPayload {}
+
+message GitRemoveDiscoveredWorktreeOperationPayload {
+  string worktree_path = 1;
+  string repository_anchor_path = 2;
+  string branch_name = 3;
+  string fingerprint = 4;
+  bool force = 5;
+}
+
 message FileApplyPatchOperationPayload {
   string base_path = 1;
   uint64 total_bytes = 2;
@@ -331,6 +343,8 @@ message RunnerOperationFinalSuccessPayload {
     FileApplyPatchFinalSuccess file_apply_patch = 18;
     FileEditFinalSuccess file_edit = 19;
     GitInspectWorktreeFinalSuccess git_inspect_worktree = 20;
+    GitDiscoverManagedWorktreesFinalSuccess git_discover_managed_worktrees = 21;
+    GitRemoveDiscoveredWorktreeFinalSuccess git_remove_discovered_worktree = 22;
   }
 }
 
@@ -472,6 +486,24 @@ message GitInspectWorktreeFinalSuccess {
   optional string registered_branch_name = 3;
   string target_kind = 4;
   optional bool dirty = 5;
+}
+
+message RuntimeDiscoveredGitWorktree {
+  string worktree_path = 1;
+  bool registered = 2;
+  string repository_anchor_path = 3;
+  string branch_name = 4;
+  string fingerprint = 5;
+  string failure_code = 6;
+}
+
+message GitDiscoverManagedWorktreesFinalSuccess {
+  repeated RuntimeDiscoveredGitWorktree entries = 1;
+}
+
+message GitRemoveDiscoveredWorktreeFinalSuccess {
+  string worktree_path = 1;
+  string outcome = 2;
 }
 
 message FileGrepFinalSuccess {

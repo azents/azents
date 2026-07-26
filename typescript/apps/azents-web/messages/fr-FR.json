@@ -1550,6 +1550,15 @@
       "projectRegistered": "Project enregistré : {path}",
       "branch": "Branche : {branch}",
       "baseRef": "Ref de base : {ref}",
+      "cleanup": {
+        "title": "Nettoyage des worktrees orphelins",
+        "phase": "Phase : {phase}",
+        "examined": "{count} examinés",
+        "removed": "{count} supprimés",
+        "protected": "{count} protégés",
+        "alreadyAbsent": "{count} déjà absents",
+        "attention": "{count} nécessitent une attention"
+      },
       "result": {
         "pending": "En attente de création du worktree…",
         "running": "Création du worktree…",

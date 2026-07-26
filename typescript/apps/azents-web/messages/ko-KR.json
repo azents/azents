@@ -1550,6 +1550,15 @@
       "projectRegistered": "Project 등록: {path}",
       "branch": "브랜치: {branch}",
       "baseRef": "기준 ref: {ref}",
+      "cleanup": {
+        "title": "고아 worktree 정리",
+        "phase": "단계: {phase}",
+        "examined": "{count}개 검사",
+        "removed": "{count}개 제거",
+        "protected": "{count}개 보호",
+        "alreadyAbsent": "{count}개 이미 없음",
+        "attention": "{count}개 확인 필요"
+      },
       "result": {
         "pending": "Worktree 생성을 기다리는 중…",
         "running": "Worktree 생성 중…",

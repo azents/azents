@@ -187,6 +187,24 @@ class SessionGitWorktreeBranchCreatedBy(enum.StrEnum):
     AZENTS = "azents"
 
 
+class GitWorktreePathClaimOwnerKind(enum.StrEnum):
+    """Destructive operation currently reserving a managed worktree path."""
+
+    MANUAL_ACTION = "manual_action"
+    ARCHIVE_CLEANUP = "archive_cleanup"
+
+
+class GitWorktreePathClaimState(enum.StrEnum):
+    """Durable state of a managed worktree path claim."""
+
+    CLAIMED = "claimed"
+    REMOVING = "removing"
+    REMOVED = "removed"
+    ALREADY_ABSENT = "already_absent"
+    FAILED = "failed"
+    UNRESOLVED = "unresolved"
+
+
 class ActionExecutionStatus(enum.StrEnum):
     """Live TurnAction execution status."""
 

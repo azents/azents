@@ -25,14 +25,14 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-23 | 4 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-24 | 74 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-26 | 48 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-26 | 49 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-24 | 132 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-24 | 28 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-26 | 133 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-26 | 29 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-24 | 4 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-22 | 41 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
@@ -384,6 +384,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Provider-Native Channel Work Progress Requirements](requirements/work-260723-provider-native-progress.md) | work-260723 | 2026-07-23 | - |
 | [Session Worktree Archive and Purge Integrity Requirements](requirements/worktree-260722-archive-purge-integrity.md) | worktree-260722 | 2026-07-22 | 2026-07-22 |
 | [Archive-Owned Session Worktree Cleanup Requirements](requirements/worktree-260723-archive-owned-cleanup.md) | worktree-260723 | 2026-07-23 | 2026-07-23 |
+| [Manual Orphan Worktree Cleanup Requirements](requirements/worktree-260726-manual-orphan-cleanup.md) | worktree-260726 | 2026-07-26 | - |
 | [Explicit AgentSession Write Target Historical Requirements Reconstruction](requirements/write-260625-write-target.md) | write-260625 | 2026-06-25 | - |
 | [xAI API Key Provider Historical Requirements Reconstruction](requirements/xai-260710-xai-api-key.md) | xai-260710 | 2026-07-10 | 2026-07-10 |
 
@@ -717,6 +718,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Provider-Native Channel Work Progress](adr/work-260723-provider-native-progress.md)
 - [Session Worktree Archive and Purge Integrity](adr/worktree-260722-archive-purge-integrity.md)
 - [Archive-Owned Session Worktree Cleanup](adr/worktree-260723-archive-owned-cleanup.md)
+- [Manual Orphan Worktree Cleanup](adr/worktree-260726-manual-orphan-cleanup.md)
 - [Explicit AgentSession Write Target Historical Decision Reconstruction](adr/write-260625-write-target.md)
 - [xAI API Key Provider Historical Decision Reconstruction](adr/xai-260710-xai-api-key.md)
 

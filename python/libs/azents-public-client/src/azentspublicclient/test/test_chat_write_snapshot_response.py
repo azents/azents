@@ -116,6 +116,9 @@ class TestChatWriteSnapshotResponse(unittest.TestCase):
                             sender_user_id = '', 
                             action_type = '', 
                             action = null, 
+                            result = {
+                                'key' : null
+                                }, 
                             status = '', 
                             owner_generation = 56, 
                             failure_summary = '', 

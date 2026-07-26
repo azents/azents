@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **sender_user_id** | **str** |  | 
 **action_type** | **str** | Action discriminator | 
 **action** | [**Action**](Action.md) |  | 
+**result** | [**Dict[str, JSONValue]**](JSONValue.md) |  | [optional] 
 **status** | **str** | Execution status | 
 **owner_generation** | **int** | Admitting Session owner generation | 
 **failure_summary** | **str** |  | [optional] 

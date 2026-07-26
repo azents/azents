@@ -168,16 +168,15 @@ class _RuntimeRepository(AgentRuntimeRepository):
         agent_id: str,
     ) -> AgentRuntime | None:
         """Return a ready runtime."""
-        del session
-        now = datetime.datetime.now(datetime.UTC)
-        return AgentRuntime(
-            id="runtime-1",
-            workspace_id="workspace-1",
-            agent_id=agent_id,
-            runner_state=RuntimeRunnerState.READY,
-            runner_generation=7,
-            created_at=now,
-            updated_at=now,
+        repository = AgentRuntimeRepository()
+        runtime = await repository.get_by_agent_id(session, agent_id)
+        if runtime is None:
+            runtime = await repository.ensure_for_agent(session, agent_id)
+        return runtime.model_copy(
+            update={
+                "runner_state": RuntimeRunnerState.READY,
+                "runner_generation": 7,
+            }
         )
 
     async def ensure_for_agent(
@@ -662,9 +661,10 @@ async def _execute_first_setup_action(
         include_action_messages=True,
     )
     assert promoted.events == []
-    worktree_action = promoted.worktree_action
+    worktree_action = promoted.operation_action
     assert worktree_action is not None
     assert worktree_action.execution is not None
+    assert isinstance(worktree_action.action, CreateGitWorktreeAction)
     await worktree_service.run_git_worktree_action(
         agent_id=agent_id,
         session_id=session_id,
@@ -783,6 +783,7 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=agent_session.id,
             )
+            runtime = await AgentRuntimeRepository().get_by_agent_id(session, agent_id)
             projects = await SessionWorkspaceProjectRepository().list_projects(
                 session,
                 session_id=agent_session.id,
@@ -799,6 +800,7 @@ class TestSessionGitWorktreeService:
                 limit=20,
             )
         assert len(allocations) == 1
+        assert runtime is not None
         assert allocations[0].action_execution_id is None
         assert allocations[0].status is SessionGitWorktreeStatus.READY
         assert [project.path for project in projects] == [allocations[0].worktree_path]
@@ -815,7 +817,7 @@ class TestSessionGitWorktreeService:
         assert runner.calls == [
             {
                 "operation": "create_git_worktree",
-                "runtime_id": "runtime-1",
+                "runtime_id": runtime.id,
                 "runner_generation": 7,
                 "source_project_path": "/workspace/agent/repo",
                 "worktree_path": allocations[0].worktree_path,
@@ -1044,10 +1046,13 @@ class TestSessionGitWorktreeService:
         assert isinstance(result, Success)
         assert result.value.default_branch == "main"
         assert result.value.refs[0].ref == "refs/heads/main"
+        async with rdb_session_manager() as session:
+            runtime = await AgentRuntimeRepository().get_by_agent_id(session, agent_id)
+        assert runtime is not None
         assert runner.calls == [
             {
                 "operation": "list_git_refs",
-                "runtime_id": "runtime-1",
+                "runtime_id": runtime.id,
                 "runner_generation": 7,
                 "source_project_path": "/workspace/agent/repo",
             }

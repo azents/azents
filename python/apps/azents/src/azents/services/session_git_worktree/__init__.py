@@ -19,17 +19,23 @@ from azents.core.enums import (
     ActionExecutionStatus,
     AgentProjectCatalogStatus,
     AgentSessionKind,
+    AgentSessionStatus,
     EventKind,
+    GitWorktreePathClaimState,
     RuntimeRunnerState,
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
 )
-from azents.engine.events.action_messages import CreateGitWorktreeAction
+from azents.engine.events.action_messages import (
+    CleanupOrphanGitWorktreesAction,
+    CreateGitWorktreeAction,
+)
 from azents.engine.events.types import Event
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
 from azents.engine.tools.deps import get_skill_state_store
 from azents.engine.tools.skill import SkillProjectionService, SkillStateStore
 from azents.rdb.deps import get_session_manager
+from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.action_execution.data import (
@@ -374,6 +380,626 @@ class SessionGitWorktreeService:
             )
             raise
 
+    async def run_cleanup_orphan_git_worktrees_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        action: CleanupOrphanGitWorktreesAction,
+        owner_generation: int,
+        on_projection_updated: ActionExecutionProjectionCallback | None = None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
+    ) -> GitWorktreeActionExecutionResult:
+        """Execute one manual orphan-worktree cleanup TurnAction."""
+        del action
+        try:
+            return await self._execute_cleanup_orphan_git_worktrees_action(
+                agent_id=agent_id,
+                session_id=session_id,
+                execution=execution,
+                owner_generation=owner_generation,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+        except asyncio.CancelledError as exc:
+            await asyncio.shield(
+                self._release_nonremoving_cleanup_claims(
+                    action_execution_id=execution.id
+                )
+            )
+            await asyncio.shield(
+                self._persist_cleanup_cancellation(
+                    execution=execution,
+                    reason=_action_cancellation_reason(exc),
+                    on_projection_updated=on_projection_updated,
+                )
+            )
+            await asyncio.shield(
+                self.cancel_action_execution(
+                    execution=execution,
+                    reason=_action_cancellation_reason(exc),
+                    on_history_event_appended=on_history_event_appended,
+                )
+            )
+            raise
+
+    async def _execute_cleanup_orphan_git_worktrees_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        owner_generation: int,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> GitWorktreeActionExecutionResult:
+        """Discover and force-remove orphan worktrees from the current Runtime."""
+        if execution.session_id != session_id:
+            raise ValueError("ActionExecution belongs to another session")
+        if execution.owner_generation != owner_generation:
+            raise RuntimeError("ActionExecution belongs to another Session owner")
+        if execution.status is not ActionExecutionStatus.PENDING:
+            raise RuntimeError("Only newly admitted pending operations may execute")
+
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            project_repository = self.session_workspace_project_repository
+            context_runtime_id = await project_repository.get_runtime_id_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            execution = await self.action_execution_repository.mark_running(
+                session,
+                action_execution_id=execution.id,
+                started_at=datetime.now(UTC),
+            )
+            execution = await self.action_execution_repository.update_result(
+                session,
+                action_execution_id=execution.id,
+                result=_cleanup_result(phase="discovering", candidates=[]),
+            )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
+
+        if (
+            agent_session is None
+            or agent_session.agent_id != agent_id
+            or agent_session.session_kind is not AgentSessionKind.ROOT
+            or agent_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            await self._mark_cleanup_action_failed(
+                execution=execution,
+                result=_cleanup_result(phase="failed", candidates=[]),
+                reason="Session not found.",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        runtime = await self._get_runtime(agent_id=agent_id)
+        if (
+            runtime is None
+            or runtime.runner_state != RuntimeRunnerState.READY
+            or runtime.id != context_runtime_id
+        ):
+            await self._mark_cleanup_action_failed(
+                execution=execution,
+                result=_cleanup_result(phase="failed", candidates=[]),
+                reason="Runtime runner is not ready.",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        if self.runner_operations is None:
+            await self._mark_cleanup_action_failed(
+                execution=execution,
+                result=_cleanup_result(phase="failed", candidates=[]),
+                reason="Runtime runner operations are unavailable.",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="discover_orphan_git_worktrees",
+            command_argv=None,
+            content="Discovering managed Git worktrees.",
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        try:
+            discovery = await self.runner_operations.discover_managed_git_worktrees(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=session_id,
+                deadline_at=_git_operation_deadline(),
+            )
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ):
+            await self._mark_cleanup_action_failed(
+                execution=execution,
+                result=_cleanup_result(phase="failed", candidates=[]),
+                reason="Runtime runner is not ready.",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        except RuntimeRunnerOperationFailedError:
+            await self._mark_cleanup_action_failed(
+                execution=execution,
+                result=_cleanup_result(phase="failed", candidates=[]),
+                reason="Managed Git worktree discovery failed.",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+
+        candidates = [
+            _cleanup_candidate(
+                path=entry.worktree_path,
+                outcome="unresolved",
+                reason_code=None,
+                summary=None,
+            )
+            for entry in sorted(
+                discovery.entries, key=lambda entry: entry.worktree_path
+            )
+        ]
+        result = _cleanup_result(phase="processing", candidates=candidates)
+        execution = await self._update_cleanup_result(
+            execution=execution,
+            result=result,
+            on_projection_updated=on_projection_updated,
+        )
+
+        for index, discovered in enumerate(
+            sorted(discovery.entries, key=lambda entry: entry.worktree_path)
+        ):
+            if (
+                not discovered.registered
+                or discovered.repository_anchor_path is None
+                or discovered.failure_code is not None
+            ):
+                candidates[index] = _cleanup_candidate(
+                    path=discovered.worktree_path,
+                    outcome="failed",
+                    reason_code=discovered.failure_code
+                    or "worktree_ownership_ambiguous",
+                    summary="Git worktree identity could not be established.",
+                )
+                result = _cleanup_result(phase="processing", candidates=candidates)
+                execution = await self._update_cleanup_result(
+                    execution=execution,
+                    result=result,
+                    on_projection_updated=on_projection_updated,
+                )
+                await self._append_action_execution_event(
+                    execution=execution,
+                    kind=ActionExecutionEventKind.FAILED,
+                    step_key="orphan_git_worktree_failed",
+                    command_argv=None,
+                    content="A managed worktree could not be safely identified.",
+                    exit_code=None,
+                    on_projection_updated=on_projection_updated,
+                )
+                continue
+
+            claim_outcome = await self._claim_cleanup_candidate(
+                runtime_id=runtime.id,
+                action_execution_id=execution.id,
+                owner_generation=execution.owner_generation,
+                worktree_path=discovered.worktree_path,
+                discovery_fingerprint=discovered.fingerprint,
+            )
+            if claim_outcome != "claimed":
+                candidates[index] = _cleanup_candidate(
+                    path=discovered.worktree_path,
+                    outcome=(
+                        "protected"
+                        if claim_outcome == "active_connection"
+                        else "failed"
+                    ),
+                    reason_code=claim_outcome,
+                    summary=(
+                        "Connected to active Session work."
+                        if claim_outcome == "active_connection"
+                        else "Another manual cleanup currently owns this path."
+                    ),
+                )
+                result = _cleanup_result(phase="processing", candidates=candidates)
+                execution = await self._update_cleanup_result(
+                    execution=execution,
+                    result=result,
+                    on_projection_updated=on_projection_updated,
+                )
+                await self._append_action_execution_event(
+                    execution=execution,
+                    kind=(
+                        ActionExecutionEventKind.STEP_STARTED
+                        if claim_outcome == "active_connection"
+                        else ActionExecutionEventKind.FAILED
+                    ),
+                    step_key=(
+                        "protect_active_worktree"
+                        if claim_outcome == "active_connection"
+                        else "orphan_git_worktree_failed"
+                    ),
+                    command_argv=None,
+                    content=(
+                        "Protected a worktree connected to active Session work."
+                        if claim_outcome == "active_connection"
+                        else "Skipped a worktree owned by another manual cleanup."
+                    ),
+                    exit_code=None,
+                    on_projection_updated=on_projection_updated,
+                )
+                continue
+
+            claim_state = GitWorktreePathClaimState.UNRESOLVED
+            try:
+                await self._mark_cleanup_claim_removing(
+                    action_execution_id=execution.id,
+                    worktree_path=discovered.worktree_path,
+                )
+                await self._append_action_execution_event(
+                    execution=execution,
+                    kind=ActionExecutionEventKind.STEP_STARTED,
+                    step_key="remove_orphan_git_worktree",
+                    command_argv=None,
+                    content="Removing an orphaned Git worktree.",
+                    exit_code=None,
+                    on_projection_updated=on_projection_updated,
+                )
+                try:
+                    removal = (
+                        await self.runner_operations.remove_discovered_git_worktree(
+                            runtime_id=runtime.id,
+                            runner_generation=runtime.runner_generation,
+                            owner_session_id=session_id,
+                            discovered=discovered,
+                            deadline_at=_git_operation_deadline(),
+                        )
+                    )
+                except (
+                    RuntimeRunnerOperationUnavailable,
+                    RuntimeRunnerOperationGenerationError,
+                ):
+                    outcome = "failed"
+                    reason_code = "runtime_unavailable"
+                    summary = "Runtime runner is not ready."
+                    claim_state = GitWorktreePathClaimState.FAILED
+                except RuntimeRunnerOperationFailedError as exc:
+                    outcome = "failed"
+                    reason_code = exc.code or "runner_operation_failed"
+                    summary = "Git worktree removal failed."
+                    claim_state = GitWorktreePathClaimState.FAILED
+                else:
+                    outcome = removal.outcome
+                    reason_code = None
+                    summary = None
+                    claim_state = (
+                        GitWorktreePathClaimState.REMOVED
+                        if outcome == "removed"
+                        else GitWorktreePathClaimState.ALREADY_ABSENT
+                    )
+            finally:
+                await self._release_cleanup_claim(
+                    action_execution_id=execution.id,
+                    worktree_path=discovered.worktree_path,
+                    state=claim_state,
+                )
+            candidates[index] = _cleanup_candidate(
+                path=discovered.worktree_path,
+                outcome=outcome,
+                reason_code=reason_code,
+                summary=summary,
+            )
+            result = _cleanup_result(phase="processing", candidates=candidates)
+            execution = await self._update_cleanup_result(
+                execution=execution,
+                result=result,
+                on_projection_updated=on_projection_updated,
+            )
+            await self._append_action_execution_event(
+                execution=execution,
+                kind=(
+                    ActionExecutionEventKind.COMMAND_COMPLETED
+                    if outcome in {"removed", "already_absent"}
+                    else ActionExecutionEventKind.FAILED
+                ),
+                step_key=(
+                    "orphan_git_worktree_removed"
+                    if outcome in {"removed", "already_absent"}
+                    else "orphan_git_worktree_failed"
+                ),
+                command_argv=None,
+                content=(
+                    "Orphaned Git worktree removal completed."
+                    if outcome in {"removed", "already_absent"}
+                    else "Orphaned Git worktree removal failed."
+                ),
+                exit_code=0 if outcome in {"removed", "already_absent"} else None,
+                on_projection_updated=on_projection_updated,
+            )
+
+        failed_count = _cleanup_candidate_count(candidates, "failed")
+        if failed_count:
+            result = _cleanup_result(phase="failed", candidates=candidates)
+            await self._release_cleanup_claims(action_execution_id=execution.id)
+            await self._mark_cleanup_action_failed(
+                execution=execution,
+                result=result,
+                reason="One or more managed worktrees could not be removed.",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+        else:
+            result = _cleanup_result(phase="completed", candidates=candidates)
+            execution = await self._update_cleanup_result(
+                execution=execution,
+                result=result,
+                on_projection_updated=on_projection_updated,
+            )
+            await self._release_cleanup_claims(action_execution_id=execution.id)
+            await self._append_action_execution_event(
+                execution=execution,
+                kind=ActionExecutionEventKind.COMPLETED,
+                step_key=None,
+                command_argv=None,
+                content="Orphan Git worktree cleanup completed.",
+                exit_code=0,
+                on_projection_updated=on_projection_updated,
+            )
+            await self._commit_action_execution_history_event(
+                execution=execution,
+                status=ActionExecutionStatus.COMPLETED,
+                failure_summary=None,
+                cancellation_summary=None,
+                on_history_event_appended=on_history_event_appended,
+            )
+        return GitWorktreeActionExecutionResult(
+            completed=True,
+            context_invalidated=False,
+        )
+
+    async def _claim_cleanup_candidate(
+        self,
+        *,
+        runtime_id: str,
+        action_execution_id: str,
+        owner_generation: int,
+        worktree_path: str,
+        discovery_fingerprint: str,
+    ) -> Literal["claimed", "active_connection", "cleanup_in_progress"]:
+        """Atomically check protection and claim one path before Runner I/O."""
+        async with self.session_manager() as session:
+            project_repository = self.session_workspace_project_repository
+            result = await project_repository.try_claim_orphan_git_worktree(
+                session,
+                runtime_id=runtime_id,
+                action_execution_id=action_execution_id,
+                owner_generation=owner_generation,
+                worktree_path=worktree_path,
+                discovery_fingerprint=discovery_fingerprint,
+            )
+            await session.commit()
+        return result
+
+    async def _mark_cleanup_claim_removing(
+        self,
+        *,
+        action_execution_id: str,
+        worktree_path: str,
+    ) -> None:
+        """Mark one claimed target as undergoing Runner removal."""
+        async with self.session_manager() as session:
+            project_repository = self.session_workspace_project_repository
+            await project_repository.mark_orphan_git_worktree_claim_removing(
+                session,
+                action_execution_id=action_execution_id,
+                worktree_path=worktree_path,
+            )
+            await session.commit()
+
+    async def _release_cleanup_claim(
+        self,
+        *,
+        action_execution_id: str,
+        worktree_path: str,
+        state: GitWorktreePathClaimState,
+    ) -> None:
+        """Release one cleanup claim after its Runner operation terminalizes."""
+        async with self.session_manager() as session:
+            project_repository = self.session_workspace_project_repository
+            await project_repository.release_orphan_git_worktree_claim(
+                session,
+                action_execution_id=action_execution_id,
+                worktree_path=worktree_path,
+                state=state,
+            )
+            await session.commit()
+
+    async def _release_cleanup_claims(self, *, action_execution_id: str) -> None:
+        """Release every cleanup claim after a settled terminal action."""
+        async with self.session_manager() as session:
+            project_repository = self.session_workspace_project_repository
+            await project_repository.release_orphan_git_worktree_claims(
+                session,
+                action_execution_id=action_execution_id,
+            )
+            await session.commit()
+
+    async def _release_nonremoving_cleanup_claims(
+        self,
+        *,
+        action_execution_id: str,
+    ) -> None:
+        """Retain in-flight removal claims through their bounded cancellation lease."""
+        async with self.session_manager() as session:
+            project_repository = self.session_workspace_project_repository
+            await project_repository.release_nonremoving_orphan_git_worktree_claims(
+                session,
+                action_execution_id=action_execution_id,
+            )
+            await session.commit()
+
+    async def _claim_archive_cleanup_path(
+        self,
+        *,
+        runtime_id: str,
+        root_session_id: str,
+        worktree_path: str,
+    ) -> bool:
+        """Claim one archive cleanup target before the Runner operation."""
+        async with self.session_manager() as session:
+            project_repository = self.session_workspace_project_repository
+            claimed = await project_repository.try_claim_archive_git_worktree(
+                session,
+                runtime_id=runtime_id,
+                root_session_id=root_session_id,
+                worktree_path=worktree_path,
+            )
+            await session.commit()
+        return claimed
+
+    async def _release_archive_cleanup_path(
+        self,
+        *,
+        runtime_id: str,
+        root_session_id: str,
+        worktree_path: str,
+    ) -> None:
+        """Release one archive cleanup target after the Runner operation."""
+        async with self.session_manager() as session:
+            project_repository = self.session_workspace_project_repository
+            await project_repository.release_archive_git_worktree_claim(
+                session,
+                runtime_id=runtime_id,
+                root_session_id=root_session_id,
+                worktree_path=worktree_path,
+            )
+            await session.commit()
+
+    async def _update_cleanup_result(
+        self,
+        *,
+        execution: ActionExecution,
+        result: dict[str, JSONValue],
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+    ) -> ActionExecution:
+        """Persist and project one cleanup result snapshot."""
+        async with self.session_manager() as session:
+            updated = await self.action_execution_repository.update_result(
+                session,
+                action_execution_id=execution.id,
+                result=result,
+            )
+        await self._publish_action_execution_projection(
+            execution=updated,
+            on_projection_updated=on_projection_updated,
+        )
+        return updated
+
+    async def _mark_cleanup_action_failed(
+        self,
+        *,
+        execution: ActionExecution,
+        result: dict[str, JSONValue],
+        reason: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> None:
+        """Persist a cleanup result before terminalizing its failed action."""
+        execution = await self._update_cleanup_result(
+            execution=execution,
+            result=result,
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.FAILED,
+            step_key="orphan_git_worktree_failed",
+            command_argv=None,
+            content=reason,
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        await self._commit_action_execution_history_event(
+            execution=execution,
+            status=ActionExecutionStatus.FAILED,
+            failure_summary=reason,
+            cancellation_summary=None,
+            on_history_event_appended=on_history_event_appended,
+        )
+
+    async def _persist_cleanup_cancellation(
+        self,
+        *,
+        execution: ActionExecution,
+        reason: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+    ) -> None:
+        """Record unresolved cleanup candidates before cancellation terminalization."""
+        async with self.session_manager() as session:
+            current = await self.action_execution_repository.get_by_id(
+                session,
+                action_execution_id=execution.id,
+            )
+            if current is None:
+                return
+            current_result = current.result
+            if current_result is None:
+                result = _cleanup_result(phase="cancelled", candidates=[])
+            else:
+                candidates_value = current_result.get("candidates")
+                candidates = (
+                    [
+                        candidate
+                        for candidate in candidates_value
+                        if isinstance(candidate, dict)
+                    ]
+                    if isinstance(candidates_value, list)
+                    else []
+                )
+                for candidate in candidates:
+                    if candidate.get("outcome") == "unresolved":
+                        candidate["reason_code"] = "cancelled"
+                        candidate["summary"] = reason
+                result = _cleanup_result(phase="cancelled", candidates=candidates)
+            updated = await self.action_execution_repository.update_result(
+                session,
+                action_execution_id=execution.id,
+                result=result,
+            )
+        await self._publish_action_execution_projection(
+            execution=updated,
+            on_projection_updated=on_projection_updated,
+        )
+
     async def _execute_git_worktree_action(
         self,
         *,
@@ -638,6 +1264,7 @@ class SessionGitWorktreeService:
         for _ in range(_MAX_COLLISION_ATTEMPTS):
             current = await self._choose_available_target(
                 current,
+                runtime_id=runtime.id,
                 path_suffix=path_suffix,
                 branch_suffix=branch_suffix,
             )
@@ -1059,6 +1686,15 @@ class SessionGitWorktreeService:
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
     ) -> Event:
         """Cancel one active operation without re-executing its side effect."""
+        if execution.action_type == "cleanup_orphan_git_worktrees":
+            await self._persist_cleanup_cancellation(
+                execution=execution,
+                reason=reason,
+                on_projection_updated=None,
+            )
+            await self._release_nonremoving_cleanup_claims(
+                action_execution_id=execution.id
+            )
         async with self.session_manager() as session:
             allocation = (
                 await self.session_git_worktree_repository.get_by_action_execution_id(
@@ -1302,6 +1938,7 @@ class SessionGitWorktreeService:
             cleaned = await self._run_cleanup_for_allocation(
                 agent_id=agent_id,
                 session_id=session_id,
+                claim_owner_session_id=session_id,
                 runtime=runtime,
                 allocation=allocation,
                 force=False,
@@ -1426,6 +2063,7 @@ class SessionGitWorktreeService:
                     await self._run_cleanup_for_allocation(
                         agent_id=agent_id,
                         session_id=creator_session_id,
+                        claim_owner_session_id=root_session_id,
                         runtime=runtime,
                         allocation=allocation,
                         force=True,
@@ -1468,6 +2106,7 @@ class SessionGitWorktreeService:
         *,
         agent_id: str,
         session_id: str,
+        claim_owner_session_id: str,
         runtime: AgentRuntime,
         allocation: SessionGitWorktree,
         force: bool,
@@ -1486,6 +2125,21 @@ class SessionGitWorktreeService:
         runner_operations = self.runner_operations
         if runner_operations is None:
             raise RuntimeError("Runtime runner operations are unavailable")
+        claimed = await self._claim_archive_cleanup_path(
+            runtime_id=runtime.id,
+            root_session_id=claim_owner_session_id,
+            worktree_path=allocation.worktree_path,
+        )
+        if not claimed:
+            logger.info(
+                "Skipped archived Git worktree cleanup owned by another operation",
+                extra={
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "worktree_id": allocation.id,
+                },
+            )
+            return None
         try:
             removal = await runner_operations.remove_git_worktree(
                 runtime_id=runtime.id,
@@ -1560,6 +2214,12 @@ class SessionGitWorktreeService:
                 reason=_cleanup_operation_failure_summary(exc),
             )
             return None
+        finally:
+            await self._release_archive_cleanup_path(
+                runtime_id=runtime.id,
+                root_session_id=claim_owner_session_id,
+                worktree_path=allocation.worktree_path,
+            )
 
     async def _cleanup_empty_session_worktree_parent(
         self,
@@ -1648,6 +2308,7 @@ class SessionGitWorktreeService:
         self,
         allocation: SessionGitWorktree,
         *,
+        runtime_id: str,
         path_suffix: int,
         branch_suffix: int,
     ) -> SessionGitWorktree:
@@ -1662,13 +2323,28 @@ class SessionGitWorktreeService:
                 branch_suffix=current_branch_suffix,
             )
             async with self.session_manager() as session:
+                project_repository = self.session_workspace_project_repository
+                await project_repository.acquire_runtime_path_coordination_lock(
+                    session,
+                    runtime_id=runtime_id,
+                )
+                await project_repository.acquire_runtime_worktree_path_lock(
+                    session,
+                    runtime_id=runtime_id,
+                    worktree_path=worktree_path,
+                )
                 exists = await self.session_git_worktree_repository.target_exists(
                     session,
                     worktree_path=worktree_path,
                     branch_name=branch_name,
                     excluding_id=allocation.id,
                 )
-                if not exists:
+                claim_exists = await project_repository.has_blocking_git_worktree_claim(
+                    session,
+                    runtime_id=runtime_id,
+                    worktree_path=worktree_path,
+                )
+                if not exists and not claim_exists:
                     return await self.session_git_worktree_repository.update_target(
                         session,
                         worktree_id=allocation.id,
@@ -1815,6 +2491,59 @@ def _cleanup_operation_failure_summary(
     if isinstance(error, RuntimeRunnerOperationCanceledError):
         return "Git worktree cleanup failed: runner_operation_failed."
     return "Git worktree cleanup failed: runtime_unavailable."
+
+
+def _cleanup_candidate(
+    *,
+    path: str,
+    outcome: Literal[
+        "unresolved",
+        "protected",
+        "removed",
+        "already_absent",
+        "failed",
+    ],
+    reason_code: str | None,
+    summary: str | None,
+) -> dict[str, JSONValue]:
+    """Build one content-free durable cleanup candidate result."""
+    return {
+        "path": path,
+        "outcome": outcome,
+        "reason_code": reason_code,
+        "summary": summary,
+    }
+
+
+def _cleanup_result(
+    *,
+    phase: str,
+    candidates: list[dict[str, JSONValue]],
+) -> dict[str, JSONValue]:
+    """Build the versioned durable result for one cleanup action."""
+    candidate_values: list[JSONValue] = [candidate for candidate in candidates]
+    return {
+        "schema_version": 1,
+        "phase": phase,
+        "examined_count": len(candidates),
+        "protected_count": _cleanup_candidate_count(candidates, "protected"),
+        "removed_count": _cleanup_candidate_count(candidates, "removed"),
+        "already_absent_count": _cleanup_candidate_count(
+            candidates,
+            "already_absent",
+        ),
+        "failed_count": _cleanup_candidate_count(candidates, "failed"),
+        "unresolved_count": _cleanup_candidate_count(candidates, "unresolved"),
+        "candidates": candidate_values,
+    }
+
+
+def _cleanup_candidate_count(
+    candidates: list[dict[str, JSONValue]],
+    outcome: str,
+) -> int:
+    """Count one candidate outcome without exposing candidate contents."""
+    return sum(1 for candidate in candidates if candidate.get("outcome") == outcome)
 
 
 def _collision_kind(message: str) -> Literal["branch", "path"] | None:

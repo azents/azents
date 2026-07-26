@@ -2491,7 +2491,7 @@ async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
         del args
         expected_buffer_ids.append(cast(str | None, kwargs["expected_buffer_id"]))
         return PromotedInputBuffers(
-            worktree_action=None,
+            operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
             promoted_event_ids=[],
@@ -2548,7 +2548,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     )
     promoted_batches = [
         PromotedInputBuffers(
-            worktree_action=None,
+            operation_action=None,
             turn_effect=TurnEffect.FAILED,
             requested_inference_profile=None,
             promoted_event_ids=[],
@@ -2561,7 +2561,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             deduped_count=0,
         ),
         PromotedInputBuffers(
-            worktree_action=None,
+            operation_action=None,
             turn_effect=TurnEffect.ELIGIBLE,
             requested_inference_profile=None,
             promoted_event_ids=[],
@@ -2582,7 +2582,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             deduped_count=0,
         ),
         PromotedInputBuffers(
-            worktree_action=None,
+            operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
             promoted_event_ids=[],
@@ -2606,7 +2606,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         **kwargs: object,
     ) -> OperationActionProcessResult:
         del args
-        processed_worktree_actions.append(kwargs["worktree_action"])
+        processed_worktree_actions.append(kwargs["operation_action"])
         return OperationActionProcessResult(context_invalidated=False)
 
     async def has_actionable_model_input(session_id: str) -> bool:
@@ -2672,7 +2672,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
     order: list[str] = []
     promoted_batches = [
         PromotedInputBuffers(
-            worktree_action=None,
+            operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
             promoted_event_ids=[],
@@ -2685,7 +2685,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
             deduped_count=0,
         ),
         PromotedInputBuffers(
-            worktree_action=None,
+            operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
             promoted_event_ids=[],
@@ -2755,7 +2755,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
     executor = _executor()
     promoted_batches = [
         PromotedInputBuffers(
-            worktree_action=None,
+            operation_action=None,
             turn_effect=TurnEffect.FAILED,
             requested_inference_profile=None,
             promoted_event_ids=[],
@@ -2768,7 +2768,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
             deduped_count=0,
         ),
         PromotedInputBuffers(
-            worktree_action=None,
+            operation_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
             promoted_event_ids=[],

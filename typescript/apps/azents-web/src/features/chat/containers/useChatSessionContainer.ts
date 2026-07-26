@@ -72,7 +72,10 @@ export type SessionRunState = "idle" | "running";
 
 type WritableChatAction = Extract<
   ChatAction,
-  { type: "command" } | { type: "goal" } | { type: "skill" }
+  | { type: "command" }
+  | { type: "goal" }
+  | { type: "skill" }
+  | { type: "cleanup_orphan_git_worktrees" }
 >;
 
 function writableChatAction(
@@ -85,6 +88,7 @@ function writableChatAction(
     case "command":
     case "goal":
     case "skill":
+    case "cleanup_orphan_git_worktrees":
       return action;
     case "create_git_worktree":
       return null;
@@ -318,6 +322,9 @@ function chatActionFromValue(value: unknown): ChatAction | null {
       source_project_path: value.source_project_path,
       starting_ref: value.starting_ref,
     };
+  }
+  if (value.type === "cleanup_orphan_git_worktrees") {
+    return { type: "cleanup_orphan_git_worktrees" };
   }
   return null;
 }

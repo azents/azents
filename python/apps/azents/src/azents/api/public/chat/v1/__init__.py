@@ -55,6 +55,7 @@ from azents.core.deps import get_appctx, get_auth_config
 from azents.core.enums import AgentSessionKind
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import (
+    CleanupOrphanGitWorktreesAction,
     CommandAction,
     CreateGitWorktreeAction,
     GoalAction,
@@ -163,6 +164,7 @@ from azents.services.session_workspace_project import (
     InvalidProjectPath,
     ProjectAccessDenied,
     ProjectNotFound,
+    ProjectPathCleanupInProgress,
     ProjectPathConflict,
     SessionWorkspaceProjectService,
 )
@@ -1322,7 +1324,11 @@ async def _write_turn_action_via_rest(
                 raise HTTPException(
                     status_code=400, detail="Goal objective is required."
                 )
-        case SkillAction() | CreateGitWorktreeAction():
+        case (
+            SkillAction()
+            | CreateGitWorktreeAction()
+            | CleanupOrphanGitWorktreesAction()
+        ):
             pass
         case _:
             raise HTTPException(status_code=400, detail="This action is not supported.")
@@ -1423,7 +1429,12 @@ async def _write_input_via_rest(
                 user_id=user_id,
                 payload_override=request.model_dump(mode="json"),
             )
-        case GoalAction() | SkillAction() | CreateGitWorktreeAction():
+        case (
+            GoalAction()
+            | SkillAction()
+            | CreateGitWorktreeAction()
+            | CleanupOrphanGitWorktreesAction()
+        ):
             return await _write_turn_action_via_rest(
                 chat_service,
                 agent_session_input_service,
@@ -2133,6 +2144,31 @@ async def list_input_actions(
                         ),
                         availability_hint=goal_hint,
                     ),
+                    InputActionDefinitionResponse(
+                        id="cleanup_orphan_git_worktrees",
+                        keyword="cleanup-worktrees",
+                        label="Clean up orphan worktrees",
+                        description=(
+                            "Find and permanently remove orphan Git worktrees "
+                            "from this runtime. Local branches are preserved."
+                        ),
+                        action=CleanupOrphanGitWorktreesAction(),
+                        category="turn",
+                        message=InputActionMessagePolicyResponse(
+                            policy="optional",
+                            placeholder="Optional cleanup note.",
+                        ),
+                        attachments=InputActionAttachmentPolicyResponse(
+                            policy="unsupported"
+                        ),
+                        availability_hint=InputActionAvailabilityHintResponse(
+                            state="warning",
+                            message=(
+                                "This permanently removes orphaned worktree "
+                                "files without deleting their local branches."
+                            ),
+                        ),
+                    ),
                     *[
                         InputActionDefinitionResponse(
                             id=skill_action_id(item.skill_path),
@@ -2286,6 +2322,13 @@ async def register_agent_project(
                     raise HTTPException(
                         status_code=409,
                         detail="Project path conflicts with an existing Project.",
+                    )
+                case ProjectPathCleanupInProgress():
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Project path is being removed by manual worktree cleanup."
+                        ),
                     )
                 case ProjectAgentNotFound() | ProjectAccessDenied():
                     _raise_project_access_error(error)

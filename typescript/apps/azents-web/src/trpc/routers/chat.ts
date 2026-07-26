@@ -57,6 +57,7 @@ const inputActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("command"), name: z.string().min(1) }),
   z.object({ type: z.literal("goal") }),
   z.object({ type: z.literal("skill"), skill_path: z.string().min(1) }),
+  z.object({ type: z.literal("cleanup_orphan_git_worktrees") }),
 ]);
 
 const inferenceProfileSchema = z.object({

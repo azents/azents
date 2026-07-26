@@ -10537,6 +10537,9 @@
               },
               {
                 "$ref": "#/components/schemas/CreateGitWorktreeAction"
+              },
+              {
+                "$ref": "#/components/schemas/CleanupOrphanGitWorktreesAction"
               }
             ],
             "title": "Action",
@@ -10544,12 +10547,28 @@
             "discriminator": {
               "propertyName": "type",
               "mapping": {
+                "cleanup_orphan_git_worktrees": "#/components/schemas/CleanupOrphanGitWorktreesAction",
                 "command": "#/components/schemas/CommandAction",
                 "create_git_worktree": "#/components/schemas/CreateGitWorktreeAction",
                 "goal": "#/components/schemas/GoalAction",
                 "skill": "#/components/schemas/SkillAction"
               }
             }
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JSONValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result",
+            "description": "Action-specific structured result"
           },
           "status": {
             "type": "string",
@@ -14092,11 +14111,15 @@
                   },
                   {
                     "$ref": "#/components/schemas/CreateGitWorktreeAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CleanupOrphanGitWorktreesAction"
                   }
                 ],
                 "discriminator": {
                   "propertyName": "type",
                   "mapping": {
+                    "cleanup_orphan_git_worktrees": "#/components/schemas/CleanupOrphanGitWorktreesAction",
                     "command": "#/components/schemas/CommandAction",
                     "create_git_worktree": "#/components/schemas/CreateGitWorktreeAction",
                     "goal": "#/components/schemas/GoalAction",
@@ -14594,6 +14617,19 @@
         ],
         "title": "ChatWriteSnapshotResponse",
         "description": "Authoritative live snapshot after REST write."
+      },
+      "CleanupOrphanGitWorktreesAction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "cleanup_orphan_git_worktrees",
+            "title": "Type",
+            "default": "cleanup_orphan_git_worktrees"
+          }
+        },
+        "type": "object",
+        "title": "CleanupOrphanGitWorktreesAction",
+        "description": "Remove orphaned Git worktrees from the current Agent Runtime."
       },
       "CleanupSessionGitWorktreeRequest": {
         "properties": {
@@ -16129,6 +16165,9 @@
               },
               {
                 "$ref": "#/components/schemas/CreateGitWorktreeAction"
+              },
+              {
+                "$ref": "#/components/schemas/CleanupOrphanGitWorktreesAction"
               }
             ],
             "title": "Action",
@@ -16136,6 +16175,7 @@
             "discriminator": {
               "propertyName": "type",
               "mapping": {
+                "cleanup_orphan_git_worktrees": "#/components/schemas/CleanupOrphanGitWorktreesAction",
                 "command": "#/components/schemas/CommandAction",
                 "create_git_worktree": "#/components/schemas/CreateGitWorktreeAction",
                 "goal": "#/components/schemas/GoalAction",
@@ -16356,6 +16396,44 @@
         ],
         "title": "InvitationStatus",
         "description": "Workspace invitation status."
+      },
+      "JSONScalar": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "JSONValue": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/JSONScalar"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/JSONValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JSONValue"
+            },
+            "type": "object"
+          }
+        ]
       },
       "JoinRequestListResponse": {
         "properties": {

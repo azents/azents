@@ -75,8 +75,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-24
-spec_version: 132
+last_verified_at: 2026-07-26
+spec_version: 133
 ---
 
 # Agent Execution Loop
@@ -914,7 +914,7 @@ Web chat user writes enter through REST commit endpoints. Message writes create 
 also enqueue ordered setup action inputs, such as `create_git_worktree`, before the first user message
 so operation setup runs before the first model run. Existing-session writes may also enqueue ordered
 operation action inputs for user-requested workspace mutations, such as Register Project → New
-worktree. Those actions are FIFO `action_message` InputBuffers, not transcript events or
+worktree or `cleanup_orphan_git_worktrees`. Those actions are FIFO `action_message` InputBuffers, not transcript events or
 session-initialization setup rows. Edit writes are
 idle-only: the REST transaction rewrites durable history state, clears pending input buffers,
 creates an `edited_user_message` input buffer, marks the session running, and sends a wake-up.
@@ -941,7 +941,15 @@ operations, registers the created path as a session Project, refreshes catalog/S
 then invalidates the prepared context boundary.
 
 This same path covers new-session setup actions and existing-session Register Project worktree
-actions. After successful Project mutation, the same active `AgentRun` rebuilds model/tool context
+actions. `cleanup_orphan_git_worktrees` is parameterless and current-Runtime-only: it discovers
+Azents-managed worktrees, records every candidate in a bounded structured execution result, protects
+paths connected to active root Sessions, and force-removes only unconnected candidates through the
+typed Runner operation. It preserves local branches. A protected candidate is not an action failure;
+every ambiguous, contended, failed, or unresolved candidate is retained in the result, and any failed
+candidate makes the terminal action fail after all candidates have been examined. Cancellation retains
+completed side effects, marks unsettled candidates unresolved, releases settled cleanup claims, retains
+any in-flight removal claim through its bounded lease, and never
+replays removal on a later owner. After successful Project mutation, the same active `AgentRun` rebuilds model/tool context
 and the next physical model request from the current Session inference snapshot. If an action fails,
 it is terminal and FIFO processing may continue to later pending input without a retry/discard
 mutation. Completion, failure, and cancellation all use one transaction that copies the current
@@ -1164,6 +1172,9 @@ with a channel/message icon rather than presenting it as Goal continuation.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 133) — Added the parameterless manual orphan Git-worktree
+  cleanup TurnAction, bounded structured candidate results, active-root protection, cancellation
+  reconciliation, and no-replay terminalization.
 - **2026-07-24** (spec_version 132) — Promoted routing-only broker signals,
   owner-generation-first canonical PostgreSQL snapshots, and Userless Team Session execution.
 - **2026-07-24** (spec_version 131) — Added safe structured OpenAI Responses terminal-event
