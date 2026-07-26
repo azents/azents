@@ -35,6 +35,7 @@ import {
   IconRefresh,
   IconServer,
   IconSettings,
+  IconShieldCog,
   IconSun,
   IconUser,
   IconUsersGroup,
@@ -107,6 +108,12 @@ const RESOURCES: ResourceItem[] = [
     list: "/runtime-providers",
     icon: <IconServer size={20} />,
     label: "Runtime Providers",
+  },
+  {
+    name: "runtime-execution",
+    list: "/runtime-execution",
+    icon: <IconShieldCog size={20} />,
+    label: "Runtime Execution",
   },
   {
     name: "system-settings",

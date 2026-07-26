@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  | 
 **state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  | 
+**execution_policy** | [**AgentRuntimeExecutionPolicyStatusResponse**](AgentRuntimeExecutionPolicyStatusResponse.md) |  | 
 **command_type** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  | 
 **desired_generation** | **int** |  | 
 

@@ -13,6 +13,7 @@ Name | Type | Description | Notes
 **updated_by_user_id** | **str** |  | 
 **created_at** | **datetime** |  | 
 **updated_at** | **datetime** |  | 
+**capabilities** | [**RuntimeExecutionManagementCapabilitiesResponse**](RuntimeExecutionManagementCapabilitiesResponse.md) |  | 
 
 ## Example
 

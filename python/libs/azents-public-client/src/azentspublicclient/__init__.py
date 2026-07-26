@@ -73,6 +73,7 @@ __all__ = [
     "AgentRuntimeExecutionPolicyApplyResponse",
     "AgentRuntimeExecutionPolicyReplaceRequest",
     "AgentRuntimeExecutionPolicyResponse",
+    "AgentRuntimeExecutionPolicyStatusResponse",
     "AgentRuntimeFailureResponse",
     "AgentRuntimeLifecycleResponse",
     "AgentRuntimeRawStateResponse",
@@ -344,10 +345,14 @@ __all__ = [
     "RuntimeExecutionAvailabilityReason",
     "RuntimeExecutionBooleanModule",
     "RuntimeExecutionBooleanRestriction",
+    "RuntimeExecutionCapabilitySummaryResponse",
     "RuntimeExecutionChangeDirection",
     "RuntimeExecutionChangeSummary",
+    "RuntimeExecutionConfiguredSummaryResponse",
     "RuntimeExecutionFieldChange",
+    "RuntimeExecutionManagementCapabilitiesResponse",
     "RuntimeExecutionManagementLayer",
+    "RuntimeExecutionModuleId",
     "RuntimeExecutionNetworkMode",
     "RuntimeExecutionNetworkModule",
     "RuntimeExecutionNetworkRestriction",
@@ -356,12 +361,15 @@ __all__ = [
     "RuntimeExecutionPolicyDocument",
     "RuntimeExecutionPolicyLayer",
     "RuntimeExecutionPolicyRestriction",
+    "RuntimeExecutionPolicyStatus",
     "RuntimeExecutionProfileLifecycle",
     "RuntimeExecutionReduction",
     "RuntimeExecutionReductionReason",
+    "RuntimeExecutionRequiredAction",
     "RuntimeExecutionResolution",
     "RuntimeExecutionResourceModule",
     "RuntimeExecutionResourceRestriction",
+    "RuntimeExecutionSnapshotSummaryResponse",
     "RuntimeExecutionSourceVersions",
     "RuntimeExecutionStorageMode",
     "RuntimeExecutionStorageModule",
@@ -513,6 +521,7 @@ from azentspublicclient.models.agent_runtime_actions_response import AgentRuntim
 from azentspublicclient.models.agent_runtime_execution_policy_apply_response import AgentRuntimeExecutionPolicyApplyResponse as AgentRuntimeExecutionPolicyApplyResponse
 from azentspublicclient.models.agent_runtime_execution_policy_replace_request import AgentRuntimeExecutionPolicyReplaceRequest as AgentRuntimeExecutionPolicyReplaceRequest
 from azentspublicclient.models.agent_runtime_execution_policy_response import AgentRuntimeExecutionPolicyResponse as AgentRuntimeExecutionPolicyResponse
+from azentspublicclient.models.agent_runtime_execution_policy_status_response import AgentRuntimeExecutionPolicyStatusResponse as AgentRuntimeExecutionPolicyStatusResponse
 from azentspublicclient.models.agent_runtime_failure_response import AgentRuntimeFailureResponse as AgentRuntimeFailureResponse
 from azentspublicclient.models.agent_runtime_lifecycle_response import AgentRuntimeLifecycleResponse as AgentRuntimeLifecycleResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse as AgentRuntimeRawStateResponse
@@ -784,10 +793,14 @@ from azentspublicclient.models.runtime_execution_audit_event_type import Runtime
 from azentspublicclient.models.runtime_execution_availability_reason import RuntimeExecutionAvailabilityReason as RuntimeExecutionAvailabilityReason
 from azentspublicclient.models.runtime_execution_boolean_module import RuntimeExecutionBooleanModule as RuntimeExecutionBooleanModule
 from azentspublicclient.models.runtime_execution_boolean_restriction import RuntimeExecutionBooleanRestriction as RuntimeExecutionBooleanRestriction
+from azentspublicclient.models.runtime_execution_capability_summary_response import RuntimeExecutionCapabilitySummaryResponse as RuntimeExecutionCapabilitySummaryResponse
 from azentspublicclient.models.runtime_execution_change_direction import RuntimeExecutionChangeDirection as RuntimeExecutionChangeDirection
 from azentspublicclient.models.runtime_execution_change_summary import RuntimeExecutionChangeSummary as RuntimeExecutionChangeSummary
+from azentspublicclient.models.runtime_execution_configured_summary_response import RuntimeExecutionConfiguredSummaryResponse as RuntimeExecutionConfiguredSummaryResponse
 from azentspublicclient.models.runtime_execution_field_change import RuntimeExecutionFieldChange as RuntimeExecutionFieldChange
+from azentspublicclient.models.runtime_execution_management_capabilities_response import RuntimeExecutionManagementCapabilitiesResponse as RuntimeExecutionManagementCapabilitiesResponse
 from azentspublicclient.models.runtime_execution_management_layer import RuntimeExecutionManagementLayer as RuntimeExecutionManagementLayer
+from azentspublicclient.models.runtime_execution_module_id import RuntimeExecutionModuleId as RuntimeExecutionModuleId
 from azentspublicclient.models.runtime_execution_network_mode import RuntimeExecutionNetworkMode as RuntimeExecutionNetworkMode
 from azentspublicclient.models.runtime_execution_network_module import RuntimeExecutionNetworkModule as RuntimeExecutionNetworkModule
 from azentspublicclient.models.runtime_execution_network_restriction import RuntimeExecutionNetworkRestriction as RuntimeExecutionNetworkRestriction
@@ -796,12 +809,15 @@ from azentspublicclient.models.runtime_execution_policy_audit_list_response impo
 from azentspublicclient.models.runtime_execution_policy_document import RuntimeExecutionPolicyDocument as RuntimeExecutionPolicyDocument
 from azentspublicclient.models.runtime_execution_policy_layer import RuntimeExecutionPolicyLayer as RuntimeExecutionPolicyLayer
 from azentspublicclient.models.runtime_execution_policy_restriction import RuntimeExecutionPolicyRestriction as RuntimeExecutionPolicyRestriction
+from azentspublicclient.models.runtime_execution_policy_status import RuntimeExecutionPolicyStatus as RuntimeExecutionPolicyStatus
 from azentspublicclient.models.runtime_execution_profile_lifecycle import RuntimeExecutionProfileLifecycle as RuntimeExecutionProfileLifecycle
 from azentspublicclient.models.runtime_execution_reduction import RuntimeExecutionReduction as RuntimeExecutionReduction
 from azentspublicclient.models.runtime_execution_reduction_reason import RuntimeExecutionReductionReason as RuntimeExecutionReductionReason
+from azentspublicclient.models.runtime_execution_required_action import RuntimeExecutionRequiredAction as RuntimeExecutionRequiredAction
 from azentspublicclient.models.runtime_execution_resolution import RuntimeExecutionResolution as RuntimeExecutionResolution
 from azentspublicclient.models.runtime_execution_resource_module import RuntimeExecutionResourceModule as RuntimeExecutionResourceModule
 from azentspublicclient.models.runtime_execution_resource_restriction import RuntimeExecutionResourceRestriction as RuntimeExecutionResourceRestriction
+from azentspublicclient.models.runtime_execution_snapshot_summary_response import RuntimeExecutionSnapshotSummaryResponse as RuntimeExecutionSnapshotSummaryResponse
 from azentspublicclient.models.runtime_execution_source_versions import RuntimeExecutionSourceVersions as RuntimeExecutionSourceVersions
 from azentspublicclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode as RuntimeExecutionStorageMode
 from azentspublicclient.models.runtime_execution_storage_module import RuntimeExecutionStorageModule as RuntimeExecutionStorageModule

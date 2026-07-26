@@ -32,6 +32,7 @@ from azents.repos.agent_runtime.data import (
 from azents.services.runtime_execution_policy.application_service import (
     RuntimeExecutionPolicyApplicationService,
     RuntimeExecutionPolicyApplicationUnavailable,
+    RuntimeExecutionPolicyStatusProjection,
 )
 from azents.services.runtime_provider_selection.data import (
     RuntimeProviderSelectionUnavailable,
@@ -110,7 +111,21 @@ class AgentRuntimeService:
                     message=error.message,
                 )
             )
-        return Success(self._build_output(runtime))
+        try:
+            execution_policy = (
+                await self.execution_policy_application_service.get_status(
+                    agent_id=agent_id
+                )
+            )
+        except RuntimeExecutionPolicyApplicationUnavailable as error:
+            return Failure(
+                RuntimeProviderUnavailable(
+                    code=error.code,
+                    provider_id=None,
+                    message=error.code,
+                )
+            )
+        return Success(self._build_output(runtime, execution_policy=execution_policy))
 
     async def start(
         self,
@@ -238,6 +253,7 @@ class AgentRuntimeService:
                 reset_final_desired_state=final_desired_state,
                 terminal_delete_requested=False,
             )
+            execution_policy = await application.get_status(agent_id=agent_id)
         except RuntimeProviderSelectionUnavailable as error:
             return Failure(
                 RuntimeProviderUnavailable(
@@ -260,6 +276,7 @@ class AgentRuntimeService:
                 state=self.calculate_state(command.runtime),
                 command_type=command.command_type,
                 desired_generation=command.desired_generation,
+                execution_policy=execution_policy,
             )
         )
 
@@ -322,6 +339,7 @@ class AgentRuntimeService:
                 reset_final_desired_state=None,
                 terminal_delete_requested=False,
             )
+            execution_policy = await application.get_status(agent_id=agent_id)
         except RuntimeProviderSelectionUnavailable as error:
             return Failure(
                 RuntimeProviderUnavailable(
@@ -344,6 +362,7 @@ class AgentRuntimeService:
                 state=self.calculate_state(command.runtime),
                 command_type=command.command_type,
                 desired_generation=command.desired_generation,
+                execution_policy=execution_policy,
             )
         )
 
@@ -378,11 +397,17 @@ class AgentRuntimeService:
         )
         return result.runtime
 
-    def _build_output(self, runtime: AgentRuntime) -> AgentRuntimeOutput:
+    def _build_output(
+        self,
+        runtime: AgentRuntime,
+        *,
+        execution_policy: RuntimeExecutionPolicyStatusProjection,
+    ) -> AgentRuntimeOutput:
         """Combine Runtime raw state and summary."""
         return AgentRuntimeOutput(
             runtime=runtime,
             state=self.calculate_state(runtime),
+            execution_policy=execution_policy,
         )
 
     def calculate_state(self, runtime: AgentRuntime) -> AgentRuntimeSummaryState:

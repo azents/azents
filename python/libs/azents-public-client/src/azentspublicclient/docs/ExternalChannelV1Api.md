@@ -2704,7 +2704,7 @@ Name | Type | Description  | Notes
 
 Validate Multi Slack Connection
 
-Validate one Workspace Slack Multi App.
+Validate one Workspace Multi App.
 
 ### Example
 

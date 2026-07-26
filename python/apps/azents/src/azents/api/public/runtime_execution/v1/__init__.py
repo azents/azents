@@ -50,7 +50,10 @@ async def get_workspace_policy(
         Permissions.RUNTIME_EXECUTION_POLICY_READ,
     )
     policy = await service.get_workspace_policy(member.workspace_id)
-    return WorkspaceRuntimeExecutionPolicyResponse.convert_from(policy)
+    return WorkspaceRuntimeExecutionPolicyResponse.convert_from(
+        policy,
+        capabilities=service.get_management_capabilities(),
+    )
 
 
 @router.put("/workspaces/{handle}/policy")
@@ -82,7 +85,10 @@ async def replace_workspace_policy(
         RuntimeExecutionRestrictionExpansion,
     ) as error:
         _raise_policy_error(error)
-    return WorkspaceRuntimeExecutionPolicyResponse.convert_from(policy)
+    return WorkspaceRuntimeExecutionPolicyResponse.convert_from(
+        policy,
+        capabilities=service.get_management_capabilities(),
+    )
 
 
 @router.get("/workspaces/{handle}/profiles")

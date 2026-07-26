@@ -7,6 +7,7 @@ Paginated Profile collection.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **items** | [**List[RuntimeExecutionProfileResponse]**](RuntimeExecutionProfileResponse.md) |  | 
+**capabilities** | [**RuntimeExecutionManagementCapabilitiesResponse**](RuntimeExecutionManagementCapabilitiesResponse.md) |  | 
 
 ## Example
 

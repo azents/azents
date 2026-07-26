@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from azentsadminclient.models.runtime_execution_management_capabilities_response import RuntimeExecutionManagementCapabilitiesResponse
 from azentsadminclient.models.runtime_execution_policy_document import RuntimeExecutionPolicyDocument
 from typing import Optional, Set
 from typing_extensions import Self
@@ -35,8 +36,9 @@ class RuntimeExecutionPlatformPolicyResponse(BaseModel):
     updated_by_user_id: Optional[StrictStr]
     created_at: datetime
     updated_at: datetime
+    capabilities: RuntimeExecutionManagementCapabilitiesResponse
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "version", "policy", "digest", "updated_by_user_id", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "version", "policy", "digest", "updated_by_user_id", "created_at", "updated_at", "capabilities"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -82,6 +84,9 @@ class RuntimeExecutionPlatformPolicyResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of policy
         if self.policy:
             _dict['policy'] = self.policy.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of capabilities
+        if self.capabilities:
+            _dict['capabilities'] = self.capabilities.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -110,7 +115,8 @@ class RuntimeExecutionPlatformPolicyResponse(BaseModel):
             "digest": obj.get("digest"),
             "updated_by_user_id": obj.get("updated_by_user_id"),
             "created_at": obj.get("created_at"),
-            "updated_at": obj.get("updated_at")
+            "updated_at": obj.get("updated_at"),
+            "capabilities": RuntimeExecutionManagementCapabilitiesResponse.from_dict(obj["capabilities"]) if obj.get("capabilities") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

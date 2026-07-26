@@ -16,6 +16,7 @@ Name | Type | Description | Notes
 **effective_preview** | [**RuntimeExecutionResolution**](RuntimeExecutionResolution.md) |  | 
 **provider_compatibility_evaluated** | **bool** |  | 
 **updated_at** | **datetime** |  | 
+**capabilities** | [**RuntimeExecutionManagementCapabilitiesResponse**](RuntimeExecutionManagementCapabilitiesResponse.md) |  | 
 
 ## Example
 

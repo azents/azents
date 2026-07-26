@@ -1,5 +1,6 @@
 """Runtime execution policy service tests."""
 
+import dataclasses
 import datetime
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, cast
@@ -12,6 +13,7 @@ from azents.core.enums import WorkspaceUserRole
 from azents.core.runtime_execution_policy import (
     RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
     SYSTEM_STANDARD_PROFILE_ID,
+    RuntimeExecutionAvailabilityReason,
     RuntimeExecutionBooleanModule,
     RuntimeExecutionBooleanRestriction,
     RuntimeExecutionChangeDirection,
@@ -73,7 +75,27 @@ def _expanded_standard() -> RuntimeExecutionPolicyDocument:
                 module_id=RuntimeExecutionModuleId.IMAGE_BUILD,
                 version=1,
                 enabled=True,
-            )
+            ),
+            "container_run": RuntimeExecutionBooleanModule(
+                module_id=RuntimeExecutionModuleId.CONTAINER_RUN,
+                version=1,
+                enabled=True,
+            ),
+            "resources": policy.resources.model_copy(
+                update={
+                    "cpu_millicores": 1_000,
+                    "memory_bytes": 1_000,
+                    "pids": 100,
+                    "container_count": 10,
+                    "ephemeral_storage_bytes": 1_000,
+                }
+            ),
+            "engine_storage": policy.engine_storage.model_copy(
+                update={
+                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
+                    "capacity_bytes": 1_000,
+                }
+            ),
         }
     )
 
@@ -101,6 +123,16 @@ def _profile(
         created_at=_NOW,
         updated_at=_NOW,
     )
+
+
+def _profiles(profile_ids: frozenset[str]) -> list[RuntimeExecutionProfile]:
+    return [
+        _profile(
+            reserved=profile_id == SYSTEM_STANDARD_PROFILE_ID,
+            profile_id=profile_id,
+        )
+        for profile_id in sorted(profile_ids)
+    ]
 
 
 def _workspace(
@@ -219,7 +251,7 @@ async def test_workspace_restriction_cannot_expand_platform_boundary() -> None:
     repository = Mock(spec=RuntimeExecutionPolicyRepository)
     repository.get_workspace = AsyncMock(return_value=None)
     repository.get_platform = AsyncMock(return_value=_platform())
-    repository.profile_ids_exist = AsyncMock()
+    repository.list_profiles = AsyncMock()
     repository.replace_workspace = AsyncMock()
     repository.append_audit_event = AsyncMock()
     service = _service(repository)
@@ -247,7 +279,7 @@ async def test_workspace_restriction_cannot_expand_platform_boundary() -> None:
             ),
         )
 
-    repository.profile_ids_exist.assert_not_awaited()
+    repository.list_profiles.assert_not_awaited()
     repository.replace_workspace.assert_not_awaited()
     repository.append_audit_event.assert_not_awaited()
 
@@ -294,6 +326,59 @@ async def test_agent_cannot_newly_select_workspace_disallowed_profile() -> None:
             AgentRuntimeExecutionSettingMutation(
                 expected_version=1,
                 profile_id="profile-2",
+                restriction=restriction,
+                actor_workspace_user_id="workspace-user-1",
+                correlation_id="correlation-1",
+            ),
+        )
+
+    repository.replace_agent_setting.assert_not_awaited()
+    repository.append_audit_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_agent_cannot_newly_select_capability_unavailable_profile() -> None:
+    """An unsupported Profile cannot become a new Agent selection."""
+    restriction = empty_runtime_execution_restriction()
+    current = AgentRuntimeExecutionSetting(
+        agent_id="agent-1",
+        profile_id=SYSTEM_STANDARD_PROFILE_ID,
+        version=1,
+        restriction=restriction,
+        digest=digest_runtime_execution_policy(restriction),
+        updated_by_workspace_user_id=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    unsupported_policy = _expanded_standard()
+    unsupported = dataclasses.replace(
+        _profile(reserved=False, profile_id="nested-engine"),
+        policy=unsupported_policy,
+        digest=digest_runtime_execution_policy(unsupported_policy),
+    )
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.get_agent_setting = AsyncMock(return_value=current)
+    repository.get_agent_workspace_id = AsyncMock(return_value="workspace-1")
+    repository.get_profile = AsyncMock(return_value=unsupported)
+    repository.get_platform = AsyncMock(return_value=_platform())
+    repository.get_workspace = AsyncMock(
+        return_value=_workspace(
+            allowed_profile_ids=frozenset(
+                {SYSTEM_STANDARD_PROFILE_ID, "nested-engine"}
+            ),
+            restriction=restriction,
+        )
+    )
+    repository.replace_agent_setting = AsyncMock()
+    repository.append_audit_event = AsyncMock()
+    service = _service(repository)
+
+    with pytest.raises(RuntimeExecutionPolicyUnavailable, match="profile_unavailable"):
+        await service.replace_agent_setting(
+            "agent-1",
+            AgentRuntimeExecutionSettingMutation(
+                expected_version=1,
+                profile_id="nested-engine",
                 restriction=restriction,
                 actor_workspace_user_id="workspace-user-1",
                 correlation_id="correlation-1",
@@ -372,7 +457,7 @@ async def test_workspace_restriction_audit_aligns_optional_nested_modules(
         )
     )
     repository.get_platform = AsyncMock(return_value=_platform())
-    repository.profile_ids_exist = AsyncMock(return_value=True)
+    repository.list_profiles = AsyncMock(return_value=_profiles(allowed))
     repository.replace_workspace = AsyncMock(
         return_value=_workspace(
             allowed_profile_ids=allowed,
@@ -439,7 +524,7 @@ async def test_workspace_allowance_audit_classifies_set_direction(
     repository = Mock(spec=RuntimeExecutionPolicyRepository)
     repository.get_workspace = AsyncMock(return_value=current_workspace)
     repository.get_platform = AsyncMock(return_value=_platform())
-    repository.profile_ids_exist = AsyncMock(return_value=True)
+    repository.list_profiles = AsyncMock(return_value=_profiles(current))
     repository.replace_workspace = AsyncMock(return_value=updated_workspace)
     repository.append_audit_event = AsyncMock()
     service = _service(repository)
@@ -486,7 +571,7 @@ async def test_workspace_first_materialization_uses_implicit_standard_allowance(
     repository = Mock(spec=RuntimeExecutionPolicyRepository)
     repository.get_workspace = AsyncMock(return_value=None)
     repository.get_platform = AsyncMock(return_value=_platform())
-    repository.profile_ids_exist = AsyncMock(return_value=True)
+    repository.list_profiles = AsyncMock(return_value=_profiles(allowed_profile_ids))
     repository.replace_workspace = AsyncMock(
         return_value=_workspace(
             allowed_profile_ids=allowed_profile_ids,
@@ -598,8 +683,8 @@ async def test_agent_policy_read_rejects_non_admin_workspace_manager() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_admin_receives_hierarchy_preview_without_provider_claim() -> None:
-    """Agent administrators receive safe hierarchy state without fake compatibility."""
+async def test_agent_admin_receives_current_server_capability_evaluation() -> None:
+    """Agent administrators receive the current conservative compatibility gate."""
     restriction = empty_runtime_execution_restriction()
     setting = AgentRuntimeExecutionSetting(
         agent_id="agent-1",
@@ -630,4 +715,131 @@ async def test_agent_admin_receives_hierarchy_preview_without_provider_claim() -
 
     assert policy.setting == setting
     assert policy.resolution.available
-    assert policy.provider_compatibility_evaluated is False
+    assert policy.provider_compatibility_evaluated is True
+    assert not policy.capabilities.image_build
+    assert not policy.capabilities.container_run
+    assert not policy.capabilities.compose
+    assert policy.capabilities.storage_modes == (RuntimeExecutionStorageMode.NONE,)
+
+
+@pytest.mark.asyncio
+async def test_platform_write_rejects_unavailable_engine_authority() -> None:
+    """Platform policy cannot store authority without compatible enforcement."""
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.get_platform = AsyncMock()
+    repository.replace_platform = AsyncMock()
+    repository.append_audit_event = AsyncMock()
+    service = _service(repository)
+
+    with pytest.raises(
+        RuntimeExecutionPolicyUnavailable,
+        match="provider_engine_unsupported",
+    ):
+        await service.replace_platform(
+            RuntimeExecutionPlatformMutation(
+                expected_version=1,
+                policy=_expanded_standard(),
+                actor_user_id="user-1",
+                correlation_id="correlation-1",
+            )
+        )
+
+    repository.get_platform.assert_not_awaited()
+    repository.replace_platform.assert_not_awaited()
+    repository.append_audit_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_profile_create_rejects_unavailable_engine_authority() -> None:
+    """Profiles cannot store authority without compatible enforcement."""
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.create_profile = AsyncMock()
+    repository.append_audit_event = AsyncMock()
+    service = _service(repository)
+
+    with pytest.raises(
+        RuntimeExecutionPolicyUnavailable,
+        match="provider_engine_unsupported",
+    ):
+        await service.create_profile(
+            profile_id="nested-engine",
+            display_name="Nested engine",
+            description="Unavailable authority",
+            policy=_expanded_standard(),
+            actor_user_id="user-1",
+            correlation_id="correlation-1",
+        )
+
+    repository.create_profile.assert_not_awaited()
+    repository.append_audit_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_workspace_cannot_save_unavailable_profile_allowance() -> None:
+    """Workspace policy cannot newly allow an unsupported Profile."""
+    restriction = empty_runtime_execution_restriction()
+    allowed = frozenset({SYSTEM_STANDARD_PROFILE_ID, "nested-engine"})
+    unsupported_policy = _expanded_standard()
+    unsupported = dataclasses.replace(
+        _profile(reserved=False, profile_id="nested-engine"),
+        policy=unsupported_policy,
+        digest=digest_runtime_execution_policy(unsupported_policy),
+    )
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.get_workspace = AsyncMock(return_value=None)
+    repository.get_platform = AsyncMock(return_value=_platform())
+    repository.list_profiles = AsyncMock(
+        return_value=[_profile(reserved=True), unsupported]
+    )
+    repository.replace_workspace = AsyncMock()
+    repository.append_audit_event = AsyncMock()
+    service = _service(repository)
+
+    with pytest.raises(RuntimeExecutionPolicyUnavailable, match="profile_unavailable"):
+        await service.replace_workspace(
+            "workspace-1",
+            WorkspaceRuntimeExecutionPolicyMutation(
+                expected_version=0,
+                restriction=restriction,
+                allowed_profile_ids=allowed,
+                actor_workspace_user_id="workspace-user-1",
+                correlation_id="correlation-1",
+            ),
+        )
+
+    repository.replace_workspace.assert_not_awaited()
+    repository.append_audit_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_workspace_profile_list_marks_unsupported_authority_unavailable() -> None:
+    """Workspace availability is derived from the server capability gate."""
+    unsupported_policy = _expanded_standard()
+    unsupported = dataclasses.replace(
+        _profile(reserved=False, profile_id="nested-engine"),
+        policy=unsupported_policy,
+        digest=digest_runtime_execution_policy(unsupported_policy),
+    )
+    repository = Mock(spec=RuntimeExecutionPolicyRepository)
+    repository.get_workspace = AsyncMock(
+        return_value=_workspace(
+            allowed_profile_ids=frozenset({"nested-engine"}),
+            restriction=empty_runtime_execution_restriction(),
+        )
+    )
+    repository.list_profiles = AsyncMock(return_value=[unsupported])
+    service = _service(repository)
+
+    profiles = await service.list_workspace_profiles(
+        "workspace-1",
+        include_retired=True,
+        offset=0,
+        limit=100,
+    )
+
+    assert len(profiles) == 1
+    assert not profiles[0].available
+    assert (
+        profiles[0].reason
+        is RuntimeExecutionAvailabilityReason.PROVIDER_ENGINE_UNSUPPORTED
+    )

@@ -144,13 +144,25 @@ class RuntimeExecutionProfileAvailability:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeExecutionManagementCapabilities:
+    """Safe server-owned capability availability for policy management UI."""
+
+    image_build: bool
+    container_run: bool
+    compose: bool
+    storage_modes: tuple[RuntimeExecutionStorageMode, ...]
+    network_modes: tuple[RuntimeExecutionNetworkMode, ...]
+
+
+@dataclasses.dataclass(frozen=True)
 class AgentRuntimeExecutionPolicyView:
-    """Configured Agent execution intent with a hierarchy-only preview."""
+    """Configured Agent execution intent with current capability evaluation."""
 
     setting: AgentRuntimeExecutionSetting
     profile: RuntimeExecutionProfile
     resolution: RuntimeExecutionResolution
     provider_compatibility_evaluated: bool
+    capabilities: RuntimeExecutionManagementCapabilities
 
 
 @dataclasses.dataclass
@@ -168,6 +180,10 @@ class RuntimeExecutionPolicyService:
         AgentAdminRepository,
         Depends(AgentAdminRepository),
     ]
+
+    def get_management_capabilities(self) -> RuntimeExecutionManagementCapabilities:
+        """Return the current server-owned policy management capability gate."""
+        return _management_capabilities()
 
     async def get_platform(self) -> RuntimeExecutionPlatformPolicy:
         """Return the current Platform execution-policy ceiling."""
@@ -290,7 +306,12 @@ class RuntimeExecutionPolicyService:
             workspace,
         ).allowed_profile_ids
         return [
-            _profile_availability(profile, allowed_profile_ids) for profile in profiles
+            _profile_availability(
+                profile,
+                allowed_profile_ids,
+                capability_reason=_policy_capability_reason(profile.policy),
+            )
+            for profile in profiles
         ]
 
     async def list_workspace_audit_events(
@@ -383,7 +404,8 @@ class RuntimeExecutionPolicyService:
             setting=setting,
             profile=profile,
             resolution=resolution,
-            provider_compatibility_evaluated=False,
+            provider_compatibility_evaluated=True,
+            capabilities=_management_capabilities(),
         )
 
     async def replace_agent_setting_for_manager(
@@ -477,6 +499,10 @@ class RuntimeExecutionPolicyService:
         mutation: RuntimeExecutionPlatformMutation,
     ) -> RuntimeExecutionPlatformPolicy:
         """Replace Platform policy with atomic expected-version audit."""
+        _require_policy_capability_available(
+            mutation.policy,
+            target_id=RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
+        )
         async with self.session_manager() as session:
             current = await self.repository.get_platform(session, for_update=True)
             if current is None:
@@ -541,6 +567,7 @@ class RuntimeExecutionPolicyService:
                 "reserved_profile_identity",
                 profile_id,
             )
+        _require_policy_capability_available(policy, target_id=profile_id)
         async with self.session_manager() as session:
             created = await self.repository.create_profile(
                 session,
@@ -600,6 +627,10 @@ class RuntimeExecutionPolicyService:
                     "reserved_profile_policy_immutable",
                     profile_id,
                 )
+            _require_policy_capability_available(
+                mutation.policy,
+                target_id=profile_id,
+            )
             changed = classify_runtime_execution_change(
                 current.policy,
                 mutation.policy,
@@ -730,12 +761,30 @@ class RuntimeExecutionPolicyService:
                 mutation.restriction,
                 governing_layer=RuntimeExecutionPolicyLayer.PLATFORM,
             )
-            if not await self.repository.profile_ids_exist(
+            profiles = await self.repository.list_profiles(
                 session,
+                include_retired=True,
                 profile_ids=mutation.allowed_profile_ids,
+                offset=0,
+                limit=len(mutation.allowed_profile_ids),
+            )
+            if {profile.id for profile in profiles} != set(
+                mutation.allowed_profile_ids
             ):
                 raise RuntimeExecutionPolicyUnavailable(
                     "allowed_profile_not_found",
+                    workspace_id,
+                )
+            if any(
+                not _profile_availability(
+                    profile,
+                    mutation.allowed_profile_ids,
+                    capability_reason=_policy_capability_reason(profile.policy),
+                ).available
+                for profile in profiles
+            ):
+                raise RuntimeExecutionPolicyUnavailable(
+                    "profile_unavailable",
                     workspace_id,
                 )
             digest = digest_runtime_execution_policy(mutation.restriction)
@@ -865,6 +914,7 @@ class RuntimeExecutionPolicyService:
             if selecting_new_profile and (
                 profile.lifecycle is not RuntimeExecutionProfileLifecycle.ACTIVE
                 or profile.id not in allowed_profile_ids
+                or _policy_capability_reason(profile.policy) is not None
             ):
                 raise RuntimeExecutionPolicyUnavailable(
                     "profile_unavailable",
@@ -1207,17 +1257,64 @@ def _string_set(value: JsonValue) -> set[str]:
 
 
 def _validation_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
-    """Return unbounded typed support used only for hierarchy validation."""
+    """Return only capability support backed by the current implementation."""
     return RuntimeExecutionProviderCapabilities(
         supported_modules=frozenset(
             RuntimeExecutionModuleSupport(module_id=module_id, version=1)
             for module_id in RuntimeExecutionModuleId
         ),
-        privileged_engine=True,
-        storage_modes=frozenset(RuntimeExecutionStorageMode),
-        network_modes=frozenset(RuntimeExecutionNetworkMode),
+        privileged_engine=False,
+        storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
+        network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
         resource_maxima=None,
     )
+
+
+def _management_capabilities() -> RuntimeExecutionManagementCapabilities:
+    """Project current compatibility into a stable UI capability gate."""
+    capabilities = _validation_provider_capabilities()
+    privileged_engine = capabilities.privileged_engine
+    return RuntimeExecutionManagementCapabilities(
+        image_build=privileged_engine,
+        container_run=privileged_engine,
+        compose=privileged_engine,
+        storage_modes=tuple(sorted(capabilities.storage_modes)),
+        network_modes=tuple(sorted(capabilities.network_modes)),
+    )
+
+
+def _policy_capability_reason(
+    policy: RuntimeExecutionPolicyDocument,
+) -> RuntimeExecutionAvailabilityReason | None:
+    """Return a bounded incompatibility reason for one raw authority policy."""
+    resolution = resolve_runtime_execution_policy(
+        platform_policy=policy,
+        profile_policy=policy,
+        workspace_restriction=empty_runtime_execution_restriction(),
+        agent_restriction=empty_runtime_execution_restriction(),
+        source_versions=RuntimeExecutionSourceVersions(
+            platform=1,
+            profile=1,
+            workspace=1,
+            agent=1,
+        ),
+        provider_capabilities=_validation_provider_capabilities(),
+        profile_active=True,
+        profile_allowed=True,
+        applied_policy=None,
+    )
+    return resolution.availability_reason
+
+
+def _require_policy_capability_available(
+    policy: RuntimeExecutionPolicyDocument,
+    *,
+    target_id: str,
+) -> None:
+    """Reject authority content without current compatible enforcement."""
+    reason = _policy_capability_reason(policy)
+    if reason is not None:
+        raise RuntimeExecutionPolicyUnavailable(reason.value, target_id)
 
 
 def _workspace_view(
@@ -1248,6 +1345,8 @@ def _workspace_view(
 def _profile_availability(
     profile: RuntimeExecutionProfile,
     allowed_profile_ids: frozenset[str],
+    *,
+    capability_reason: RuntimeExecutionAvailabilityReason | None,
 ) -> RuntimeExecutionProfileAvailability:
     """Build one bounded Workspace-level Profile availability explanation."""
     allowed = profile.id in allowed_profile_ids
@@ -1255,6 +1354,8 @@ def _profile_availability(
         reason = RuntimeExecutionAvailabilityReason.PROFILE_RETIRED
     elif not allowed:
         reason = RuntimeExecutionAvailabilityReason.PROFILE_NOT_ALLOWED
+    elif capability_reason is not None:
+        reason = capability_reason
     else:
         reason = None
     return RuntimeExecutionProfileAvailability(

@@ -12327,6 +12327,9 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/RuntimeExecutionManagementCapabilitiesResponse"
           }
         },
         "type": "object",
@@ -12340,10 +12343,75 @@
           "digest",
           "effective_preview",
           "provider_compatibility_evaluated",
-          "updated_at"
+          "updated_at",
+          "capabilities"
         ],
         "title": "AgentRuntimeExecutionPolicyResponse",
         "description": "Configured Agent intent and hierarchy-only effective preview."
+      },
+      "AgentRuntimeExecutionPolicyStatusResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/RuntimeExecutionPolicyStatus"
+          },
+          "configured": {
+            "$ref": "#/components/schemas/RuntimeExecutionConfiguredSummaryResponse"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeExecutionSnapshotSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "applied": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeExecutionSnapshotSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "desired_generation": {
+            "type": "integer",
+            "title": "Desired Generation"
+          },
+          "governing_layers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RuntimeExecutionPolicyLayer"
+            },
+            "type": "object",
+            "title": "Governing Layers"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          },
+          "required_action": {
+            "$ref": "#/components/schemas/RuntimeExecutionRequiredAction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "configured",
+          "target",
+          "applied",
+          "desired_generation",
+          "governing_layers",
+          "reason_codes",
+          "required_action"
+        ],
+        "title": "AgentRuntimeExecutionPolicyStatusResponse",
+        "description": "Safe server-authoritative Runtime execution-policy status."
       },
       "AgentRuntimeFailureResponse": {
         "properties": {
@@ -12377,6 +12445,9 @@
           "state": {
             "$ref": "#/components/schemas/AgentRuntimeSummaryResponse"
           },
+          "execution_policy": {
+            "$ref": "#/components/schemas/AgentRuntimeExecutionPolicyStatusResponse"
+          },
           "command_type": {
             "$ref": "#/components/schemas/RuntimeLifecycleCommandType"
           },
@@ -12389,6 +12460,7 @@
         "required": [
           "runtime",
           "state",
+          "execution_policy",
           "command_type",
           "desired_generation"
         ],
@@ -12577,12 +12649,16 @@
           },
           "state": {
             "$ref": "#/components/schemas/AgentRuntimeSummaryResponse"
+          },
+          "execution_policy": {
+            "$ref": "#/components/schemas/AgentRuntimeExecutionPolicyStatusResponse"
           }
         },
         "type": "object",
         "required": [
           "runtime",
-          "state"
+          "state",
+          "execution_policy"
         ],
         "title": "AgentRuntimeResponse",
         "description": "Agent Runtime response."
@@ -22126,6 +22202,29 @@
         "title": "RuntimeExecutionBooleanRestriction",
         "description": "Boolean authority can only be explicitly disabled."
       },
+      "RuntimeExecutionCapabilitySummaryResponse": {
+        "properties": {
+          "module_id": {
+            "$ref": "#/components/schemas/RuntimeExecutionModuleId"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "module_id",
+          "version",
+          "enabled"
+        ],
+        "title": "RuntimeExecutionCapabilitySummaryResponse",
+        "description": "One safe Runtime execution capability summary."
+      },
       "RuntimeExecutionChangeDirection": {
         "type": "string",
         "enum": [
@@ -22161,6 +22260,53 @@
         "title": "RuntimeExecutionChangeSummary",
         "description": "Aggregate and field-level security direction."
       },
+      "RuntimeExecutionConfiguredSummaryResponse": {
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeExecutionCapabilitySummaryResponse"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "storage_mode": {
+            "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
+          },
+          "storage_capacity_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Capacity Bytes"
+          },
+          "network_mode": {
+            "$ref": "#/components/schemas/RuntimeExecutionNetworkMode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_id",
+          "digest",
+          "capabilities",
+          "storage_mode",
+          "storage_capacity_bytes",
+          "network_mode"
+        ],
+        "title": "RuntimeExecutionConfiguredSummaryResponse",
+        "description": "Safe configured Runtime execution-policy summary."
+      },
       "RuntimeExecutionFieldChange": {
         "properties": {
           "path": {
@@ -22182,6 +22328,46 @@
         "title": "RuntimeExecutionFieldChange",
         "description": "Security direction for one canonical policy field change."
       },
+      "RuntimeExecutionManagementCapabilitiesResponse": {
+        "properties": {
+          "image_build": {
+            "type": "boolean",
+            "title": "Image Build"
+          },
+          "container_run": {
+            "type": "boolean",
+            "title": "Container Run"
+          },
+          "compose": {
+            "type": "boolean",
+            "title": "Compose"
+          },
+          "storage_modes": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
+            },
+            "type": "array",
+            "title": "Storage Modes"
+          },
+          "network_modes": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeExecutionNetworkMode"
+            },
+            "type": "array",
+            "title": "Network Modes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_build",
+          "container_run",
+          "compose",
+          "storage_modes",
+          "network_modes"
+        ],
+        "title": "RuntimeExecutionManagementCapabilitiesResponse",
+        "description": "Safe server-owned policy management capability gate."
+      },
       "RuntimeExecutionManagementLayer": {
         "type": "string",
         "enum": [
@@ -22193,6 +22379,19 @@
         ],
         "title": "RuntimeExecutionManagementLayer",
         "description": "Management authority that produced one metadata audit event."
+      },
+      "RuntimeExecutionModuleId": {
+        "type": "string",
+        "enum": [
+          "container.image_build",
+          "container.run",
+          "container.compose",
+          "container.resources",
+          "engine.storage",
+          "network.egress"
+        ],
+        "title": "RuntimeExecutionModuleId",
+        "description": "Application-owned execution capability module identifiers."
       },
       "RuntimeExecutionNetworkMode": {
         "type": "string",
@@ -22574,6 +22773,18 @@
         "title": "RuntimeExecutionPolicyRestriction",
         "description": "Restrictive-only Workspace or Agent policy contribution."
       },
+      "RuntimeExecutionPolicyStatus": {
+        "type": "string",
+        "enum": [
+          "configured",
+          "pending",
+          "applied",
+          "unavailable",
+          "divergent"
+        ],
+        "title": "RuntimeExecutionPolicyStatus",
+        "description": "Server-derived relationship between configured and applied policy."
+      },
       "RuntimeExecutionProfileLifecycle": {
         "type": "string",
         "enum": [
@@ -22623,6 +22834,17 @@
         ],
         "title": "RuntimeExecutionReductionReason",
         "description": "Bounded reason attached to a resolved value reduction."
+      },
+      "RuntimeExecutionRequiredAction": {
+        "type": "string",
+        "enum": [
+          "none",
+          "apply",
+          "wait",
+          "administrator_action"
+        ],
+        "title": "RuntimeExecutionRequiredAction",
+        "description": "Bounded next action for one Runtime execution-policy status."
       },
       "RuntimeExecutionResolution": {
         "properties": {
@@ -22856,6 +23078,58 @@
         ],
         "title": "RuntimeExecutionResourceRestriction",
         "description": "Optional lower-layer resource ceilings."
+      },
+      "RuntimeExecutionSnapshotSummaryResponse": {
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "desired_generation": {
+            "type": "integer",
+            "title": "Desired Generation"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeExecutionCapabilitySummaryResponse"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "storage_mode": {
+            "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
+          },
+          "storage_capacity_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Capacity Bytes"
+          },
+          "network_mode": {
+            "$ref": "#/components/schemas/RuntimeExecutionNetworkMode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_id",
+          "digest",
+          "desired_generation",
+          "capabilities",
+          "storage_mode",
+          "storage_capacity_bytes",
+          "network_mode"
+        ],
+        "title": "RuntimeExecutionSnapshotSummaryResponse",
+        "description": "Safe target or applied Runtime execution-policy summary."
       },
       "RuntimeExecutionSourceVersions": {
         "properties": {
@@ -25597,6 +25871,9 @@
               }
             ],
             "title": "Updated At"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/RuntimeExecutionManagementCapabilitiesResponse"
           }
         },
         "type": "object",
@@ -25606,7 +25883,8 @@
           "restriction",
           "digest",
           "allowed_profile_ids",
-          "updated_at"
+          "updated_at",
+          "capabilities"
         ],
         "title": "WorkspaceRuntimeExecutionPolicyResponse",
         "description": "Current explicit or implicit Workspace execution policy."

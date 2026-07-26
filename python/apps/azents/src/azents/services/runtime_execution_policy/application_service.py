@@ -26,8 +26,11 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionModuleSupport,
     RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyDocument,
+    RuntimeExecutionPolicyLayer,
+    RuntimeExecutionPolicyStatus,
     RuntimeExecutionProfileLifecycle,
     RuntimeExecutionProviderCapabilities,
+    RuntimeExecutionRequiredAction,
     RuntimeExecutionResolution,
     RuntimeExecutionSourceVersions,
     RuntimeExecutionStorageMode,
@@ -83,6 +86,54 @@ class RuntimeExecutionPolicyConvergenceResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeExecutionCapabilitySummary:
+    """One safe boolean execution capability summary."""
+
+    module_id: RuntimeExecutionModuleId
+    version: int
+    enabled: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeExecutionConfiguredSummary:
+    """Current configured execution-policy summary."""
+
+    profile_id: str
+    digest: str
+    capabilities: tuple[RuntimeExecutionCapabilitySummary, ...]
+    storage_mode: RuntimeExecutionStorageMode
+    storage_capacity_bytes: int | None
+    network_mode: RuntimeExecutionNetworkMode
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeExecutionSnapshotSummary:
+    """Safe immutable target or applied snapshot summary."""
+
+    profile_id: str
+    digest: str
+    desired_generation: int
+    capabilities: tuple[RuntimeExecutionCapabilitySummary, ...]
+    storage_mode: RuntimeExecutionStorageMode
+    storage_capacity_bytes: int | None
+    network_mode: RuntimeExecutionNetworkMode
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeExecutionPolicyStatusProjection:
+    """Server-authoritative read-only Runtime execution-policy projection."""
+
+    status: RuntimeExecutionPolicyStatus
+    configured: RuntimeExecutionConfiguredSummary
+    target: RuntimeExecutionSnapshotSummary | None
+    applied: RuntimeExecutionSnapshotSummary | None
+    desired_generation: int
+    governing_layers: dict[str, RuntimeExecutionPolicyLayer]
+    reason_codes: tuple[str, ...]
+    required_action: RuntimeExecutionRequiredAction
+
+
+@dataclasses.dataclass(frozen=True)
 class _ResolvedRuntimePolicy:
     """Locked resolution inputs and current immutable application state."""
 
@@ -125,6 +176,16 @@ class RuntimeExecutionPolicyApplicationService:
         AgentAdminRepository,
         Depends(AgentAdminRepository),
     ]
+
+    async def get_status(
+        self,
+        *,
+        agent_id: str,
+    ) -> RuntimeExecutionPolicyStatusProjection:
+        """Return a read-only server-derived execution-policy status."""
+        async with self.session_manager() as session:
+            resolved = await self._resolve_read(session, agent_id=agent_id)
+        return _build_status_projection(resolved)
 
     async def apply_agent_for_manager(
         self,
@@ -438,9 +499,42 @@ class RuntimeExecutionPolicyApplicationService:
         agent_id: str,
         locked_runtime: AgentRuntime | None = None,
     ) -> _ResolvedRuntimePolicy:
-        runtime = (
-            locked_runtime
-            or await self.runtime_repository.get_by_agent_id_for_update(
+        return await self._resolve(
+            session,
+            agent_id=agent_id,
+            supplied_runtime=locked_runtime,
+            for_update=True,
+        )
+
+    async def _resolve_read(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> _ResolvedRuntimePolicy:
+        """Resolve current Runtime policy without locks or mutations."""
+        return await self._resolve(
+            session,
+            agent_id=agent_id,
+            supplied_runtime=None,
+            for_update=False,
+        )
+
+    async def _resolve(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        supplied_runtime: AgentRuntime | None,
+        for_update: bool,
+    ) -> _ResolvedRuntimePolicy:
+        runtime = supplied_runtime or (
+            await self.runtime_repository.get_by_agent_id_for_update(
+                session,
+                agent_id,
+            )
+            if for_update
+            else await self.runtime_repository.get_by_agent_id(
                 session,
                 agent_id,
             )
@@ -450,16 +544,19 @@ class RuntimeExecutionPolicyApplicationService:
                 "runtime_provider_binding_missing",
                 agent_id,
             )
-        platform = await self.policy_repository.get_platform(session, for_update=True)
+        platform = await self.policy_repository.get_platform(
+            session,
+            for_update=for_update,
+        )
         setting = await self.policy_repository.get_agent_setting(
             session,
             agent_id=agent_id,
-            for_update=True,
+            for_update=for_update,
         )
         workspace = await self.policy_repository.get_workspace(
             session,
             workspace_id=runtime.workspace_id,
-            for_update=True,
+            for_update=for_update,
         )
         if platform is None or setting is None:
             raise RuntimeExecutionPolicyApplicationUnavailable(
@@ -469,7 +566,7 @@ class RuntimeExecutionPolicyApplicationService:
         profile = await self.policy_repository.get_profile(
             session,
             profile_id=setting.profile_id,
-            for_update=True,
+            for_update=for_update,
         )
         if profile is None:
             raise RuntimeExecutionPolicyApplicationUnavailable(
@@ -484,7 +581,7 @@ class RuntimeExecutionPolicyApplicationService:
         target_snapshot = await self.snapshot_repository.get_snapshot(
             session,
             snapshot_id=runtime.runtime_policy_snapshot_id,
-            for_update=True,
+            for_update=for_update,
         )
         if target_snapshot is None:
             raise RuntimeExecutionPolicyApplicationUnavailable(
@@ -702,6 +799,197 @@ def _phase_three_provider_capabilities() -> RuntimeExecutionProviderCapabilities
         storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
         network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
         resource_maxima=None,
+    )
+
+
+def _build_status_projection(
+    resolved: _ResolvedRuntimePolicy,
+) -> RuntimeExecutionPolicyStatusProjection:
+    runtime = resolved.runtime
+    resolution = resolved.resolution
+    configured = _configured_summary(
+        profile_id=resolved.profile_id,
+        digest=resolution.digest,
+        policy=resolution.effective_policy,
+    )
+    target = _snapshot_summary(resolved.target_snapshot)
+    applied = _snapshot_summary(resolved.applied_snapshot)
+
+    if not resolution.available:
+        reason_codes = (
+            (resolution.availability_reason.value,)
+            if resolution.availability_reason is not None
+            else ("execution_policy_unavailable",)
+        )
+        return RuntimeExecutionPolicyStatusProjection(
+            status=RuntimeExecutionPolicyStatus.UNAVAILABLE,
+            configured=configured,
+            target=target,
+            applied=applied,
+            desired_generation=runtime.desired_generation,
+            governing_layers=dict(resolution.governing_layers),
+            reason_codes=reason_codes,
+            required_action=RuntimeExecutionRequiredAction.ADMINISTRATOR_ACTION,
+        )
+
+    divergence = _divergence_reasons(resolved)
+    if divergence:
+        return RuntimeExecutionPolicyStatusProjection(
+            status=RuntimeExecutionPolicyStatus.DIVERGENT,
+            configured=configured,
+            target=target,
+            applied=applied,
+            desired_generation=runtime.desired_generation,
+            governing_layers=dict(resolution.governing_layers),
+            reason_codes=divergence,
+            required_action=RuntimeExecutionRequiredAction.ADMINISTRATOR_ACTION,
+        )
+
+    configured_matches_target = _snapshot_matches_target(
+        resolved.target_snapshot,
+        execution_digest=resolution.digest,
+        source_versions=resolution.source_versions,
+        desired_generation=runtime.desired_generation,
+    )
+    if not configured_matches_target:
+        automatic = (
+            resolution.change.direction is RuntimeExecutionChangeDirection.RESTRICTIVE
+            and _automatic_convergence_source_allowed(resolved)
+        )
+        return RuntimeExecutionPolicyStatusProjection(
+            status=(
+                RuntimeExecutionPolicyStatus.PENDING
+                if automatic
+                else RuntimeExecutionPolicyStatus.CONFIGURED
+            ),
+            configured=configured,
+            target=target,
+            applied=applied,
+            desired_generation=runtime.desired_generation,
+            governing_layers=dict(resolution.governing_layers),
+            reason_codes=(
+                ("automatic_convergence_pending",)
+                if automatic
+                else ("explicit_apply_required",)
+            ),
+            required_action=(
+                RuntimeExecutionRequiredAction.WAIT
+                if automatic
+                else RuntimeExecutionRequiredAction.APPLY
+            ),
+        )
+
+    target_applied = (
+        resolved.target_snapshot.application_state
+        is RuntimePolicySnapshotApplicationState.APPLIED
+        and resolved.applied_snapshot is not None
+        and resolved.applied_snapshot.id == resolved.target_snapshot.id
+    )
+    return RuntimeExecutionPolicyStatusProjection(
+        status=(
+            RuntimeExecutionPolicyStatus.APPLIED
+            if target_applied
+            else RuntimeExecutionPolicyStatus.PENDING
+        ),
+        configured=configured,
+        target=target,
+        applied=applied,
+        desired_generation=runtime.desired_generation,
+        governing_layers=dict(resolution.governing_layers),
+        reason_codes=() if target_applied else ("application_pending",),
+        required_action=(
+            RuntimeExecutionRequiredAction.NONE
+            if target_applied
+            else RuntimeExecutionRequiredAction.WAIT
+        ),
+    )
+
+
+def _divergence_reasons(resolved: _ResolvedRuntimePolicy) -> tuple[str, ...]:
+    runtime = resolved.runtime
+    target = resolved.target_snapshot
+    applied = resolved.applied_snapshot
+    reasons: list[str] = []
+    if target.application_state is RuntimePolicySnapshotApplicationState.DIVERGENT:
+        reasons.append("target_divergent")
+    if (
+        target.execution_reported_digest is not None
+        and target.execution_reported_digest != target.execution_target_digest
+    ):
+        reasons.append("reported_digest_mismatch")
+    if target.target_desired_generation != runtime.desired_generation:
+        reasons.append("target_generation_mismatch")
+    if (
+        runtime.failure_generation == runtime.desired_generation
+        and runtime.failure_code is not None
+        and target.application_state
+        is not RuntimePolicySnapshotApplicationState.APPLIED
+    ):
+        reasons.append(runtime.failure_code)
+    if runtime.applied_runtime_policy_snapshot_id is not None:
+        if applied is None:
+            reasons.append("applied_snapshot_missing")
+        elif (
+            applied.application_state
+            is not RuntimePolicySnapshotApplicationState.APPLIED
+        ):
+            reasons.append("applied_snapshot_unverified")
+    if (
+        target.application_state is RuntimePolicySnapshotApplicationState.APPLIED
+        and runtime.applied_runtime_policy_snapshot_id != target.id
+    ):
+        reasons.append("applied_pointer_mismatch")
+    return tuple(dict.fromkeys(reasons))
+
+
+def _configured_summary(
+    *,
+    profile_id: str,
+    digest: str,
+    policy: RuntimeExecutionPolicyDocument,
+) -> RuntimeExecutionConfiguredSummary:
+    return RuntimeExecutionConfiguredSummary(
+        profile_id=profile_id,
+        digest=digest,
+        capabilities=_capability_summaries(policy),
+        storage_mode=policy.engine_storage.mode,
+        storage_capacity_bytes=policy.engine_storage.capacity_bytes,
+        network_mode=policy.network_egress.mode,
+    )
+
+
+def _snapshot_summary(
+    snapshot: RuntimePolicySnapshot | None,
+) -> RuntimeExecutionSnapshotSummary | None:
+    policy = _snapshot_policy(snapshot)
+    if (
+        snapshot is None
+        or policy is None
+        or snapshot.execution_profile_id is None
+        or snapshot.execution_target_digest is None
+    ):
+        return None
+    return RuntimeExecutionSnapshotSummary(
+        profile_id=snapshot.execution_profile_id,
+        digest=snapshot.execution_target_digest,
+        desired_generation=snapshot.target_desired_generation,
+        capabilities=_capability_summaries(policy),
+        storage_mode=policy.engine_storage.mode,
+        storage_capacity_bytes=policy.engine_storage.capacity_bytes,
+        network_mode=policy.network_egress.mode,
+    )
+
+
+def _capability_summaries(
+    policy: RuntimeExecutionPolicyDocument,
+) -> tuple[RuntimeExecutionCapabilitySummary, ...]:
+    return tuple(
+        RuntimeExecutionCapabilitySummary(
+            module_id=module.module_id,
+            version=module.version,
+            enabled=module.enabled,
+        )
+        for module in (policy.image_build, policy.container_run, policy.compose)
     )
 
 

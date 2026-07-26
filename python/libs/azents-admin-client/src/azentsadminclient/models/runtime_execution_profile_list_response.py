@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
+from azentsadminclient.models.runtime_execution_management_capabilities_response import RuntimeExecutionManagementCapabilitiesResponse
 from azentsadminclient.models.runtime_execution_profile_response import RuntimeExecutionProfileResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -28,8 +29,9 @@ class RuntimeExecutionProfileListResponse(BaseModel):
     Paginated Profile collection.
     """ # noqa: E501
     items: List[RuntimeExecutionProfileResponse]
+    capabilities: RuntimeExecutionManagementCapabilitiesResponse
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["items"]
+    __properties: ClassVar[List[str]] = ["items", "capabilities"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -79,6 +81,9 @@ class RuntimeExecutionProfileListResponse(BaseModel):
                 if _item_items:
                     _items.append(_item_items.to_dict())
             _dict['items'] = _items
+        # override the default output from pydantic by calling `to_dict()` of capabilities
+        if self.capabilities:
+            _dict['capabilities'] = self.capabilities.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -96,7 +101,8 @@ class RuntimeExecutionProfileListResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "items": [RuntimeExecutionProfileResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
+            "items": [RuntimeExecutionProfileResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
+            "capabilities": RuntimeExecutionManagementCapabilitiesResponse.from_dict(obj["capabilities"]) if obj.get("capabilities") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

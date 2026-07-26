@@ -14,6 +14,9 @@ from azents.repos.agent_runtime.data import (
     AgentRuntimeFailureSummary,
     AgentRuntimeSummaryState,
 )
+from azents.services.runtime_execution_policy.application_service import (
+    RuntimeExecutionPolicyStatusProjection,
+)
 
 
 class AgentRuntimeOutput(BaseModel):
@@ -21,6 +24,9 @@ class AgentRuntimeOutput(BaseModel):
 
     runtime: AgentRuntime = Field(description="Raw runtime state")
     state: AgentRuntimeSummaryState = Field(description="Server-computed state")
+    execution_policy: RuntimeExecutionPolicyStatusProjection = Field(
+        description="Server-computed execution-policy status"
+    )
 
 
 class AgentRuntimeLifecycleOutput(BaseModel):
@@ -30,6 +36,9 @@ class AgentRuntimeLifecycleOutput(BaseModel):
     state: AgentRuntimeSummaryState = Field(description="Server-computed state")
     command_type: RuntimeLifecycleCommandType = Field(description="Command type")
     desired_generation: int = Field(description="Desired generation")
+    execution_policy: RuntimeExecutionPolicyStatusProjection = Field(
+        description="Server-computed execution-policy status"
+    )
 
 
 @dataclasses.dataclass(frozen=True)

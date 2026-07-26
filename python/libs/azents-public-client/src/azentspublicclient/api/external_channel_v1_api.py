@@ -9675,7 +9675,7 @@ class ExternalChannelV1Api:
     ) -> ExternalChannelConnectionStatusSnapshot:
         """Validate Multi Slack Connection
 
-        Validate one Workspace Slack Multi App.
+        Validate one Workspace Multi App.
 
         :param connection_id: (required)
         :type connection_id: str
@@ -9747,7 +9747,7 @@ class ExternalChannelV1Api:
     ) -> ApiResponse[ExternalChannelConnectionStatusSnapshot]:
         """Validate Multi Slack Connection
 
-        Validate one Workspace Slack Multi App.
+        Validate one Workspace Multi App.
 
         :param connection_id: (required)
         :type connection_id: str
@@ -9819,7 +9819,7 @@ class ExternalChannelV1Api:
     ) -> RESTResponseType:
         """Validate Multi Slack Connection
 
-        Validate one Workspace Slack Multi App.
+        Validate one Workspace Multi App.
 
         :param connection_id: (required)
         :type connection_id: str

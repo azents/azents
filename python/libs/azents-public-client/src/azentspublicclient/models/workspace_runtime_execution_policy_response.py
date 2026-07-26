@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.runtime_execution_management_capabilities_response import RuntimeExecutionManagementCapabilitiesResponse
 from azentspublicclient.models.runtime_execution_policy_restriction import RuntimeExecutionPolicyRestriction
 from typing import Optional, Set
 from typing_extensions import Self
@@ -34,8 +35,9 @@ class WorkspaceRuntimeExecutionPolicyResponse(BaseModel):
     digest: StrictStr
     allowed_profile_ids: List[StrictStr]
     updated_at: Optional[datetime]
+    capabilities: RuntimeExecutionManagementCapabilitiesResponse
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["workspace_id", "version", "restriction", "digest", "allowed_profile_ids", "updated_at"]
+    __properties: ClassVar[List[str]] = ["workspace_id", "version", "restriction", "digest", "allowed_profile_ids", "updated_at", "capabilities"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -81,6 +83,9 @@ class WorkspaceRuntimeExecutionPolicyResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of restriction
         if self.restriction:
             _dict['restriction'] = self.restriction.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of capabilities
+        if self.capabilities:
+            _dict['capabilities'] = self.capabilities.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -108,7 +113,8 @@ class WorkspaceRuntimeExecutionPolicyResponse(BaseModel):
             "restriction": RuntimeExecutionPolicyRestriction.from_dict(obj["restriction"]) if obj.get("restriction") is not None else None,
             "digest": obj.get("digest"),
             "allowed_profile_ids": obj.get("allowed_profile_ids"),
-            "updated_at": obj.get("updated_at")
+            "updated_at": obj.get("updated_at"),
+            "capabilities": RuntimeExecutionManagementCapabilitiesResponse.from_dict(obj["capabilities"]) if obj.get("capabilities") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
