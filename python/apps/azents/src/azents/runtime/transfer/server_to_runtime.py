@@ -341,6 +341,20 @@ class ServerToRuntimeTransferService:
                 request.deadline_at,
             )
             raise
+        except ServerToRuntimeTransferError as error:
+            try:
+                await self._cancel(
+                    identity,
+                    preparation.revision
+                    if preparation is not None
+                    else expected_revision,
+                    request.deadline_at,
+                )
+            except ServerToRuntimeTransferError:
+                if error.failure is CoordinatorTransferFailure.EXPIRED:
+                    raise error from None
+                raise
+            raise
         except Exception:
             await self._cancel(
                 identity,
@@ -389,7 +403,9 @@ class ServerToRuntimeTransferService:
         if expected_revision is None:
             return
         revision = expected_revision
-        while self.clock() < deadline_at:
+        attempted = False
+        while not attempted or self.clock() < deadline_at:
+            attempted = True
             try:
                 status = await self.coordinator.cancel_transfer(
                     CoordinatorCancelTransferRequest(

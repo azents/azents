@@ -154,6 +154,17 @@ class Coordinator:
         return _status(request.expected_revision + 1)
 
 
+class DeadlineClock:
+    """Advance to the request deadline after one live status observation."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self) -> datetime:
+        self.calls += 1
+        return _NOW if self.calls <= 2 else _NOW + timedelta(minutes=1)
+
+
 class StrictStateCoordinator:
     """Exercise service cleanup handoff against the real state transition."""
 
@@ -607,6 +618,38 @@ async def test_cancellation_retries_fenced_revisions_past_eight() -> None:
         for request in cancellations
         if isinstance(request, CoordinatorCancelTransferRequest)
     ] == list(range(4, 14))
+
+
+@pytest.mark.asyncio
+async def test_deadline_keeps_expired_failure_after_boundary_cancellation_check() -> (
+    None
+):
+    """Deadline expiry performs one cancellation check without masking EXPIRED."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    coordinator = Coordinator([_status(4, phase=CoordinatorTransferPhase.READY)])
+    clock = DeadlineClock()
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=clock,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(ServerToRuntimeTransferError, match="deadline") as raised:
+        await service.transfer(_request(source))
+
+    assert raised.value.failure is CoordinatorTransferFailure.EXPIRED
+    assert [name for name, _ in coordinator.calls] == [
+        "admit",
+        "ready",
+        "dispatch",
+        "status",
+        "cancel",
+    ]
 
 
 @pytest.mark.asyncio
