@@ -19,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
@@ -47,6 +48,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelMessageRevision,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
+    RDBExternalChannelWorkProjectionPart,
 )
 from azents.repos.external_channel.work_data import (
     ChannelActionCommit,
@@ -56,6 +58,15 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkTask,
     ExternalChannelFileAccessTarget,
     ExternalChannelFileSource,
+)
+from azents.services.external_channel.discord_delivery import (
+    DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
+    DISCORD_DEFAULT_MAX_FILE_BYTES,
+)
+from azents.services.external_channel.discord_presentation import (
+    DiscordProgressPresentation,
+    render_discord_persisted_progress,
+    split_discord_markdown,
 )
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
@@ -485,15 +496,24 @@ class ExternalChannelWorkRepository:
             await session.flush()
 
         operations: list[
-            tuple[ExternalChannelDeliveryOperation, dict[str, object]]
+            tuple[ExternalChannelDeliveryOperation, dict[str, object], int]
         ] = []
         if message is not None:
-            operations.append(
-                (
-                    ExternalChannelDeliveryOperation.REPLY,
-                    _provider_payload(resource.labels, text=message, files=files),
+            for part_ordinal, part in enumerate(
+                _reply_parts(
+                    provider=connection.provider,
+                    labels=resource.labels,
+                    text=message,
+                    files=files,
                 )
-            )
+            ):
+                operations.append(
+                    (
+                        ExternalChannelDeliveryOperation.REPLY,
+                        part,
+                        part_ordinal,
+                    )
+                )
         if mode is ExternalChannelActionMode.CONTINUE:
             progress_changed = title is not None or requested_tasks is not None
             if requested_tasks is not None and title is None:
@@ -536,58 +556,68 @@ class ExternalChannelWorkRepository:
                 work.state_revision += 1
                 work.desired_progress_revision += 1
                 work.desired_progress_payload = progress.model_dump(mode="json")
-                presentation = _render_progress(
-                    connection.provider,
-                    progress,
-                    work_id=work.id,
-                    desired_progress_revision=work.desired_progress_revision,
-                )
-                if created_work:
-                    operations.append(
-                        (
-                            ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                            _provider_payload(
-                                resource.labels,
-                                text=presentation.text,
-                                blocks=presentation.blocks,
-                                desired_progress_revision=(
-                                    work.desired_progress_revision
-                                ),
-                            ),
-                        )
+                if connection.provider is ExternalChannelProvider.SLACK:
+                    presentation = _render_progress(
+                        connection.provider,
+                        progress,
+                        work_id=work.id,
+                        desired_progress_revision=work.desired_progress_revision,
                     )
-                elif work.progress_provider_message_key is not None:
-                    operations.append(
-                        (
-                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                            _provider_payload(
-                                resource.labels,
-                                text=presentation.text,
-                                blocks=presentation.blocks,
-                                provider_message_key=(
-                                    work.progress_provider_message_key
+                    if created_work:
+                        operations.append(
+                            (
+                                ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                                _provider_payload(
+                                    connection.provider,
+                                    resource.labels,
+                                    text=presentation.text,
+                                    blocks=presentation.blocks,
+                                    desired_progress_revision=(
+                                        work.desired_progress_revision
+                                    ),
                                 ),
-                                desired_progress_revision=(
-                                    work.desired_progress_revision
-                                ),
-                            ),
+                                0,
+                            )
                         )
-                    )
+                    elif work.progress_provider_message_key is not None:
+                        operations.append(
+                            (
+                                ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                                _provider_payload(
+                                    connection.provider,
+                                    resource.labels,
+                                    text=presentation.text,
+                                    blocks=presentation.blocks,
+                                    provider_message_key=(
+                                        work.progress_provider_message_key
+                                    ),
+                                    desired_progress_revision=(
+                                        work.desired_progress_revision
+                                    ),
+                                ),
+                                0,
+                            )
+                        )
         else:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.state_revision += 1
             work.finished_at = now
             work.desired_progress_revision += 1
             work.desired_progress_payload = None
-            if work.progress_provider_message_key is not None:
+            if (
+                connection.provider is ExternalChannelProvider.SLACK
+                and work.progress_provider_message_key is not None
+            ):
                 operations.append(
                     (
                         ExternalChannelDeliveryOperation.PROGRESS_DELETE,
                         _provider_payload(
+                            connection.provider,
                             resource.labels,
                             provider_message_key=work.progress_provider_message_key,
                             desired_progress_revision=(work.desired_progress_revision),
                         ),
+                        0,
                     )
                 )
 
@@ -604,7 +634,7 @@ class ExternalChannelWorkRepository:
         )
         session.add(action)
         await session.flush()
-        for operation, payload in operations:
+        for operation, payload, part_ordinal in operations:
             session.add(
                 RDBExternalChannelDeliveryAttempt(
                     origin_type=ExternalChannelDeliveryOriginType.CHANNEL_ACTION,
@@ -612,6 +642,7 @@ class ExternalChannelWorkRepository:
                     operation=operation,
                     request_payload=payload,
                     status=ExternalChannelDeliveryStatus.PENDING,
+                    part_ordinal=part_ordinal,
                     channel_action_id=action.id,
                     binding_id=binding.id,
                     provider_message_key=(
@@ -628,6 +659,24 @@ class ExternalChannelWorkRepository:
                     attempted_at=None,
                     completed_at=None,
                 )
+            )
+        await session.flush()
+        if (
+            mode is ExternalChannelActionMode.CONTINUE
+            and work.desired_progress_payload is not None
+            and connection.provider is ExternalChannelProvider.DISCORD
+        ):
+            presentation = render_discord_persisted_progress(
+                work.desired_progress_payload,
+                work_id=work.id,
+                desired_progress_revision=work.desired_progress_revision,
+            )
+            await self._plan_discord_progress(
+                session,
+                work=work,
+                action=action,
+                labels=resource.labels,
+                presentation=presentation,
             )
         await session.flush()
         return await self._build_commit(session, action)
@@ -841,9 +890,13 @@ class ExternalChannelWorkRepository:
         attempt.error_summary = error_summary
         attempt.completed_at = now
         work = await self._work_for_delivery_attempt(session, attempt=attempt)
+        provider = (
+            None if work is None else await self._provider_for_work(session, work=work)
+        )
         effective_status = status
         if (
             work is not None
+            and provider is ExternalChannelProvider.SLACK
             and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE
             and status is ExternalChannelDeliveryStatus.FAILED
             and error_kind == "message_not_found"
@@ -856,6 +909,7 @@ class ExternalChannelWorkRepository:
             )
         if (
             work is not None
+            and provider is ExternalChannelProvider.SLACK
             and effective_status is ExternalChannelDeliveryStatus.DELIVERED
         ):
             if attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
@@ -865,6 +919,7 @@ class ExternalChannelWorkRepository:
         recovery_id = None
         if (
             work is not None
+            and provider is ExternalChannelProvider.SLACK
             and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE
             and effective_status is ExternalChannelDeliveryStatus.DELIVERED
             and provider_message_key is not None
@@ -935,6 +990,7 @@ class ExternalChannelWorkRepository:
                 )
         if (
             work is not None
+            and provider is ExternalChannelProvider.SLACK
             and work.status is ExternalChannelWorkStatus.ACTIVE
             and work.desired_progress_payload is not None
             and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
@@ -982,6 +1038,17 @@ class ExternalChannelWorkRepository:
                 await session.flush()
                 if existing_recovery.status is ExternalChannelDeliveryStatus.PENDING:
                     recovery_id = existing_recovery.id
+        if work is not None and provider is ExternalChannelProvider.DISCORD:
+            discord_recovery_id = await self._finish_discord_progress_part(
+                session,
+                work=work,
+                attempt=attempt,
+                effective_status=effective_status,
+                provider_message_key=provider_message_key,
+                now=now,
+            )
+            if discord_recovery_id is not None:
+                recovery_id = discord_recovery_id
         if (
             work is not None
             and work.status is ExternalChannelWorkStatus.FINISHED
@@ -994,6 +1061,18 @@ class ExternalChannelWorkRepository:
             )
             if cleanup_id is not None:
                 recovery_id = cleanup_id
+        if (
+            work is not None
+            and provider is ExternalChannelProvider.DISCORD
+            and work.status is ExternalChannelWorkStatus.FINISHED
+            and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE
+        ):
+            next_cleanup_id = await self._next_pending_finished_discord_tracker_delete(
+                session,
+                work_id=work.id,
+            )
+            if next_cleanup_id is not None:
+                recovery_id = next_cleanup_id
         await session.flush()
         return recovery_id
 
@@ -1004,6 +1083,14 @@ class ExternalChannelWorkRepository:
         work: RDBExternalChannelWork,
     ) -> str | None:
         """Create one cleanup intent after both Tracker creation and reply delivery."""
+        provider = await self._provider_for_work(session, work=work)
+        if provider is ExternalChannelProvider.DISCORD:
+            return await self._ensure_finished_discord_tracker_delete(
+                session,
+                work=work,
+            )
+        if provider is not ExternalChannelProvider.SLACK:
+            return None
         provider_message_key = work.progress_provider_message_key
         if (
             work.status is not ExternalChannelWorkStatus.FINISHED
@@ -1023,14 +1110,22 @@ class ExternalChannelWorkRepository:
         )
         if finish_action is None:
             return None
-        reply = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt).where(
-                RDBExternalChannelDeliveryAttempt.channel_action_id == finish_action.id,
-                RDBExternalChannelDeliveryAttempt.operation
-                == ExternalChannelDeliveryOperation.REPLY,
+        replies = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelDeliveryAttempt)
+                .where(
+                    RDBExternalChannelDeliveryAttempt.channel_action_id
+                    == finish_action.id,
+                    RDBExternalChannelDeliveryAttempt.operation
+                    == ExternalChannelDeliveryOperation.REPLY,
+                )
+                .order_by(RDBExternalChannelDeliveryAttempt.part_ordinal)
             )
         )
-        if reply is None or reply.status is not ExternalChannelDeliveryStatus.DELIVERED:
+        if not replies or any(
+            reply.status is not ExternalChannelDeliveryStatus.DELIVERED
+            for reply in replies
+        ):
             return None
         cleanup = await session.scalar(
             sa.select(RDBExternalChannelDeliveryAttempt).where(
@@ -1040,7 +1135,7 @@ class ExternalChannelWorkRepository:
             )
         )
         if cleanup is None:
-            cleanup_payload = dict(reply.request_payload)
+            cleanup_payload = dict(replies[0].request_payload)
             cleanup_payload.pop("text", None)
             cleanup_payload.update(
                 {
@@ -1067,6 +1162,447 @@ class ExternalChannelWorkRepository:
         if cleanup.status is ExternalChannelDeliveryStatus.PENDING:
             return cleanup.id
         return None
+
+    async def _plan_discord_progress(
+        self,
+        session: AsyncSession,
+        *,
+        work: RDBExternalChannelWork,
+        action: RDBExternalChannelAction,
+        labels: dict[str, object] | None,
+        presentation: DiscordProgressPresentation,
+    ) -> None:
+        """Commit changed Discord Tracker page intents without reopening old calls."""
+        existing = {
+            part.part_ordinal: part
+            for part in await session.scalars(
+                sa.select(RDBExternalChannelWorkProjectionPart)
+                .where(RDBExternalChannelWorkProjectionPart.work_id == work.id)
+                .with_for_update()
+            )
+        }
+        planned: list[
+            tuple[
+                RDBExternalChannelWorkProjectionPart,
+                ExternalChannelDeliveryOperation,
+                str | None,
+            ]
+        ] = []
+        for ordinal, text in enumerate(presentation.pages):
+            part = existing.pop(ordinal, None)
+            if part is None:
+                part = RDBExternalChannelWorkProjectionPart(
+                    work_id=work.id,
+                    part_ordinal=ordinal,
+                    desired_progress_revision=work.desired_progress_revision,
+                    status=ExternalChannelWorkProjectionStatus.PENDING,
+                    provider_message_key=None,
+                    latest_delivery_attempt_id=None,
+                    deleted_at=None,
+                )
+                session.add(part)
+                planned.append(
+                    (
+                        part,
+                        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                        text,
+                    )
+                )
+                continue
+            part.desired_progress_revision = work.desired_progress_revision
+            part.deleted_at = None
+            if part.status is ExternalChannelWorkProjectionStatus.DELETED:
+                part.provider_message_key = None
+                planned.append(
+                    (
+                        part,
+                        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                        text,
+                    )
+                )
+                continue
+            if part.status is ExternalChannelWorkProjectionStatus.FAILED:
+                planned.append(
+                    (
+                        part,
+                        (
+                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                            if part.provider_message_key is not None
+                            else ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                        ),
+                        text,
+                    )
+                )
+                continue
+            if (
+                part.status is ExternalChannelWorkProjectionStatus.PRESENT
+                and part.provider_message_key is not None
+                and not await self._discord_progress_page_matches(
+                    session,
+                    part=part,
+                    text=text,
+                )
+            ):
+                planned.append(
+                    (
+                        part,
+                        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+                        text,
+                    )
+                )
+        for part in existing.values():
+            part.desired_progress_revision = work.desired_progress_revision
+            if (
+                part.status is ExternalChannelWorkProjectionStatus.PRESENT
+                and part.provider_message_key is not None
+            ):
+                planned.append(
+                    (
+                        part,
+                        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                        None,
+                    )
+                )
+        await session.flush()
+        for part, operation, text in planned:
+            await self._create_discord_progress_attempt(
+                session,
+                work=work,
+                origin_type=ExternalChannelDeliveryOriginType.CHANNEL_ACTION,
+                origin_id=action.id,
+                channel_action_id=action.id,
+                binding_id=action.binding_id,
+                part=part,
+                operation=operation,
+                labels=labels,
+                text=text,
+            )
+
+    async def _finish_discord_progress_part(
+        self,
+        session: AsyncSession,
+        *,
+        work: RDBExternalChannelWork,
+        attempt: RDBExternalChannelDeliveryAttempt,
+        effective_status: ExternalChannelDeliveryStatus,
+        provider_message_key: str | None,
+        now: datetime.datetime,
+    ) -> str | None:
+        """Advance one Discord page projection and catch it up only when safe."""
+        if attempt.operation not in {
+            ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+        }:
+            return None
+        part = await session.scalar(
+            sa.select(RDBExternalChannelWorkProjectionPart)
+            .where(
+                RDBExternalChannelWorkProjectionPart.work_id == work.id,
+                RDBExternalChannelWorkProjectionPart.latest_delivery_attempt_id
+                == attempt.id,
+            )
+            .with_for_update()
+        )
+        if part is None:
+            return None
+        if effective_status is ExternalChannelDeliveryStatus.DELIVERED:
+            if attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
+                part.status = ExternalChannelWorkProjectionStatus.DELETED
+                part.deleted_at = now
+            else:
+                resolved_key = provider_message_key or part.provider_message_key
+                if resolved_key is None:
+                    part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
+                    return None
+                part.provider_message_key = resolved_key
+                part.status = ExternalChannelWorkProjectionStatus.PRESENT
+        elif effective_status is ExternalChannelDeliveryStatus.UNKNOWN:
+            part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
+            return None
+        else:
+            part.status = ExternalChannelWorkProjectionStatus.FAILED
+            return None
+        if work.status is ExternalChannelWorkStatus.FINISHED:
+            return await self._ensure_finished_discord_tracker_delete(
+                session,
+                work=work,
+            )
+        if work.desired_progress_payload is None:
+            return None
+        presentation = render_discord_persisted_progress(
+            work.desired_progress_payload,
+            work_id=work.id,
+            desired_progress_revision=work.desired_progress_revision,
+        )
+        if (
+            attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE
+            and part.part_ordinal < len(presentation.pages)
+        ):
+            part.provider_message_key = None
+            return await self._create_discord_progress_attempt(
+                session,
+                work=work,
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id=attempt.id,
+                channel_action_id=attempt.channel_action_id,
+                binding_id=attempt.binding_id,
+                part=part,
+                operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                labels=None,
+                text=presentation.pages[part.part_ordinal],
+                request_payload=dict(attempt.request_payload),
+            )
+        if part.part_ordinal >= len(presentation.pages):
+            if part.provider_message_key is None:
+                return None
+            return await self._create_discord_progress_attempt(
+                session,
+                work=work,
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id=attempt.id,
+                channel_action_id=attempt.channel_action_id,
+                binding_id=attempt.binding_id,
+                part=part,
+                operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                labels=None,
+                text=None,
+                request_payload=dict(attempt.request_payload),
+            )
+        text = presentation.pages[part.part_ordinal]
+        if (
+            attempt.request_payload.get("text") == text
+            or part.provider_message_key is None
+        ):
+            return None
+        return await self._create_discord_progress_attempt(
+            session,
+            work=work,
+            origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+            origin_id=attempt.id,
+            channel_action_id=attempt.channel_action_id,
+            binding_id=attempt.binding_id,
+            part=part,
+            operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+            labels=None,
+            text=text,
+            request_payload=dict(attempt.request_payload),
+        )
+
+    async def _ensure_finished_discord_tracker_delete(
+        self,
+        session: AsyncSession,
+        *,
+        work: RDBExternalChannelWork,
+    ) -> str | None:
+        """Create each known Discord Tracker page delete after all reply parts land."""
+        if work.status is not ExternalChannelWorkStatus.FINISHED:
+            return None
+        finish_action = await session.scalar(
+            sa.select(RDBExternalChannelAction)
+            .where(
+                RDBExternalChannelAction.work_id == work.id,
+                RDBExternalChannelAction.mode == ExternalChannelActionMode.FINISH,
+            )
+            .order_by(
+                RDBExternalChannelAction.created_at.desc(),
+                RDBExternalChannelAction.id.desc(),
+            )
+        )
+        if finish_action is None:
+            return None
+        replies = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelDeliveryAttempt)
+                .where(
+                    RDBExternalChannelDeliveryAttempt.channel_action_id
+                    == finish_action.id,
+                    RDBExternalChannelDeliveryAttempt.operation
+                    == ExternalChannelDeliveryOperation.REPLY,
+                )
+                .order_by(RDBExternalChannelDeliveryAttempt.part_ordinal)
+            )
+        )
+        if not replies or any(
+            reply.status is not ExternalChannelDeliveryStatus.DELIVERED
+            for reply in replies
+        ):
+            return None
+        parts = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelWorkProjectionPart)
+                .where(
+                    RDBExternalChannelWorkProjectionPart.work_id == work.id,
+                    RDBExternalChannelWorkProjectionPart.provider_message_key.is_not(
+                        None
+                    ),
+                    RDBExternalChannelWorkProjectionPart.status
+                    == ExternalChannelWorkProjectionStatus.PRESENT,
+                )
+                .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
+                .with_for_update()
+            )
+        )
+        for part in parts:
+            existing = await session.scalar(
+                sa.select(RDBExternalChannelDeliveryAttempt).where(
+                    RDBExternalChannelDeliveryAttempt.channel_action_id
+                    == finish_action.id,
+                    RDBExternalChannelDeliveryAttempt.operation
+                    == ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                    RDBExternalChannelDeliveryAttempt.part_ordinal == part.part_ordinal,
+                )
+            )
+            if existing is not None:
+                continue
+            await self._create_discord_progress_attempt(
+                session,
+                work=work,
+                origin_type=ExternalChannelDeliveryOriginType.CHANNEL_ACTION,
+                origin_id=finish_action.id,
+                channel_action_id=finish_action.id,
+                binding_id=finish_action.binding_id,
+                part=part,
+                operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                labels=None,
+                text=None,
+                request_payload=dict(replies[0].request_payload),
+            )
+        return await self._next_pending_finished_discord_tracker_delete(
+            session,
+            work_id=work.id,
+        )
+
+    async def _next_pending_finished_discord_tracker_delete(
+        self,
+        session: AsyncSession,
+        *,
+        work_id: str,
+    ) -> str | None:
+        """Return the next ordered delete after the prior page has terminalized."""
+        return await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt.id)
+            .join(
+                RDBExternalChannelAction,
+                RDBExternalChannelAction.id
+                == RDBExternalChannelDeliveryAttempt.channel_action_id,
+            )
+            .where(
+                RDBExternalChannelAction.work_id == work_id,
+                RDBExternalChannelAction.mode == ExternalChannelActionMode.FINISH,
+                RDBExternalChannelDeliveryAttempt.operation
+                == ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                RDBExternalChannelDeliveryAttempt.status
+                == ExternalChannelDeliveryStatus.PENDING,
+            )
+            .order_by(RDBExternalChannelDeliveryAttempt.part_ordinal)
+            .limit(1)
+        )
+
+    async def _create_discord_progress_attempt(
+        self,
+        session: AsyncSession,
+        *,
+        work: RDBExternalChannelWork,
+        origin_type: ExternalChannelDeliveryOriginType,
+        origin_id: str,
+        channel_action_id: str | None,
+        binding_id: str | None,
+        part: RDBExternalChannelWorkProjectionPart,
+        operation: ExternalChannelDeliveryOperation,
+        labels: dict[str, object] | None,
+        text: str | None,
+        request_payload: dict[str, object] | None = None,
+    ) -> str:
+        """Create one page intent and make it the sole current page mutation."""
+        payload = (
+            _provider_payload(
+                ExternalChannelProvider.DISCORD,
+                labels,
+                text=text,
+                provider_message_key=part.provider_message_key,
+                desired_progress_revision=work.desired_progress_revision,
+            )
+            if request_payload is None
+            else dict(request_payload)
+        )
+        payload["work_id"] = work.id
+        payload["desired_progress_revision"] = work.desired_progress_revision
+        if text is None:
+            payload.pop("text", None)
+        else:
+            payload["text"] = text
+        if operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
+            if part.provider_message_key is None:
+                raise RuntimeError("Discord Tracker page delete has no message key.")
+            payload["provider_message_key"] = part.provider_message_key
+        elif operation is ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
+            if part.provider_message_key is None:
+                raise RuntimeError("Discord Tracker page update has no message key.")
+            payload["provider_message_key"] = part.provider_message_key
+        else:
+            payload.pop("provider_message_key", None)
+        attempt = RDBExternalChannelDeliveryAttempt(
+            origin_type=origin_type,
+            origin_id=origin_id,
+            operation=operation,
+            part_ordinal=part.part_ordinal,
+            request_payload=payload,
+            status=ExternalChannelDeliveryStatus.PENDING,
+            channel_action_id=channel_action_id,
+            binding_id=binding_id,
+            provider_message_key=(
+                part.provider_message_key
+                if operation is not ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                else None
+            ),
+            error_kind=None,
+            error_summary=None,
+            attempted_at=None,
+            completed_at=None,
+        )
+        session.add(attempt)
+        await session.flush()
+        part.latest_delivery_attempt_id = attempt.id
+        part.status = ExternalChannelWorkProjectionStatus.PENDING
+        return attempt.id
+
+    async def _discord_progress_page_matches(
+        self,
+        session: AsyncSession,
+        *,
+        part: RDBExternalChannelWorkProjectionPart,
+        text: str,
+    ) -> bool:
+        """Compare a page with its last committed provider-bound presentation."""
+        if part.latest_delivery_attempt_id is None:
+            return False
+        attempt = await session.get(
+            RDBExternalChannelDeliveryAttempt,
+            part.latest_delivery_attempt_id,
+        )
+        return attempt is not None and attempt.request_payload.get("text") == text
+
+    async def _provider_for_work(
+        self,
+        session: AsyncSession,
+        *,
+        work: RDBExternalChannelWork,
+    ) -> ExternalChannelProvider | None:
+        """Resolve the current provider for one locked canonical Work row."""
+        return await session.scalar(
+            sa.select(RDBExternalChannelConnection.provider)
+            .join(
+                RDBExternalChannelAgentRoute,
+                RDBExternalChannelAgentRoute.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .join(
+                RDBExternalChannelBinding,
+                RDBExternalChannelBinding.route_id == RDBExternalChannelAgentRoute.id,
+            )
+            .where(RDBExternalChannelBinding.id == work.binding_id)
+        )
 
     async def _work_for_delivery_attempt(
         self,
@@ -1330,6 +1866,7 @@ class ExternalChannelWorkRepository:
                     ),
                     else_=1,
                 ),
+                RDBExternalChannelDeliveryAttempt.part_ordinal,
                 RDBExternalChannelDeliveryAttempt.created_at,
                 RDBExternalChannelDeliveryAttempt.id,
             )
@@ -1398,6 +1935,7 @@ def _validate_existing_action(
 
 
 def _provider_payload(
+    provider: ExternalChannelProvider,
     labels: dict[str, object] | None,
     *,
     text: str | None = None,
@@ -1408,16 +1946,31 @@ def _provider_payload(
 ) -> dict[str, object]:
     """Build one persisted provider request intent without credentials."""
     labels = labels or {}
-    channel_id = labels.get("channel_id")
-    thread_ts = labels.get("thread_ts")
-    if not isinstance(channel_id, str) or not channel_id:
-        raise ValueError("External Channel resource has no provider channel.")
-    if not isinstance(thread_ts, str) or not thread_ts:
-        raise ValueError("External Channel resource has no provider thread.")
-    payload: dict[str, object] = {
-        "channel_id": channel_id,
-        "thread_ts": thread_ts,
-    }
+    match provider:
+        case ExternalChannelProvider.SLACK:
+            channel_id = labels.get("channel_id")
+            thread_ts = labels.get("thread_ts")
+            if not isinstance(channel_id, str) or not channel_id:
+                raise ValueError("External Channel resource has no provider channel.")
+            if not isinstance(thread_ts, str) or not thread_ts:
+                raise ValueError("External Channel resource has no provider thread.")
+            payload: dict[str, object] = {
+                "channel_id": channel_id,
+                "thread_ts": thread_ts,
+            }
+        case ExternalChannelProvider.DISCORD:
+            guild_id = labels.get("guild_id")
+            thread_id = labels.get("thread_id")
+            if not isinstance(guild_id, str) or not guild_id:
+                raise ValueError("Discord resource has no provider Guild.")
+            if not isinstance(thread_id, str) or not thread_id:
+                raise ValueError("Discord resource has no provider thread.")
+            payload = {
+                "guild_id": guild_id,
+                "channel_id": thread_id,
+            }
+        case _ as unreachable:
+            assert_never(unreachable)
     if text is not None:
         payload["text"] = text
     if files:
@@ -1429,6 +1982,91 @@ def _provider_payload(
     if desired_progress_revision is not None:
         payload["desired_progress_revision"] = desired_progress_revision
     return payload
+
+
+def _reply_parts(
+    *,
+    provider: ExternalChannelProvider,
+    labels: dict[str, object] | None,
+    text: str,
+    files: Sequence[ExternalChannelOutboundFileManifest],
+) -> tuple[dict[str, object], ...]:
+    """Lower one canonical reply into ordered provider-bound message parts."""
+    match provider:
+        case ExternalChannelProvider.SLACK:
+            return (
+                _provider_payload(
+                    provider,
+                    labels,
+                    text=text,
+                    files=files,
+                ),
+            )
+        case ExternalChannelProvider.DISCORD:
+            parts = split_discord_markdown(text)
+            text_parts = tuple(
+                _provider_payload(
+                    provider,
+                    labels,
+                    text=part,
+                )
+                for part in parts
+            )
+            if not files:
+                return text_parts
+            batches = _discord_file_batches(files)
+            if len(text_parts) == 1:
+                return tuple(
+                    _provider_payload(
+                        provider,
+                        labels,
+                        text=text if ordinal == 0 else "Attachments (continued)",
+                        files=batch,
+                    )
+                    for ordinal, batch in enumerate(batches)
+                )
+            return (
+                *text_parts,
+                *(
+                    _provider_payload(
+                        provider,
+                        labels,
+                        text=(
+                            "Attachments" if ordinal == 0 else "Attachments (continued)"
+                        ),
+                        files=batch,
+                    )
+                    for ordinal, batch in enumerate(batches)
+                ),
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _discord_file_batches(
+    files: Sequence[ExternalChannelOutboundFileManifest],
+) -> tuple[tuple[ExternalChannelOutboundFileManifest, ...], ...]:
+    """Plan bounded ordered multipart batches before any provider call."""
+    payload_budget = DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES - (64 * 1024)
+    batches: list[tuple[ExternalChannelOutboundFileManifest, ...]] = []
+    current: list[ExternalChannelOutboundFileManifest] = []
+    current_bytes = 0
+    for file in files:
+        if file.expected_size > DISCORD_DEFAULT_MAX_FILE_BYTES:
+            raise ValueError(
+                "Discord outbound file exceeds the current provider file limit."
+            )
+        if current and current_bytes + file.expected_size > payload_budget:
+            batches.append(tuple(current))
+            current = []
+            current_bytes = 0
+        if file.expected_size > payload_budget:
+            raise ValueError("Discord outbound file exceeds the request limit.")
+        current.append(file)
+        current_bytes += file.expected_size
+    if current:
+        batches.append(tuple(current))
+    return tuple(batches)
 
 
 def _render_progress(
@@ -1484,7 +2122,7 @@ def _validate_message_length(
         case ExternalChannelProvider.SLACK:
             maximum = SLACK_MARKDOWN_TEXT_MAX_LENGTH
         case ExternalChannelProvider.DISCORD:
-            raise RuntimeError("Discord delivery is not enabled.")
+            maximum = 64 * 1024
         case _ as unreachable:
             assert_never(unreachable)
     if len(message) > maximum:
