@@ -118,6 +118,22 @@ export const TurnAction: Story = {
   },
 };
 
+export const CleanupWorktreesAction: Story = {
+  args: {
+    entry: item("cleanup", {
+      type: "action_message",
+      action: { type: "cleanup_orphan_git_worktrees" },
+      message: "Clean up orphaned worktrees before continuing.",
+      requested_inference_profile: null,
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Pending action")).toBeVisible();
+    await expect(canvas.getByText("/cleanup-worktrees")).toBeVisible();
+  },
+};
+
 export const CompoundEnvelopeOrder: Story = {
   render: (args) => (
     <>
