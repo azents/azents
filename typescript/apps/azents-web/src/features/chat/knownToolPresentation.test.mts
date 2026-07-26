@@ -578,6 +578,11 @@ void test("covers every remaining source-less builtin with a validated adapter",
       action: "followupTask",
     },
     {
+      name: "wait",
+      arguments: '{"timeout_seconds":30}',
+      action: "wait",
+    },
+    {
       name: "wait_agent",
       arguments: '{"timeout_seconds":30}',
       action: "waitAgent",
@@ -606,6 +611,37 @@ void test("covers every remaining source-less builtin with a validated adapter",
     assert.equal(result.type, "specialized", item.name);
     assert.equal(result.presentation.action, item.action, item.name);
   }
+});
+
+void test("renders a completed runtime wait result", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "wait",
+      arguments: '{"timeout_seconds":30}',
+      result:
+        '{"outcome":"activity","reason":"new user input, agent or subagent message"}',
+    }),
+  );
+
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "wait",
+      subject: null,
+      qualifier: "activity",
+      detail: {
+        type: "semantic",
+        fields: [{ label: "timeout", value: "30" }],
+        sections: [
+          {
+            label: "result",
+            content: "new user input, agent or subagent message",
+          },
+        ],
+        items: [],
+      },
+    },
+  });
 });
 
 void test("renders a completed managed Skill result", () => {

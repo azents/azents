@@ -37,6 +37,7 @@ export type KnownToolAction =
   | "spawnAgent"
   | "sendMessage"
   | "followupTask"
+  | "wait"
   | "waitAgent"
   | "interruptAgent"
   | "listAgents"
@@ -262,6 +263,10 @@ const followupTaskInputSchema = z.object({
 });
 const waitAgentInputSchema = z.object({
   timeout_seconds: z.number().int().min(0).max(600).optional(),
+});
+const runtimeWaitResultSchema = z.object({
+  outcome: z.enum(["activity", "not_waitable", "timed_out"]),
+  reason: z.string().optional(),
 });
 const interruptAgentInputSchema = z.object({ agent_name: z.string().min(1) });
 const toolSearchInputSchema = z.object({
@@ -1056,6 +1061,35 @@ export function knownToolPresentation(
               ? [{ label: "agentPath", value: result.agent_path }]
               : [],
             sections: [{ label: "task", content: input.data.task }],
+          }),
+        );
+      }
+      case "wait": {
+        const input = waitAgentInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, runtimeWaitResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "wait",
+          null,
+          result?.outcome ?? null,
+          semanticDetail({
+            fields: [
+              {
+                label: "timeout",
+                value: String(input.data.timeout_seconds ?? 30),
+              },
+            ],
+            sections:
+              typeof result?.reason !== "string"
+                ? []
+                : [{ label: "result", content: result.reason }],
           }),
         );
       }

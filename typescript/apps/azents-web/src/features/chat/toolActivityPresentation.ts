@@ -264,10 +264,12 @@ function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
     case "spawn_agent":
     case "followup_task":
     case "send_message":
-    case "wait_agent":
     case "interrupt_agent":
     case "list_agents":
       return { key: "subagent", label: "subagent" };
+    case "wait":
+    case "wait_agent":
+      return { key: "wait", label: "wait" };
     default:
       return { key: "other", label: "other" };
   }

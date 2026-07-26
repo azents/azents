@@ -1798,6 +1798,7 @@
         "spawnAgent": "Sous-agent créé",
         "sendMessage": "Message envoyé",
         "followupTask": "Suivi attribué",
+        "wait": "En attente",
         "waitAgent": "Attente des sous-agents",
         "interruptAgent": "Sous-agent interrompu",
         "listAgents": "Sous-agents listés",
@@ -1856,6 +1857,7 @@
       "categoryMemory": "Memory",
       "categoryOrganize": "Organiser",
       "categorySubagent": "Sous-agent",
+      "categoryWait": "Attente",
       "categoryOther": "Autre"
     },
     "authorization": {
