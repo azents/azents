@@ -126,6 +126,8 @@ function categoryLabel(
       return t("categoryOrganize");
     case "subagent":
       return t("categorySubagent");
+    case "wait":
+      return t("categoryWait");
     case "other":
       return t("categoryOther");
     default:

@@ -14,6 +14,7 @@ import {
 import {
   IconBook,
   IconBrain,
+  IconClock,
   IconDots,
   IconDownload,
   IconFileExport,
@@ -138,6 +139,8 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
       return <IconSquareCheck size={activityRowIconSize} />;
     case "loadSkill":
       return <IconBook size={activityRowIconSize} />;
+    case "wait":
+      return <IconClock size={activityRowIconSize} />;
     case "spawnAgent":
     case "sendMessage":
     case "followupTask":
@@ -212,6 +215,8 @@ function actionLabel(
       return t("action.sendMessage");
     case "followupTask":
       return t("action.followupTask");
+    case "wait":
+      return t("action.wait");
     case "waitAgent":
       return t("action.waitAgent");
     case "interruptAgent":
@@ -258,6 +263,7 @@ function presentationQualifier(
     case "spawnAgent":
     case "sendMessage":
     case "followupTask":
+    case "wait":
     case "waitAgent":
     case "interruptAgent":
     case "listAgents":
