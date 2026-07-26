@@ -1259,7 +1259,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "The agent run was stopped."
+        "userMessage": "The agent run was interrupted."
       },
       "response": {
         "content": "Subagent interrupt request completed."
