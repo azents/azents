@@ -221,6 +221,17 @@ Agent Workspace path preview first uses Runner `file.stat` to classify the path.
 
 Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/reconcile do not delete Agent Workspace data. Only `reset` may delete Agent Workspace.
 
+### Runtime execution policy
+
+Workspace controls the Profiles its Agents may use and may add only restrictive typed limits to
+the Platform envelope. Expected-version writes prevent stale replacement. A Workspace tightening
+automatically attaches a narrower Runtime target without an Agent Apply; it preserves Agent
+Workspace data and may restart compute but never resets or terminal-deletes it. Workspace and Agent
+views expose only server-computed availability, governing layer, reductions, audit metadata, and
+bounded action/status. Workspace policy is writable only by the applicable Workspace authority;
+Agent intent/Apply separately permits a Workspace owner or Agent administrator. Backend
+authorization is final.
+
 ### Agent Workspace Projects
 
 Agent Workspace Project is a boundary registry explicitly registered by user for an existing directory under AgentRuntime's Provider-reported Agent Workspace. Agent Workspace root itself is not a Project. Current public API registers any non-root descendant directory under `/workspace/agent`, including nested folders.
@@ -545,6 +556,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-26 (spec_version=50)** — Added Workspace Profile allowance, restrictive Runtime execution policy, and reset-free automatic tightening convergence.
 - **2026-07-26 (spec_version=49)** — Added the manual orphan Git-worktree cleanup TurnAction,
   Runtime/path claim coordination with Project attachment and allocation, active-root protection,
   force removal with branch preservation, and bounded durable candidate results.

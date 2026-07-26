@@ -11,6 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/runtime_execution_policy/**
   - python/apps/azents/src/azents/core/runtime_provider_credential.py
   - python/apps/azents/src/azents/core/runtime_runner_credential.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_binding.py
@@ -29,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-07-26
-spec_version: 30
+spec_version: 31
 ---
 
 # Agent Runtime Control
@@ -269,6 +270,13 @@ Lifecycle APIs are desired-state declarations. Repeating the same request must c
 
 Reset carries its own desired generation and a final desired state. Provider is responsible for performing backend deletion/recreation according to that command and reporting the resulting observed state.
 
+Runtime execution targets are immutable generation-fenced policy snapshots. Explicit Agent Apply
+attaches a target; Platform/Workspace tightening attaches a narrower target through automatic
+convergence. Control accepts Provider evidence only for the matching desired generation and does
+not report compliance before matching observation. Failed tightening remains pending or divergent
+and may fence/stop noncompliant authority, but never invokes reset, terminal delete, Provider
+fallback, or workspace deletion. Unsupported capability remains unavailable rather than weakened.
+
 ## Delivery
 
 Production deploys the new path through GitOps:
@@ -297,6 +305,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-26** (spec_version 31) — Added immutable execution-policy targets, generation-fenced convergence evidence, and reset-free fail-closed tightening semantics.
 - **2026-07-26** (spec_version 30) — Changed periodic desired-running Runtime reconciliation from read-only observe to idempotent start so Runner image and Provider-managed configuration drift converges without deleting Agent Workspace storage.
 - **2026-07-26** (spec_version 29) — Added confined managed-worktree discovery and
   identity-revalidated force removal for the explicit manual orphan-cleanup action, including

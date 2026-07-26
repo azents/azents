@@ -70,7 +70,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-07-26
-spec_version: 56
+spec_version: 57
 ---
 
 # Agent Domain Spec
@@ -108,6 +108,15 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 `subagent_settings.max_subagents` is the maximum active subagent count under one root session. It is equivalent to Codex `max_concurrent_threads_per_session - 1`; the root/current agent is not counted in the stored value. `subagent_settings.max_depth` is the maximum `SessionAgent` tree depth below `/root`, where `1` allows root-to-child spawning only. Both values are non-negative integers.
 
 `auto_archive_ttl_days` is required and must be positive. Agent create and patch responses expose the configured value. Updating it changes eligibility for all existing active root Session trees at their next scheduler evaluation; it does not snapshot a TTL onto the Session.
+
+### 1.2 Runtime execution intent
+
+Each Agent has versioned Runtime execution intent: an allowed Profile plus optional restrictive
+typed overrides. Saving intent changes configured policy only and never advances Runtime desired
+generation. A Workspace owner or Agent administrator explicitly applies intent to attach the next
+immutable target. Runtime status is server-authoritative as `configured`, `pending`, `applied`,
+`unavailable`, or `divergent` with a bounded required action; clients do not infer it from Provider
+details, digests, or generations.
 
 `selectable_model_options` is a JSONB array rather than a separate table because option order is part of the fallback contract. The list invariants are:
 
@@ -447,6 +456,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-26 | 57 | Added Agent Runtime execution intent, explicit Apply, and server-authoritative status projection. |
 | 2026-07-26 | 55 | Added Agent-admin Single App ownership, read-only Multi App association context, and mode-aware decommission behavior |
 | 2026-07-24 | 54 | Added AgentAdmin-managed revisioned automatic root Session Project policy, Runtime-backed non-empty replacement validation, empty clear, and stable conflict semantics |
 | 2026-07-22 | 52 | Integrated External Channel route, binding, Channel Work, cleanup-intent, authorization, and restrictive ownership behavior into Agent decommission |

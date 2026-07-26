@@ -15,13 +15,13 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-26 | 56 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-26 | 57 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-26 | 133 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-26 | 18 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-26 | 12 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-23 | 3 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-26 | 4 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-23 | 4 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-26 | 75 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
@@ -32,8 +32,8 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-26 | 134 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-26 | 30 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-26 | 5 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-26 | 31 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-26 | 6 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-26 | 10 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-26 | 11 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-19 | 6 |
 
