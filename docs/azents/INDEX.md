@@ -224,6 +224,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Move LLM Model Catalog to External Sources and Local Overrides Historical Requirements Reconstruction](requirements/llm-260513-llm-catalog-source.md) | llm-260513 | 2026-05-13 | - |
 | [Full-Stack Local Test Environment — Discussion Record Historical Requirements Reconstruction](requirements/local-260406-local-fullstack-test-env.md) | local-260406 | 2026-04-06 | 2026-04-06 |
 | [Account Language Preference Requirements](requirements/locale-260721-account-language-preference.md) | locale-260721 | 2026-07-21 | - |
+| [Unified Agent Input Mailbox Requirements](requirements/mailbox-260726-unified-agent-input-mailbox.md) | mailbox-260726 | 2026-07-26 | - |
 | [MCP Toolkit Historical Requirements Reconstruction](requirements/mcp-260228-mcp-toolkit.md) | mcp-260228 | 2026-02-28 | 2026-03-12 |
 | [MCP Egress Proxy Historical Requirements Reconstruction](requirements/mcp-260319-mcp-egress-proxy.md) | mcp-260319 | 2026-03-19 | 2026-03-19 |
 | [Agent Home Sidecar Discussion (MCP stdio + File ops) Historical Requirements Reconstruction](requirements/mcp-260325-mcp-stdio-sidecar.md) | mcp-260325 | 2026-03-25 | 2026-03-25 |
@@ -558,6 +559,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Move LLM Model Catalog to External Sources and Local Overrides](adr/llm-260513-llm-catalog-source.md)
 - [Full-Stack Local Test Environment — Discussion Record](adr/local-260406-local-fullstack-test-env.md)
 - [Account Language Preference](adr/locale-260721-account-language-preference.md)
+- [Unified Agent Input Mailbox](adr/mailbox-260726-unified-agent-input-mailbox.md)
 - [MCP Toolkit Historical Decision Reconstruction](adr/mcp-260228-mcp-toolkit.md)
 - [MCP Egress Proxy Historical Decision Reconstruction](adr/mcp-260319-mcp-egress-proxy.md)
 - [Agent Home Sidecar Discussion (MCP stdio + File ops)](adr/mcp-260325-mcp-stdio-sidecar.md)
