@@ -222,6 +222,37 @@ class ExternalChannelRepository:
             return None
         return ExternalChannelConnectionConfiguration.model_validate(rows[0])
 
+    async def get_discord_http_configuration_by_selector_hash(
+        self,
+        session: AsyncSession,
+        *,
+        selector_hash: str,
+    ) -> ExternalChannelConnectionConfiguration | None:
+        """Fetch one active Discord callback target by its opaque selector hash."""
+        rows = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelConnection)
+                .where(
+                    RDBExternalChannelConnection.provider
+                    == ExternalChannelProvider.DISCORD,
+                    RDBExternalChannelConnection.ingress_profile
+                    == ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+                    RDBExternalChannelConnection.http_callback_selector_hash
+                    == selector_hash,
+                    RDBExternalChannelConnection.status.in_(
+                        (
+                            ExternalChannelConnectionStatus.ACTIVE,
+                            ExternalChannelConnectionStatus.DEGRADED,
+                        )
+                    ),
+                )
+                .limit(2)
+            )
+        )
+        if len(rows) != 1:
+            return None
+        return ExternalChannelConnectionConfiguration.model_validate(rows[0])
+
     async def update_connection_health(
         self,
         session: AsyncSession,
@@ -272,6 +303,76 @@ class ExternalChannelRepository:
         await session.flush()
         await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelConnection.model_validate(rdb)
+
+    async def activate_discord_connection(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        expected_encrypted_credentials: str,
+        provider_app_id: str,
+        provider_tenant_id: str,
+        provider_bot_user_id: str | None,
+        interaction_public_key: str,
+        callback_selector_hash: str,
+        checked_at: datetime.datetime,
+    ) -> ExternalChannelConnection | None:
+        """Activate a Discord App and current claim behind a credential fence."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.provider
+                == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelConnection.encrypted_credentials
+                == expected_encrypted_credentials,
+                RDBExternalChannelConnection.status.not_in(
+                    (
+                        ExternalChannelConnectionStatus.DISCONNECTING,
+                        ExternalChannelConnectionStatus.DISCONNECTED,
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+        if connection is None:
+            return None
+        if connection.provider_app_id != provider_app_id:
+            return None
+        claim = await session.scalar(
+            sa.select(RDBExternalChannelAppClaim)
+            .where(
+                RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelAppClaim.provider_app_id == provider_app_id,
+            )
+            .with_for_update()
+        )
+        if claim is not None and claim.connection_id != connection_id:
+            return None
+        if claim is None:
+            claim = RDBExternalChannelAppClaim(
+                provider=ExternalChannelProvider.DISCORD,
+                provider_app_id=provider_app_id,
+                connection_id=connection_id,
+                claim_generation=1,
+            )
+            session.add(claim)
+        else:
+            claim.claim_generation += 1
+        connection.provider_tenant_id = provider_tenant_id
+        connection.provider_bot_user_id = provider_bot_user_id
+        connection.http_callback_selector_hash = callback_selector_hash
+        connection.capabilities = {
+            "interaction_public_key": interaction_public_key,
+        }
+        connection.configuration_generation += 1
+        connection.status = ExternalChannelConnectionStatus.ACTIVE
+        connection.last_verified_at = checked_at
+        connection.last_health_at = checked_at
+        connection.disconnected_at = None
+        await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
+        return ExternalChannelConnection.model_validate(connection)
 
     async def list_socket_connection_ids(
         self,

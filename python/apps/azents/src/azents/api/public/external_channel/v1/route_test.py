@@ -7,6 +7,15 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from azents.app import create_dummy_public_app
+from azents.services.external_channel.discord_http import (
+    DiscordHTTPAdmissionResult,
+    DiscordHTTPAdmissionService,
+)
+from azents.services.external_channel.discord_interaction import (
+    MAX_DISCORD_INTERACTION_BODY_BYTES,
+    DiscordInteractionEnvelope,
+    DiscordInteractionUnauthorized,
+)
 from azents.services.external_channel.http_admission import (
     SlackHTTPAdmissionResult,
     SlackHTTPAdmissionService,
@@ -23,6 +32,80 @@ def _client(service: AsyncMock) -> TestClient:
     app = create_dummy_public_app()
     app.dependency_overrides[SlackHTTPAdmissionService] = lambda: service
     return TestClient(app)
+
+
+def _discord_client(service: AsyncMock) -> TestClient:
+    app = create_dummy_public_app()
+    app.dependency_overrides[DiscordHTTPAdmissionService] = lambda: service
+    return TestClient(app)
+
+
+@pytest.mark.parametrize(
+    ("interaction_type", "expected_response_type"),
+    [(2, 5), (3, 6), (4, 8), (5, 5)],
+)
+def test_discord_admission_returns_matching_initial_response(
+    interaction_type: int,
+    expected_response_type: int,
+) -> None:
+    """A successful durable admission receives its provider-native acknowledgement."""
+    service = AsyncMock(spec=DiscordHTTPAdmissionService)
+    service.handle.return_value = DiscordHTTPAdmissionResult(
+        envelope=DiscordInteractionEnvelope(
+            interaction_id="interaction-1",
+            interaction_type=interaction_type,
+            application_id="app-1",
+            guild_id="guild-1",
+            channel_id="channel-1",
+            actor_user_id="user-1",
+        ),
+        admission=None,
+    )
+
+    response = _discord_client(service).post(
+        "/external-channel/v1/discord/interactions/opaque-selector",
+        content=b'{"token":"request-local-only"}',
+        headers={
+            "X-Signature-Ed25519": "signature",
+            "X-Signature-Timestamp": "1784682000",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"type": expected_response_type}
+    call = service.handle.await_args.kwargs
+    assert call["selector"] == "opaque-selector"
+    assert call["raw_body"] == b'{"token":"request-local-only"}'
+
+
+def test_discord_authentication_failure_uses_one_safe_response() -> None:
+    """Unknown selectors and invalid signatures remain indistinguishable."""
+    service = AsyncMock(spec=DiscordHTTPAdmissionService)
+    service.handle.side_effect = DiscordInteractionUnauthorized("private detail")
+
+    response = _discord_client(service).post(
+        "/external-channel/v1/discord/interactions/opaque-selector",
+        content=b"{}",
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Discord interaction could not be authenticated."
+    }
+    assert "private detail" not in response.text
+
+
+def test_oversized_discord_body_is_rejected_before_admission() -> None:
+    """The Discord raw-body cap stops buffering before signature handling."""
+    service = AsyncMock(spec=DiscordHTTPAdmissionService)
+
+    response = _discord_client(service).post(
+        "/external-channel/v1/discord/interactions/opaque-selector",
+        content=b"x" * (MAX_DISCORD_INTERACTION_BODY_BYTES + 1),
+    )
+
+    assert response.status_code == 400
+    service.handle.assert_not_awaited()
 
 
 def test_url_verification_returns_challenge() -> None:
