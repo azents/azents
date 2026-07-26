@@ -76,6 +76,8 @@ feature stack before implementation planning begins.
    independent review subagent for the complete stack. Assign roles for the
    feature, not for individual phases. Add a specialist reviewer only for an
    explicit review requirement that the primary reviewer cannot cover.
+   Record the independent reviewer's exact agent name or path and give it to
+   every implementation owner that will request review.
 3. Brief each role from the approved Requirements, ADR, Design, relevant specs,
    applicable project rules, and its initial role boundary.
 4. Ask each implementation role to perform read-only codebase discovery and
@@ -179,21 +181,27 @@ and current phase execution plan as the handoff contract for every subagent.
 
 - The primary agent is the sole orchestrator for this workflow. It owns
   planning, interface and scope decisions, coordination, implementation
-  verification, accepted review-finding integration, and final verification.
+  verification, assignment of the exact independent reviewer, and final
+  integrated verification.
 - The primary agent alone controls phase progression and role-level
   orchestration. It creates, assigns, coordinates, continues, replaces, or
-  stops implementation owners and independent reviewers, and it decides
-  workstream reassignment.
+  stops implementation owners and independent reviewers, decides workstream
+  reassignment, and tells each implementation owner which reviewer to use.
 - Implementation subagents own bounded feature implementation and focused
-  validation defined by the phase execution plan and report their results to
-  the primary agent.
+  validation defined by the phase execution plan. After validation, each
+  implementation owner directly requests review from the exact independent
+  reviewer assigned by the primary agent.
 - A separate subagent that did not participate in implementation performs the
-  independent code review after primary-agent verification and reports its
-  findings to the primary agent.
-- The primary agent applies accepted review findings directly. When a finding
-  requires workstream-level reimplementation rather than a localized review
-  fix, delegate that reimplementation to an implementation subagent and prefer
-  the original implementer.
+  independent code review as a read-only task and reports findings to the
+  requesting implementation owner.
+- The implementation owner applies grounded Critical and Warning findings,
+  runs affected validation, and asks the same reviewer to recheck the addressed
+  findings. It also applies Suggestion and Consistency findings when reasonable.
+- The primary agent does not request review on an implementation owner's
+  behalf and does not apply review findings. It performs final verification
+  only after the implementation-review-fix cycle is complete. If final
+  verification finds a required change, return it to the owning implementation
+  subagent and require the same review cycle before proceeding.
 
 ### Long-running subagent work
 
@@ -244,15 +252,19 @@ For each implementation phase:
 8. Update specs in the same PR only when the phase directly changes current behavior and cannot wait for the spec-promotion phase.
 9. Compare the diff against the phase deliverables, owned paths, and non-goals.
 10. Move later-phase or unrelated work out of the branch before committing.
-11. Have the primary agent run the phase's verification commands.
-12. Have the primary agent continue the existing independent reviewer after
-    verification and provide the current phase contract and diff.
-13. Have the primary agent apply accepted review findings directly. Delegate
-    only workstream-level reimplementation, preferably to the original
-    implementation subagent.
-14. Have the primary agent verify the fixes and ask the same independent
-    reviewer to recheck addressed findings.
-15. Re-run affected checks and the phase's final validation commands.
+11. Have each participating implementation owner run its documented validation
+    and directly continue the exact independent reviewer assigned by the
+    primary agent. Provide the current phase contract, owned scope, and diff.
+12. Have the independent reviewer perform a read-only review and report
+    grounded findings to the requesting implementation owner.
+13. Have the implementation owner apply Critical and Warning findings, apply
+    Suggestion and Consistency findings when reasonable, run affected checks,
+    and ask the same reviewer to recheck the addressed findings.
+14. After every implementation-review-fix cycle is complete, have the primary
+    agent perform final scope, integration, and validation verification. Return
+    required changes to the owning implementation subagent rather than applying
+    them in the primary agent.
+15. Re-run the phase's final validation commands.
 16. Commit and open the PR before starting implementation for the next phase.
 
 Keep each phase reviewable. Do not mix unrelated refactors, cleanup, or future phases.
@@ -273,9 +285,10 @@ Include:
 
 If validation finds a bug, assign the behavior correction to the existing
 implementation role owner in the validation PR or responsible earlier phase.
-Have the primary agent verify the correction, continue the existing independent
-reviewer, apply accepted review findings, and rebase following branches when an
-earlier phase changes.
+Have that implementation owner request the existing independent reviewer
+directly, apply the findings, and complete revalidation. Then have the primary
+agent perform final verification and rebase following branches when an earlier
+phase changes.
 
 ## Phase 4: Spec promotion PR
 
@@ -349,7 +362,7 @@ For each completed phase, report:
 - Stable role owners continued, added, or reassigned
 - Primary-agent verification results
 - Independent review result
-- Accepted review fixes and final validation results
+- Implementation-owner review fixes and final validation results
 - Next stacked branch
 
 ## Guardrails
@@ -363,8 +376,13 @@ For each completed phase, report:
   stable role owner remains available and compatible with the workstream.
 - Keep implementation and independent review assigned to separate subagents.
 - Keep phase progression and role-level orchestration with the primary agent.
-  Implementation and review subagents do not reassign role owners, appoint
-  independent reviewers, or advance the phase workflow.
+  The primary agent must name the exact reviewer to each implementation owner.
+  Implementation subagents may directly request and continue only that assigned
+  reviewer; they do not appoint or replace reviewers, reassign role owners, or
+  advance the phase workflow.
+- Keep independent review read-only. The implementation owner that produced the
+  change applies review findings and requests recheck; the primary agent
+  performs only final verification and never applies those findings itself.
 - Do not start the next phase before the current phase PR is created.
 - Do not ship an Azents feature when its new-format Requirements, ADR, and primary Design use different basenames.
 - Do not collapse a large feature into one PR when phased delivery is expected.

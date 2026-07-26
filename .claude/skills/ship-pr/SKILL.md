@@ -9,23 +9,33 @@ Check that the current branch is ready for review, then create the PR through `/
 
 ## Workflow
 
-### 1. Code review (required)
+### 1. Establish review ownership
 
-Before creating the PR, always run the `/code-review` skill for self-review. Do not skip it.
+Satisfy the `/code-review` gate before creating the PR.
 
-Run review and fixes only once. After `/code-review` → apply required fixes → commit, do not start another review loop within the same `/ship-pr` execution. Continue to the next step.
+- For a single-agent change, the current agent is the implementation owner. Run
+  `/code-review`, apply required findings, and commit.
+- For a delegated implementation, use the completed review evidence when the
+  named implementation owner directly requested review from the named
+  independent reviewer, applied required findings, ran affected validation,
+  and received the reviewer's recheck. The shipping agent performs final
+  verification only; it does not start a replacement review or apply findings.
+- If delegated review evidence is incomplete, return the work to the
+  implementation owner and its assigned reviewer before continuing.
 
-- If Critical/Warning findings are found → fix them, commit, then continue.
-- If there are only Suggestion/Consistency findings, or no findings → continue immediately.
+### 2. Complete required fixes
 
-### 2. Apply required fixes
+The implementation owner applies review findings on the same branch.
 
-If `/code-review` identifies required code or documentation fixes, apply them on the same branch.
+- Fix Critical and Warning findings, run affected validation, and commit.
+- Apply Suggestion and Consistency findings when reasonable.
+- In a delegated workflow, have the same independent reviewer recheck addressed
+  findings. The shipping agent must route required final-verification changes
+  back to the implementation owner instead of editing them directly.
 
-This step runs only once. Do not call `/code-review` again to look for new Critical/Warning findings after the fix. If additional review is needed, handle it through the normal PR review process after PR creation.
-
-- If Critical/Warning findings are found → fix them, then continue.
-- If there are only Suggestion/Consistency findings, or no findings → continue immediately.
+For a single-agent change, run review and fixes only once. After
+`/code-review` → apply required fixes → commit, do not start another review loop
+within the same `/ship-pr` execution. Continue to PR creation.
 
 ### 3. Call `/create-pr`
 
@@ -39,4 +49,5 @@ Follow the `/create-pr` rules.
 ### 4. Report the result
 
 - Created PR URL
-- `/code-review` result
+- Review owner, reviewer, findings, and recheck result
+- Final verification result
