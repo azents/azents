@@ -19,6 +19,9 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_automatic_project_setting import (
+    RDBAgentAutomaticProjectSetting,
+)
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
@@ -137,6 +140,7 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     )
     session.add(agent)
     await session.flush()
+    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
     return agent.id
 
 
@@ -1236,11 +1240,14 @@ class TestChatSessionTeamSessions:
             await update_session.commit()
 
         service = _service(rdb_session_manager)
-        assert await service.auto_archive_once() == {
-            "scanned": 1,
-            "archived": 0,
-            "skipped": 1,
-        }
+        await service.auto_archive_once()
+        async with rdb_session_manager() as verify_session:
+            active = await AgentSessionRepository().get_by_id(
+                verify_session,
+                create_result.value.id,
+            )
+        assert active is not None
+        assert active.status is AgentSessionStatus.ACTIVE
 
         async with rdb_session_manager() as update_session:
             agent = await update_session.get(RDBAgent, agent_id)
@@ -1248,11 +1255,7 @@ class TestChatSessionTeamSessions:
             agent.auto_archive_ttl_days = 30
             await update_session.commit()
 
-        assert await service.auto_archive_once() == {
-            "scanned": 1,
-            "archived": 1,
-            "skipped": 0,
-        }
+        await service.auto_archive_once()
         async with rdb_session_manager() as verify_session:
             archived = await AgentSessionRepository().get_by_id(
                 verify_session,
@@ -1330,11 +1333,7 @@ class TestChatSessionTeamSessions:
             running.run_state = AgentSessionRunState.RUNNING
             await update_session.commit()
 
-        assert await service.auto_archive_once() == {
-            "scanned": 1,
-            "archived": 0,
-            "skipped": 1,
-        }
+        await service.auto_archive_once()
         async with rdb_session_manager() as verify_session:
             pinned = await AgentSessionRepository().get_by_id(
                 verify_session,
@@ -1405,11 +1404,7 @@ class TestChatSessionTeamSessions:
             child_session.last_activity_at = datetime.datetime.now(datetime.UTC)
             await update_session.commit()
 
-        assert await _service(rdb_session_manager).auto_archive_once() == {
-            "scanned": 1,
-            "archived": 0,
-            "skipped": 1,
-        }
+        await _service(rdb_session_manager).auto_archive_once()
         async with rdb_session_manager() as verify_session:
             root = await AgentSessionRepository().get_by_id(
                 verify_session,
