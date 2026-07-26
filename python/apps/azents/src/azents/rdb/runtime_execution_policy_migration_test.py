@@ -79,7 +79,7 @@ def test_generated_revision_renders_valid_incremental_postgresql_sql() -> None:
 
     alembic_command.upgrade(
         config,
-        "3dd5802b8a10:f18c05d9d547",
+        "10d8111b556c:f18c05d9d547",
         sql=True,
     )
 
