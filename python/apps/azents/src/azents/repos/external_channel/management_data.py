@@ -39,6 +39,7 @@ class ManagedConnection(_Projection):
     provider_bot_user_id: str | None
     credentials_configured: bool
     capabilities: dict[str, Any] | None
+    provider_config: dict[str, Any] | None
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
     socket_gap_detected_at: datetime.datetime | None
@@ -59,6 +60,7 @@ class ManagedMultiConnection(_Projection):
     provider_bot_user_id: str | None
     credentials_configured: bool
     capabilities: dict[str, Any] | None
+    provider_config: dict[str, Any] | None
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
     socket_gap_detected_at: datetime.datetime | None

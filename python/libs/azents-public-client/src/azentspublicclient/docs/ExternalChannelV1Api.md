@@ -27,6 +27,8 @@ Method | HTTP request | Description
 [**external_channel_v1_remove_multi_slack_route**](ExternalChannelV1Api.md#external_channel_v1_remove_multi_slack_route) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id} | Remove Multi Slack Route
 [**external_channel_v1_replace_multi_slack_channel_default**](ExternalChannelV1Api.md#external_channel_v1_replace_multi_slack_channel_default) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id} | Replace Multi Slack Channel Default
 [**external_channel_v1_revoke_access_grant**](ExternalChannelV1Api.md#external_channel_v1_revoke_access_grant) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/grants/{grant_id} | Revoke Access Grant
+[**external_channel_v1_setup_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/discord | Setup Discord Connection
+[**external_channel_v1_setup_multi_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi | Setup Multi Discord Connection
 [**external_channel_v1_setup_multi_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
 [**external_channel_v1_setup_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
 [**external_channel_v1_update_multi_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_update_multi_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Update Multi Slack Connection
@@ -1936,6 +1938,172 @@ void (empty response body)
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_setup_discord_connection**
+> ManagedConnectionSetup external_channel_v1_setup_discord_connection(agent_id, handle, discord_connection_setup_request)
+
+Setup Discord Connection
+
+Create a configuring dedicated Discord App and its sole Agent route.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.discord_connection_setup_request import DiscordConnectionSetupRequest
+from azentspublicclient.models.managed_connection_setup import ManagedConnectionSetup
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    discord_connection_setup_request = azentspublicclient.DiscordConnectionSetupRequest() # DiscordConnectionSetupRequest | 
+
+    try:
+        # Setup Discord Connection
+        api_response = api_instance.external_channel_v1_setup_discord_connection(agent_id, handle, discord_connection_setup_request)
+        print("The response of ExternalChannelV1Api->external_channel_v1_setup_discord_connection:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_setup_discord_connection: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **discord_connection_setup_request** | [**DiscordConnectionSetupRequest**](DiscordConnectionSetupRequest.md)|  | 
+
+### Return type
+
+[**ManagedConnectionSetup**](ManagedConnectionSetup.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**201** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_setup_multi_discord_connection**
+> ManagedMultiConnectionSetup external_channel_v1_setup_multi_discord_connection(handle, discord_connection_setup_request)
+
+Setup Multi Discord Connection
+
+Create a zero-Agent-capable configuring Workspace Discord Multi App.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.discord_connection_setup_request import DiscordConnectionSetupRequest
+from azentspublicclient.models.managed_multi_connection_setup import ManagedMultiConnectionSetup
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    handle = 'handle_example' # str | 
+    discord_connection_setup_request = azentspublicclient.DiscordConnectionSetupRequest() # DiscordConnectionSetupRequest | 
+
+    try:
+        # Setup Multi Discord Connection
+        api_response = api_instance.external_channel_v1_setup_multi_discord_connection(handle, discord_connection_setup_request)
+        print("The response of ExternalChannelV1Api->external_channel_v1_setup_multi_discord_connection:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_setup_multi_discord_connection: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **discord_connection_setup_request** | [**DiscordConnectionSetupRequest**](DiscordConnectionSetupRequest.md)|  | 
+
+### Return type
+
+[**ManagedMultiConnectionSetup**](ManagedMultiConnectionSetup.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**201** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

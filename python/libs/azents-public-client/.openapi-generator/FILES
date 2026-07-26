@@ -141,6 +141,9 @@ azentspublicclient/docs/CreateWorkspaceRequest.md
 azentspublicclient/docs/CreateWorkspaceResponse.md
 azentspublicclient/docs/CurrentMemberResponse.md
 azentspublicclient/docs/Detail.md
+azentspublicclient/docs/DiscordConnectionConfiguration.md
+azentspublicclient/docs/DiscordConnectionCredentials.md
+azentspublicclient/docs/DiscordConnectionSetupRequest.md
 azentspublicclient/docs/ElevateResponse.md
 azentspublicclient/docs/ElevateWithEmailRequest.md
 azentspublicclient/docs/ElevateWithPasswordRequest.md
@@ -514,6 +517,9 @@ azentspublicclient/models/create_workspace_request.py
 azentspublicclient/models/create_workspace_response.py
 azentspublicclient/models/current_member_response.py
 azentspublicclient/models/detail.py
+azentspublicclient/models/discord_connection_configuration.py
+azentspublicclient/models/discord_connection_credentials.py
+azentspublicclient/models/discord_connection_setup_request.py
 azentspublicclient/models/elevate_response.py
 azentspublicclient/models/elevate_with_email_request.py
 azentspublicclient/models/elevate_with_password_request.py
@@ -876,6 +882,9 @@ azentspublicclient/test/test_create_workspace_request.py
 azentspublicclient/test/test_create_workspace_response.py
 azentspublicclient/test/test_current_member_response.py
 azentspublicclient/test/test_detail.py
+azentspublicclient/test/test_discord_connection_configuration.py
+azentspublicclient/test/test_discord_connection_credentials.py
+azentspublicclient/test/test_discord_connection_setup_request.py
 azentspublicclient/test/test_elevate_response.py
 azentspublicclient/test/test_elevate_with_email_request.py
 azentspublicclient/test/test_elevate_with_password_request.py

@@ -160,6 +160,9 @@ __all__ = [
     "CreateWorkspaceResponse",
     "CurrentMemberResponse",
     "Detail",
+    "DiscordConnectionConfiguration",
+    "DiscordConnectionCredentials",
+    "DiscordConnectionSetupRequest",
     "ElevateResponse",
     "ElevateWithEmailRequest",
     "ElevateWithPasswordRequest",
@@ -552,6 +555,9 @@ from azentspublicclient.models.create_workspace_request import CreateWorkspaceRe
 from azentspublicclient.models.create_workspace_response import CreateWorkspaceResponse as CreateWorkspaceResponse
 from azentspublicclient.models.current_member_response import CurrentMemberResponse as CurrentMemberResponse
 from azentspublicclient.models.detail import Detail as Detail
+from azentspublicclient.models.discord_connection_configuration import DiscordConnectionConfiguration as DiscordConnectionConfiguration
+from azentspublicclient.models.discord_connection_credentials import DiscordConnectionCredentials as DiscordConnectionCredentials
+from azentspublicclient.models.discord_connection_setup_request import DiscordConnectionSetupRequest as DiscordConnectionSetupRequest
 from azentspublicclient.models.elevate_response import ElevateResponse as ElevateResponse
 from azentspublicclient.models.elevate_with_email_request import ElevateWithEmailRequest as ElevateWithEmailRequest
 from azentspublicclient.models.elevate_with_password_request import ElevateWithPasswordRequest as ElevateWithPasswordRequest

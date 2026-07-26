@@ -41,6 +41,7 @@ class ManagedMultiConnection(BaseModel):
     provider_bot_user_id: Optional[StrictStr]
     credentials_configured: StrictBool
     capabilities: Optional[Dict[str, Any]]
+    provider_config: Optional[Dict[str, Any]]
     last_verified_at: Optional[datetime]
     last_health_at: Optional[datetime]
     socket_gap_detected_at: Optional[datetime]
@@ -50,7 +51,7 @@ class ManagedMultiConnection(BaseModel):
     active_agent_count: StrictInt
     configured_default_count: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider", "transport", "app_mode", "status", "provider_app_id", "provider_tenant_id", "provider_bot_user_id", "credentials_configured", "capabilities", "last_verified_at", "last_health_at", "socket_gap_detected_at", "socket_gap_reason", "disconnected_at", "generation", "active_agent_count", "configured_default_count"]
+    __properties: ClassVar[List[str]] = ["id", "provider", "transport", "app_mode", "status", "provider_app_id", "provider_tenant_id", "provider_bot_user_id", "credentials_configured", "capabilities", "provider_config", "last_verified_at", "last_health_at", "socket_gap_detected_at", "socket_gap_reason", "disconnected_at", "generation", "active_agent_count", "configured_default_count"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -118,6 +119,11 @@ class ManagedMultiConnection(BaseModel):
         if self.capabilities is None and "capabilities" in self.model_fields_set:
             _dict['capabilities'] = None
 
+        # set to None if provider_config (nullable) is None
+        # and model_fields_set contains the field
+        if self.provider_config is None and "provider_config" in self.model_fields_set:
+            _dict['provider_config'] = None
+
         # set to None if last_verified_at (nullable) is None
         # and model_fields_set contains the field
         if self.last_verified_at is None and "last_verified_at" in self.model_fields_set:
@@ -165,6 +171,7 @@ class ManagedMultiConnection(BaseModel):
             "provider_bot_user_id": obj.get("provider_bot_user_id"),
             "credentials_configured": obj.get("credentials_configured"),
             "capabilities": obj.get("capabilities"),
+            "provider_config": obj.get("provider_config"),
             "last_verified_at": obj.get("last_verified_at"),
             "last_health_at": obj.get("last_health_at"),
             "socket_gap_detected_at": obj.get("socket_gap_detected_at"),

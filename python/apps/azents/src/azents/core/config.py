@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     external_channel_slack_callback_url: str | None = None
     # Rollout gate: enable only after every API and worker is mode-aware.
     external_channel_multi_app_enabled: bool = False
+    # Rollout gate: Discord requires its Gateway, callback, fixture, and E2E paths.
+    external_channel_discord_enabled: bool = False
 
     # LLM credential encryption key; Fernet key, base64-encoded 32 bytes
     credential_encryption_key: str
@@ -376,6 +378,7 @@ class Config(BaseModel):
     api_url: str = ""
     external_channel_slack_callback_url: str = ""
     external_channel_multi_app_enabled: bool = False
+    external_channel_discord_enabled: bool = False
     oauth_secret_key: str = ""
     mcp_proxy_url: str | None = None
     workspace_s3: WorkspaceS3Config
@@ -467,6 +470,9 @@ class Config(BaseModel):
             ),
             external_channel_multi_app_enabled=(
                 settings.external_channel_multi_app_enabled
+            ),
+            external_channel_discord_enabled=(
+                settings.external_channel_discord_enabled
             ),
             oauth_secret_key=settings.oauth_secret_key,
             mcp_proxy_url=settings.mcp_proxy_url,

@@ -13,6 +13,7 @@ from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
@@ -30,6 +31,8 @@ from azents.services.external_channel.connection import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
     ExternalChannelCapabilitySnapshot,
     ExternalChannelProviderIdentity,
     SlackConnectionCredentials,
@@ -298,6 +301,54 @@ async def test_http_setup_uses_fixed_callback_and_encrypts_credentials(
     assert repository.create.http_callback_selector_hash is None
     assert "xoxb-secret" not in repr(repository.create)
     assert repository.create.encrypted_credentials is not None
+    assert session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_discord_setup_uses_fixed_gateway_http_ingress_and_redacts_token(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """Persist Discord Guild configuration without treating it as tenant identity."""
+    repository = _RepositoryDouble()
+    session = _SessionDouble()
+    service = _service(
+        repository=repository,
+        codec=codec,
+        slack_client=_SlackClientDouble(
+            SlackConnectionValidation(
+                status="unavailable",
+                code="unused",
+                message=None,
+                action_hint=None,
+                identity=None,
+                capabilities=None,
+            )
+        ),
+        session=session,
+    )
+
+    await service.create_discord_connection(
+        workspace_id="workspace-1",
+        app_id="discord-app-1",
+        configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+        credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
+        app_mode=ExternalChannelAppMode.MULTI,
+    )
+
+    assert repository.create is not None
+    assert repository.create.provider is ExternalChannelProvider.DISCORD
+    assert repository.create.transport is ExternalChannelTransport.HTTP
+    assert (
+        repository.create.ingress_profile
+        is ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+    )
+    assert repository.create.app_mode is ExternalChannelAppMode.MULTI
+    assert repository.create.provider_tenant_id is None
+    assert repository.create.provider_config == {
+        "provider": "discord",
+        "target_guild_id": "guild-1",
+    }
+    assert "discord-bot-token" not in repr(repository.create)
     assert session.commits == 1
 
 
