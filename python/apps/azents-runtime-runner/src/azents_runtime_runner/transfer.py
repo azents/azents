@@ -279,6 +279,7 @@ class RunnerTransferManager:
         stage_identity: _FileIdentity | None = None
         published = False
         try:
+            await self._register_pending_orphan(intent.runtime_path, stage_name)
             stage_fd = os.open(
                 stage_name,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -385,6 +386,7 @@ class RunnerTransferManager:
             before = _regular_identity(os.fstat(source_fd))
             if before.size != expected_size:
                 raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
+            await self._register_pending_orphan(intent.runtime_path, snapshot_name)
             snapshot_fd = os.open(
                 snapshot_name,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -497,12 +499,30 @@ class RunnerTransferManager:
         identity = os.fstat(file_descriptor)
         parent = str(PurePath(runtime_path).parent)
         await asyncio.to_thread(
-            _write_orphan_record,
+            _replace_orphan_record,
             self._orphan_root,
             parent,
             temporary_name,
             identity.st_dev,
             identity.st_ino,
+            datetime.now(UTC),
+        )
+
+    async def _register_pending_orphan(
+        self,
+        runtime_path: str,
+        temporary_name: str,
+    ) -> None:
+        self._active_temporary_names.add(temporary_name)
+        if self._orphan_root is None:
+            return
+        await asyncio.to_thread(
+            _write_orphan_record,
+            self._orphan_root,
+            str(PurePath(runtime_path).parent),
+            temporary_name,
+            0,
+            0,
             datetime.now(UTC),
         )
 
@@ -832,6 +852,48 @@ def _write_orphan_record(
         os.close(directory_fd)
 
 
+def _replace_orphan_record(
+    root: Path,
+    parent: str,
+    temporary_name: str,
+    device: int,
+    inode: int,
+    created_at: datetime,
+) -> None:
+    directory_fd = _open_orphan_directory(root)
+    try:
+        record_name = _orphan_record_name(temporary_name)
+        temporary_record_name = f".{record_name}.{uuid.uuid4().hex}"
+        record = {
+            "parent": parent,
+            "name": temporary_name,
+            "device": device,
+            "inode": inode,
+            "created_at": created_at.isoformat(),
+        }
+        encoded = json.dumps(record, separators=(",", ":"), sort_keys=True).encode()
+        descriptor = os.open(
+            temporary_record_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=directory_fd,
+        )
+        try:
+            _write_all(descriptor, encoded)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(
+            temporary_record_name,
+            record_name,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def _remove_orphan_record(root: Path, temporary_name: str) -> None:
     with contextlib.suppress(FileNotFoundError):
         directory_fd = _open_orphan_directory(root)
@@ -867,6 +929,8 @@ def _reclaim_orphan_files(
                 temporary_name,
                 device,
                 inode,
+                created_at,
+                now,
             )
             if removed:
                 reclaimed += 1
@@ -929,6 +993,8 @@ def _remove_owned_orphan(
     temporary_name: str,
     device: int,
     inode: int,
+    created_at: datetime,
+    now: datetime,
 ) -> bool:
     if not PurePath(parent).is_relative_to(root):
         return False
@@ -941,11 +1007,14 @@ def _remove_owned_orphan(
         return False
     try:
         observed = os.stat(temporary_name, dir_fd=parent_fd, follow_symlinks=False)
-        if (
-            not stat.S_ISREG(observed.st_mode)
-            or observed.st_dev != device
-            or observed.st_ino != inode
-        ):
+        if not stat.S_ISREG(observed.st_mode):
+            return False
+        if device == 0 and inode == 0:
+            if datetime.fromtimestamp(observed.st_mtime, UTC) > (
+                created_at + _ORPHAN_MINIMUM_AGE
+            ):
+                return False
+        elif observed.st_dev != device or observed.st_ino != inode:
             return False
         os.unlink(temporary_name, dir_fd=parent_fd)
         return True
