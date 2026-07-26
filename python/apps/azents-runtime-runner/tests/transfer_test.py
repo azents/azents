@@ -317,6 +317,70 @@ async def test_protected_staging_atomically_replaces_and_cleans_attempt(
 
 
 @pytest.mark.asyncio
+async def test_protected_staging_creates_workload_accessible_nested_destination(
+    tmpfs_path: Path,
+    protected_tmpfs_staging: Path,
+) -> None:
+    """Nested destination parents remain traversable after root publication."""
+    os.chown(tmpfs_path, 0, 0)
+    tmpfs_path.chmod(0o755)
+    workspace = tmpfs_path / "workspace"
+    workspace.mkdir(mode=0o755)
+    os.chown(workspace, 1000, 1000)
+    destination = workspace / "nested" / "destination.bin"
+    data = b"workload-readable"
+    control = _Control()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_Transfer(
+            (
+                RunnerDownloadChunk(offset=0, data=data),
+                RunnerDownloadComplete(
+                    actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
+                ),
+            )
+        ),
+        accepted_generation=lambda: 1,
+        protected_staging_directory=protected_tmpfs_staging,
+    )
+
+    await manager.handle_intent(_intent(destination, data=data))
+
+    result = await _result(control)
+    parent_metadata = destination.parent.stat()
+    assert result.outcome is RunnerTransferOutcome.SUCCEEDED
+    assert parent_metadata.st_uid == 1000
+    assert parent_metadata.st_gid == 1000
+    assert parent_metadata.st_mode & 0o777 == 0o755
+
+    read_fd, write_fd = os.pipe()
+    process_id = os.fork()
+    if process_id == 0:
+        os.close(read_fd)
+        os.setgroups(())
+        os.setgid(1000)
+        os.setuid(1000)
+        try:
+            descriptor = os.open(destination, os.O_RDONLY)
+            try:
+                received = os.read(descriptor, len(data))
+            finally:
+                os.close(descriptor)
+            os.write(write_fd, received)
+        finally:
+            os.close(write_fd)
+        os._exit(0)
+    os.close(write_fd)
+    received = os.read(read_fd, len(data))
+    _, status = os.waitpid(process_id, 0)
+    os.close(read_fd)
+
+    assert os.waitstatus_to_exitcode(status) == 0
+    assert received == data
+    await manager.close()
+
+
+@pytest.mark.asyncio
 async def test_cross_device_protected_staging_fails_without_replacing_destination(
     tmpfs_path: Path,
     tmp_path: Path,

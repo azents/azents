@@ -699,12 +699,25 @@ def _open_parent(path: str, *, create: bool) -> tuple[int, str]:
             except FileNotFoundError:
                 if not create:
                     raise
-                os.mkdir(component, 0o700, dir_fd=parent_fd)
+                created = False
+                try:
+                    os.mkdir(component, 0o700, dir_fd=parent_fd)
+                    created = True
+                except FileExistsError:
+                    pass
                 next_fd = os.open(
                     component,
                     os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                     dir_fd=parent_fd,
                 )
+                try:
+                    if created:
+                        if os.geteuid() == 0:
+                            os.fchown(next_fd, _WORKLOAD_UID, _WORKLOAD_GID)
+                        os.fchmod(next_fd, 0o755)
+                except BaseException:
+                    os.close(next_fd)
+                    raise
             os.close(parent_fd)
             parent_fd = next_fd
         return parent_fd, candidate.name
