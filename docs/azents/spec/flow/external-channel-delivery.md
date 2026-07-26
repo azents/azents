@@ -1,7 +1,7 @@
 ---
 title: "External Channel Delivery and Channel Work"
 created: 2026-07-22
-tags: [backend, engine, external-channel, slack, delivery]
+tags: [backend, engine, external-channel, slack, discord, delivery]
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation, toolkit]
@@ -18,6 +18,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
   - python/apps/azents/src/azents/services/external_channel/presentation.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
+  - python/apps/azents/src/azents/services/external_channel/discord_delivery.py
+  - python/apps/azents/src/azents/services/external_channel/discord_presentation.py
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
@@ -27,14 +29,17 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-26
-spec_version: 13
+spec_version: 14
 ---
 
 # External Channel Delivery and Channel Work
 
 ## Explicit Publication Boundary
 
-Normal model output is never relayed to Slack. The only model-facing publication path is the direct unprefixed `channel_action` tool. It is exposed only when the root AgentSession has at least one active External Channel binding and receives the current binding/work snapshot in its execution context.
+Normal model output is never relayed to a provider. The only model-facing publication
+path is the direct unprefixed `channel_action` tool. It is exposed only when the root
+AgentSession has at least one active External Channel binding and receives the current
+binding/work snapshot in its execution context.
 
 A tool call must identify a binding owned by the current Agent and Session. The tool supports two atomic modes:
 
@@ -89,6 +94,13 @@ Provider calls occur without an open database transaction. A delivery is claimed
 
 Provider mutations are never automatically retried. Stale `attempting` recovery marks an ambiguous outcome conservatively instead of re-executing the call. An explicit Slack `ok: false` response not covered by a specialized provider error is a confirmed `failed` result with the bounded Slack error code retained in its sanitized summary; it is not classified as a transport-ambiguous `unknown` result.
 
+Discord Create Message uses a deterministic, bounded nonce derived from the durable
+delivery attempt and sends `enforce_nonce=true`. A matching provider message identity
+converges duplicate creates. Credential, permission, missing-message, rate-limit, and
+confirmed provider rejection outcomes are `failed`; network, timeout, invalid success
+payload, and server ambiguity are `unknown`. An unknown Discord write is never blindly
+replayed.
+
 ## File-bearing Reply Delivery
 
 Before the action transaction commits, the service resolves each source and enforces the
@@ -116,6 +128,15 @@ A failed acquisition or stream prevents completion. Confirmed provider rejection
 missing scope, rate limit, or unavailable Runtime source is `failed`. Upload or
 completion transport ambiguity is `unknown`. No phase is automatically replayed, and
 ordinary Agent output is never uploaded without the explicit Channel action.
+
+Discord lowers a reply or Channel Work snapshot into stable ordered message pages. Each
+page is bounded to the provider message limit, preserves balanced fenced Markdown where
+possible, and is delivered through durable per-part intents. Discord file-bearing
+messages stream a bounded multipart body from the already-authorized Runtime or
+Exchange source manifest. The multipart request includes the same durable-attempt
+nonce, validates each emitted byte count against preflight size, and is bounded by the
+provider request limit. The durable records retain source manifests and delivery
+evidence, never file bytes.
 
 ## Activity Tracker Lifecycle
 
@@ -205,6 +226,9 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-26** (spec_version 14) — Added nonce-fenced Discord message and
+  multipart delivery, ordered bounded progress pages, and conservative
+  classification of rate-limit, rejection, and ambiguous provider outcomes.
 - **2026-07-26** (spec_version 13) — Added the required bold Agent-name prefix for
   Agent-associated Slack output and capability-aware icon override with safe fallback.
 - **2026-07-25** (spec_version 12) — Added authority-resolved `exchange://` outbound

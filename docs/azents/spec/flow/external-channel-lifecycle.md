@@ -1,7 +1,7 @@
 ---
 title: "External Channel Lifecycle"
 created: 2026-07-22
-tags: [backend, external-channel, lifecycle, session, agent]
+tags: [backend, external-channel, lifecycle, session, agent, discord]
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
@@ -11,6 +11,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/lifecycle.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
   - python/apps/azents/src/azents/services/external_channel/management.py
+  - python/apps/azents/src/azents/services/external_channel/discord_activation.py
+  - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
   - python/apps/azents/src/azents/services/session_lifecycle/orchestrator.py
   - python/apps/azents/src/azents/services/session_lifecycle/registry.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
@@ -20,7 +22,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-26
-spec_version: 10
+spec_version: 11
 ---
 
 # External Channel Lifecycle
@@ -53,6 +55,13 @@ identity, capability, health, lease, and gap projections and immediately validat
 the replacement configuration. No lifecycle status prevents editing a visible
 connection, and no transport fallback occurs.
 
+Editing a visible Discord connection replaces the submitted Application identity,
+target Guild configuration, and complete Bot credential set in one fenced operation.
+It invalidates stale callback selector, Application claim, Gateway lease/checkpoint,
+gap, identity, capability, and health projections before callback activation repeats.
+The Gateway Worker can claim only the newly activated configuration; a stale worker
+cannot continue mutation after replacement or disconnect.
+
 Revoking a participant grant deletes the selected grant policy row after an ownership
 check. It does not delete canonical provider content, invocation history, projected
 Session events, or unrelated grants.
@@ -69,6 +78,11 @@ Provider credential and permission failures move only connection health to
 App uninstall clears provider credentials and terminalizes provider resources while
 preserving the route relationship for later reconfiguration. In-flight validation
 results are generation-fenced so they cannot overwrite a newer edit or disconnect.
+
+Discord Gateway credential, intent, close-code, or transport failures likewise update
+only connection health/gap state and preserve route relationships, bindings, and work.
+Discord callback and Gateway authority are released during disconnect after terminal
+local state commits; provider cleanup failure remains a visible post-commit outcome.
 
 ## Session Archive and Restore
 
@@ -128,6 +142,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 11) — Added fenced Discord credential/callback
+  replacement, Gateway lease/checkpoint invalidation, and provider-health repair
+  behavior without rerouting retained bindings.
 - **2026-07-26** (spec_version 10) — Added mode-specific association removal,
   generation-fenced Multi route/default/App mutations, invalidated defaults,
   historical route snapshots, and read-only disconnected Multi Apps.

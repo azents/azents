@@ -1,7 +1,7 @@
 ---
 title: "External Channel"
 created: 2026-07-22
-tags: [backend, frontend, external-channel, slack, security]
+tags: [backend, frontend, external-channel, slack, discord, security]
 spec_type: domain
 domain: external-channel
 owner: "@Hardtack"
@@ -41,8 +41,12 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/discord
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}
+  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi
+  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{handoff_id}
@@ -50,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-26
-spec_version: 16
+spec_version: 17
 ---
 
 # External Channel
@@ -59,11 +63,13 @@ spec_version: 16
 
 External Channels connect provider conversations to Azents Agents without treating provider credentials, conversations, participants, or delivery state as AgentSession-owned chat data. Workspace owns connection credentials and provider identity. An Agent route selects the Agent for a connection. A resource represents one provider conversation, and an active binding links that resource to one AgentSession.
 
-Slack is the first provider. Each connection uses a manually configured Slack App,
-selects either signed HTTP callbacks or Socket Mode, and has an immutable App mode.
-A Single App is managed by one Agent's administrators and has exactly one Agent
-route. A Multi App is managed by Workspace Owners and Managers and may have zero or
-more Agent routes. One Agent may appear in several Apps, and one AgentSession may
+Slack and Discord are supported providers. A Slack connection uses a manually
+configured Slack App and selects either signed HTTP callbacks or Socket Mode. A Discord
+connection uses a customer-owned Discord App, its Bot Token, one target Guild, a signed
+interaction callback, and a dedicated Gateway Worker. Both providers have an immutable
+App mode. A Single App is managed by one Agent's administrators and has exactly one
+Agent route. A Multi App is managed by Workspace Owners and Managers and may have zero
+or more Agent routes. One Agent may appear in several Apps, and one AgentSession may
 contain multiple independent bindings.
 
 ## Ownership and Security Boundaries
@@ -86,15 +92,15 @@ contain multiple independent bindings.
 
 | Record | Current contract |
 | --- | --- |
-| Connection | Workspace-owned provider app identity, immutable `single` or `multi` mode, selected transport, encrypted credentials, capability/health snapshot, mutation generation, terminal disconnect state, and Socket lease/gap state. |
+| Connection | Workspace-owned provider App identity, immutable `single` or `multi` mode, encrypted credentials, capability/health snapshot, configuration and App-claim generations, terminal disconnect state, and provider ingress lease/checkpoint/gap state. Slack has one selected HTTP or Socket transport; Discord concurrently uses signed HTTP interactions and a Gateway session. |
 | Agent route | Persistent connection-to-Agent relationship. Single Apps require exactly one current route. Multi Apps retain zero or more available or removed catalog routes; immutable Agent identity snapshots preserve history after Agent deletion. |
 | Channel default | Multi App channel-to-route preference. At most one active default exists per connection and provider channel. Removing its route invalidates rather than silently retargets it. |
 | Conversation admission | Durable, expiring unbound-conversation scope that records the initiating provider principal and may become selected exactly once. |
-| Interaction | Idempotent signed Slack shortcut, block-action, navigation, or view-submission claim. Provider triggers stay transient and are never persisted or replayed. |
-| Resource | One Slack thread with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. |
+| Interaction | Idempotent signed Slack or Discord shortcut, component/action, navigation, or submission claim. Provider triggers and Discord interaction tokens stay transient and are never persisted or replayed. |
+| Resource | One provider conversation: a Slack thread or Discord thread, with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. |
 | Event | Durable provider envelope admission keyed by connection and provider event identity. Processing is at-least-once and domain writes are idempotent. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Message and revision | Canonical provider message plus immutable original/edit/delete revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Raw provider blocks cannot supply Azents' internal normalized-text projection; only the authenticated admission projection may be consumed through the trusted projection path. Revisions retain optional bounded Slack user/channel ID-to-display-name mappings and up to 20 metadata-only file entries. Supported entries expose binding-scoped opaque locators; private URLs and file bodies are never persisted or rendered. Canonical bodies and provider identities keep raw IDs, while visible body projections replace known Slack user and channel references with readable names. `original_url` is nullable and is set only from a successful provider permalink lookup. |
+| Message and revision | Canonical provider message plus immutable original/edit/delete revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Discord Gateway messages are normalized only after target-Guild, author, content, and message eligibility checks. Raw provider payloads cannot supply Azents' internal normalized-text projection; only the authenticated admission projection may be consumed through the trusted projection path. Revisions retain optional bounded provider identity mappings and up to 20 metadata-only file entries. Supported entries expose binding-scoped opaque locators; private URLs and file bodies are never persisted or rendered. |
 | Pending context | Unprojected same-route/resource revisions retained for at most 7 days, 100 messages, and 256 KiB. Oldest content is expired or trimmed first. |
 | Binding | Active or disconnected link from one route/resource to one AgentSession. Initial activation waits for hydration reconciliation. |
 | Invocation batch | Immutable ordered revision membership released through one authorized trigger and referenced by a batch InputBuffer. |
@@ -124,10 +130,28 @@ contain multiple independent bindings.
   Missing legacy fields are unavailable. A file locator is valid only for the current
   Agent, Session, active binding, route, and active or degraded connection; provider
   authorization remains authoritative at download time.
+- A Discord connection is scoped to its validated Application and target Guild. The
+  callback selector is opaque and retained only as a hash; the Application public key,
+  Bot identity, and callback authority are configuration-derived state. Discord
+  interaction tokens, callback URLs, raw interaction bodies, and signature values are
+  never durable External Channel state.
+- The dedicated Discord Gateway Worker claims each connection through owner,
+  configuration-generation, App-claim-generation, and lease-generation fences.
+  Heartbeats and lease renewal do not authorize durable mutation by themselves. A
+  Gateway dispatch advances the encrypted Resume checkpoint only in the same durable
+  admission transaction that accepts the canonical event; an unadmitted dispatch is
+  not checkpointed. Gateway `READY` is session state, not a canonical message event.
+- Production Discord REST and Gateway endpoints require `https` and `wss`. The
+  deterministic test origin may use `http` and `ws` only when an explicit test REST
+  origin and an explicit insecure-Gateway opt-in are both configured.
 - Supported first-release inbound files are direct Slack-hosted uploads with a concrete
   ID, non-negative declared size, visible access, and no external or Slack Connect
   classification. Unsupported entries remain metadata-visible with a stable rejection
   reason but cannot be materialized.
+- Discord attachment metadata likewise stores bounded identifiers, filename, media type,
+  and declared size only. A current provider message lookup obtains a non-durable
+  download URL immediately before a bounded in-memory download; redirects, stale
+  authority, malformed metadata, and oversized streams fail closed.
 - Initial binding activation creates one separate button-only Session navigation
   message. Releasing a new invocation batch creates the current work cycle's
   Activity Tracker before Session wake-up. Checking and task progress update one
@@ -183,6 +207,14 @@ Slack can open an opaque, expiring management handoff for the current Multi App
 channel; the authenticated Web surface rechecks Workspace write permission and
 handoff scope before reading or replacing that channel's default.
 
+Discord Single and Multi setup use separate Agent and Workspace flows. A connection
+validates that its Bot Token belongs to the submitted Discord Application, retains the
+target Guild identity, configures an opaque signed-interaction callback, and activates
+only after the fenced configuration commit. Replacing Discord credentials or App
+identity invalidates prior callback and Gateway authority before activation repeats.
+Discord creation remains rollout-gated until every API and Worker reader is
+provider-aware and the dedicated Gateway Worker is deployed.
+
 Slack validation first uses `auth.test` to resolve Team and Bot identity, then uses
 `bots.info` to verify that the Bot Token's actual App ID equals the configured App
 ID. An App ID copied from a different Slack App is rejected as a recoverable
@@ -214,6 +246,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-26** (spec_version 17) — Promoted Discord as a supported External
+  Channel provider with customer-owned Single/Multi Apps, signed callback and
+  Gateway authority, provider-safe attachment retrieval, rollout gating, and
+  production-versus-deterministic-test endpoint boundaries.
 - **2026-07-26** (spec_version 16) — Added immutable Single/Multi App modes,
   mode-aware route cardinality and resolution, durable selector/default state,
   Workspace Multi management, generation fences, and read-only disconnected history.
