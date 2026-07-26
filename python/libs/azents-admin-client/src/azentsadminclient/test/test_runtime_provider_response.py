@@ -48,9 +48,9 @@ class TestRuntimeProviderResponse(unittest.TestCase):
                 accepted_contract_revision_id = '',
                 active_config_revision_id = '',
                 admin_version = 56,
-                capabilities = { },
-                config_schema = { },
-                metadata = { }
+                capabilities = azentsadminclient.models.capabilities.Capabilities(),
+                config_schema = azentsadminclient.models.metadata.metadata(),
+                metadata = azentsadminclient.models.metadata.metadata()
             )
         else:
             return RuntimeProviderResponse(
@@ -67,9 +67,9 @@ class TestRuntimeProviderResponse(unittest.TestCase):
                 accepted_contract_revision_id = '',
                 active_config_revision_id = '',
                 admin_version = 56,
-                capabilities = { },
-                config_schema = { },
-                metadata = { },
+                capabilities = azentsadminclient.models.capabilities.Capabilities(),
+                config_schema = azentsadminclient.models.metadata.metadata(),
+                metadata = azentsadminclient.models.metadata.metadata(),
         )
         """
 

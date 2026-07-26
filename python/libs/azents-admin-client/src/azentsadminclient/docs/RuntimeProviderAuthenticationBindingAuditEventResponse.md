@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **actor_user_id** | **str** |  | 
 **previous_admin_version** | **int** |  | 
 **new_admin_version** | **int** |  | 
-**metadata** | **Dict[str, object]** |  | 
+**metadata** | **object** |  | 
 **created_at** | **datetime** |  | 
 
 ## Example

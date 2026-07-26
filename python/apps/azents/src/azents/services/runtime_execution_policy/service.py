@@ -1,16 +1,19 @@
 """Runtime execution policy management and resolution service."""
 
 import dataclasses
+import datetime
 from typing import Annotated
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import WorkspaceUserRole
 from azents.core.runtime_execution_policy import (
     RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
     SYSTEM_STANDARD_PROFILE_ID,
     JsonValue,
     RuntimeExecutionAuditEventType,
+    RuntimeExecutionAvailabilityReason,
     RuntimeExecutionChangeDirection,
     RuntimeExecutionManagementLayer,
     RuntimeExecutionModuleId,
@@ -33,9 +36,11 @@ from azents.core.runtime_execution_policy import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.runtime_execution_policy.data import (
     AgentRuntimeExecutionSetting,
     RuntimeExecutionPlatformPolicy,
+    RuntimeExecutionPolicyAuditEvent,
     RuntimeExecutionPolicyAuditEventCreate,
     RuntimeExecutionProfile,
     RuntimeExecutionProfileCreate,
@@ -116,6 +121,38 @@ class AgentRuntimeExecutionSettingMutation:
     correlation_id: str
 
 
+@dataclasses.dataclass(frozen=True)
+class WorkspaceRuntimeExecutionPolicyView:
+    """Safe current Workspace policy, including the implicit initial state."""
+
+    workspace_id: str
+    version: int
+    restriction: RuntimeExecutionPolicyRestriction
+    digest: str
+    allowed_profile_ids: frozenset[str]
+    updated_at: datetime.datetime | None
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeExecutionProfileAvailability:
+    """One Profile's Workspace-level availability projection."""
+
+    profile: RuntimeExecutionProfile
+    allowed: bool
+    available: bool
+    reason: RuntimeExecutionAvailabilityReason | None
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentRuntimeExecutionPolicyView:
+    """Configured Agent execution intent with a hierarchy-only preview."""
+
+    setting: AgentRuntimeExecutionSetting
+    profile: RuntimeExecutionProfile
+    resolution: RuntimeExecutionResolution
+    provider_compatibility_evaluated: bool
+
+
 @dataclasses.dataclass
 class RuntimeExecutionPolicyService:
     """Manage current policy rows and resolve effective Agent policy."""
@@ -127,6 +164,313 @@ class RuntimeExecutionPolicyService:
         RuntimeExecutionPolicyRepository,
         Depends(RuntimeExecutionPolicyRepository),
     ]
+    agent_admin_repository: Annotated[
+        AgentAdminRepository,
+        Depends(AgentAdminRepository),
+    ]
+
+    async def get_platform(self) -> RuntimeExecutionPlatformPolicy:
+        """Return the current Platform execution-policy ceiling."""
+        async with self.session_manager() as session:
+            platform = await self.repository.get_platform(session, for_update=False)
+        if platform is None:
+            raise RuntimeExecutionPolicyUnavailable(
+                "platform_policy_missing",
+                RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
+            )
+        return platform
+
+    async def list_profiles(
+        self,
+        *,
+        include_retired: bool,
+        offset: int,
+        limit: int,
+    ) -> list[RuntimeExecutionProfile]:
+        """List Profiles for System Admin management."""
+        async with self.session_manager() as session:
+            return await self.repository.list_profiles(
+                session,
+                include_retired=include_retired,
+                profile_ids=None,
+                offset=offset,
+                limit=limit,
+            )
+
+    async def get_profile(self, profile_id: str) -> RuntimeExecutionProfile:
+        """Return one stable Profile."""
+        async with self.session_manager() as session:
+            profile = await self.repository.get_profile(
+                session,
+                profile_id=profile_id,
+                for_update=False,
+            )
+        if profile is None:
+            raise RuntimeExecutionPolicyUnavailable(
+                "profile_not_found",
+                profile_id,
+            )
+        return profile
+
+    async def list_admin_audit_events(
+        self,
+        *,
+        management_layer: RuntimeExecutionManagementLayer | None,
+        target_id: str | None,
+        workspace_id: str | None,
+        agent_id: str | None,
+        offset: int,
+        limit: int,
+    ) -> list[RuntimeExecutionPolicyAuditEvent]:
+        """List metadata-only audit events for System Admins."""
+        async with self.session_manager() as session:
+            return await self.repository.list_audit_events(
+                session,
+                management_layer=management_layer,
+                target_id=target_id,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                offset=offset,
+                limit=limit,
+            )
+
+    async def get_workspace_policy(
+        self,
+        workspace_id: str,
+    ) -> WorkspaceRuntimeExecutionPolicyView:
+        """Return the explicit or implicit safe Workspace policy."""
+        async with self.session_manager() as session:
+            workspace = await self.repository.get_workspace(
+                session,
+                workspace_id=workspace_id,
+                for_update=False,
+            )
+        return _workspace_view(workspace_id, workspace)
+
+    async def replace_workspace_for_manager(
+        self,
+        workspace_id: str,
+        mutation: WorkspaceRuntimeExecutionPolicyMutation,
+        *,
+        role: WorkspaceUserRole,
+    ) -> WorkspaceRuntimeExecutionPolicyView:
+        """Authorize and replace one Workspace execution policy."""
+        if role not in {WorkspaceUserRole.OWNER, WorkspaceUserRole.MANAGER}:
+            raise RuntimeExecutionPolicyUnavailable(
+                "workspace_policy_access_denied",
+                workspace_id,
+            )
+        await self.replace_workspace(workspace_id, mutation)
+        return await self.get_workspace_policy(workspace_id)
+
+    async def list_workspace_profiles(
+        self,
+        workspace_id: str,
+        *,
+        include_retired: bool,
+        offset: int,
+        limit: int,
+    ) -> list[RuntimeExecutionProfileAvailability]:
+        """List Platform Profiles with Workspace allowance diagnostics."""
+        async with self.session_manager() as session:
+            workspace = await self.repository.get_workspace(
+                session,
+                workspace_id=workspace_id,
+                for_update=False,
+            )
+            profiles = await self.repository.list_profiles(
+                session,
+                include_retired=include_retired,
+                profile_ids=None,
+                offset=offset,
+                limit=limit,
+            )
+        allowed_profile_ids = _workspace_view(
+            workspace_id,
+            workspace,
+        ).allowed_profile_ids
+        return [
+            _profile_availability(profile, allowed_profile_ids) for profile in profiles
+        ]
+
+    async def list_workspace_audit_events(
+        self,
+        workspace_id: str,
+        *,
+        offset: int,
+        limit: int,
+    ) -> list[RuntimeExecutionPolicyAuditEvent]:
+        """List metadata-only audit events scoped to one Workspace."""
+        async with self.session_manager() as session:
+            return await self.repository.list_audit_events(
+                session,
+                management_layer=RuntimeExecutionManagementLayer.WORKSPACE,
+                target_id=None,
+                workspace_id=workspace_id,
+                agent_id=None,
+                offset=offset,
+                limit=limit,
+            )
+
+    async def get_agent_policy_for_manager(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> AgentRuntimeExecutionPolicyView:
+        """Return Agent intent only to its administrators or Workspace owner."""
+        async with self.session_manager() as session:
+            await self._require_agent_manager(
+                session,
+                agent_id=agent_id,
+                workspace_id=workspace_id,
+                workspace_user_id=workspace_user_id,
+                role=role,
+            )
+            platform = await self.repository.get_platform(session, for_update=False)
+            setting = await self.repository.get_agent_setting(
+                session,
+                agent_id=agent_id,
+                for_update=False,
+            )
+            workspace = await self.repository.get_workspace(
+                session,
+                workspace_id=workspace_id,
+                for_update=False,
+            )
+            if platform is None or setting is None:
+                target_id = (
+                    RUNTIME_EXECUTION_PLATFORM_POLICY_ID
+                    if platform is None
+                    else agent_id
+                )
+                raise RuntimeExecutionPolicyUnavailable(
+                    "execution_policy_state_missing",
+                    target_id,
+                )
+            profile = await self.repository.get_profile(
+                session,
+                profile_id=setting.profile_id,
+                for_update=False,
+            )
+            if profile is None:
+                raise RuntimeExecutionPolicyUnavailable(
+                    "profile_not_found",
+                    setting.profile_id,
+                )
+        workspace_view = _workspace_view(workspace_id, workspace)
+        resolution = resolve_runtime_execution_policy(
+            platform_policy=platform.policy,
+            profile_policy=profile.policy,
+            workspace_restriction=workspace_view.restriction,
+            agent_restriction=setting.restriction,
+            source_versions=RuntimeExecutionSourceVersions(
+                platform=platform.version,
+                profile=profile.version,
+                workspace=max(workspace_view.version, 1),
+                agent=setting.version,
+            ),
+            provider_capabilities=_validation_provider_capabilities(),
+            profile_active=(
+                profile.lifecycle is RuntimeExecutionProfileLifecycle.ACTIVE
+            ),
+            profile_allowed=profile.id in workspace_view.allowed_profile_ids,
+            applied_policy=None,
+        )
+        return AgentRuntimeExecutionPolicyView(
+            setting=setting,
+            profile=profile,
+            resolution=resolution,
+            provider_compatibility_evaluated=False,
+        )
+
+    async def replace_agent_setting_for_manager(
+        self,
+        agent_id: str,
+        mutation: AgentRuntimeExecutionSettingMutation,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> AgentRuntimeExecutionPolicyView:
+        """Authorize and replace Agent intent without Runtime application."""
+        async with self.session_manager() as session:
+            await self._require_agent_manager(
+                session,
+                agent_id=agent_id,
+                workspace_id=workspace_id,
+                workspace_user_id=workspace_user_id,
+                role=role,
+            )
+        await self.replace_agent_setting(agent_id, mutation)
+        return await self.get_agent_policy_for_manager(
+            agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+
+    async def list_agent_audit_events_for_manager(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+        offset: int,
+        limit: int,
+    ) -> list[RuntimeExecutionPolicyAuditEvent]:
+        """List Agent policy audit only for authorized Agent managers."""
+        async with self.session_manager() as session:
+            await self._require_agent_manager(
+                session,
+                agent_id=agent_id,
+                workspace_id=workspace_id,
+                workspace_user_id=workspace_user_id,
+                role=role,
+            )
+            return await self.repository.list_audit_events(
+                session,
+                management_layer=None,
+                target_id=None,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                offset=offset,
+                limit=limit,
+            )
+
+    async def _require_agent_manager(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> None:
+        """Enforce the existing Agent administrator-or-owner boundary."""
+        owner_workspace_id = await self.repository.get_agent_workspace_id(
+            session,
+            agent_id=agent_id,
+        )
+        if owner_workspace_id != workspace_id:
+            raise RuntimeExecutionPolicyUnavailable(
+                "agent_not_found",
+                agent_id,
+            )
+        if role is WorkspaceUserRole.OWNER:
+            return
+        if not await self.agent_admin_repository.is_admin(
+            session,
+            agent_id,
+            workspace_user_id,
+        ):
+            raise RuntimeExecutionPolicyUnavailable(
+                "agent_access_denied",
+                agent_id,
+            )
 
     async def replace_platform(
         self,
@@ -873,4 +1217,49 @@ def _validation_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
         storage_modes=frozenset(RuntimeExecutionStorageMode),
         network_modes=frozenset(RuntimeExecutionNetworkMode),
         resource_maxima=None,
+    )
+
+
+def _workspace_view(
+    workspace_id: str,
+    workspace: WorkspaceRuntimeExecutionPolicy | None,
+) -> WorkspaceRuntimeExecutionPolicyView:
+    """Project an absent Workspace row as the safe initial policy."""
+    if workspace is not None:
+        return WorkspaceRuntimeExecutionPolicyView(
+            workspace_id=workspace.workspace_id,
+            version=workspace.version,
+            restriction=workspace.restriction,
+            digest=workspace.digest,
+            allowed_profile_ids=workspace.allowed_profile_ids,
+            updated_at=workspace.updated_at,
+        )
+    restriction = empty_runtime_execution_restriction()
+    return WorkspaceRuntimeExecutionPolicyView(
+        workspace_id=workspace_id,
+        version=0,
+        restriction=restriction,
+        digest=digest_runtime_execution_policy(restriction),
+        allowed_profile_ids=frozenset({SYSTEM_STANDARD_PROFILE_ID}),
+        updated_at=None,
+    )
+
+
+def _profile_availability(
+    profile: RuntimeExecutionProfile,
+    allowed_profile_ids: frozenset[str],
+) -> RuntimeExecutionProfileAvailability:
+    """Build one bounded Workspace-level Profile availability explanation."""
+    allowed = profile.id in allowed_profile_ids
+    if profile.lifecycle is RuntimeExecutionProfileLifecycle.RETIRED:
+        reason = RuntimeExecutionAvailabilityReason.PROFILE_RETIRED
+    elif not allowed:
+        reason = RuntimeExecutionAvailabilityReason.PROFILE_NOT_ALLOWED
+    else:
+        reason = None
+    return RuntimeExecutionProfileAvailability(
+        profile=profile,
+        allowed=allowed,
+        available=reason is None,
+        reason=reason,
     )

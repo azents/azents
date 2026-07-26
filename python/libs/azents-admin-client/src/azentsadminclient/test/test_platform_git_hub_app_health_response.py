@@ -39,7 +39,7 @@ class TestPlatformGitHubAppHealthResponse(unittest.TestCase):
                 code = '',
                 message = '',
                 action_hint = '',
-                metadata = { },
+                metadata = azentsadminclient.models.metadata.metadata(),
                 checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
         else:
@@ -48,7 +48,7 @@ class TestPlatformGitHubAppHealthResponse(unittest.TestCase):
                 code = '',
                 message = '',
                 action_hint = '',
-                metadata = { },
+                metadata = azentsadminclient.models.metadata.metadata(),
                 checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """

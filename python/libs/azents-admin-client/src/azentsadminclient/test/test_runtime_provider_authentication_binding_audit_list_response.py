@@ -43,7 +43,7 @@ class TestRuntimeProviderAuthenticationBindingAuditListResponse(unittest.TestCas
                         actor_user_id = '', 
                         previous_admin_version = 56, 
                         new_admin_version = 56, 
-                        metadata = { }, 
+                        metadata = azentsadminclient.models.metadata.metadata(), 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -57,7 +57,7 @@ class TestRuntimeProviderAuthenticationBindingAuditListResponse(unittest.TestCas
                         actor_user_id = '', 
                         previous_admin_version = 56, 
                         new_admin_version = 56, 
-                        metadata = { }, 
+                        metadata = azentsadminclient.models.metadata.metadata(), 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )
