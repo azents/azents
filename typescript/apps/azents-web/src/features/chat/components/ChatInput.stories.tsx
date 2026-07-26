@@ -194,9 +194,9 @@ const inputActions: InputActionDefinition[] = [
   {
     id: "cleanup_orphan_git_worktrees",
     keyword: "cleanup-worktrees",
-    label: "Clean up orphan worktrees",
+    label: "Clean up worktrees",
     description:
-      "Find and permanently remove orphan Git worktrees from this runtime.",
+      "Remove managed Git worktrees not connected to an active session.",
     action: { type: "cleanup_orphan_git_worktrees" },
     category: "turn",
     message: {
@@ -363,7 +363,7 @@ export const CleanupActionSelection = {
     const canvas = within(canvasElement);
     await userEvent.type(canvas.getByRole("textbox"), "/cleanup");
     await userEvent.click(
-      canvas.getByRole("button", { name: /clean up orphan worktrees/i }),
+      canvas.getByRole("button", { name: /clean up worktrees/i }),
     );
     await expect(canvas.getByText("/cleanup-worktrees")).toBeVisible();
     await expect(canvas.getByRole("textbox")).toHaveValue("");
