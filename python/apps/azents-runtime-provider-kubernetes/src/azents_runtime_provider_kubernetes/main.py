@@ -112,6 +112,11 @@ async def _run_control_loop(
             pvc_storage_request=settings.pvc_storage_request,
             runner_resources=settings.runner_resources,
             runner_env=settings.runner_env,
+            gateway_image=settings.gateway_image,
+            engine_image=settings.engine_image,
+            runtime_control_namespace=settings.runtime_control_namespace,
+            runtime_control_labels=settings.runtime_control_labels,
+            runtime_control_port=settings.runtime_control_port,
             image_pull_secrets=settings.image_pull_secrets,
             pod_annotations=settings.pod_annotations,
             pod_node_selector=settings.pod_node_selector,
@@ -131,6 +136,9 @@ async def _run_control_loop(
             "observe",
             "workspace_path",
             "pvc_persistence",
+            "execution_policy_v1",
+            "runtime_network_policy",
+            "engine_storage_ephemeral",
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={"workspace_path": settings.workspace_path},
@@ -442,6 +450,25 @@ class ProviderSettings:
             _json_container_resources_env("AZ_RUNTIME_RUNNER_RESOURCES")
         )
         self.runner_env: Mapping[str, str] = _selected_env(RUNNER_LIMIT_ENV_NAMES)
+        self.gateway_image = _required_env("AZ_RUNTIME_PROVIDER_GATEWAY_IMAGE")
+        self.engine_image = _required_env("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE")
+        self.runtime_control_namespace = _required_env(
+            "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE"
+        )
+        self.runtime_control_labels = _json_string_map_env(
+            "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_LABELS"
+        )
+        if not self.runtime_control_labels:
+            raise RuntimeError(
+                "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_LABELS must not be empty"
+            )
+        self.runtime_control_port = int(
+            _required_env("AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT")
+        )
+        if not 1 <= self.runtime_control_port <= 65_535:
+            raise RuntimeError(
+                "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT must be between 1 and 65535"
+            )
         self.image_pull_secrets: tuple[LocalObjectReference, ...] = (
             _json_local_object_references_env(
                 "AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS"

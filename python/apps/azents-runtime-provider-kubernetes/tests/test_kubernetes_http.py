@@ -3,15 +3,30 @@
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ContainerResourceClaim,
     ContainerResources,
+    ContainerSecurityContext,
     ContainerSpec,
+    EmptyDirVolume,
     EnvVar,
+    ExecAction,
+    IpBlock,
+    LabelSelector,
     LocalObjectReference,
+    NetworkPolicyEgressRule,
+    NetworkPolicyPeer,
+    NetworkPolicyPort,
+    NetworkPolicyResource,
+    NetworkPolicySpec,
     ObjectMeta,
     PodResource,
+    PodSecurityContext,
     PodSpec,
+    Probe,
+    VolumeMount,
 )
 from azents_runtime_provider_kubernetes.kubernetes_http import (
     POD_WATCH_TIMEOUT,
+    network_policy_manifest,
+    network_policy_resource,
     pod_manifest,
     pod_resource,
 )
@@ -173,6 +188,133 @@ def test_pod_resource_preserves_generic_resource_requirements() -> None:
     )
 
 
+def test_pod_policy_topology_round_trips() -> None:
+    runner = _pod(resources=None).spec.containers[0]
+    gateway = ContainerSpec(
+        name="container-policy-gateway",
+        image="gateway@sha256:test",
+        command=("/usr/local/bin/azents-container-policy-gateway",),
+        args=(),
+        working_dir="/",
+        resources=None,
+        security_context=runner.security_context,
+        readiness_probe=Probe(
+            exec_action=ExecAction(
+                command=("test", "-S", "/var/run/azents-gateway/docker.sock")
+            ),
+            initial_delay_seconds=1,
+            period_seconds=2,
+            timeout_seconds=1,
+            failure_threshold=30,
+        ),
+        env=(),
+        volume_mounts=(
+            VolumeMount(
+                name="container-gateway-socket",
+                mount_path="/var/run/azents-gateway",
+                read_only=False,
+            ),
+        ),
+    )
+    pod = PodResource(
+        metadata=ObjectMeta(
+            name="runtime",
+            namespace="azents-runtime",
+            labels={"azents/execution-policy-managed": "true"},
+            annotations={},
+        ),
+        spec=PodSpec(
+            service_account_name=None,
+            automount_service_account_token=False,
+            image_pull_secrets=(),
+            security_context=PodSecurityContext(
+                run_as_user=None,
+                run_as_group=None,
+                fs_group=1000,
+                fs_group_change_policy="OnRootMismatch",
+            ),
+            node_selector={},
+            tolerations=(),
+            containers=(runner, gateway),
+            volumes=(
+                EmptyDirVolume(
+                    name="container-gateway-socket",
+                    medium="Memory",
+                    size_limit="16Mi",
+                ),
+                EmptyDirVolume(
+                    name="container-engine-storage",
+                    medium=None,
+                    size_limit=8_589_934_592,
+                ),
+            ),
+        ),
+    )
+
+    manifest = pod_manifest(pod)
+
+    assert pod_resource(manifest) == pod
+    assert manifest["spec"]["automountServiceAccountToken"] is False
+    assert "serviceAccountName" not in manifest["spec"]
+    assert manifest["spec"]["volumes"][1] == {
+        "name": "container-engine-storage",
+        "emptyDir": {"sizeLimit": 8_589_934_592},
+    }
+
+
+def test_network_policy_round_trips_runtime_evidence_and_rules() -> None:
+    network_policy = NetworkPolicyResource(
+        metadata=ObjectMeta(
+            name="azents-runtime-runtime-1-execution",
+            namespace="azents-runtime",
+            labels={"azents/runtime-id": "runtime-1"},
+            annotations={"azents/execution-policy-digest": "digest"},
+        ),
+        spec=NetworkPolicySpec(
+            pod_selector=LabelSelector(
+                match_labels={
+                    "azents/runtime-id": "runtime-1",
+                    "azents/execution-policy-managed": "true",
+                }
+            ),
+            policy_types=("Ingress", "Egress"),
+            ingress=(),
+            egress=(
+                NetworkPolicyEgressRule(
+                    peers=(
+                        NetworkPolicyPeer(
+                            namespace_selector=None,
+                            pod_selector=None,
+                            ip_block=IpBlock(
+                                cidr="203.0.113.0/24",
+                                except_cidrs=("203.0.113.128/25",),
+                            ),
+                        ),
+                    ),
+                    ports=(NetworkPolicyPort(protocol="TCP", port=443),),
+                ),
+            ),
+        ),
+    )
+
+    manifest = network_policy_manifest(network_policy)
+
+    assert network_policy_resource(manifest) == network_policy
+    assert manifest["spec"]["egress"] == [
+        {
+            "to": [
+                {
+                    "ipBlock": {
+                        "cidr": "203.0.113.0/24",
+                        "except": ["203.0.113.128/25"],
+                    }
+                }
+            ],
+            "ports": [{"protocol": "TCP", "port": 443}],
+        }
+    ]
+
+
 def _pod(resources: ContainerResources | None) -> PodResource:
     return PodResource(
         metadata=ObjectMeta(
@@ -192,8 +334,21 @@ def _pod(resources: ContainerResources | None) -> PodResource:
                 ContainerSpec(
                     name="runner",
                     image="runner:latest",
+                    command=None,
+                    args=(),
                     working_dir="/workspace/agent",
                     resources=resources,
+                    security_context=ContainerSecurityContext(
+                        privileged=False,
+                        allow_privilege_escalation=False,
+                        read_only_root_filesystem=False,
+                        run_as_non_root=True,
+                        run_as_user=1000,
+                        run_as_group=1000,
+                        capabilities_add=(),
+                        capabilities_drop=("ALL",),
+                    ),
+                    readiness_probe=None,
                     env=(EnvVar(name="AZ_RUNTIME_ID", value="runtime"),),
                     volume_mounts=(),
                 ),

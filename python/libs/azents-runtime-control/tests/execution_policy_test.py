@@ -1,12 +1,17 @@
 """Runtime execution-policy envelope validation tests."""
 
+import dataclasses
+
 import pytest
 
 from azents_runtime_control.execution_policy import (
     JsonValue,
+    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyEnvelope,
     RuntimeExecutionPolicyEvidence,
+    RuntimeExecutionStorageMode,
     digest_effective_policy,
+    parse_execution_policy_envelope,
     validate_standard_execution_policy_envelope,
 )
 
@@ -56,6 +61,21 @@ def _policy(*, image_build: bool = False) -> dict[str, JsonValue]:
 
 def _envelope(*, image_build: bool = False) -> RuntimeExecutionPolicyEnvelope:
     policy = _policy(image_build=image_build)
+    if image_build:
+        resources = policy["resources"]
+        storage = policy["engine_storage"]
+        assert isinstance(resources, dict)
+        assert isinstance(storage, dict)
+        resources.update(
+            {
+                "cpu_millicores": 1000,
+                "memory_bytes": 2_147_483_648,
+                "pids": 256,
+                "container_count": 8,
+                "ephemeral_storage_bytes": 10_737_418_240,
+            }
+        )
+        storage.update({"mode": "ephemeral", "capacity_bytes": 8_589_934_592})
     return RuntimeExecutionPolicyEnvelope(
         evidence=RuntimeExecutionPolicyEvidence(
             snapshot_id="snapshot-1",
@@ -143,3 +163,92 @@ def test_module_version_evidence_mismatch_is_rejected() -> None:
             invalid,
             desired_generation=3,
         )
+
+
+def test_authority_bearing_policy_parses_as_typed_contract() -> None:
+    policy = _policy(image_build=True)
+    resources = policy["resources"]
+    storage = policy["engine_storage"]
+    network = policy["network_egress"]
+    assert isinstance(resources, dict)
+    assert isinstance(storage, dict)
+    assert isinstance(network, dict)
+    resources.update(
+        {
+            "cpu_millicores": 1000,
+            "memory_bytes": 2_147_483_648,
+            "pids": 256,
+            "container_count": 8,
+            "ephemeral_storage_bytes": 10_737_418_240,
+        }
+    )
+    storage.update({"mode": "ephemeral", "capacity_bytes": 8_589_934_592})
+    network.update(
+        {
+            "mode": "restricted",
+            "allowed_destinations": ["203.0.113.0/24"],
+        }
+    )
+    envelope = RuntimeExecutionPolicyEnvelope(
+        evidence=dataclasses.replace(
+            _envelope().evidence,
+            digest=digest_effective_policy(policy),
+        ),
+        effective_policy=policy,
+    )
+
+    parsed = parse_execution_policy_envelope(envelope, desired_generation=3)
+
+    assert parsed.image_build is True
+    assert parsed.engine_storage.mode is RuntimeExecutionStorageMode.EPHEMERAL
+    assert parsed.network_egress.mode is RuntimeExecutionNetworkMode.RESTRICTED
+    assert parsed.network_egress.allowed_destinations == ("203.0.113.0/24",)
+
+
+def test_engine_policy_requires_complete_resource_bounds() -> None:
+    policy = _policy(image_build=True)
+    envelope = RuntimeExecutionPolicyEnvelope(
+        evidence=dataclasses.replace(
+            _envelope().evidence,
+            digest=digest_effective_policy(policy),
+        ),
+        effective_policy=policy,
+    )
+
+    with pytest.raises(ValueError, match="bounded resources"):
+        parse_execution_policy_envelope(
+            envelope,
+            desired_generation=3,
+        )
+
+
+def test_unknown_module_field_is_rejected() -> None:
+    policy = _policy()
+    resources = policy["resources"]
+    assert isinstance(resources, dict)
+    resources["unbounded"] = True
+    envelope = RuntimeExecutionPolicyEnvelope(
+        evidence=dataclasses.replace(
+            _envelope().evidence,
+            digest=digest_effective_policy(policy),
+        ),
+        effective_policy=policy,
+    )
+
+    with pytest.raises(ValueError, match="module evidence is invalid"):
+        parse_execution_policy_envelope(envelope, desired_generation=3)
+
+
+def test_boolean_schema_version_is_rejected() -> None:
+    policy = _policy()
+    policy["schema_version"] = True
+    envelope = RuntimeExecutionPolicyEnvelope(
+        evidence=dataclasses.replace(
+            _envelope().evidence,
+            digest=digest_effective_policy(policy),
+        ),
+        effective_policy=policy,
+    )
+
+    with pytest.raises(ValueError, match="document shape is invalid"):
+        parse_execution_policy_envelope(envelope, desired_generation=3)

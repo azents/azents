@@ -22,6 +22,10 @@ def _helm_template(*values: str) -> str:
         "web.image.tag=sha",
         "adminWeb.image.repository=repo/admin-web",
         "adminWeb.image.tag=sha",
+        "runtimeProviderKubernetes.gatewayImage.repository=repo/gateway",
+        "runtimeProviderKubernetes.gatewayImage.tag=sha",
+        "runtimeProviderKubernetes.engineImage.repository=repo/engine",
+        "runtimeProviderKubernetes.engineImage.tag=sha",
         "secrets.existingSecrets.redis=azents-redis",
         "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
     )

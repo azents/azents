@@ -91,18 +91,17 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 - Server ConfigMap: `AZ_RUNTIME_RUNNER_IMAGE`, `AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT`
 - Provider authentication: `AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE` points to a projected ServiceAccount token with audience `azents-runtime-control`. The Provider watches the file and reconnects after rotation. It is separate from Runtime Runner authentication.
 - Provider Deployment: `AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKSPACE_PATH`, `AZ_RUNTIME_PROVIDER_STORAGE_CLASS`, `AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS`
-- Provider RBAC: leader election Lease permissions are scoped to the provider namespace, while Runtime Pod/PVC permissions are scoped to the workload namespace
+- Provider RBAC: leader election Lease permissions are scoped to the provider namespace, while Runtime Pod/PVC/NetworkPolicy permissions are scoped to the workload namespace
 - Runtime Pod image pulls: by default, Runtime Pods inherit `global.imagePullSecrets`. Consumers may override with `runtimeProviderKubernetes.runtimePod.imagePullSecrets`. Referenced pull secrets must already exist in the workload namespace.
 - Runtime Pod resources: `runtimeProviderKubernetes.runnerResources` is passed to the Provider as Kubernetes `ResourceRequirements`. Defaults set requests to CPU `1` and memory `2Gi`; limits are intentionally omitted unless consumers set them.
 - Runner operation limits: `runtimeProviderKubernetes.runnerLimits` configures per-Session, system, Runtime, pending, and control-path concurrency. Defaults are 10 Session active, 10 system active, 50 Runtime active, 100 pending per owner, 1,000 pending per Runtime, and 4 control operations. The Provider forwards these values to new Runner Pods; restart existing Runtimes after changing them.
 - Persistence: Kubernetes Provider v1 uses PVCs in the workload namespace as canonical persistence
-- Runtime NetworkPolicy: when enabled, Runtime Pods can reach cluster DNS and
-  the chart-managed `runtime-control` Service by default. `deniedCidrs` defines
-  the CIDRs excluded from the default public egress rule, `allowedCidrs` adds
-  explicit CIDR egress rules, and `extraEgress` appends raw Kubernetes
-  NetworkPolicy egress rules for service-specific exceptions. NetworkPolicy rules
-  are additive, so explicit egress entries remain allowed even when a broader CIDR
-  appears in `deniedCidrs`.
+- Runtime NetworkPolicy: Profile-managed Runtime Pods always match a chart-owned
+  deny-all baseline and receive allowed DNS, Runtime Control, and policy-derived
+  egress only through Provider-owned Runtime-specific NetworkPolicies. The legacy
+  broad policy explicitly excludes these Pods because Kubernetes allow rules are
+  additive. For legacy Pods, `deniedCidrs` narrows default public egress,
+  `allowedCidrs` adds explicit CIDRs, and `extraEgress` adds service exceptions.
 
 ## External Service And Credential Modes
 

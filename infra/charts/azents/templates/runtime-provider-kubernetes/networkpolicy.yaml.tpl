@@ -1,8 +1,9 @@
-{{- if and .Values.runtimeProviderKubernetes.enabled .Values.runtimeProviderKubernetes.networkPolicy.enabled }}
+{{- if .Values.runtimeProviderKubernetes.enabled }}
+{{- if .Values.runtimeProviderKubernetes.networkPolicy.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: azents-runtime-workload-isolation
+  name: azents-runtime-legacy-workload-egress
   namespace: {{ include "azents.runtimeProviderKubernetesWorkloadNamespace" . | quote }}
   labels:
     {{- include "azents.componentLabels" (dict "root" . "component" "runtime-provider-kubernetes") | nindent 4 }}
@@ -11,6 +12,9 @@ spec:
   podSelector:
     matchLabels:
       azents/managed-by: azents-runtime-provider-kubernetes
+    matchExpressions:
+      - key: azents/execution-policy-managed
+        operator: DoesNotExist
   policyTypes:
     - Ingress
     - Egress
@@ -53,4 +57,24 @@ spec:
             cidr: 0.0.0.0/0
             except:
               {{- toYaml .Values.runtimeProviderKubernetes.networkPolicy.deniedCidrs | nindent 14 }}
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: azents-runtime-execution-policy-default-deny
+  namespace: {{ include "azents.runtimeProviderKubernetesWorkloadNamespace" . | quote }}
+  labels:
+    {{- include "azents.componentLabels" (dict "root" . "component" "runtime-provider-kubernetes") | nindent 4 }}
+    app.kubernetes.io/part-of: "azents"
+spec:
+  podSelector:
+    matchLabels:
+      azents/managed-by: azents-runtime-provider-kubernetes
+      azents/execution-policy-managed: "true"
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []
 {{- end }}

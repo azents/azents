@@ -329,6 +329,20 @@ Return the Runtime Runner image for the Kubernetes Runtime Provider.
 {{- end -}}
 
 {{/*
+Return the fixed policy gateway image for Kubernetes Runtime Pods.
+*/}}
+{{- define "azents.runtimeGatewayImage" -}}
+{{- include "azents.imageReference" (dict "image" .Values.runtimeProviderKubernetes.gatewayImage "repositoryRequiredMessage" "runtimeProviderKubernetes.gatewayImage.repository is required" "tagRequiredMessage" "runtimeProviderKubernetes.gatewayImage.tag is required") -}}
+{{- end -}}
+
+{{/*
+Return the fixed nested engine image for Kubernetes Runtime Pods.
+*/}}
+{{- define "azents.runtimeEngineImage" -}}
+{{- include "azents.imageReference" (dict "image" .Values.runtimeProviderKubernetes.engineImage "repositoryRequiredMessage" "runtimeProviderKubernetes.engineImage.repository is required" "tagRequiredMessage" "runtimeProviderKubernetes.engineImage.tag is required") -}}
+{{- end -}}
+
+{{/*
 Return the Runtime Runner image for server-side Runtime Control.
 */}}
 {{- define "azents.serverRuntimeRunnerImage" -}}
