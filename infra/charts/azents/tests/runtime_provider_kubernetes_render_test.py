@@ -7,6 +7,10 @@ from pathlib import Path
 import pytest
 
 CHART_DIR = Path(__file__).resolve().parents[1]
+_RUNNER_DIGEST = f"sha256:{'a' * 64}"
+_GATEWAY_DIGEST = f"sha256:{'b' * 64}"
+_ENGINE_DIGEST = f"sha256:{'c' * 64}"
+_PROVIDER_DIGEST = f"sha256:{'d' * 64}"
 
 
 def _helm_template(*values: str) -> str:
@@ -24,8 +28,11 @@ def _helm_template(*values: str) -> str:
         "adminWeb.image.tag=sha",
         "runtimeProviderKubernetes.gatewayImage.repository=repo/gateway",
         "runtimeProviderKubernetes.gatewayImage.tag=sha",
+        f"runtimeProviderKubernetes.gatewayImage.digest={_GATEWAY_DIGEST}",
         "runtimeProviderKubernetes.engineImage.repository=repo/engine",
         "runtimeProviderKubernetes.engineImage.tag=sha",
+        f"runtimeProviderKubernetes.engineImage.digest={_ENGINE_DIGEST}",
+        f"runtimeProviderKubernetes.runnerImage.digest={_RUNNER_DIGEST}",
         "secrets.existingSecrets.redis=azents-redis",
         "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
     )
@@ -81,7 +88,9 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_DEFAULT_PROVIDER_ID" not in rendered
     assert "mountPath: /var/run/azents/runtime-provider-bootstrap" in rendered
     assert "repo/provider:sha" in rendered
-    assert "repo/runner:sha" in rendered
+    assert f"repo/runner:sha@{_RUNNER_DIGEST}" in rendered
+    assert f"repo/gateway:sha@{_GATEWAY_DIGEST}" in rendered
+    assert f"repo/engine:sha@{_ENGINE_DIGEST}" in rendered
     assert "AZ_RUNTIME_CONTROL_ENDPOINT" in rendered
     assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
     assert "AZ_RUNTIME_CONTROL_ALLOW_INSECURE" in rendered
@@ -371,14 +380,38 @@ def test_runtime_provider_kubernetes_digest_pinning_render_contract() -> None:
         "runtimeProviderKubernetes.enabled=true",
         "runtimeProviderKubernetes.image.repository=repo/provider",
         "runtimeProviderKubernetes.image.tag=sha",
-        "runtimeProviderKubernetes.image.digest=sha256:providerdigest",
+        f"runtimeProviderKubernetes.image.digest={_PROVIDER_DIGEST}",
         "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
         "runtimeProviderKubernetes.runnerImage.tag=sha",
-        "runtimeProviderKubernetes.runnerImage.digest=sha256:runnerdigest",
+        f"runtimeProviderKubernetes.runnerImage.digest={_RUNNER_DIGEST}",
     )
 
-    assert "repo/provider:sha@sha256:providerdigest" in rendered
-    assert "repo/runner:sha@sha256:runnerdigest" in rendered
+    assert f"repo/provider:sha@{_PROVIDER_DIGEST}" in rendered
+    assert f"repo/runner:sha@{_RUNNER_DIGEST}" in rendered
+
+
+@pytest.mark.parametrize(
+    "digest_value",
+    [
+        "runtimeProviderKubernetes.runnerImage.digest=",
+        "runtimeProviderKubernetes.gatewayImage.digest=",
+        "runtimeProviderKubernetes.engineImage.digest=",
+    ],
+)
+def test_runtime_execution_images_require_immutable_digests(
+    digest_value: str,
+) -> None:
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "runtimeProviderKubernetes.enabled=true",
+            "runtimeProviderKubernetes.image.repository=repo/provider",
+            "runtimeProviderKubernetes.image.tag=sha",
+            "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+            "runtimeProviderKubernetes.runnerImage.tag=sha",
+            digest_value,
+        )
+
+    assert "digest" in raised.value.stderr.lower()
 
 
 def test_runtime_provider_kubernetes_has_no_secret_or_tokenreview_authority() -> None:

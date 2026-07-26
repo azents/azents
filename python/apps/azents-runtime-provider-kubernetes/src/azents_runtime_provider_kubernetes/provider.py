@@ -59,6 +59,7 @@ from azents_runtime_provider_kubernetes.models import (
 )
 
 _RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_IMMUTABLE_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[0-9a-f]{64}$")
 _QUANTITY_RE = re.compile(
     r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+))"
     r"(?:(?:[eE]([+-]?\d+))|([numkMGTPE]|[KMGTPE]i))?$"
@@ -97,7 +98,14 @@ _RUNNER_UID = 1000
 _RUNNER_GID = 1000
 _GATEWAY_UID = 1001
 _GATEWAY_GID = 1001
+_ENGINE_SOCKET_GROUP = "azents-gateway"
 _FS_GROUP_CHANGE_POLICY = "OnRootMismatch"
+_GATEWAY_CPU_MIN_MILLICORES = 50
+_GATEWAY_CPU_MAX_MILLICORES = 250
+_GATEWAY_MEMORY_MIN_BYTES = 128 * 1024 * 1024
+_GATEWAY_MEMORY_MAX_BYTES = 512 * 1024 * 1024
+_GATEWAY_EPHEMERAL_MIN_BYTES = 16 * 1024 * 1024
+_GATEWAY_EPHEMERAL_MAX_BYTES = 64 * 1024 * 1024
 
 _LABEL_MANAGED_BY = "azents/managed-by"
 _LABEL_PROVIDER_ID = "azents/runtime-provider-id"
@@ -135,13 +143,6 @@ _ENV_GATEWAY_SOCKET = "DOCKER_HOST"
 _ENV_POLICY_DOCUMENT = "AZ_RUNTIME_EXECUTION_POLICY_DOCUMENT"
 _ENV_GATEWAY_LISTEN_SOCKET = "AZ_RUNTIME_GATEWAY_LISTEN_SOCKET"
 _ENV_GATEWAY_ENGINE_SOCKET = "AZ_RUNTIME_GATEWAY_ENGINE_SOCKET"
-_ENV_GATEWAY_RESOURCE_CPU_MILLICORES = "AZ_RUNTIME_GATEWAY_RESOURCE_CPU_MILLICORES"
-_ENV_GATEWAY_RESOURCE_MEMORY_BYTES = "AZ_RUNTIME_GATEWAY_RESOURCE_MEMORY_BYTES"
-_ENV_GATEWAY_RESOURCE_PIDS = "AZ_RUNTIME_GATEWAY_RESOURCE_PIDS"
-_ENV_GATEWAY_RESOURCE_CONTAINER_COUNT = "AZ_RUNTIME_GATEWAY_RESOURCE_CONTAINER_COUNT"
-_ENV_GATEWAY_RESOURCE_EPHEMERAL_STORAGE_BYTES = (
-    "AZ_RUNTIME_GATEWAY_RESOURCE_EPHEMERAL_STORAGE_BYTES"
-)
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -214,6 +215,8 @@ class KubernetesRuntimeProvider:
             raise ValueError("Runtime Control NetworkPolicy labels are required.")
         if not 1 <= config.runtime_control_port <= 65_535:
             raise ValueError("Runtime Control NetworkPolicy port is invalid.")
+        _immutable_image_reference(config.gateway_image, "gateway image")
+        _immutable_image_reference(config.engine_image, "engine image")
         self._api = api
         self._config = config
         self._runner_env = dict(config.runner_env)
@@ -672,12 +675,15 @@ class KubernetesRuntimeProvider:
         ]
         engine_required = policy.image_build or policy.container_run
         runner_env = self._env(command)
+        execution_resources = (
+            _execution_resource_partition(policy) if engine_required else None
+        )
         if engine_required:
             runner_mounts.append(
                 VolumeMount(
                     name=_GATEWAY_SOCKET_VOLUME_NAME,
                     mount_path=_GATEWAY_SOCKET_DIR,
-                    read_only=False,
+                    read_only=True,
                 )
             )
             runner_env[_ENV_GATEWAY_SOCKET] = f"unix://{_GATEWAY_SOCKET_PATH}"
@@ -700,21 +706,24 @@ class KubernetesRuntimeProvider:
         )
         if not engine_required:
             return (runner,)
+        if execution_resources is None:
+            raise AssertionError("execution resource partition is required")
         gateway = ContainerSpec(
             name=_GATEWAY_CONTAINER_NAME,
             image=self._config.gateway_image,
             command=("/usr/local/bin/azents-container-policy-gateway",),
             args=(),
             working_dir="/",
-            resources=None,
+            resources=execution_resources.gateway,
             security_context=_unprivileged_security_context(
                 uid=_GATEWAY_UID,
                 gid=_GATEWAY_GID,
+                read_only_root_filesystem=True,
             ),
-            readiness_probe=_socket_probe(_GATEWAY_SOCKET_PATH),
+            readiness_probe=_gateway_probe(command),
             env=tuple(
                 EnvVar(name=key, value=value)
-                for key, value in self._gateway_env(command, policy).items()
+                for key, value in self._gateway_env(command).items()
             ),
             volume_mounts=(
                 VolumeMount(
@@ -736,11 +745,12 @@ class KubernetesRuntimeProvider:
             args=(
                 f"--host=unix://{_ENGINE_SOCKET_PATH}",
                 f"--data-root={_ENGINE_STORAGE_PATH}",
+                f"--group={_ENGINE_SOCKET_GROUP}",
             ),
             working_dir="/",
-            resources=_engine_resources(policy),
+            resources=execution_resources.engine,
             security_context=_engine_security_context(),
-            readiness_probe=_socket_probe(_ENGINE_SOCKET_PATH),
+            readiness_probe=_engine_probe(),
             env=(),
             volume_mounts=(
                 VolumeMount(
@@ -760,13 +770,15 @@ class KubernetesRuntimeProvider:
     def _gateway_env(
         self,
         command: RuntimeLifecycleCommand,
-        policy: RuntimeExecutionPolicy,
     ) -> dict[str, str]:
-        resources = policy.resources
+        evidence = command.execution_policy.evidence
         return {
             _ENV_RUNTIME_ID: command.identity.runtime_id,
-            _ENV_POLICY_SNAPSHOT_ID: command.execution_policy.evidence.snapshot_id,
-            _ENV_POLICY_DIGEST: command.execution_policy.evidence.digest,
+            _ENV_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
+            _ENV_POLICY_DIGEST: evidence.digest,
+            _ENV_POLICY_DESIRED_GENERATION: str(evidence.desired_generation),
+            _ENV_POLICY_MODULE_VERSIONS: _canonical_mapping(evidence.module_versions),
+            _ENV_POLICY_SOURCE_VERSIONS: _canonical_mapping(evidence.source_versions),
             _ENV_POLICY_DOCUMENT: json.dumps(
                 command.execution_policy.effective_policy,
                 sort_keys=True,
@@ -774,13 +786,6 @@ class KubernetesRuntimeProvider:
             ),
             _ENV_GATEWAY_LISTEN_SOCKET: _GATEWAY_SOCKET_PATH,
             _ENV_GATEWAY_ENGINE_SOCKET: _ENGINE_SOCKET_PATH,
-            _ENV_GATEWAY_RESOURCE_CPU_MILLICORES: str(resources.cpu_millicores),
-            _ENV_GATEWAY_RESOURCE_MEMORY_BYTES: str(resources.memory_bytes),
-            _ENV_GATEWAY_RESOURCE_PIDS: str(resources.pids),
-            _ENV_GATEWAY_RESOURCE_CONTAINER_COUNT: str(resources.container_count),
-            _ENV_GATEWAY_RESOURCE_EPHEMERAL_STORAGE_BYTES: str(
-                resources.ephemeral_storage_bytes
-            ),
         }
 
     def _network_policy(
@@ -1049,6 +1054,8 @@ class KubernetesRuntimeProvider:
         )
         engine_required = policy.image_build or policy.container_run
         if engine_required:
+            _immutable_image_reference(command.runner_image, "Runner image")
+            _execution_resource_partition(policy)
             if policy.engine_storage.mode is not RuntimeExecutionStorageMode.EPHEMERAL:
                 raise UnsupportedExecutionPolicy(
                     "Kubernetes Runtime Provider supports ephemeral engine "
@@ -1074,11 +1081,12 @@ def _unprivileged_security_context(
     *,
     uid: int,
     gid: int,
+    read_only_root_filesystem: bool = False,
 ) -> ContainerSecurityContext:
     return ContainerSecurityContext(
         privileged=False,
         allow_privilege_escalation=False,
-        read_only_root_filesystem=False,
+        read_only_root_filesystem=read_only_root_filesystem,
         run_as_non_root=True,
         run_as_user=uid,
         run_as_group=gid,
@@ -1100,9 +1108,25 @@ def _engine_security_context() -> ContainerSecurityContext:
     )
 
 
-def _socket_probe(path: str) -> Probe:
+def _gateway_probe(command: RuntimeLifecycleCommand) -> Probe:
+    evidence = command.execution_policy.evidence
     return Probe(
-        exec_action=ExecAction(command=("test", "-S", path)),
+        exec_action=ExecAction(
+            command=(
+                "/usr/local/bin/azents-container-policy-gateway",
+                "check-ready",
+                "--socket",
+                _GATEWAY_SOCKET_PATH,
+                "--runtime-id",
+                command.identity.runtime_id,
+                "--desired-generation",
+                str(command.desired_generation),
+                "--snapshot-id",
+                evidence.snapshot_id,
+                "--policy-digest",
+                evidence.digest,
+            )
+        ),
         initial_delay_seconds=1,
         period_seconds=2,
         timeout_seconds=1,
@@ -1110,7 +1134,44 @@ def _socket_probe(path: str) -> Probe:
     )
 
 
-def _engine_resources(policy: RuntimeExecutionPolicy) -> ContainerResources:
+def _engine_probe() -> Probe:
+    return Probe(
+        exec_action=ExecAction(
+            command=(
+                "sh",
+                "-ec",
+                (
+                    'test "$(docker --host '
+                    f"unix://{_ENGINE_SOCKET_PATH} version "
+                    "--format '{{.Server.Version}}/{{.Server.APIVersion}}')\" "
+                    "= '28.5.2/1.51'"
+                ),
+            )
+        ),
+        initial_delay_seconds=1,
+        period_seconds=2,
+        timeout_seconds=1,
+        failure_threshold=30,
+    )
+
+
+def _immutable_image_reference(value: str, name: str) -> str:
+    if not _IMMUTABLE_IMAGE_RE.fullmatch(value):
+        raise UnsupportedExecutionPolicy(
+            f"{name} must use an immutable sha256 digest reference."
+        )
+    return value
+
+
+@dataclasses.dataclass(frozen=True)
+class _ExecutionResourcePartition:
+    gateway: ContainerResources
+    engine: ContainerResources
+
+
+def _execution_resource_partition(
+    policy: RuntimeExecutionPolicy,
+) -> _ExecutionResourcePartition:
     resources = policy.resources
     cpu_millicores = resources.cpu_millicores
     memory_bytes = resources.memory_bytes
@@ -1120,15 +1181,41 @@ def _engine_resources(policy: RuntimeExecutionPolicy) -> ContainerResources:
         or memory_bytes is None
         or ephemeral_storage_bytes is None
     ):
-        raise AssertionError("engine resource limits are required")
-    return ContainerResources(
-        requests=None,
-        limits={
-            "cpu": _canonical_millicores(cpu_millicores),
-            "memory": str(memory_bytes),
-            "ephemeral-storage": str(ephemeral_storage_bytes),
-        },
-        claims=None,
+        raise AssertionError("execution resource limits are required")
+    gateway_cpu = min(_GATEWAY_CPU_MAX_MILLICORES, cpu_millicores // 4)
+    gateway_memory = min(_GATEWAY_MEMORY_MAX_BYTES, memory_bytes // 4)
+    gateway_ephemeral = min(
+        _GATEWAY_EPHEMERAL_MAX_BYTES,
+        ephemeral_storage_bytes // 16,
+    )
+    if (
+        gateway_cpu < _GATEWAY_CPU_MIN_MILLICORES
+        or gateway_memory < _GATEWAY_MEMORY_MIN_BYTES
+        or gateway_ephemeral < _GATEWAY_EPHEMERAL_MIN_BYTES
+    ):
+        raise UnsupportedExecutionPolicy(
+            "Container execution policy resources are too small for the "
+            "fixed policy gateway."
+        )
+    return _ExecutionResourcePartition(
+        gateway=ContainerResources(
+            requests=None,
+            limits={
+                "cpu": _canonical_millicores(gateway_cpu),
+                "memory": str(gateway_memory),
+                "ephemeral-storage": str(gateway_ephemeral),
+            },
+            claims=None,
+        ),
+        engine=ContainerResources(
+            requests=None,
+            limits={
+                "cpu": _canonical_millicores(cpu_millicores - gateway_cpu),
+                "memory": str(memory_bytes - gateway_memory),
+                "ephemeral-storage": str(ephemeral_storage_bytes - gateway_ephemeral),
+            },
+            claims=None,
+        ),
     )
 
 
