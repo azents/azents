@@ -471,9 +471,18 @@ Included behavior:
 
 - Runtime upload attempts replacing complete Runner Control `file.read` events
   for managed-object publication.
+- Upload admission with an expected size and optional expected SHA-256; Runtime
+  Control computes and verifies the actual upload SHA-256 before the object is
+  available. No pre-upload full-file read or dummy digest is allowed.
 - Exchange and Artifact object-source publication with preallocated identity,
   S3-native final copy, bounded preview/transformation, ownership revalidation,
   metadata commit, compensation, and transfer consumer acknowledgement.
+- Renewable, revision-fenced consumer claims and stable product identity so
+  publication can resume safely across lease expiry, acknowledgement transport
+  uncertainty, and terminal-settlement retry without duplicating a product.
+- A product-publication S3 copy contract that fences the verified source
+  manifest, fails closed on an unexpected final key, verifies the final object,
+  and conditionally compensates only the exact uncommitted product object.
 - `present_file` success only after Exchange publication succeeds.
 - Incremental text preview validation with bounded retained prefix and
   disk-backed/spooled image preview input.
@@ -492,6 +501,9 @@ Primary validation:
   application relay.
 - Publication failure, consumer retry-before-expiry, acknowledgement, source
   expiry, and cleanup behavior.
+- Unknown-digest Runtime upload, long publication lease renewal, committed
+  product acknowledgement retry, acknowledgement-to-settlement transport
+  recovery, and Memory/Redis parity evidence.
 
 ## Phase 8: External Channel outbound
 
