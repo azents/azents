@@ -6,12 +6,15 @@ from pathlib import Path
 class Workspace:
     """Resolve operation paths against the Runner process filesystem."""
 
-    def __init__(self, root: str) -> None:
+    def __init__(self, root: str, *, blocked_paths: tuple[Path, ...] = ()) -> None:
         """Initialize the default workspace root."""
         if not root:
             raise ValueError("workspace root is required")
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._blocked_paths = tuple(
+            path.resolve(strict=False) for path in blocked_paths
+        )
 
     def resolve(self, raw_path: object) -> Path:
         """Resolve an absolute or workspace-relative path.
@@ -25,8 +28,19 @@ class Workspace:
         candidate = Path(raw_path)
         if not candidate.is_absolute():
             candidate = self.root / candidate
-        return candidate.resolve(strict=False)
+        resolved = candidate.resolve(strict=False)
+        if any(_is_within(resolved, blocked) for blocked in self._blocked_paths):
+            raise ValueError("path is reserved for Runtime transfer staging")
+        return resolved
 
     def display_path(self, path: Path) -> str:
         """Return a stable absolute display path."""
         return str(path.resolve(strict=False))
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True

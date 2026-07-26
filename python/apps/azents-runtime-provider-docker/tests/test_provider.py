@@ -216,12 +216,16 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     assert result.report.observed_state is RuntimeProviderObservedState.RUNNING
     assert result.report.workspace_path == "/workspace/agent"
     container = docker.containers["azents-runtime-runtime-1"]
-    assert container.spec.user == "1000:1000"
+    assert container.spec.user == "0:0"
     assert container.spec.working_dir == "/workspace/agent"
     assert any(
         bind.container_path == "/workspace/agent" for bind in container.spec.binds
     )
     assert container.spec.env["AZ_RUNTIME_TRANSFER_ENDPOINT"] == "runtime-transfer:8030"
+    assert (
+        container.spec.env["AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"]
+        == "/var/run/azents-transfer"
+    )
     assert container.spec.env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-1"
     assert (
         container.spec.env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"]

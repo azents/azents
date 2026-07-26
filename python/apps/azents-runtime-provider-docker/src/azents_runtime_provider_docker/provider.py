@@ -39,11 +39,12 @@ _IMAGE_GENERATION = "agent-runtime-docker-v1"
 _RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _RUNNER_UID = 1000
 _RUNNER_GID = 1000
-_RUNNER_USER = f"{_RUNNER_UID}:{_RUNNER_GID}"
+_RUNNER_USER = "0:0"
 _WORKSPACE_DIR_MODE = 0o755
 _NON_ROOT_WORKSPACE_DIR_MODE = 0o777
 _CONTROL_HOST_ALIAS = "host.docker.internal:host-gateway"
 _LOGGER = logging.getLogger(__name__)
+_TRANSFER_STAGING_MOUNT_PATH = "/var/run/azents-transfer"
 
 _LABEL_MANAGED_BY = "azents/managed-by"
 _LABEL_PROVIDER_ID = "azents/runtime-provider-id"
@@ -77,6 +78,7 @@ _ENV_POLICY_DIGEST = "AZ_RUNTIME_EXECUTION_POLICY_DIGEST"
 _ENV_POLICY_DESIRED_GENERATION = "AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION"
 _ENV_POLICY_MODULE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS"
 _ENV_POLICY_SOURCE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS"
+_ENV_TRANSFER_STAGING_DIRECTORY = "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -408,6 +410,7 @@ class DockerRuntimeProvider:
             _ENV_WORKSPACE_ID: identity.workspace_id,
             _ENV_PROVIDER_ID: self._config.provider_id,
             _ENV_WORKSPACE_PATH: self._workspace_mount_path,
+            _ENV_TRANSFER_STAGING_DIRECTORY: _TRANSFER_STAGING_MOUNT_PATH,
         }
         if command.auth.control_tls_ca_pem is not None:
             env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
@@ -444,6 +447,10 @@ class DockerRuntimeProvider:
             DockerBindMount(
                 host_path=str(self._tmp_host_dir(runtime_id)),
                 container_path=self._tmp_mount_path,
+            ),
+            DockerBindMount(
+                host_path=str(self._transfer_staging_host_dir(runtime_id)),
+                container_path=_TRANSFER_STAGING_MOUNT_PATH,
             ),
         )
 
@@ -518,9 +525,13 @@ class DockerRuntimeProvider:
     def _tmp_host_dir(self, runtime_id: str) -> Path:
         return self._runtime_root(runtime_id) / "tmp-agent"
 
+    def _transfer_staging_host_dir(self, runtime_id: str) -> Path:
+        return self._runtime_root(runtime_id) / "transfer-staging"
+
     def _ensure_workspace_dirs(self, runtime_id: str) -> None:
         _ensure_writable_dir(self._workspace_host_dir(runtime_id))
         _ensure_writable_dir(self._tmp_host_dir(runtime_id))
+        _ensure_protected_staging_dir(self._transfer_staging_host_dir(runtime_id))
 
     def _delete_runtime_root(self, runtime_id: str) -> None:
         runtime_root = self._runtime_root(runtime_id)
@@ -551,6 +562,13 @@ def _ensure_writable_dir(path: Path) -> None:
     current_mode = stat.S_IMODE(path.stat().st_mode)
     if current_mode != expected_mode:
         path.chmod(expected_mode)  # noqa: S103
+
+
+def _ensure_protected_staging_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    if os.geteuid() == 0:
+        os.chown(path, 0, 0)
+    path.chmod(0o700)  # noqa: S103
 
 
 def _observed_state(

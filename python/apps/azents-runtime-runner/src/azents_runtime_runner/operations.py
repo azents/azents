@@ -66,6 +66,8 @@ _PROCESS_CLOSE_TIMEOUT_SECONDS = 5.0
 _MAX_MISSING_PROCESS_RECORDS = 128
 _MANAGED_WORKTREE_ROOT = ".azents/worktrees"
 _MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES = 512
+_WORKLOAD_UID = 1000
+_WORKLOAD_GID = 1000
 
 _T = TypeVar("_T")
 
@@ -514,6 +516,7 @@ class RunnerOperations:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            preexec_fn=_drop_to_workload_identity,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -1556,6 +1559,7 @@ class RunnerOperations:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
+                preexec_fn=_drop_to_workload_identity,
             )
         except OSError as exc:
             await self._final_error(operation, "PROCESS_START_FAILED", str(exc))
@@ -2326,6 +2330,7 @@ class RunnerOperations:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
+                preexec_fn=_drop_to_workload_identity,
             )
         except OSError as exc:
             await self._final_error(operation, "git_command_failed", str(exc))
@@ -2505,6 +2510,14 @@ def _remaining_timeout_seconds(deadline_at: datetime | None) -> float | None:
     if deadline_at is None:
         return None
     return max((deadline_at - datetime.now(UTC)).total_seconds(), 0.001)
+
+
+def _drop_to_workload_identity() -> None:
+    """Drop privileged Runner subprocesses to the untrusted workload identity."""
+    if os.geteuid() == 0:
+        os.setgroups(())
+        os.setgid(_WORKLOAD_GID)
+        os.setuid(_WORKLOAD_UID)
 
 
 def _git_command_error_message(result: _GitCommandResult) -> str:

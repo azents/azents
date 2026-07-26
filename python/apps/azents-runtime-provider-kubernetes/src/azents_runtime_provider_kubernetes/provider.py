@@ -95,6 +95,8 @@ _RUNNER_UID = 1000
 _RUNNER_GID = 1000
 _ENGINE_SOCKET_GROUP = "azents-runner"
 _FS_GROUP_CHANGE_POLICY = "OnRootMismatch"
+_TRANSFER_STAGING_MOUNT_PATH = "/var/run/azents-transfer"
+_TRANSFER_STAGING_DIRECTORY = "/workspace/agent/.azents-transfer-staging"
 
 _LABEL_MANAGED_BY = "azents/managed-by"
 _LABEL_PROVIDER_ID = "azents/runtime-provider-id"
@@ -133,6 +135,7 @@ _ENV_DOCKER_HOST = "DOCKER_HOST"
 _ENV_TESTCONTAINERS_HOST_OVERRIDE = "TESTCONTAINERS_HOST_OVERRIDE"
 _ENV_TESTCONTAINERS_CONNECTION_MODE = "TESTCONTAINERS_CONNECTION_MODE"
 _ENV_TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE = "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE"
+_ENV_TRANSFER_STAGING_DIRECTORY = "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -702,7 +705,12 @@ class KubernetesRuntimeProvider:
                 name=_WORKSPACE_VOLUME_NAME,
                 mount_path=self._workspace_mount_path,
                 read_only=False,
-            )
+            ),
+            VolumeMount(
+                name=_WORKSPACE_VOLUME_NAME,
+                mount_path=_TRANSFER_STAGING_MOUNT_PATH,
+                read_only=False,
+            ),
         ]
         docker_enabled = policy.docker.enabled
         runner_env = self._env(command)
@@ -733,10 +741,7 @@ class KubernetesRuntimeProvider:
             args=(),
             working_dir=self._workspace_mount_path,
             resources=self._config.runner_resources,
-            security_context=_unprivileged_security_context(
-                uid=_RUNNER_UID,
-                gid=_RUNNER_GID,
-            ),
+            security_context=_runner_supervisor_security_context(),
             readiness_probe=None,
             env=tuple(
                 EnvVar(name=key, value=value) for key, value in runner_env.items()
@@ -880,6 +885,7 @@ class KubernetesRuntimeProvider:
             _ENV_WORKSPACE_ID: identity.workspace_id,
             _ENV_PROVIDER_ID: self._config.provider_id,
             _ENV_WORKSPACE_PATH: self._workspace_mount_path,
+            _ENV_TRANSFER_STAGING_DIRECTORY: _TRANSFER_STAGING_DIRECTORY,
         }
         if command.auth.control_tls_ca_pem is not None:
             env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
@@ -1420,6 +1426,20 @@ def _quantity_value(value: KubernetesResourceQuantity) -> Decimal | None:
         return quantity * _QUANTITY_SUFFIX_MULTIPLIERS[suffix]
     except InvalidOperation, ValueError:
         return None
+
+
+def _runner_supervisor_security_context() -> ContainerSecurityContext:
+    """Allow the Runner supervisor to own protected staging and drop children."""
+    return ContainerSecurityContext(
+        privileged=False,
+        allow_privilege_escalation=False,
+        read_only_root_filesystem=False,
+        run_as_non_root=False,
+        run_as_user=0,
+        run_as_group=0,
+        capabilities_add=("SETGID", "SETUID"),
+        capabilities_drop=("ALL",),
+    )
 
 
 def _absolute_posix_path(raw_path: str) -> str:
