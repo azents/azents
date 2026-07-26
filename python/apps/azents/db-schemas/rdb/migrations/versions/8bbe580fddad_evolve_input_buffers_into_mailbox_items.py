@@ -42,6 +42,22 @@ def _rename_index_if_exists(old: str, new: str) -> None:
     op.execute(sa.text(f"ALTER INDEX IF EXISTS {old} RENAME TO {new}"))
 
 
+def _rename_type_if_exists(old: str, new: str) -> None:
+    op.execute(
+        sa.text(
+            f"""
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM pg_type WHERE typname = '{old}') THEN
+                    ALTER TYPE {old} RENAME TO {new};
+                END IF;
+            END
+            $$;
+            """
+        )
+    )
+
+
 def _rename_constraint_if_exists(table: str, old: str, new: str) -> None:
     inspector = sa.inspect(op.get_bind())
     names = {
@@ -189,14 +205,9 @@ def _validate_payload_rows(bind: sa.Connection) -> None:
 def upgrade() -> None:
     """Rename the persistence boundary and materialize typed payload snapshots."""
     op.execute(sa.text("ALTER TABLE IF EXISTS input_buffers RENAME TO mailbox_items"))
-    op.execute(
-        sa.text("ALTER TYPE IF EXISTS input_buffer_kind RENAME TO mailbox_item_kind")
-    )
-    op.execute(
-        sa.text(
-            "ALTER TYPE IF EXISTS input_buffer_scheduling_mode "
-            "RENAME TO mailbox_item_scheduling_mode"
-        )
+    _rename_type_if_exists("input_buffer_kind", "mailbox_item_kind")
+    _rename_type_if_exists(
+        "input_buffer_scheduling_mode", "mailbox_item_scheduling_mode"
     )
 
     _rename_if_exists(
@@ -650,13 +661,8 @@ def downgrade() -> None:
     _rename_if_exists(
         "external_channel_invocation_batches", "mailbox_item_id", "input_buffer_id"
     )
-    op.execute(
-        sa.text(
-            "ALTER TYPE IF EXISTS mailbox_item_scheduling_mode "
-            "RENAME TO input_buffer_scheduling_mode"
-        )
+    _rename_type_if_exists(
+        "mailbox_item_scheduling_mode", "input_buffer_scheduling_mode"
     )
-    op.execute(
-        sa.text("ALTER TYPE IF EXISTS mailbox_item_kind RENAME TO input_buffer_kind")
-    )
+    _rename_type_if_exists("mailbox_item_kind", "input_buffer_kind")
     op.execute(sa.text("ALTER TABLE IF EXISTS mailbox_items RENAME TO input_buffers"))
