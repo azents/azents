@@ -194,14 +194,6 @@ and current phase execution plan as the handoff contract for every subagent.
 - A separate subagent that did not participate in implementation performs the
   independent code review as a read-only task and reports findings to the
   requesting implementation owner.
-- The implementation owner applies grounded Critical and Warning findings,
-  runs affected validation, and asks the same reviewer to recheck the addressed
-  findings. It also applies Suggestion and Consistency findings when reasonable.
-- The primary agent does not request review on an implementation owner's
-  behalf and does not apply review findings. It performs final verification
-  only after the implementation-review-fix cycle is complete. If final
-  verification finds a required change, return it to the owning implementation
-  subagent and require the same review cycle before proceeding.
 
 ### Long-running subagent work
 
@@ -257,13 +249,14 @@ For each implementation phase:
     primary agent. Provide the current phase contract, owned scope, and diff.
 12. Have the independent reviewer perform a read-only review and report
     grounded findings to the requesting implementation owner.
-13. Have the implementation owner apply Critical and Warning findings, apply
-    Suggestion and Consistency findings when reasonable, run affected checks,
-    and ask the same reviewer to recheck the addressed findings.
-14. After every implementation-review-fix cycle is complete, have the primary
-    agent perform final scope, integration, and validation verification. Return
-    required changes to the owning implementation subagent rather than applying
-    them in the primary agent.
+13. Address required findings in one correction pass and run affected checks.
+    Use the `/code-review` re-review criteria. When required, have the
+    implementation owner directly request targeted re-review from the same
+    reviewer.
+14. Have the primary agent perform final scope, integration, and validation
+    verification. If final verification changes the diff, rerun affected
+    validation. When required, have the implementation owner directly request
+    targeted re-review from the same reviewer.
 15. Re-run the phase's final validation commands.
 16. Commit and open the PR before starting implementation for the next phase.
 
@@ -283,10 +276,10 @@ Include:
 - Any failures found and the fixes applied
 - A strict comparison table between implemented behavior and current specs, including missing implementation or spec drift
 
-If validation finds a bug, assign the behavior correction to the existing
-implementation role owner in the validation PR or responsible earlier phase.
-Have that implementation owner request the existing independent reviewer
-directly, apply the findings, and complete revalidation. Then have the primary
+If validation finds a bug, address it in the validation PR or responsible
+earlier phase and run affected validation. Use the `/code-review` re-review
+criteria and, when required, have the implementation owner directly request
+targeted re-review from the existing independent reviewer. Then have the primary
 agent perform final verification and rebase following branches when an earlier
 phase changes.
 
@@ -362,7 +355,7 @@ For each completed phase, report:
 - Stable role owners continued, added, or reassigned
 - Primary-agent verification results
 - Independent review result
-- Implementation-owner review fixes and final validation results
+- Review findings, re-review decision or result, and final validation results
 - Next stacked branch
 
 ## Guardrails
@@ -380,9 +373,8 @@ For each completed phase, report:
   Implementation subagents may directly request and continue only that assigned
   reviewer; they do not appoint or replace reviewers, reassign role owners, or
   advance the phase workflow.
-- Keep independent review read-only. The implementation owner that produced the
-  change applies review findings and requests recheck; the primary agent
-  performs only final verification and never applies those findings itself.
+- Keep independent review read-only and limit re-review to the targeted cases
+  defined by the `/code-review` criteria.
 - Do not start the next phase before the current phase PR is created.
 - Do not ship an Azents feature when its new-format Requirements, ADR, and primary Design use different basenames.
 - Do not collapse a large feature into one PR when phased delivery is expected.

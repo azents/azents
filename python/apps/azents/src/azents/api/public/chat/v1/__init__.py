@@ -2147,10 +2147,10 @@ async def list_input_actions(
                     InputActionDefinitionResponse(
                         id="cleanup_orphan_git_worktrees",
                         keyword="cleanup-worktrees",
-                        label="Clean up orphan worktrees",
+                        label="Clean up worktrees",
                         description=(
-                            "Find and permanently remove orphan Git worktrees "
-                            "from this runtime. Local branches are preserved."
+                            "Remove managed Git worktrees not connected to an "
+                            "active session. Local branches are preserved."
                         ),
                         action=CleanupOrphanGitWorktreesAction(),
                         category="turn",
@@ -2161,13 +2161,7 @@ async def list_input_actions(
                         attachments=InputActionAttachmentPolicyResponse(
                             policy="unsupported"
                         ),
-                        availability_hint=InputActionAvailabilityHintResponse(
-                            state="warning",
-                            message=(
-                                "This permanently removes orphaned worktree "
-                                "files without deleting their local branches."
-                            ),
-                        ),
+                        availability_hint=None,
                     ),
                     *[
                         InputActionDefinitionResponse(

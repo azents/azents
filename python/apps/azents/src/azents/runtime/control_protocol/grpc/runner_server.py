@@ -873,6 +873,7 @@ def _copy_operation_payload(
         message.git_inspect_worktree.branch_name = _str_payload(payload, "branch_name")
         return
     if operation_type == "discover_managed_git_worktrees":
+        message.git_discover_managed_worktrees.SetInParent()
         return
     if operation_type == "remove_discovered_git_worktree":
         message.git_remove_discovered_worktree.worktree_path = _str_payload(

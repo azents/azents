@@ -1565,7 +1565,7 @@
       "branch": "Branch: {branch}",
       "baseRef": "Base ref: {ref}",
       "cleanup": {
-        "title": "Orphan worktree cleanup",
+        "title": "Worktree cleanup",
         "phase": "Phase: {phase}",
         "examined": "Examined {count}",
         "removed": "Removed {count}",

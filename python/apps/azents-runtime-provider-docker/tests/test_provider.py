@@ -143,6 +143,7 @@ def _command(
     final_desired_state: RuntimeDesiredState | None = None,
     desired_generation: int = 1,
     provider_generation: int = 7,
+    runner_image: str = "runner:latest",
     runner_auth_token: str = "runner-token-1",
     runner_auth_credential_id: str = "runner-credential-1",
 ) -> RuntimeLifecycleCommand:
@@ -155,7 +156,7 @@ def _command(
         ),
         desired_generation=desired_generation,
         provider_generation=provider_generation,
-        runner_image="runner:latest",
+        runner_image=runner_image,
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
             runner_auth_token=runner_auth_token,
@@ -322,6 +323,43 @@ async def test_start_replaces_container_for_new_runner_credential(
     )
     assert container.spec.binds == original_binds
     assert marker.read_text() == "preserved"
+
+
+@pytest.mark.asyncio
+async def test_start_replaces_stale_runner_image_and_preserves_workspace(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+    await provider.start(
+        _command(RuntimeLifecycleCommandType.START, runner_image="runner:old")
+    )
+    marker = tmp_path / "agent-runtimes" / "runtime-1" / "workspace" / "keep.txt"
+    marker.write_text("preserved")
+
+    await provider.start(
+        _command(RuntimeLifecycleCommandType.START, runner_image="runner:new")
+    )
+
+    assert docker.removed == ["azents-runtime-runtime-1"]
+    assert docker.containers["azents-runtime-runtime-1"].spec.image == "runner:new"
+    assert marker.read_text() == "preserved"
+
+
+@pytest.mark.asyncio
+async def test_start_reuses_container_when_runner_image_and_config_are_unchanged(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    container = docker.containers["azents-runtime-runtime-1"]
+
+    await provider.start(command)
+
+    assert docker.removed == []
+    assert docker.containers["azents-runtime-runtime-1"] is container
 
 
 @pytest.mark.asyncio

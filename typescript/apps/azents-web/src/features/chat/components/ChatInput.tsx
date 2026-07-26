@@ -33,7 +33,15 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   normalizeReasoningEffort,
   reasoningEffortLevels,
@@ -182,6 +190,9 @@ function normalizeAction(
   ) {
     return { type: "skill", skill_path: action.skill_path };
   }
+  if (type === "cleanup_orphan_git_worktrees") {
+    return { type: "cleanup_orphan_git_worktrees" };
+  }
   return null;
 }
 
@@ -224,6 +235,9 @@ function normalizeStoredAction(value: unknown): ChatAction | null {
   }
   if (action.type === "skill" && typeof action.skill_path === "string") {
     return { type: "skill", skill_path: action.skill_path };
+  }
+  if (action.type === "cleanup_orphan_git_worktrees") {
+    return { type: "cleanup_orphan_git_worktrees" };
   }
   return null;
 }
@@ -446,7 +460,7 @@ function fallbackActionDefinition(action: ChatAction): InputActionDefinition {
       return {
         id: "cleanup_orphan_git_worktrees",
         keyword: "cleanup-worktrees",
-        label: "Clean up orphan worktrees",
+        label: "Clean up worktrees",
         description: "",
         action,
         category: "turn",
@@ -660,6 +674,11 @@ export const ChatInput = memo(function ChatInput({
     useState<InputActionDefinition | null>(() =>
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
+  const [inputActionSuggestionsDismissed, setInputActionSuggestionsDismissed] =
+    useState(false);
+  const [activeInputActionIndex, setActiveInputActionIndex] = useState(0);
+  const inputActionListboxId = useId();
+  const inputActionOptionRefs = useRef(new Map<number, HTMLButtonElement>());
   const selectableEfforts = useMemo(
     () =>
       effortLevelsForTarget(
@@ -680,7 +699,9 @@ export const ChatInput = memo(function ChatInput({
     ? null
     : selectedAction
       ? null
-      : getInputActionQuery(inputValue);
+      : inputActionSuggestionsDismissed
+        ? null
+        : getInputActionQuery(inputValue);
   const visibleInputActions = useMemo(() => {
     if (inputActionQuery === null) {
       return [];
@@ -700,6 +721,18 @@ export const ChatInput = memo(function ChatInput({
     editingMessageId === null &&
     ((Boolean(goal?.objective) && goal?.status !== "complete") ||
       todo.items.some((item) => item.status !== "completed"));
+  const activeInputAction = visibleInputActions[activeInputActionIndex] ?? null;
+  const activeInputActionOptionId = `${inputActionListboxId}-option-${activeInputActionIndex}`;
+
+  useEffect(() => {
+    setActiveInputActionIndex(0);
+  }, [visibleInputActions]);
+
+  useEffect(() => {
+    inputActionOptionRefs.current
+      .get(activeInputActionIndex)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeInputActionIndex, visibleInputActions]);
 
   useEffect(() => {
     onInferenceProfileChange?.(inferenceProfile);
@@ -832,6 +865,7 @@ export const ChatInput = memo(function ChatInput({
   const updateInputValue = useCallback(
     (nextValue: string): void => {
       setSendErrorVisible(false);
+      setInputActionSuggestionsDismissed(false);
       setInputValue(nextValue);
       persistDraft(
         nextValue,
@@ -999,8 +1033,52 @@ export const ChatInput = memo(function ChatInput({
     resetDoneFiles,
   ]);
 
+  const handleSelectInputAction = useCallback(
+    (definition: InputActionDefinition): void => {
+      const normalizedAction = normalizeAction(definition.action);
+      if (normalizedAction === null) {
+        return;
+      }
+      setSelectedAction(definition);
+      setInputActionSuggestionsDismissed(false);
+      setActiveInputActionIndex(0);
+      setInputValue("");
+      persistDraft("", normalizedAction, inferenceProfile);
+      textareaRef.current?.focus();
+    },
+    [inferenceProfile, persistDraft],
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (
+        !e.nativeEvent.isComposing &&
+        visibleInputActions.length > 0 &&
+        e.key === "Escape"
+      ) {
+        e.preventDefault();
+        setInputActionSuggestionsDismissed(true);
+        return;
+      }
+      if (!e.nativeEvent.isComposing && visibleInputActions.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setActiveInputActionIndex((index) =>
+            Math.min(index + 1, visibleInputActions.length - 1),
+          );
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setActiveInputActionIndex((index) => Math.max(index - 1, 0));
+          return;
+        }
+        if (e.key === "Enter" && activeInputAction !== null) {
+          e.preventDefault();
+          handleSelectInputAction(activeInputAction.action);
+          return;
+        }
+      }
       // mobile in Enter with textrow, text button withonly send
       if (isMobile) {
         return;
@@ -1014,7 +1092,13 @@ export const ChatInput = memo(function ChatInput({
         handleSend();
       }
     },
-    [handleSend, isMobile],
+    [
+      activeInputAction,
+      handleSelectInputAction,
+      handleSend,
+      isMobile,
+      visibleInputActions,
+    ],
   );
 
   /** file select handler */
@@ -1027,20 +1111,6 @@ export const ChatInput = memo(function ChatInput({
       e.target.value = "";
     },
     [addFiles],
-  );
-
-  const handleSelectInputAction = useCallback(
-    (definition: InputActionDefinition): void => {
-      const normalizedAction = normalizeAction(definition.action);
-      if (normalizedAction === null) {
-        return;
-      }
-      setSelectedAction(definition);
-      setInputValue("");
-      persistDraft("", normalizedAction, inferenceProfile);
-      textareaRef.current?.focus();
-    },
-    [inferenceProfile, persistDraft],
   );
 
   const updateInferenceProfile = useCallback(
@@ -1470,6 +1540,9 @@ export const ChatInput = memo(function ChatInput({
         )}
         {visibleInputActions.length > 0 && (
           <Paper
+            id={inputActionListboxId}
+            role="listbox"
+            aria-label={t("slashCommands.title")}
             withBorder
             radius="md"
             p="xs"
@@ -1485,13 +1558,33 @@ export const ChatInput = memo(function ChatInput({
               <Text size="xs" c="dimmed" px="xs">
                 {t("slashCommands.title")}
               </Text>
-              {visibleInputActions.map((ranked) => (
+              {visibleInputActions.map((ranked, index) => (
                 <UnstyledButton
                   key={ranked.action.id}
+                  ref={(node) => {
+                    if (node === null) {
+                      inputActionOptionRefs.current.delete(index);
+                    } else {
+                      inputActionOptionRefs.current.set(index, node);
+                    }
+                  }}
+                  id={`${inputActionListboxId}-option-${index}`}
+                  role="option"
+                  aria-selected={index === activeInputActionIndex}
+                  tabIndex={-1}
                   onClick={() => handleSelectInputAction(ranked.action)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseMove={() => setActiveInputActionIndex(index)}
                   px="xs"
                   py={rem(7)}
-                  style={{ borderRadius: rem(8), width: "100%" }}
+                  style={{
+                    background:
+                      index === activeInputActionIndex
+                        ? "var(--mantine-color-default-hover)"
+                        : "transparent",
+                    borderRadius: rem(8),
+                    width: "100%",
+                  }}
                 >
                   <Stack gap={rem(3)} style={{ minWidth: 0 }}>
                     <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
@@ -1623,6 +1716,15 @@ export const ChatInput = memo(function ChatInput({
               onChange={(event) => updateInputValue(event.currentTarget.value)}
               onKeyDown={handleKeyDown}
               onFocus={onFocus}
+              aria-autocomplete={inputActionQuery === null ? void 0 : "list"}
+              aria-controls={
+                visibleInputActions.length > 0 ? inputActionListboxId : void 0
+              }
+              aria-expanded={visibleInputActions.length > 0}
+              aria-haspopup="listbox"
+              aria-activedescendant={
+                activeInputAction === null ? void 0 : activeInputActionOptionId
+              }
               disabled={inputDisabled}
               autosize
               minRows={1}

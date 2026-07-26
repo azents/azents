@@ -1,3 +1,5 @@
+import { Box, rem } from "@mantine/core";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
 import type { JsonValue } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -105,6 +107,45 @@ export const CleanupMixedResult = cleanupStory({
     ],
   },
 });
+
+export const CleanupMixedResultExpandsAndCollapses = {
+  ...CleanupMixedResult,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const toggle = canvas.getByRole("button", { name: /cleanup worktrees/i });
+
+    await userEvent.click(toggle);
+    await expect(
+      canvas.getByText("Git worktree removal failed."),
+    ).toBeVisible();
+
+    await userEvent.click(canvas.getByText("Git worktree removal failed."));
+    await waitFor(async () => {
+      await expect(
+        canvas.queryByText("Git worktree removal failed."),
+      ).not.toBeInTheDocument();
+    });
+  },
+} satisfies Story;
+
+export const CleanupMixedResultOnNarrowScreen = {
+  ...CleanupMixedResult,
+  decorators: [
+    (Story) => (
+      <Box w={rem(320)}>
+        <Story />
+      </Box>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /cleanup worktrees/i }),
+    );
+    await expect(canvas.getByText("already_absent")).toBeVisible();
+    await expect(canvas.getByText("failed")).toBeVisible();
+  },
+} satisfies Story;
 
 export const CleanupProtectedCandidate = cleanupStory({
   id: "protected",

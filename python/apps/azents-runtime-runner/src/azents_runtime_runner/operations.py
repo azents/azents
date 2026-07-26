@@ -1158,10 +1158,26 @@ class RunnerOperations:
         for session_directory in sorted(root.iterdir(), key=lambda path: path.name):
             if session_directory.is_symlink() or not session_directory.is_dir():
                 continue
+            direct_entry = await self._discover_managed_worktree_entry(
+                operation,
+                session_directory,
+            )
+            if _bool_payload(direct_entry, "registered", default=False):
+                if len(entries) >= _MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES:
+                    await self._final_error(
+                        operation,
+                        "managed_worktree_inventory_overflow",
+                        "Managed worktree inventory exceeds the operation limit.",
+                    )
+                    return
+                entries.append(direct_entry)
+                continue
             for candidate in sorted(
                 session_directory.iterdir(),
                 key=lambda path: path.name,
             ):
+                if candidate.is_symlink() or not candidate.is_dir():
+                    continue
                 if len(entries) >= _MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES:
                     await self._final_error(
                         operation,

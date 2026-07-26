@@ -39,10 +39,10 @@ from azents.runtime.coordination.memory import (
 from azents.testing.model_selection import make_test_model_selection_dict
 
 
-async def test_reconciler_dispatches_periodic_provider_observe(
+async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Control dispatches OBSERVE for stale desired-running runtimes."""
+    """Control dispatches idempotent START to converge running Runtime config."""
     runtime_repository = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
         workspace_id = await _create_workspace(session, "reconciler-observe-ws")
@@ -119,8 +119,8 @@ async def test_reconciler_dispatches_periodic_provider_observe(
 
     assert dispatched == 1
     assert claimed is not None
-    assert claimed.operation_type == "provider.observe"
-    assert claimed.payload["command_type"] == "observe"
+    assert claimed.operation_type == "provider.start"
+    assert claimed.payload["command_type"] == "start"
     payload = claimed.payload["payload"]
     assert isinstance(payload, dict)
     auth = payload["auth"]

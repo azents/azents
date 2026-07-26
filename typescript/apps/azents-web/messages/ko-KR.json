@@ -1565,7 +1565,7 @@
       "branch": "브랜치: {branch}",
       "baseRef": "기준 ref: {ref}",
       "cleanup": {
-        "title": "고아 worktree 정리",
+        "title": "워크트리 정리",
         "phase": "단계: {phase}",
         "examined": "{count}개 검사",
         "removed": "{count}개 제거",

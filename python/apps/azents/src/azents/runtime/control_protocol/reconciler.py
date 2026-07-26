@@ -11,6 +11,7 @@ from azents_runtime_control.provider import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
 )
@@ -99,7 +100,7 @@ class RuntimeLifecycleReconciler:
                     retry_delay=self._config.lifecycle_retry_delay,
                 )
             )
-            observe_runtimes = (
+            reconcile_runtimes = (
                 await self._runtime_repository.find_provider_observe_candidates(
                     session,
                     limit=limit,
@@ -120,10 +121,10 @@ class RuntimeLifecycleReconciler:
             if await self._dispatch_runtime(runtime):
                 dispatched += 1
         lifecycle_runtime_ids = {runtime.id for runtime in runtimes}
-        for runtime in observe_runtimes:
+        for runtime in reconcile_runtimes:
             if runtime.id in lifecycle_runtime_ids:
                 continue
-            if await self._dispatch_observe(runtime):
+            if await self._dispatch_periodic_reconcile(runtime):
                 dispatched += 1
         return dispatched
 
@@ -137,15 +138,20 @@ class RuntimeLifecycleReconciler:
             claim_lifecycle=True,
         )
 
-    async def _dispatch_observe(self, runtime: AgentRuntime) -> bool:
+    async def _dispatch_periodic_reconcile(self, runtime: AgentRuntime) -> bool:
         async with self._session_manager() as session:
             await self._runtime_repository.mark_provider_observe_requested(
                 session,
                 runtime.id,
             )
+        command_type = (
+            RuntimeProviderCommandType.START
+            if runtime.desired_state is RuntimeDesiredState.RUNNING
+            else RuntimeProviderCommandType.OBSERVE
+        )
         return await self._dispatch_runtime_command(
             runtime,
-            command_type=RuntimeProviderCommandType.OBSERVE,
+            command_type=command_type,
             claim_lifecycle=False,
         )
 
