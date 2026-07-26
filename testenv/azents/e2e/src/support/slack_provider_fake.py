@@ -224,8 +224,14 @@ class FakeState:
             }
             return file_id, upload_path
 
-    def record_upload(self, *, file_id: str, received_length: int) -> bool:
-        """Record only upload size evidence and return whether length matched."""
+    def record_upload(
+        self,
+        *,
+        file_id: str,
+        received_length: int,
+        content_sha256: str,
+    ) -> bool:
+        """Record sanitized upload length and digest evidence."""
         with self.lock:
             upload = self.uploads.get(file_id)
             if upload is None:
@@ -233,6 +239,7 @@ class FakeState:
             expected_length = upload.get("expected_length")
             matched = expected_length == received_length
             upload["received_length"] = received_length
+            upload["content_sha256"] = content_sha256
             upload["uploaded"] = matched
             return matched
 
@@ -656,6 +663,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
                 "file": file_id,
                 "content_length": content_length,
                 "received_length": len(content),
+                "content_sha256": hashlib.sha256(content).hexdigest(),
             },
         )
         if scenario == "ambiguous":
@@ -673,6 +681,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         matched = self.state.record_upload(
             file_id=file_id,
             received_length=len(content),
+            content_sha256=hashlib.sha256(content).hexdigest(),
         )
         if scenario in {"rejected", "size_mismatch"} or not matched:
             self._bytes_response(400, b"rejected")

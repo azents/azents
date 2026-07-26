@@ -1,6 +1,7 @@
 """Deterministic Slack provider fake contract tests."""
 
 import base64
+import hashlib
 import threading
 from collections.abc import Generator
 from http.server import ThreadingHTTPServer
@@ -430,6 +431,29 @@ def test_slack_fake_collects_ordered_external_upload_evidence(
             "has_initial_comment": True,
             "outcome": "delivered",
         }
+    ]
+    uploads = [
+        request
+        for request in evidence["requests"]
+        if request["operation"] == "file.upload"
+    ]
+    assert uploads == [
+        {
+            "operation": "file.upload",
+            "method": "POST",
+            "file": first_target["file_id"],
+            "content_length": 3,
+            "received_length": 3,
+            "content_sha256": hashlib.sha256(b"abc").hexdigest(),
+        },
+        {
+            "operation": "file.upload",
+            "method": "POST",
+            "file": second_target["file_id"],
+            "content_length": 4,
+            "received_length": 4,
+            "content_sha256": hashlib.sha256(b"defg").hexdigest(),
+        },
     ]
     assert "xoxb-private-token" not in rendered
     assert "first-private.txt" not in rendered

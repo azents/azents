@@ -109,6 +109,7 @@ _DISCORD_GUILD_ID = "200000000000000001"
 _DISCORD_BOT_USER_ID = "300000000000000001"
 _DISCORD_CHANNEL_ID = "400000000000000001"
 _DISCORD_BOT_TOKEN = "discord-e2e-private"
+_EXTERNAL_CHANNEL_LARGE_FILE_BYTES = 6 * 1024 * 1024
 
 
 def _create_agent(
@@ -1699,7 +1700,7 @@ def test_external_channel_file_transfer_journey(
     slack_provider_fake_url: str,
     openai_proxy_url: str,
 ) -> None:
-    """Download one selected Slack file and publish two processed Runtime files."""
+    """Transfer one 6 MiB Slack file through Runtime and publish two results."""
     del azents_engine_worker_container, azents_runtime_provider_docker_container
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
@@ -1714,8 +1715,17 @@ def test_external_channel_file_transfer_journey(
         "<@B-E2E> External Channel file transfer E2E. "
         "Process only the first attached file and return two results."
     )
-    selected_content = b"alpha beta"
+    selected_content_pattern = b"runtime-transfer-large-file\n"
+    selected_content = (
+        selected_content_pattern
+        * ((_EXTERNAL_CHANNEL_LARGE_FILE_BYTES // len(selected_content_pattern)) + 1)
+    )[:_EXTERNAL_CHANNEL_LARGE_FILE_BYTES]
     ignored_content = b"unused input"
+    expected_uploads = (
+        b"summary:" + selected_content,
+        b"details:" + selected_content.upper(),
+    )
+    assert len(selected_content) == _EXTERNAL_CHANNEL_LARGE_FILE_BYTES
     event_files = [
         {
             "id": "F-IN-SELECTED",
@@ -1964,7 +1974,7 @@ def test_external_channel_file_transfer_journey(
     assert completion["channel"] == _CHANNEL_ID
     assert completion["thread_ts"] == root_timestamp
     assert completion["file_count"] == 2
-    assert completion["total_bytes"] == 36
+    assert completion["total_bytes"] == sum(len(body) for body in expected_uploads)
     assert completion["has_initial_comment"] is True
 
     provider_state = _provider_state(slack_provider_fake_url)
@@ -1974,6 +1984,19 @@ def test_external_channel_file_transfer_journey(
     assert request_counts["files.getUploadURLExternal"] == 2
     assert request_counts["file.upload"] == 2
     assert request_counts["files.completeUploadExternal"] == 1
+    upload_requests = [
+        cast(dict[str, object], item)
+        for item in cast(list[object], provider_state["requests"])
+        if isinstance(item, dict)
+        and cast(dict[str, object], item).get("operation") == "file.upload"
+    ]
+    assert [
+        (
+            item.get("received_length"),
+            item.get("content_sha256"),
+        )
+        for item in upload_requests
+    ] == [(len(body), hashlib.sha256(body).hexdigest()) for body in expected_uploads]
     file_requests = [
         cast(dict[str, object], item)
         for item in cast(list[object], provider_state["requests"])
@@ -1989,7 +2012,7 @@ def test_external_channel_file_transfer_journey(
     rendered_provider_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_provider_state
     assert _SIGNING_SECRET not in rendered_provider_state
-    assert selected_content.decode() not in rendered_provider_state
+    assert selected_content_pattern.decode().strip() not in rendered_provider_state
     assert ignored_content.decode() not in rendered_provider_state
     assert "selected-input.txt" not in rendered_provider_state
 
