@@ -308,7 +308,12 @@ def _request(*sources: RuntimeToProviderSource) -> RuntimeToProviderBatchRequest
         provider_maximum_size=10 * 1024 * 1024,
         deadline_at=_NOW + timedelta(minutes=1),
         resource_class="external_channel",
+        before_source_admission=_allow_source_admission,
     )
+
+
+async def _allow_source_admission() -> None:
+    """Admit one source in ordinary batch tests."""
 
 
 def _source(path: str, size: int) -> RuntimeToProviderSource:

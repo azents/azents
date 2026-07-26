@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Protocol
@@ -55,6 +55,7 @@ class RuntimeToProviderDeliveryExecutor(Protocol):
         operation_id: str,
         batch_id: str,
         sources: tuple[RuntimeToProviderSource, ...],
+        before_source_admission: Callable[[], Awaitable[None]],
     ) -> RuntimeToProviderBatch:
         """Prepare the Runtime sources selected for one provider completion."""
         ...
@@ -185,6 +186,7 @@ class RuntimeToProviderBatchRequest:
     provider_maximum_size: int
     deadline_at: datetime.datetime
     resource_class: str
+    before_source_admission: Callable[[], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -600,6 +602,7 @@ class RuntimeToProviderBatchService:
         prepared: list[_PreparedRuntimeSource] = []
         try:
             for index, source in enumerate(request.sources):
+                await request.before_source_admission()
                 prepared_source = await self._prepare_source(
                     request=request,
                     source=source,
@@ -910,6 +913,7 @@ class RuntimeToProviderDeliveryService:
         operation_id: str,
         batch_id: str,
         sources: tuple[RuntimeToProviderSource, ...],
+        before_source_admission: Callable[[], Awaitable[None]],
     ) -> RuntimeToProviderBatch:
         """Prepare one bounded provider batch using trusted configured limits."""
         return await self.batch_service.prepare(
@@ -924,6 +928,7 @@ class RuntimeToProviderDeliveryService:
                 provider_maximum_size=self.provider_maximum_size,
                 deadline_at=self.batch_service.clock() + self.deadline,
                 resource_class=self.resource_class,
+                before_source_admission=before_source_admission,
             )
         )
 
@@ -951,6 +956,7 @@ class RuntimeToProviderDeliveryCapability:
         operation_id: str,
         batch_id: str,
         sources: tuple[RuntimeToProviderSource, ...],
+        before_source_admission: Callable[[], Awaitable[None]],
     ) -> RuntimeToProviderBatch:
         """Prepare one provider batch without exposing storage implementation data."""
         return await self.service.prepare(
@@ -960,6 +966,7 @@ class RuntimeToProviderDeliveryCapability:
             operation_id=operation_id,
             batch_id=batch_id,
             sources=sources,
+            before_source_admission=before_source_admission,
         )
 
     async def recover(

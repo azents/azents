@@ -2,6 +2,7 @@
 
 import datetime
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import assert_never
 
 import sqlalchemy as sa
@@ -80,6 +81,14 @@ from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
+
+
+@dataclass(frozen=True)
+class RuntimeProviderDeliveryCompletion:
+    """One atomic provider-success ledger completion result."""
+
+    accepted: bool
+    recovery_delivery_id: str | None
 
 
 class ExternalChannelWorkRepository:
@@ -1248,6 +1257,178 @@ class ExternalChannelWorkRepository:
         attempt.completed_at = now
         return None
 
+    async def revalidate_runtime_delivery_authority(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        runtime_target: ServerToRuntimeTarget,
+        now: datetime.datetime,
+    ) -> bool:
+        """Fence one pre-provider Runtime operation against current authority."""
+        attempt = await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt)
+            .where(
+                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
+                RDBExternalChannelDeliveryAttempt.status
+                == ExternalChannelDeliveryStatus.ATTEMPTING,
+            )
+            .with_for_update()
+        )
+        if attempt is None or attempt.binding_id is None:
+            return False
+        binding = await session.scalar(
+            sa.select(RDBExternalChannelBinding)
+            .where(RDBExternalChannelBinding.id == attempt.binding_id)
+            .with_for_update()
+        )
+        if binding is None:
+            await self._reject_delivery_start(
+                attempt,
+                error_kind="binding_unavailable",
+                error_summary="The current External Channel binding is unavailable.",
+                now=now,
+            )
+            return False
+        agent_session = await session.scalar(
+            sa.select(RDBAgentSession)
+            .where(RDBAgentSession.id == binding.agent_session_id)
+            .with_for_update()
+        )
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(RDBExternalChannelAgentRoute.id == binding.route_id)
+            .with_for_update()
+        )
+        resource = await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(RDBExternalChannelResource.id == binding.resource_id)
+            .with_for_update()
+        )
+        if agent_session is None or route is None or resource is None:
+            await self._reject_delivery_start(
+                attempt,
+                error_kind="delivery_authority_unavailable",
+                error_summary="The current External Channel authority is unavailable.",
+                now=now,
+            )
+            return False
+        agent = await session.scalar(
+            sa.select(RDBAgent)
+            .where(RDBAgent.id == agent_session.agent_id)
+            .with_for_update()
+        )
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == route.connection_id)
+            .with_for_update()
+        )
+        if (
+            agent is None
+            or connection is None
+            or binding.status is not ExternalChannelBindingStatus.ACTIVE
+            or binding.activation_status
+            is not ExternalChannelBindingActivationStatus.ACTIVE
+            or agent_session.status is not AgentSessionStatus.ACTIVE
+            or agent_session.stop_requested_at is not None
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or route.agent_id != agent.id
+            or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or resource.connection_id != connection.id
+            or connection.status is not ExternalChannelConnectionStatus.ACTIVE
+            or connection.encrypted_credentials is None
+        ):
+            await self._reject_delivery_start(
+                attempt,
+                error_kind="delivery_authority_revoked",
+                error_summary=(
+                    "The current External Channel authority is no longer active."
+                ),
+                now=now,
+            )
+            return False
+        if attempt.channel_action_id is not None:
+            action = await session.scalar(
+                sa.select(RDBExternalChannelAction)
+                .where(RDBExternalChannelAction.id == attempt.channel_action_id)
+                .with_for_update()
+            )
+            if (
+                action is None
+                or action.completed_at is not None
+                or action.agent_session_id != agent_session.id
+                or action.binding_id != binding.id
+            ):
+                await self._reject_delivery_start(
+                    attempt,
+                    error_kind="delivery_action_unavailable",
+                    error_summary="The original Channel Action is unavailable.",
+                    now=now,
+                )
+                return False
+            if action.agent_run_id is not None:
+                agent_run = await session.scalar(
+                    sa.select(RDBAgentRun)
+                    .where(RDBAgentRun.id == action.agent_run_id)
+                    .with_for_update()
+                )
+                if (
+                    agent_run is None
+                    or agent_run.session_id != agent_session.id
+                    or agent_run.status is not AgentRunStatus.RUNNING
+                    or agent_run.stop_requested_at is not None
+                ):
+                    await self._reject_delivery_start(
+                        attempt,
+                        error_kind="delivery_action_cancelled",
+                        error_summary=(
+                            "The original Channel Action is no longer active."
+                        ),
+                        now=now,
+                    )
+                    return False
+        files = attempt.request_payload.get("files")
+        file_list = files if isinstance(files, list) else []
+        if file_list and (
+            connection.capabilities is None
+            or connection.capabilities.get("upload_files") is not True
+        ):
+            await self._reject_delivery_start(
+                attempt,
+                error_kind="provider_upload_unavailable",
+                error_summary=(
+                    "The current provider file-upload capability is unavailable."
+                ),
+                now=now,
+            )
+            return False
+        runtime = await session.scalar(
+            sa.select(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_target.runtime_id,
+                RDBAgentRuntime.agent_id == agent.id,
+                RDBAgentRuntime.desired_generation == runtime_target.desired_generation,
+                RDBAgentRuntime.runner_generation == runtime_target.desired_generation,
+                RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
+                RDBAgentRuntime.provider_observed_state
+                == RuntimeProviderObservedState.RUNNING,
+                RDBAgentRuntime.provider_connection_state
+                == RuntimeProviderConnectionState.CONNECTED,
+                RDBAgentRuntime.runner_state == RuntimeRunnerState.READY,
+            )
+            .with_for_update()
+        )
+        if runtime is None:
+            await self._reject_delivery_start(
+                attempt,
+                error_kind="runtime_delivery_authority_revoked",
+                error_summary="The current Runtime delivery authority is unavailable.",
+                now=now,
+            )
+            return False
+        await session.flush()
+        return True
+
     async def record_runtime_provider_state(
         self,
         session: AsyncSession,
@@ -1284,6 +1465,53 @@ class ExternalChannelWorkRepository:
             attempt.provider_message_key = provider_message_key
         await session.flush()
         return True
+
+    async def complete_runtime_provider_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        recovery_payload: dict[str, object],
+        provider_message_key: str | None,
+        now: datetime.datetime,
+    ) -> RuntimeProviderDeliveryCompletion:
+        """Atomically retain provider success and its exact settlement correlation."""
+        attempt = await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt)
+            .where(
+                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
+                RDBExternalChannelDeliveryAttempt.status
+                == ExternalChannelDeliveryStatus.ATTEMPTING,
+            )
+            .with_for_update()
+        )
+        if attempt is None:
+            return RuntimeProviderDeliveryCompletion(
+                accepted=False,
+                recovery_delivery_id=None,
+            )
+        payload = dict(attempt.request_payload)
+        payload["runtime_provider_recovery"] = {
+            "state": "provider_completed",
+            **recovery_payload,
+        }
+        attempt.request_payload = payload
+        if provider_message_key is not None:
+            attempt.provider_message_key = provider_message_key
+        await session.flush()
+        recovery_delivery_id = await self.finish_delivery(
+            session,
+            delivery_attempt_id=delivery_attempt_id,
+            status=ExternalChannelDeliveryStatus.DELIVERED,
+            provider_message_key=provider_message_key,
+            error_kind=None,
+            error_summary=None,
+            now=now,
+        )
+        return RuntimeProviderDeliveryCompletion(
+            accepted=True,
+            recovery_delivery_id=recovery_delivery_id,
+        )
 
     async def complete_runtime_provider_recovery(
         self,
@@ -2188,13 +2416,14 @@ class ExternalChannelWorkRepository:
         )
         for attempt in attempts:
             if _has_provider_completed_runtime_recovery(attempt):
-                attempt.status = ExternalChannelDeliveryStatus.UNKNOWN
-                attempt.error_kind = "runtime_provider_settlement_pending"
-                attempt.error_summary = (
-                    "The provider accepted the Runtime file delivery, but "
-                    "Runtime settlement is pending."
+                await self.complete_runtime_provider_recovery(
+                    session,
+                    delivery_attempt_id=attempt.id,
+                    provider_message_key=_runtime_provider_message_key(attempt),
+                    now=now,
                 )
-            elif attempt.status is ExternalChannelDeliveryStatus.PENDING:
+                continue
+            if attempt.status is ExternalChannelDeliveryStatus.PENDING:
                 attempt.status = ExternalChannelDeliveryStatus.NOT_ATTEMPTED
                 attempt.error_kind = "recovered_not_attempted"
                 attempt.error_summary = (
@@ -2245,13 +2474,14 @@ class ExternalChannelWorkRepository:
         now = datetime.datetime.now(datetime.UTC)
         for row in rows:
             if _has_provider_completed_runtime_recovery(row):
-                row.status = ExternalChannelDeliveryStatus.UNKNOWN
-                row.error_kind = "runtime_provider_settlement_pending"
-                row.error_summary = (
-                    "The provider accepted the Runtime file delivery, but "
-                    "Runtime settlement is pending."
+                await self.complete_runtime_provider_recovery(
+                    session,
+                    delivery_attempt_id=row.id,
+                    provider_message_key=_runtime_provider_message_key(row),
+                    now=now,
                 )
-            elif row.status is ExternalChannelDeliveryStatus.PENDING:
+                continue
+            if row.status is ExternalChannelDeliveryStatus.PENDING:
                 row.status = ExternalChannelDeliveryStatus.NOT_ATTEMPTED
                 row.error_kind = "recovered_not_attempted"
                 row.error_summary = (
@@ -2274,6 +2504,30 @@ class ExternalChannelWorkRepository:
             session,
             channel_action_id=channel_action_id,
         )
+
+    async def list_runtime_provider_settlement_delivery_ids(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[str]:
+        """List bounded delivered provider results awaiting Runtime settlement only."""
+        if limit <= 0:
+            raise ValueError("Runtime provider settlement limit must be positive.")
+        result = await session.scalars(
+            sa.select(RDBExternalChannelDeliveryAttempt.id)
+            .where(
+                RDBExternalChannelDeliveryAttempt.status
+                == ExternalChannelDeliveryStatus.DELIVERED,
+                RDBExternalChannelDeliveryAttempt.request_payload[
+                    "runtime_provider_recovery"
+                ]["state"].as_string()
+                == "provider_completed",
+            )
+            .order_by(RDBExternalChannelDeliveryAttempt.completed_at)
+            .limit(limit)
+        )
+        return list(result)
 
     async def recover_archive_cleanup(
         self,
@@ -2446,6 +2700,19 @@ def _has_provider_completed_runtime_recovery(
     """Return whether a provider completion awaits Runtime-only settlement."""
     recovery = attempt.request_payload.get("runtime_provider_recovery")
     return isinstance(recovery, dict) and recovery.get("state") == "provider_completed"
+
+
+def _runtime_provider_message_key(
+    attempt: RDBExternalChannelDeliveryAttempt,
+) -> str | None:
+    """Read the provider message key retained with a confirmed completion."""
+    recovery = attempt.request_payload.get("runtime_provider_recovery")
+    if not isinstance(recovery, dict):
+        return attempt.provider_message_key
+    provider_message_key = recovery.get("provider_message_key")
+    if isinstance(provider_message_key, str) and provider_message_key:
+        return provider_message_key
+    return attempt.provider_message_key
 
 
 def _validate_existing_action(

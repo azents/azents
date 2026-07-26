@@ -1,5 +1,6 @@
 """Slack event normalization and bounded conversation API operations."""
 
+import asyncio
 import datetime
 import hashlib
 import json
@@ -893,6 +894,39 @@ class SlackConversationClient:
         files: Sequence[SlackOutboundFile],
         before_provider_request: Callable[[], Awaitable[None]] | None = None,
         deadline_at: datetime.datetime | None = None,
+    ) -> SlackControlMessageResult:
+        """Upload ordered files under one absolute provider-operation deadline."""
+        try:
+            async with asyncio.timeout(self._delivery_timeout(deadline_at)):
+                return await self._post_file_message(
+                    bot_token=bot_token,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    markdown_text=markdown_text,
+                    files=files,
+                    before_provider_request=before_provider_request,
+                    deadline_at=deadline_at,
+                )
+        except TimeoutError, SlackProviderTemporaryError:
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary="Slack file reply outcome is unknown.",
+            )
+
+    async def _post_file_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
+        markdown_text: str,
+        files: Sequence[SlackOutboundFile],
+        before_provider_request: Callable[[], Awaitable[None]] | None,
+        deadline_at: datetime.datetime | None,
     ) -> SlackControlMessageResult:
         """Upload ordered files and publish them through one Slack completion."""
         if (

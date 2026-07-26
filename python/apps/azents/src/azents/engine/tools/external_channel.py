@@ -322,6 +322,18 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         self,
         context: SessionIdleHookContext,
     ) -> SessionIdleResult | None:
+        runtime_context = (
+            None
+            if self.runtime_context_store is None
+            else self.runtime_context_store.get()
+        )
+        await self.service.drain_runtime_provider_settlements(
+            provider_delivery_capability=(
+                None
+                if runtime_context is None
+                else runtime_context.provider_delivery_capability
+            ),
+        )
         works = await self.service.snapshot(
             session_id=self.session_id,
             agent_id=self.agent_id,

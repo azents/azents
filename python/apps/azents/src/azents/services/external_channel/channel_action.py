@@ -386,27 +386,56 @@ class ExternalChannelActionService:
                 self._record_unknown_after_cancellation(target.delivery_attempt_id)
             )
             raise
-        async with self.session_manager() as session:
-            recovery_delivery_id = await self.repository.finish_delivery(
-                session,
-                delivery_attempt_id=target.delivery_attempt_id,
-                status=ExternalChannelDeliveryStatus(result.status),
-                provider_message_key=result.provider_message_key,
-                error_kind=result.error_kind,
-                error_summary=result.error_summary,
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            await session.commit()
+        recovery_delivery_id = None
+        if not (
+            result.status == "delivered"
+            and _has_runtime_outbound_source(started.request_payload)
+        ):
+            async with self.session_manager() as session:
+                recovery_delivery_id = await self.repository.finish_delivery(
+                    session,
+                    delivery_attempt_id=target.delivery_attempt_id,
+                    status=ExternalChannelDeliveryStatus(result.status),
+                    provider_message_key=result.provider_message_key,
+                    error_kind=result.error_kind,
+                    error_summary=result.error_summary,
+                    now=datetime.datetime.now(datetime.UTC),
+                )
+                await session.commit()
         if recovery_delivery_id is not None:
             await self.attempt_delivery(recovery_delivery_id)
         if _has_runtime_outbound_source(started.request_payload):
-            recovered_status = await self.recover_runtime_provider_settlement(
+            await self.recover_runtime_provider_settlement(
                 target.delivery_attempt_id,
                 provider_delivery_capability=provider_delivery_capability,
             )
-            if recovered_status is not None:
-                return recovered_status
         return ExternalChannelDeliveryStatus(result.status)
+
+    async def drain_runtime_provider_settlements(
+        self,
+        *,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
+        limit: int = 20,
+    ) -> int:
+        """Recover bounded provider-completed claims without provider mutation."""
+        if provider_delivery_capability is None:
+            return 0
+        async with self.session_manager() as session:
+            delivery_attempt_ids = (
+                await self.repository.list_runtime_provider_settlement_delivery_ids(
+                    session,
+                    limit=limit,
+                )
+            )
+        recovered = 0
+        for delivery_attempt_id in delivery_attempt_ids:
+            status = await self.recover_runtime_provider_settlement(
+                delivery_attempt_id,
+                provider_delivery_capability=provider_delivery_capability,
+            )
+            if status is ExternalChannelDeliveryStatus.DELIVERED:
+                recovered += 1
+        return recovered
 
     async def recover_runtime_provider_settlement(
         self,
@@ -442,9 +471,9 @@ class ExternalChannelActionService:
         except asyncio.CancelledError:
             raise
         except RuntimeToProviderTransferError:
-            return ExternalChannelDeliveryStatus.UNKNOWN
+            return target.status
         if target.status is ExternalChannelDeliveryStatus.DELIVERED:
-            recorded = await self._record_runtime_provider_state(
+            await self._record_runtime_provider_state(
                 delivery_attempt_id=target.delivery_attempt_id,
                 state="settled",
                 recoveries=recoveries,
@@ -452,11 +481,7 @@ class ExternalChannelActionService:
                     target.request_payload
                 ),
             )
-            return (
-                ExternalChannelDeliveryStatus.DELIVERED
-                if recorded
-                else ExternalChannelDeliveryStatus.UNKNOWN
-            )
+            return ExternalChannelDeliveryStatus.DELIVERED
         provider_message_key = _runtime_provider_message_key(target.request_payload)
         async with self.session_manager() as session:
             recovery_delivery_id = (
@@ -535,6 +560,53 @@ class ExternalChannelActionService:
             )
             await session.commit()
             return recorded
+
+    async def _complete_runtime_provider_delivery(
+        self,
+        *,
+        delivery_attempt_id: str,
+        recoveries: tuple[RuntimeToProviderRecovery, ...],
+        provider_message_key: str | None,
+    ) -> bool:
+        """Atomically publish confirmed provider success before Runtime cleanup."""
+        async with self.session_manager() as session:
+            completion = await self.repository.complete_runtime_provider_delivery(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+                recovery_payload={
+                    "claims": [
+                        _runtime_provider_recovery_payload(recovery)
+                        for recovery in recoveries
+                    ],
+                    "provider_message_key": provider_message_key,
+                },
+                provider_message_key=provider_message_key,
+                now=datetime.datetime.now(datetime.UTC),
+            )
+            await session.commit()
+        if completion.recovery_delivery_id is not None:
+            await self.attempt_delivery(completion.recovery_delivery_id)
+        return completion.accepted
+
+    async def _revalidate_runtime_delivery_authority(
+        self,
+        *,
+        delivery_attempt_id: str,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability,
+    ) -> None:
+        """Fence Runtime admission and provider mutation against current authority."""
+        async with self.session_manager() as session:
+            current = await self.repository.revalidate_runtime_delivery_authority(
+                session,
+                delivery_attempt_id=delivery_attempt_id,
+                runtime_target=provider_delivery_capability.target,
+                now=datetime.datetime.now(datetime.UTC),
+            )
+            await session.commit()
+        if not current:
+            raise RuntimeToProviderTransferError(
+                "Runtime provider delivery authority is no longer current"
+            )
 
     async def _deliver(
         self,
@@ -906,10 +978,18 @@ class ExternalChannelActionService:
                     error_summary="The original Runtime file source is unavailable.",
                 )
             try:
+
+                async def before_source_admission() -> None:
+                    await self._revalidate_runtime_delivery_authority(
+                        delivery_attempt_id=delivery_attempt_id,
+                        provider_delivery_capability=provider_delivery_capability,
+                    )
+
                 batch = await provider_delivery_capability.prepare(
                     operation_id=f"external-channel-delivery:{delivery_attempt_id}",
                     batch_id=delivery_attempt_id,
                     sources=runtime_sources,
+                    before_source_admission=before_source_admission,
                 )
                 await batch.ensure_active()
                 claim_recoveries = batch.recovery_evidence()
@@ -991,6 +1071,11 @@ class ExternalChannelActionService:
         async def before_provider_request() -> None:
             nonlocal provider_started
             if batch is not None:
+                assert provider_delivery_capability is not None
+                await self._revalidate_runtime_delivery_authority(
+                    delivery_attempt_id=delivery_attempt_id,
+                    provider_delivery_capability=provider_delivery_capability,
+                )
                 await batch.ensure_active()
                 if not provider_started:
                     recorded = await self._record_runtime_provider_state(
@@ -1086,30 +1171,35 @@ class ExternalChannelActionService:
         if result.status == "delivered":
             try:
                 recoveries = await batch.provider_completed()
-                recorded = await self._record_runtime_provider_state(
+                completed = await self._complete_runtime_provider_delivery(
                     delivery_attempt_id=delivery_attempt_id,
-                    state="provider_completed",
                     recoveries=recoveries,
                     provider_message_key=result.provider_message_key,
                 )
-                if not recorded:
+                if not completed:
                     await batch.close()
-                    return _runtime_settlement_pending_result()
+                    return SlackControlMessageResult(
+                        status="unknown",
+                        provider_message_key=None,
+                        error_kind="runtime_provider_completion_unrecorded",
+                        error_summary=(
+                            "Slack accepted the file reply, but the provider "
+                            "completion could not be recorded."
+                        ),
+                    )
                 await batch.acknowledge_and_settle()
-                recorded = await self._record_runtime_provider_state(
+                await self._record_runtime_provider_state(
                     delivery_attempt_id=delivery_attempt_id,
                     state="settled",
                     recoveries=recoveries,
                     provider_message_key=result.provider_message_key,
                 )
-                if not recorded:
-                    return _runtime_settlement_pending_result()
             except asyncio.CancelledError:
                 await asyncio.shield(batch.close())
                 raise
             except RuntimeToProviderTransferError:
                 await batch.close()
-                return _runtime_settlement_pending_result()
+                return result
             return result
         if result.status == "failed":
             try:
@@ -1303,8 +1393,6 @@ def _runtime_settlement_pending_result() -> SlackControlMessageResult:
             "Slack accepted the file reply, but Runtime transfer settlement is pending."
         ),
     )
-
-
 def _outbound_files(
     value: object,
 ) -> tuple[ExternalChannelOutboundFileManifest, ...] | None:
