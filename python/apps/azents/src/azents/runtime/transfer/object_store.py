@@ -65,6 +65,20 @@ class RuntimeTransferS3Cleanup:
                     )
                 except BaseException as exc:
                     error = exc
+        if record.pre_ready_object_handle is not None:
+            pre_ready_identity = runtime_transfer_object_identity(
+                bucket=self._bucket,
+                object_prefix=self._object_prefix,
+                opaque_key=record.pre_ready_object_handle,
+            )
+            try:
+                await self._object_store.delete(
+                    bucket=pre_ready_identity.bucket,
+                    key=pre_ready_identity.key,
+                )
+            except BaseException as exc:
+                if error is None:
+                    error = exc
         if record.object is not None:
             identity = runtime_transfer_object_identity(
                 bucket=self._bucket,
@@ -107,6 +121,7 @@ class RuntimeTransferS3Cleanup:
             is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
             and record.multipart_cleanup_handle is None
             and not record.completed_object_cleanup_required
+            and record.pre_ready_object_handle is None
         ):
             raise ValueError("Stale transfer cleanup evidence is unavailable")
         if error is not None:

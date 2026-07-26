@@ -286,7 +286,7 @@ async def test_provider_stages_bounded_stream_then_promotes_to_canonical_object(
     assert prepared.sha256 == hashlib.sha256(body).hexdigest()
     assert stream.opened == stream.closed == 1
     assert b"".join(store.parts) == body
-    assert [name for name, _ in cleanup.calls] == ["register", "promote", "clear"]
+    assert [name for name, _ in cleanup.calls] == ["register", "promote", "promote"]
     assert preparation.revision == 4
     assert len(store.copy_calls) == 1
     copy = store.copy_calls[0]

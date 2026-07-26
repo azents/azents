@@ -84,6 +84,9 @@ class VfsServerToRuntimeSource:
         """Decode, hash, stage, and verify the exact VFS entry incrementally."""
         if self.entry.size_bytes == 0:
             raise ValueError("Zero-byte VFS staging is not supported by multipart")
+        await preparation.promote_cleanup(
+            preparation_object_handle=preparation.admitted_object_handle,
+        )
         upload = await self.s3_service.create_multipart_upload(
             destination=S3ObjectIdentity(
                 bucket=self.bucket,

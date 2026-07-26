@@ -381,6 +381,52 @@ async def test_ready_download_cancellation_cleans_before_terminal_release() -> N
 
 
 @pytest.mark.asyncio
+async def test_pre_ready_canonical_cleanup_survives_revalidation_or_ready_failure() -> (
+    None
+):
+    """A rejected READY transition retains canonical deletion evidence."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    cleanup = _Cleanup()
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=cleanup,
+        clock=lambda: _NOW,
+    )
+    admitted = await coordinator.admit(_admission(), lease_id="lease-1")
+    assert admitted is not None
+    protected = await state.promote_preparation_cleanup(
+        admitted.admission.transfer_id,
+        attempt_id=admitted.admission.attempt_id,
+        runtime_id=admitted.admission.runtime_id,
+        desired_generation=admitted.admission.desired_generation,
+        expected_revision=admitted.revision,
+        preparation_object_handle=object_handle_for(admitted),
+    )
+    assert protected is not None
+
+    rejected = await coordinator.mark_ready(
+        admitted,
+        expected_revision=admitted.revision,
+        object_handle=object_handle_for(admitted),
+        size=3,
+        sha256="a" * 64,
+    )
+    assert rejected is None
+
+    cancelled = await coordinator.cancel(
+        protected,
+        expected_revision=protected.revision,
+        reason=RuntimeTransferCancellationReason.CALLER,
+    )
+
+    assert cancelled is not None
+    assert cancelled.phase.value == "terminal"
+    assert len(cleanup.records) == 1
+    assert cleanup.records[0].preparation_object_handle == object_handle_for(admitted)
+
+
+@pytest.mark.asyncio
 async def test_terminal_authority_canonicalizes_elapsed_deadline() -> None:
     """Trusted late failure settlement cannot win after the effective deadline."""
     clock = _Clock(_NOW)

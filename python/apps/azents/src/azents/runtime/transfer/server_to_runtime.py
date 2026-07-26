@@ -260,6 +260,7 @@ class ServerToRuntimeTransferService:
             agent_id=request.agent_id,
         )
         expected_revision: int | None = None
+        preparation: ServerToRuntimePreparation | None = None
         try:
             admitted = await self.coordinator.admit_transfer(
                 CoordinatorAdmitTransferRequest(
@@ -308,6 +309,9 @@ class ServerToRuntimeTransferService:
                 )
             )
             expected_revision = status.revision
+            preparation.revision = expected_revision
+            await preparation.clear_cleanup()
+            expected_revision = preparation.revision
             status = await self.coordinator.dispatch_transfer(
                 CoordinatorDispatchTransferRequest(
                     identity=identity,
@@ -316,18 +320,30 @@ class ServerToRuntimeTransferService:
                 )
             )
             expected_revision = status.revision
-            await self._wait_for_terminal_success(identity, request.deadline_at)
+            preparation.revision = expected_revision
+            await self._wait_for_terminal_success(
+                identity,
+                request.deadline_at,
+                preparation,
+            )
         except asyncio.CancelledError:
-            await self._cancel(identity, expected_revision)
+            await self._cancel(
+                identity,
+                preparation.revision if preparation is not None else expected_revision,
+            )
             raise
         except Exception:
-            await self._cancel(identity, expected_revision)
+            await self._cancel(
+                identity,
+                preparation.revision if preparation is not None else expected_revision,
+            )
             raise
 
     async def _wait_for_terminal_success(
         self,
         identity: CoordinatorTransferIdentity,
         deadline_at: datetime,
+        preparation: ServerToRuntimePreparation,
     ) -> None:
         while True:
             now = self.clock()
@@ -338,6 +354,7 @@ class ServerToRuntimeTransferService:
             status = await self.coordinator.get_transfer_status(
                 CoordinatorGetTransferStatusRequest(identity=identity)
             )
+            preparation.revision = status.revision
             if status.phase is CoordinatorTransferPhase.TERMINAL:
                 if status.outcome is CoordinatorTransferOutcome.SUCCEEDED:
                     return
@@ -359,7 +376,7 @@ class ServerToRuntimeTransferService:
         if expected_revision is None:
             return
         try:
-            await self.coordinator.cancel_transfer(
+            status = await self.coordinator.cancel_transfer(
                 CoordinatorCancelTransferRequest(
                     identity=identity,
                     expected_revision=expected_revision,
@@ -367,6 +384,25 @@ class ServerToRuntimeTransferService:
                 )
             )
         except Exception:
+            status = await self.coordinator.get_transfer_status(
+                CoordinatorGetTransferStatusRequest(identity=identity)
+            )
+            if status.phase is CoordinatorTransferPhase.TERMINAL:
+                return
+            try:
+                await self.coordinator.cancel_transfer(
+                    CoordinatorCancelTransferRequest(
+                        identity=identity,
+                        expected_revision=status.revision,
+                        reason=CoordinatorCancellationReason.CALLER,
+                    )
+                )
+            except Exception as exc:
+                raise ServerToRuntimeTransferError(
+                    "Runtime transfer cancellation could not be confirmed"
+                ) from exc
+            return
+        if status.phase is CoordinatorTransferPhase.TERMINAL:
             return
 
     def _validate_request(self, request: ServerToRuntimeTransferRequest) -> None:

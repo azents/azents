@@ -69,6 +69,7 @@ class Coordinator:
         self.statuses = statuses
         self.calls: list[tuple[str, object]] = []
         self.admit_request: CoordinatorAdmitTransferRequest | None = None
+        self.reject_first_cancellation = False
 
     async def admit_transfer(
         self, request: CoordinatorAdmitTransferRequest
@@ -105,6 +106,9 @@ class Coordinator:
         self, request: CoordinatorCancelTransferRequest
     ) -> CoordinatorTransferStatus:
         self.calls.append(("cancel", request))
+        if self.reject_first_cancellation:
+            self.reject_first_cancellation = False
+            raise ServerToRuntimeTransferError("Transfer revision is stale")
         return _status(
             4,
             phase=CoordinatorTransferPhase.TERMINAL,
@@ -212,6 +216,7 @@ async def test_transfer_admits_before_source_prepare_and_terminal_success() -> N
     assert [name for name, _ in coordinator.calls] == [
         "admit",
         "ready",
+        "clear_cleanup",
         "dispatch",
         "status",
     ]
@@ -326,3 +331,36 @@ async def test_cancellation_propagates_after_coordinator_cancellation() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert coordinator.calls[-1][0] == "cancel"
+    cancellation = coordinator.calls[-1][1]
+    assert isinstance(cancellation, CoordinatorCancelTransferRequest)
+    assert cancellation.expected_revision == 4
+
+
+@pytest.mark.asyncio
+async def test_revalidation_failure_retries_cancellation_at_current_revision() -> None:
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+        revalidated=False,
+        preparation_revision=4,
+    )
+    coordinator = Coordinator([_status(5, phase=CoordinatorTransferPhase.PREPARING)])
+    coordinator.reject_first_cancellation = True
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    with pytest.raises(ServerToRuntimeTransferError, match="authority changed"):
+        await service.transfer(_request(source))
+
+    cancellations = [request for name, request in coordinator.calls if name == "cancel"]
+    assert len(cancellations) == 2
+    first, second = cancellations
+    assert isinstance(first, CoordinatorCancelTransferRequest)
+    assert isinstance(second, CoordinatorCancelTransferRequest)
+    assert first.expected_revision == 4
+    assert second.expected_revision == 5

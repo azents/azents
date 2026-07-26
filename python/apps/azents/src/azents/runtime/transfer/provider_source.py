@@ -175,6 +175,9 @@ class DeferredProviderServerToRuntimeSource:
             await preparation.promote_cleanup(
                 preparation_object_handle=preparation_handle,
             )
+            await preparation.promote_cleanup(
+                preparation_object_handle=preparation.admitted_object_handle,
+            )
             verified = await self.s3_service.copy_immutable(
                 source=preparation_identity,
                 destination=self._object_identity(preparation.admitted_object_handle),
@@ -195,7 +198,6 @@ class DeferredProviderServerToRuntimeSource:
                 preparation_identity.bucket,
                 preparation_identity.key,
             )
-            await preparation.clear_cleanup()
             return PreparedServerToRuntimeObject(
                 object_handle=preparation.admitted_object_handle,
                 size=actual_size,

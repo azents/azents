@@ -1,6 +1,8 @@
 """Tests for S3-native managed Server-to-Runtime source staging."""
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from azcommon.infra.s3.service import (
@@ -158,7 +160,10 @@ class _UnusedCleanupCoordinator:
         self,
         request: CoordinatorPromotePreparationCleanupRequest,
     ) -> CoordinatorTransferStatus:
-        raise AssertionError(f"Unexpected cleanup promotion: {request}")
+        return cast(
+            CoordinatorTransferStatus,
+            SimpleNamespace(revision=request.expected_revision + 1),
+        )
 
     async def clear_preparation_cleanup(
         self,

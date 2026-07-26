@@ -62,6 +62,9 @@ class ManagedServerToRuntimeSource:
         sha256 = self.metadata.sha256
         if sha256 is None:
             raise ValueError("Managed transfer source SHA-256 is required")
+        await preparation.promote_cleanup(
+            preparation_object_handle=preparation.admitted_object_handle,
+        )
         verified = await self.s3_service.copy_immutable(
             source=self.source_identity,
             destination=S3ObjectIdentity(
