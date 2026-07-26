@@ -606,7 +606,7 @@ async def test_authority_recovers_committed_verified_publication_without_copy() 
 
 @pytest.mark.asyncio
 async def test_authority_publication_compensates_uncommitted_verified_object() -> None:
-    """Authority revalidation failure conditionally compensates the final object."""
+    """Authority revalidation failure preserves the final object for recovery."""
     service, artifact_repo, s3 = _make_authority_service(
         authority_results=[True, False]
     )
@@ -634,11 +634,7 @@ async def test_authority_publication_compensates_uncommitted_verified_object() -
     assert isinstance(result, Failure)
     assert artifact_repo.artifacts == {}
     assert len(s3.product_copy_calls) == 1
-    assert len(s3.product_cleanup_calls) == 1
-    cleanup_identity, cleanup_size, cleanup_metadata = s3.product_cleanup_calls[0]
-    assert cleanup_identity.key == s3.product_copy_calls[0][1].key
-    assert cleanup_size == 7
-    assert cleanup_metadata.publication_id not in artifact_repo.artifacts
+    assert s3.product_cleanup_calls == []
 
 
 def test_artifact_uri_returns_storage_key_only() -> None:

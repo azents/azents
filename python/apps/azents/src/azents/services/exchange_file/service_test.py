@@ -707,7 +707,7 @@ async def test_authority_recovers_committed_verified_publication_without_copy() 
 
 @pytest.mark.asyncio
 async def test_authority_verified_publication_compensates_final_object() -> None:
-    """A failed authority recheck conditionally cleans up the final Exchange object."""
+    """A failed authority recheck preserves the final object for stable recovery."""
     service, repository, s3_service = _make_authority_service(
         authority_results=[True, False]
     )
@@ -741,14 +741,7 @@ async def test_authority_verified_publication_compensates_final_object() -> None
     assert isinstance(result, Failure)
     assert repository.files == {}
     assert len(s3_service.product_copy_calls) == 1
-    assert len(s3_service.product_cleanup_calls) == 1
-    cleanup_identity, cleanup_size, cleanup_metadata = s3_service.product_cleanup_calls[
-        0
-    ]
-    copied_destination = s3_service.product_copy_calls[0][1]
-    assert cleanup_identity == copied_destination
-    assert cleanup_size == len(body)
-    assert cleanup_metadata.publication_id not in repository.files
+    assert s3_service.product_cleanup_calls == []
 
 
 @pytest.mark.asyncio

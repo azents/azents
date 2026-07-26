@@ -401,24 +401,11 @@ class ArtifactService:
             committed = True
             return Success(created)
         finally:
-            if (
-                created_by_invocation
-                and not committed
-                and not await self._has_committed_verified_publication(
-                    authority=authority,
-                    size_bytes=size_bytes,
-                    sha256=sha256,
-                    media_type=media_type,
-                    publication_id=publication_id,
-                )
-            ):
-                await self.s3_service.delete_uncommitted_product_object(
-                    identity=S3ObjectIdentity(
-                        bucket=self.config.workspace_s3.bucket,
-                        key=object_key,
-                    ),
-                    expected_size=size_bytes,
-                    publication_metadata=publication_metadata,
+            if created_by_invocation and not committed:
+                logger.warning(
+                    "Retaining uncommitted Artifact object for stable "
+                    "publication recovery",
+                    extra={"publication_id": publication_id},
                 )
 
     def _validated_existing_verified_publication(

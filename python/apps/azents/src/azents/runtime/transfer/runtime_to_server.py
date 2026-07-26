@@ -390,35 +390,32 @@ class RuntimeToServerTransferService:
                 lease=lease,
             )
         )
-        done, _ = await asyncio.wait(
-            {publication_task, renewal_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if renewal_task in done and lease.failure is not None:
-            if not publication_task.done():
-                publication_task.cancel()
-            try:
-                await publication_task
-            except asyncio.CancelledError:
-                pass
-            finally:
-                renewal_task.cancel()
+        try:
+            done, _ = await asyncio.wait(
+                {publication_task, renewal_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if renewal_task in done and lease.failure is not None:
+                if not publication_task.done():
+                    publication_task.cancel()
                 try:
-                    await renewal_task
+                    await publication_task
                 except asyncio.CancelledError:
                     pass
-            raise lease.failure
-        try:
+                raise lease.failure
             await publication_task
+            if lease.failure is not None:
+                raise lease.failure
+            return lease.revision
         finally:
-            renewal_task.cancel()
-            try:
-                await renewal_task
-            except asyncio.CancelledError:
-                pass
-        if lease.failure is not None:
-            raise lease.failure
-        return lease.revision
+            for task in (publication_task, renewal_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                publication_task,
+                renewal_task,
+                return_exceptions=True,
+            )
 
     async def _observe_status(
         self,

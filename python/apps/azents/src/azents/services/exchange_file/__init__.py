@@ -577,10 +577,10 @@ class ExchangeFileService:
             media_type=media_type,
             origin_type=origin_type,
         )
-        source_created_by_invocation = False
+        published: list[_PreparedExchangeFile] = []
         committed = False
         try:
-            source_created_by_invocation = await self._upload_prepared_files(prepared)
+            await self._upload_prepared_files(prepared, published=published)
             async with self.session_manager() as session:
                 if not await self._has_valid_resource_authority(
                     session,
@@ -608,18 +608,14 @@ class ExchangeFileService:
             committed = True
             return Success(created)
         finally:
-            if (
-                source_created_by_invocation
-                and not committed
-                and not await self._has_committed_verified_publication(
-                    authority=authority,
-                    size_bytes=size_bytes,
-                    sha256=sha256,
-                    media_type=media_type,
-                    publication_id=publication_id,
-                )
+            if not committed and not await self._has_committed_verified_publication(
+                authority=authority,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                media_type=media_type,
+                publication_id=publication_id,
             ):
-                await self._cleanup_prepared_verified_files(prepared)
+                await self._cleanup_prepared_verified_files(published)
 
     async def resolve_for_authority(
         self,
@@ -1205,9 +1201,12 @@ class ExchangeFileService:
     async def _upload_prepared_files(
         self,
         prepared: list[_PreparedExchangeFile],
+        *,
+        published: list[_PreparedExchangeFile] | None = None,
     ) -> bool:
-        """Upload prepared blobs and return source-object creation evidence."""
+        """Upload prepared blobs while retaining each completed-write evidence."""
         source_created_by_invocation = False
+        completed = published if published is not None else []
         for file in prepared:
             if file.source is not None and file.publication_metadata is not None:
                 publication = (
@@ -1222,6 +1221,8 @@ class ExchangeFileService:
                     )
                 )
                 source_created_by_invocation = publication.created
+                if publication.created:
+                    completed.append(file)
             elif file.body is not None:
                 await self.s3_service.upload(
                     bucket=self.config.workspace_s3.bucket,
@@ -1229,6 +1230,7 @@ class ExchangeFileService:
                     body=file.body,
                     content_type=file.create.media_type,
                 )
+                completed.append(file)
             else:
                 raise ValueError("Prepared ExchangeFile has no publishable source")
         return source_created_by_invocation
@@ -1313,16 +1315,7 @@ class ExchangeFileService:
     ) -> None:
         """Compensate an uncommitted verified publication and derived previews."""
         for file in prepared:
-            if file.publication_metadata is not None:
-                await self.s3_service.delete_uncommitted_product_object(
-                    identity=S3ObjectIdentity(
-                        bucket=self.config.workspace_s3.bucket,
-                        key=file.object_key,
-                    ),
-                    expected_size=file.create.size_bytes,
-                    publication_metadata=file.publication_metadata,
-                )
-            else:
+            if file.publication_metadata is None:
                 await self.s3_service.delete(
                     bucket=self.config.workspace_s3.bucket,
                     key=file.object_key,
