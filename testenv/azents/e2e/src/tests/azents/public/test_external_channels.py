@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import json
 import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import Any, cast
 from urllib.parse import urlencode
 
@@ -25,6 +27,15 @@ from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
+from azentspublicclient.models.discord_connection_configuration import (
+    DiscordConnectionConfiguration,
+)
+from azentspublicclient.models.discord_connection_credentials import (
+    DiscordConnectionCredentials,
+)
+from azentspublicclient.models.discord_connection_setup_request import (
+    DiscordConnectionSetupRequest,
+)
 from azentspublicclient.models.external_channel_access_grant_scope import (
     ExternalChannelAccessGrantScope,
 )
@@ -76,6 +87,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+from testcontainers.core.container import DockerContainer
 
 from support.utils import (
     authenticate_user,
@@ -89,6 +101,12 @@ _TEAM_ID = "T-E2E"
 _CHANNEL_ID = "C-E2E"
 _BOT_TOKEN = "xoxb-e2e-private"
 _SIGNING_SECRET = "e2e-signing-private"
+_DISCORD_APPLICATION_ID = "100000000000000001"
+_DISCORD_MULTI_APPLICATION_ID = "100000000000000002"
+_DISCORD_GUILD_ID = "200000000000000001"
+_DISCORD_BOT_USER_ID = "300000000000000001"
+_DISCORD_CHANNEL_ID = "400000000000000001"
+_DISCORD_BOT_TOKEN = "discord-e2e-private"
 
 
 def _create_agent(
@@ -228,6 +246,16 @@ def _signed_headers(
 def _provider_state(slack_provider_fake_url: str) -> dict[str, object]:
     response = requests.get(
         f"{slack_provider_fake_url}/__testenv/state",
+        timeout=5,
+    )
+    response.raise_for_status()
+    return cast(dict[str, object], response.json())
+
+
+def _discord_provider_state(discord_provider_fake_url: str) -> dict[str, object]:
+    """Return sanitized deterministic Discord fake evidence."""
+    response = requests.get(
+        f"{discord_provider_fake_url}/__testenv/state",
         timeout=5,
     )
     response.raise_for_status()
@@ -2170,3 +2198,280 @@ def test_connection_management_web_surface_uses_redacted_operational_state(
 
     wait.until(validation_reached_provider)
     assert connection.is_displayed()
+
+
+def test_discord_single_activation_interaction_and_gateway_journey(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    discord_provider_fake_url: str,
+    azents_discord_gateway_worker_factory: Callable[
+        [], AbstractContextManager[DockerContainer]
+    ],
+) -> None:
+    """Exercise Discord activation, signed ingress, and fenced Gateway admission."""
+    gateway_message_id = "500000000000000001"
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/configure",
+        json={
+            "gateway_dispatches": [
+                {
+                    "sequence": 2,
+                    "event_type": "MESSAGE_CREATE",
+                    "payload": {
+                        "id": gateway_message_id,
+                        "guild_id": _DISCORD_GUILD_ID,
+                        "channel_id": _DISCORD_CHANNEL_ID,
+                        "content": "Private Discord gateway invocation",
+                        "timestamp": "2026-07-26T00:00:00.000000+00:00",
+                        "author": {"id": "600000000000000001"},
+                        "mentions": [{"id": _DISCORD_BOT_USER_ID}],
+                    },
+                }
+            ]
+        },
+        timeout=5,
+    ).raise_for_status()
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_discord_connection(
+        agent_id=agent_id,
+        handle=handle,
+        discord_connection_setup_request=DiscordConnectionSetupRequest(
+            app_id=_DISCORD_APPLICATION_ID,
+            configuration=DiscordConnectionConfiguration(
+                target_guild_id=_DISCORD_GUILD_ID
+            ),
+            credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
+        ),
+        _headers=headers,
+    )
+    assert setup.connection.status is ExternalChannelConnectionStatus.ACTIVE
+    assert setup.connection.credentials_configured is True
+    assert setup.connection.provider_tenant_id == _DISCORD_GUILD_ID
+    assert _DISCORD_BOT_TOKEN not in setup.model_dump_json(by_alias=True)
+
+    activation_state = _discord_provider_state(discord_provider_fake_url)
+    assert activation_state["interaction_configurations"] == [
+        {"application_id": _DISCORD_APPLICATION_ID}
+    ]
+    ping = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": "700000000000000001",
+            "type": 1,
+            "application_id": _DISCORD_APPLICATION_ID,
+        },
+        timeout=10,
+    )
+    ping.raise_for_status()
+    assert ping.json() == {"status": 200, "response_type": 1}
+    command = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": "700000000000000002",
+            "type": 2,
+            "application_id": _DISCORD_APPLICATION_ID,
+            "guild_id": _DISCORD_GUILD_ID,
+            "channel_id": _DISCORD_CHANNEL_ID,
+            "member": {"user": {"id": "600000000000000001"}},
+        },
+        timeout=10,
+    )
+    command.raise_for_status()
+    assert command.json() == {"status": 200, "response_type": 5}
+
+    def admitted_gateway_state() -> dict[str, object] | None:
+        state = _discord_provider_state(discord_provider_fake_url)
+        gateway = state.get("gateway")
+        if not isinstance(gateway, dict):
+            return None
+        gateway_evidence = cast(dict[str, object], gateway)
+        initial_opcodes = gateway_evidence.get("initial_opcodes")
+        heartbeats = gateway_evidence.get("heartbeats")
+        if (
+            isinstance(initial_opcodes, list)
+            and initial_opcodes
+            and initial_opcodes[0] == 2
+            and isinstance(heartbeats, list)
+            and 2 in heartbeats
+            and gateway_evidence.get("dispatches")
+            == [{"event_type": "MESSAGE_CREATE", "sequence": 2}]
+        ):
+            return state
+        return None
+
+    with azents_discord_gateway_worker_factory():
+        state = cast(
+            dict[str, object],
+            wait_until(
+                admitted_gateway_state,
+                timeout=20,
+                interval=0.2,
+                message=(
+                    "Discord Gateway Dispatch was not durably admitted and checkpointed"
+                ),
+            ),
+        )
+    interactions = state.get("interactions")
+    assert interactions == [
+        {
+            "interaction_id": "700000000000000001",
+            "interaction_type": 1,
+            "response_status": 200,
+        },
+        {
+            "interaction_id": "700000000000000002",
+            "interaction_type": 2,
+            "response_status": 200,
+        },
+    ]
+    rendered_state = str(state)
+    assert _DISCORD_BOT_TOKEN not in rendered_state
+    assert "Private Discord gateway invocation" not in rendered_state
+    assert "X-Signature-Ed25519" not in rendered_state
+
+
+def test_discord_multi_management_and_lifecycle_journey(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    discord_provider_fake_url: str,
+) -> None:
+    """Exercise provider-neutral Multi management on one active Discord App."""
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/configure",
+        json={"application_id": _DISCORD_MULTI_APPLICATION_ID},
+        timeout=5,
+    ).raise_for_status()
+    owner_token, _, handle, agent_ids = _create_workspace_agents(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        agent_count=2,
+        runtime_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {owner_token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_multi_discord_connection(
+        handle=handle,
+        discord_connection_setup_request=DiscordConnectionSetupRequest(
+            app_id=_DISCORD_MULTI_APPLICATION_ID,
+            configuration=DiscordConnectionConfiguration(
+                target_guild_id=_DISCORD_GUILD_ID
+            ),
+            credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
+        ),
+        _headers=headers,
+    )
+    connection = setup.connection
+    assert connection.app_mode is ExternalChannelAppMode.MULTI
+    assert connection.status is ExternalChannelConnectionStatus.ACTIVE
+    assert connection.active_agent_count == 0
+    assert connection.credentials_configured is True
+    assert _DISCORD_BOT_TOKEN not in setup.model_dump_json(by_alias=True)
+
+    first_route = external_api.external_channel_v1_add_multi_slack_route(
+        connection_id=connection.id,
+        handle=handle,
+        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
+        _headers=headers,
+    )
+    duplicate_route = external_api.external_channel_v1_add_multi_slack_route(
+        connection_id=connection.id,
+        handle=handle,
+        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
+        _headers=headers,
+    )
+    second_route = external_api.external_channel_v1_add_multi_slack_route(
+        connection_id=connection.id,
+        handle=handle,
+        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[1]),
+        _headers=headers,
+    )
+    assert duplicate_route.id == first_route.id
+    assert second_route.agent_id == agent_ids[1]
+
+    current = external_api.external_channel_v1_get_multi_slack_connection(
+        connection_id=connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    default = external_api.external_channel_v1_replace_multi_slack_channel_default(
+        connection_id=connection.id,
+        provider_channel_id=_DISCORD_CHANNEL_ID,
+        handle=handle,
+        multi_channel_default_request=MultiChannelDefaultRequest(
+            expected_generation=current.generation,
+            route_id=first_route.id,
+        ),
+        _headers=headers,
+    )
+    assert default.route_id == first_route.id
+    assert default.status is ExternalChannelChannelDefaultStatus.ACTIVE
+
+    impact = external_api.external_channel_v1_get_multi_slack_route_impact(
+        connection_id=connection.id,
+        route_id=first_route.id,
+        handle=handle,
+        _headers=headers,
+    )
+    removed = external_api.external_channel_v1_remove_multi_slack_route(
+        connection_id=connection.id,
+        route_id=first_route.id,
+        handle=handle,
+        generation_fence_request=GenerationFenceRequest(
+            expected_generation=impact.generation
+        ),
+        _headers=headers,
+    )
+    assert removed.active_default_count == 1
+    defaults = external_api.external_channel_v1_list_multi_slack_channel_defaults(
+        connection_id=connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert defaults.items[0].status is ExternalChannelChannelDefaultStatus.INVALIDATED
+
+    connection_impact = (
+        external_api.external_channel_v1_get_multi_slack_connection_impact(
+            connection_id=connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+    )
+    disconnected = external_api.external_channel_v1_disconnect_multi_slack_connection(
+        connection_id=connection.id,
+        handle=handle,
+        generation_fence_request=GenerationFenceRequest(
+            expected_generation=connection_impact.generation
+        ),
+        _headers=headers,
+    )
+    assert disconnected.disconnected_route_count == 1
+    historical = external_api.external_channel_v1_get_multi_slack_connection(
+        connection_id=connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert historical.status is ExternalChannelConnectionStatus.DISCONNECTED
+    assert historical.credentials_configured is False
+    assert _DISCORD_BOT_TOKEN not in str(
+        _discord_provider_state(discord_provider_fake_url)
+    )

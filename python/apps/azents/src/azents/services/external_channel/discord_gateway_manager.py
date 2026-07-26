@@ -32,6 +32,10 @@ from azents.services.external_channel.connection import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import DiscordConnectionCredentials
+from azents.services.external_channel.discord_endpoint import (
+    discord_api_base_url,
+    discord_gateway_url_allowed,
+)
 from azents.services.external_channel.discord_events import (
     project_discord_gateway_dispatch,
 )
@@ -44,7 +48,6 @@ from azents.services.external_channel.discord_gateway import (
 )
 
 logger = logging.getLogger(__name__)
-_DISCORD_GATEWAY_API_URL = "https://discord.com/api/v10/gateway/bot"
 _POLL_INTERVAL = datetime.timedelta(seconds=5)
 _LEASE_DURATION = datetime.timedelta(seconds=45)
 _RENEW_INTERVAL = datetime.timedelta(seconds=15)
@@ -64,6 +67,11 @@ async def get_discord_gateway_http_client() -> AsyncIterator[httpx.AsyncClient]:
     """Provide the HTTP client used only for Discord Gateway endpoint discovery."""
     async with httpx.AsyncClient(timeout=20.0) as client:
         yield client
+
+
+def get_discord_gateway_client() -> DiscordGatewayClient:
+    """Provide one Discord Gateway protocol client."""
+    return DiscordGatewayClient()
 
 
 @dataclasses.dataclass
@@ -89,9 +97,10 @@ class DiscordGatewayManagerService:
         Depends(get_discord_gateway_http_client),
     ]
     manager_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
-    gateway_client: DiscordGatewayClient = dataclasses.field(
-        default_factory=DiscordGatewayClient
-    )
+    gateway_client: Annotated[
+        DiscordGatewayClient,
+        Depends(get_discord_gateway_client),
+    ] = dataclasses.field(default_factory=DiscordGatewayClient)
     poll_interval: datetime.timedelta = _POLL_INTERVAL
     lease_duration: datetime.timedelta = _LEASE_DURATION
     renew_interval: datetime.timedelta = _RENEW_INTERVAL
@@ -452,7 +461,7 @@ class DiscordGatewayManagerService:
 
     async def _discover_gateway_url(self, bot_token: str) -> str:
         response = await self.http_client.get(
-            _DISCORD_GATEWAY_API_URL,
+            f"{discord_api_base_url()}/gateway/bot",
             headers={"Authorization": f"Bot {bot_token}"},
         )
         if response.status_code in {401, 403}:
@@ -468,7 +477,11 @@ class DiscordGatewayManagerService:
         if not isinstance(payload, dict):
             raise DiscordGatewayError("Discord Gateway discovery returned an object.")
         endpoint_url = payload.get("url")
-        if not isinstance(endpoint_url, str) or not endpoint_url.startswith("wss://"):
+        if not isinstance(endpoint_url, str):
+            raise DiscordGatewayError(
+                "Discord Gateway discovery returned an invalid endpoint."
+            )
+        if not discord_gateway_url_allowed(endpoint_url):
             raise DiscordGatewayError(
                 "Discord Gateway discovery returned an invalid endpoint."
             )
@@ -516,7 +529,7 @@ def _decode_checkpoint(
         not isinstance(session_id, str)
         or not session_id
         or not isinstance(resume_gateway_url, str)
-        or not resume_gateway_url.startswith("wss://")
+        or not discord_gateway_url_allowed(resume_gateway_url)
         or not isinstance(sequence, int)
         or isinstance(sequence, bool)
         or sequence < 0

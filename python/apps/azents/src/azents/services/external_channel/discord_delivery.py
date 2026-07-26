@@ -9,7 +9,8 @@ from typing import Literal
 
 import httpx
 
-_DISCORD_API_BASE_URL = "https://discord.com/api/v10"
+from azents.services.external_channel.discord_endpoint import discord_api_base_url
+
 _DISCORD_NONCE_MAX_LENGTH = 25
 DISCORD_DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024
 DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES = 25 * 1024 * 1024
@@ -184,7 +185,7 @@ class DiscordDeliveryClient:
         try:
             response = await self.http_client.request(
                 method,
-                f"{_DISCORD_API_BASE_URL}{path}",
+                f"{discord_api_base_url()}{path}",
                 headers={
                     "Authorization": f"Bot {bot_token}",
                     **(content_headers or {}),
