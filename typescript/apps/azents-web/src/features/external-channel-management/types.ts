@@ -29,6 +29,22 @@ export type ConnectionDialogState =
     }
   | null;
 
+export type DiscordConnectionDialogState =
+  | {
+      type: "SETUP";
+      appId: string;
+      targetGuildId: string;
+      botToken: string;
+    }
+  | {
+      type: "EDIT";
+      connectionId: string;
+      appId: string;
+      targetGuildId: string;
+      botToken: string;
+    }
+  | null;
+
 export type ExternalChannelManagementState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }

@@ -8,6 +8,7 @@ import {
 } from "../invalidation";
 import type {
   ConnectionDialogState,
+  DiscordConnectionDialogState,
   ExternalChannelManagementState,
   ManifestGuidanceState,
   SlackCredentialDraft,
@@ -31,15 +32,22 @@ export interface ExternalChannelSettingsContainerOutput {
   state: ExternalChannelManagementState;
   manifestState: ManifestGuidanceState;
   dialogState: ConnectionDialogState;
+  discordDialogState: DiscordConnectionDialogState;
   actionError: string | null;
   actionTarget: string | null;
   actionsBusy: boolean;
   canManageWorkspaceMultiApps: boolean;
   onOpenSetup: () => void;
+  onOpenDiscordSetup: () => void;
   onOpenEdit: (connection: ManagedConnection) => void;
   onCloseDialog: () => void;
   onDialogChange: (state: Exclude<ConnectionDialogState, null>) => void;
   onSubmitDialog: () => void;
+  onCloseDiscordDialog: () => void;
+  onDiscordDialogChange: (
+    state: Exclude<DiscordConnectionDialogState, null>,
+  ) => void;
+  onSubmitDiscordDialog: () => void;
   onValidate: (connection: ManagedConnection) => void;
   onDisconnect: (connection: ManagedConnection) => void;
   onRevokeGrant: (grant: ManagedGrant) => void;
@@ -64,6 +72,8 @@ export function useExternalChannelSettingsContainer({
   const [manifestTransport, setManifestTransport] =
     useState<ExternalChannelTransport>("http");
   const [dialogState, setDialogState] = useState<ConnectionDialogState>(null);
+  const [discordDialogState, setDiscordDialogState] =
+    useState<DiscordConnectionDialogState>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionTarget, setActionTarget] = useState<string | null>(null);
   const actionLock = useRef(false);
@@ -132,6 +142,18 @@ export function useExternalChannelSettingsContainer({
     },
     onError: (error) => failAction(error),
   });
+  const setupDiscordMutation =
+    trpc.externalChannel.setupDiscordConnection.useMutation({
+      onSuccess: async () => {
+        setDiscordDialogState(null);
+        try {
+          await invalidate("setup");
+        } finally {
+          clearAction();
+        }
+      },
+      onError: (error) => failAction(error),
+    });
   const validateMutation = trpc.externalChannel.validateConnection.useMutation({
     onSuccess: async () => {
       try {
@@ -155,6 +177,18 @@ export function useExternalChannelSettingsContainer({
       onError: (error) => failAction(error),
     },
   );
+  const updateDiscordMutation =
+    trpc.externalChannel.updateDiscordConnection.useMutation({
+      onSuccess: async () => {
+        setDiscordDialogState(null);
+        try {
+          await invalidate("update");
+        } finally {
+          clearAction();
+        }
+      },
+      onError: (error) => failAction(error),
+    });
   const disconnectMutation =
     trpc.externalChannel.disconnectConnection.useMutation({
       onSuccess: async () => {
@@ -217,6 +251,7 @@ export function useExternalChannelSettingsContainer({
     state,
     manifestState,
     dialogState,
+    discordDialogState,
     actionError,
     actionTarget,
     actionsBusy: actionTarget !== null,
@@ -236,11 +271,36 @@ export function useExternalChannelSettingsContainer({
         credentials: { ...EMPTY_CREDENTIALS },
       });
     },
+    onOpenDiscordSetup: () => {
+      if (actionLock.current) {
+        return;
+      }
+      setActionError(null);
+      setDiscordDialogState({
+        type: "SETUP",
+        appId: "",
+        targetGuildId: "",
+        botToken: "",
+      });
+    },
     onOpenEdit: (connection) => {
       if (actionLock.current) {
         return;
       }
       setActionError(null);
+      if (connection.provider === "discord") {
+        setDiscordDialogState({
+          type: "EDIT",
+          connectionId: connection.id,
+          appId: connection.provider_app_id ?? "",
+          targetGuildId:
+            typeof connection.provider_config?.target_guild_id === "string"
+              ? connection.provider_config.target_guild_id
+              : "",
+          botToken: "",
+        });
+        return;
+      }
       setManifestTransport(connection.transport);
       setDialogState({
         type: "EDIT",
@@ -289,6 +349,36 @@ export function useExternalChannelSettingsContainer({
         connectionId: dialogState.connectionId,
         appId: dialogState.appId,
         transport: dialogState.transport,
+        credentials,
+      });
+    },
+    onCloseDiscordDialog: () => {
+      setDiscordDialogState(null);
+      setActionError(null);
+    },
+    onDiscordDialogChange: (nextState) => {
+      setDiscordDialogState(nextState);
+    },
+    onSubmitDiscordDialog: () => {
+      if (discordDialogState === null || !beginAction("discord-dialog")) {
+        return;
+      }
+      const credentials = {
+        botToken: discordDialogState.botToken,
+        targetGuildId: discordDialogState.targetGuildId,
+      };
+      if (discordDialogState.type === "SETUP") {
+        setupDiscordMutation.mutate({
+          ...queryInput,
+          appId: discordDialogState.appId,
+          credentials,
+        });
+        return;
+      }
+      updateDiscordMutation.mutate({
+        ...queryInput,
+        connectionId: discordDialogState.connectionId,
+        appId: discordDialogState.appId,
         credentials,
       });
     },

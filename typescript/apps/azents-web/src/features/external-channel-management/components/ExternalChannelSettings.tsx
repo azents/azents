@@ -37,7 +37,11 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import type { ExternalChannelSettingsContainerOutput } from "../containers/useExternalChannelSettingsContainer";
-import type { ConnectionDialogState, ManifestGuidanceState } from "../types";
+import type {
+  ConnectionDialogState,
+  DiscordConnectionDialogState,
+  ManifestGuidanceState,
+} from "../types";
 import type {
   ExternalChannelConnectionStatus,
   ManagedBlock,
@@ -105,7 +109,9 @@ function ConnectionRow({
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <Box style={{ minWidth: 0 }}>
             <Group gap="xs">
-              <Text fw={700}>{t("slack")}</Text>
+              <Text fw={700}>
+                {connection.provider === "discord" ? t("discord") : t("slack")}
+              </Text>
               <Badge color={statusColor(connection.status)} variant="light">
                 {t(`status.${connection.status}`)}
               </Badge>
@@ -640,20 +646,104 @@ function ConnectionDialog({
   );
 }
 
+function DiscordConnectionDialog({
+  state,
+  actionError,
+  saving,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  state: DiscordConnectionDialogState;
+  actionError: string | null;
+  saving: boolean;
+  onChange: (state: Exclude<DiscordConnectionDialogState, null>) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}): React.ReactElement {
+  const t = useTranslations("workspace.agents.externalChannels");
+  const disabled =
+    state === null ||
+    state.appId.trim() === "" ||
+    state.targetGuildId.trim() === "" ||
+    state.botToken.trim() === "";
+
+  return (
+    <Modal
+      opened={state !== null}
+      onClose={() => {
+        if (!saving) {
+          onClose();
+        }
+      }}
+      title={
+        state?.type === "EDIT" ? t("discordEditTitle") : t("discordSetupTitle")
+      }
+      closeOnClickOutside={!saving}
+      closeOnEscape={!saving}
+    >
+      {state && (
+        <Stack gap="md">
+          <Alert color="blue">{t("discordGuide")}</Alert>
+          <TextInput
+            label={t("discordAppId")}
+            value={state.appId}
+            disabled={saving}
+            onChange={(event) =>
+              onChange({ ...state, appId: event.currentTarget.value })
+            }
+          />
+          <TextInput
+            label={t("discordGuildId")}
+            value={state.targetGuildId}
+            disabled={saving}
+            onChange={(event) =>
+              onChange({ ...state, targetGuildId: event.currentTarget.value })
+            }
+          />
+          <PasswordInput
+            label={t("discordBotToken")}
+            value={state.botToken}
+            disabled={saving}
+            onChange={(event) =>
+              onChange({ ...state, botToken: event.currentTarget.value })
+            }
+          />
+          <Alert color="blue">{t("credentialSafety")}</Alert>
+          {actionError && <Alert color="red">{actionError}</Alert>}
+          <Group justify="flex-end">
+            <Button variant="default" disabled={saving} onClick={onClose}>
+              {t("cancel")}
+            </Button>
+            <Button loading={saving} disabled={disabled} onClick={onSubmit}>
+              {state.type === "SETUP" ? t("connect") : t("saveChanges")}
+            </Button>
+          </Group>
+        </Stack>
+      )}
+    </Modal>
+  );
+}
+
 export function ExternalChannelSettings({
   handle,
   state,
   manifestState,
   dialogState,
+  discordDialogState,
   actionError,
   actionTarget,
   actionsBusy,
   canManageWorkspaceMultiApps,
   onOpenSetup,
+  onOpenDiscordSetup,
   onOpenEdit,
   onCloseDialog,
   onDialogChange,
   onSubmitDialog,
+  onCloseDiscordDialog,
+  onDiscordDialogChange,
+  onSubmitDiscordDialog,
   onValidate,
   onDisconnect,
   onRevokeGrant,
@@ -695,13 +785,22 @@ export function ExternalChannelSettings({
               {t("description")}
             </Text>
           </Stack>
-          <Button
-            leftSection={<IconPlugConnected size={rem(16)} />}
-            disabled={actionsBusy}
-            onClick={onOpenSetup}
-          >
-            {t("addConnection")}
-          </Button>
+          <Group gap="xs">
+            <Button
+              leftSection={<IconPlugConnected size={rem(16)} />}
+              disabled={actionsBusy}
+              onClick={onOpenSetup}
+            >
+              {t("addConnection")}
+            </Button>
+            <Button
+              variant="light"
+              disabled={actionsBusy}
+              onClick={onOpenDiscordSetup}
+            >
+              {t("addDiscordConnection")}
+            </Button>
+          </Group>
         </Group>
 
         {actionError && dialogState === null && (
@@ -727,6 +826,9 @@ export function ExternalChannelSettings({
                     </Text>
                     <Button variant="light" onClick={onOpenSetup}>
                       {t("addConnection")}
+                    </Button>
+                    <Button variant="light" onClick={onOpenDiscordSetup}>
+                      {t("addDiscordConnection")}
                     </Button>
                   </Stack>
                 </Paper>
@@ -858,6 +960,14 @@ export function ExternalChannelSettings({
         onChange={onDialogChange}
         onClose={onCloseDialog}
         onSubmit={onSubmitDialog}
+      />
+      <DiscordConnectionDialog
+        state={discordDialogState}
+        actionError={actionError}
+        saving={actionTarget === "discord-dialog"}
+        onChange={onDiscordDialogChange}
+        onClose={onCloseDiscordDialog}
+        onSubmit={onSubmitDiscordDialog}
       />
     </Box>
   );
