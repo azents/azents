@@ -570,8 +570,8 @@ async def test_cancellation_propagates_after_coordinator_cancellation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancellation_retries_each_new_fenced_revision_until_confirmed() -> None:
-    """Caller cancellation survives consecutive revision fences."""
+async def test_cancellation_retries_fenced_revisions_past_eight() -> None:
+    """Caller cancellation survives arbitrary pre-deadline revision fences."""
     source = Source(
         ServerToRuntimeSourceMetadata(
             "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
@@ -581,11 +581,13 @@ async def test_cancellation_retries_each_new_fenced_revision_until_confirmed() -
     coordinator = Coordinator(
         [
             _status(4, phase=CoordinatorTransferPhase.READY),
-            _status(5, phase=CoordinatorTransferPhase.READY),
-            _status(6, phase=CoordinatorTransferPhase.READY),
+            *[
+                _status(revision, phase=CoordinatorTransferPhase.READY)
+                for revision in range(5, 14)
+            ],
         ]
     )
-    coordinator.cancellation_rejections = 2
+    coordinator.cancellation_rejections = 9
     service = ServerToRuntimeTransferService(
         coordinator=coordinator,
         clock=lambda: _NOW,
@@ -604,7 +606,7 @@ async def test_cancellation_retries_each_new_fenced_revision_until_confirmed() -
         request.expected_revision
         for request in cancellations
         if isinstance(request, CoordinatorCancelTransferRequest)
-    ] == [4, 5, 6]
+    ] == list(range(4, 14))
 
 
 @pytest.mark.asyncio

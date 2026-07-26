@@ -45,9 +45,6 @@ class ServerToRuntimeTransferError(RuntimeError):
         self.failure = failure
 
 
-_CANCELLATION_RETRY_LIMIT = 8
-
-
 @dataclass(frozen=True)
 class ServerToRuntimeSourceMetadata:
     """Authorized source metadata that never contains bytes or storage authority."""
@@ -392,7 +389,7 @@ class ServerToRuntimeTransferService:
         if expected_revision is None:
             return
         revision = expected_revision
-        for _ in range(_CANCELLATION_RETRY_LIMIT):
+        while self.clock() < deadline_at:
             try:
                 status = await self.coordinator.cancel_transfer(
                     CoordinatorCancelTransferRequest(
@@ -411,8 +408,6 @@ class ServerToRuntimeTransferService:
             ):
                 return
             revision = status.revision
-            if self.clock() >= deadline_at:
-                break
             await asyncio.sleep(0)
         raise ServerToRuntimeTransferError(
             "Runtime transfer cancellation could not be confirmed"
