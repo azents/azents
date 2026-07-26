@@ -282,6 +282,43 @@ class TestEventExecutionRepositories:
         await rdb_session.refresh(stored_session)
 
         assert stored_session.last_user_input_at == appended.created_at
+        assert stored_session.last_activity_at == appended.created_at
+
+    async def test_action_message_updates_last_activity_at(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Treat durable tool-action activity as recent Session activity."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            handle="action-last-activity-ws",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+
+        appended = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.ACTION_MESSAGE,
+                payload=ActionMessagePayload(
+                    sender_user_id=None,
+                    action=GoalAction(),
+                    message="Create a session goal.",
+                ).model_dump(mode="json"),
+            ),
+        )
+        stored_session = await rdb_session.get(RDBAgentSession, event_session.id)
+        assert stored_session is not None
+        await rdb_session.refresh(stored_session)
+
+        assert stored_session.last_activity_at == appended.created_at
 
     async def test_turn_marker_default_effort_round_trip(
         self,

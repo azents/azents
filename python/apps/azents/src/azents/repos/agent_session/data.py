@@ -64,6 +64,12 @@ class AgentSession(BaseModel):
     last_user_input_at: datetime.datetime = Field(
         description="Latest user input timestamp or creation-time baseline",
     )
+    last_activity_at: datetime.datetime = Field(
+        description="Latest user, Agent, or tool activity timestamp",
+    )
+    pinned: bool = Field(
+        description="Whether this root Session is excluded from automatic archive",
+    )
     end_reason: AgentSessionEndReason | None = Field(
         default=None, description="End reason"
     )

@@ -56,6 +56,19 @@ _TERMINAL_RUN_STATUSES = frozenset(
         AgentRunStatus.CANCELLED,
     }
 )
+_ACTIVITY_EVENT_KINDS = frozenset(
+    {
+        EventKind.USER_MESSAGE,
+        EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        EventKind.ACTION_MESSAGE,
+        EventKind.AGENT_MESSAGE,
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.CLIENT_TOOL_CALL,
+        EventKind.CLIENT_TOOL_RESULT,
+        EventKind.PROVIDER_TOOL_CALL,
+        EventKind.ACTION_EXECUTION_RESULT,
+    }
+)
 
 
 def _validate_payload(
@@ -128,6 +141,7 @@ class EventTranscriptRepository:
         session.add(rdb)
         await session.flush()
         await self._update_session_last_user_input_at(session, rdb)
+        await self._update_session_last_activity_at(session, rdb)
         return self._build(rdb)
 
     async def _append_with_external_id(
@@ -173,6 +187,7 @@ class EventTranscriptRepository:
         if inserted is not None:
             await session.flush()
             await self._update_session_last_user_input_at(session, inserted)
+            await self._update_session_last_activity_at(session, inserted)
             return self._build(inserted)
 
         existing = await self.get_by_external_id(
@@ -199,6 +214,24 @@ class EventTranscriptRepository:
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == event.session_id)
             .values(last_user_input_at=event.created_at)
+        )
+        await session.flush()
+
+    async def _update_session_last_activity_at(
+        self,
+        session: AsyncSession,
+        event: RDBEvent,
+    ) -> None:
+        """Advance the Session activity projection for qualifying durable events."""
+        if event.kind not in _ACTIVITY_EVENT_KINDS:
+            return
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == event.session_id,
+                RDBAgentSession.last_activity_at < event.created_at,
+            )
+            .values(last_activity_at=event.created_at)
         )
         await session.flush()
 

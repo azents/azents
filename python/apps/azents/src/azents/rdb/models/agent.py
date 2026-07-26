@@ -157,6 +157,12 @@ class RDBAgent(RDBModel):
     max_turns: Mapped[int | None] = mapped_column(
         sa.Integer, nullable=True, default=None
     )
+    auto_archive_ttl_days: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=30,
+        server_default="30",
+    )
     subagent_settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
@@ -199,6 +205,10 @@ class RDBAgent(RDBModel):
         "max_turns IS NULL OR max_turns > 0",
         name="ck_agents_max_turns_positive",
     )
+    CK_AUTO_ARCHIVE_TTL_DAYS_POSITIVE = sa.CheckConstraint(
+        "auto_archive_ttl_days > 0",
+        name="ck_agents_auto_archive_ttl_days_positive",
+    )
     CK_SELECTABLE_MODEL_OPTIONS_SHAPE = sa.CheckConstraint(
         "jsonb_typeof(selectable_model_options) = 'array' "
         "AND jsonb_array_length(selectable_model_options) BETWEEN 1 AND 10",
@@ -220,6 +230,7 @@ class RDBAgent(RDBModel):
         IX_RUNTIME_PROVIDER_ID,
         CK_MODEL_NOT_NULL,
         CK_MAX_TURNS_POSITIVE,
+        CK_AUTO_ARCHIVE_TTL_DAYS_POSITIVE,
         CK_SELECTABLE_MODEL_OPTIONS_SHAPE,
         CK_SUBAGENT_SETTINGS_SHAPE,
     )

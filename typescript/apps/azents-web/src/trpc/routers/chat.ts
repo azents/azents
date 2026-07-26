@@ -44,6 +44,7 @@ import {
   chatV1RetryFailedRun,
   chatV1StatAgentWorkspacePath,
   chatV1StopSessionRun,
+  chatV1UpdateAgentSessionPin,
   chatV1UpdateAgentSessionTitle,
   chatV1UpdateSessionGoal,
   chatV1UpdateSessionGoalStatus,
@@ -296,6 +297,35 @@ export const chatRouter = router({
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  updateAgentSessionPin: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        pinned: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1UpdateAgentSessionPin({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          body: { pinned: input.pinned },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
         });
       }
     }),

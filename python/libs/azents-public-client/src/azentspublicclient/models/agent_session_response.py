@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind
 from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
@@ -41,6 +41,7 @@ class AgentSessionResponse(BaseModel):
     status: AgentSessionStatus = Field(description="Session status")
     primary_kind: Optional[AgentSessionPrimaryKind] = None
     run_state: AgentSessionRunState = Field(description="Session execution state")
+    pinned: StrictBool = Field(description="Whether automatic archive is disabled for this Session")
     unread_terminal_run_id: Optional[StrictStr]
     archived_at: Optional[datetime]
     purge_after: Optional[datetime]
@@ -48,7 +49,7 @@ class AgentSessionResponse(BaseModel):
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "run_state", "unread_terminal_run_id", "archived_at", "purge_after", "archive_retention_days_snapshot", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "run_state", "pinned", "unread_terminal_run_id", "archived_at", "purge_after", "archive_retention_days_snapshot", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -162,6 +163,7 @@ class AgentSessionResponse(BaseModel):
             "status": obj.get("status"),
             "primary_kind": obj.get("primary_kind"),
             "run_state": obj.get("run_state"),
+            "pinned": obj.get("pinned"),
             "unread_terminal_run_id": obj.get("unread_terminal_run_id"),
             "archived_at": obj.get("archived_at"),
             "purge_after": obj.get("purge_after"),

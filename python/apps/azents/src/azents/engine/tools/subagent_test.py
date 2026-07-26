@@ -205,6 +205,8 @@ def _agent_session(
         title_generated_at=None,
         title_generation_event_id=None,
         last_user_input_at=_NOW,
+        last_activity_at=_NOW,
+        pinned=False,
         end_reason=None,
         model_input_head_event_id=None,
         model_input_head_model_order=None,

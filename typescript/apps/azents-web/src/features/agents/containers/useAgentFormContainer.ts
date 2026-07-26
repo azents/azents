@@ -236,6 +236,7 @@ export function useAgentFormContainer(
           memory_enabled: values.memory_enabled,
           tool_search_enabled: values.tool_search_enabled,
           max_turns: values.max_turns ?? null,
+          auto_archive_ttl_days: values.auto_archive_ttl_days,
           subagent_settings: {
             max_subagents: values.subagent_max_subagents,
             max_depth: values.subagent_max_depth,
@@ -257,6 +258,7 @@ export function useAgentFormContainer(
           memory_enabled: values.memory_enabled,
           tool_search_enabled: values.tool_search_enabled,
           max_turns: values.max_turns ?? null,
+          auto_archive_ttl_days: values.auto_archive_ttl_days,
           subagent_settings: {
             max_subagents: values.subagent_max_subagents,
             max_depth: values.subagent_max_depth,

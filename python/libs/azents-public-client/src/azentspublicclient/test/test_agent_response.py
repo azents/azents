@@ -60,6 +60,7 @@ class TestAgentResponse(unittest.TestCase):
                 memory_enabled = True,
                 tool_search_enabled = True,
                 max_turns = 56,
+                auto_archive_ttl_days = 56,
                 subagent_settings = { },
                 avatar = azentspublicclient.models.uploaded_image.UploadedImage(
                     filename = '', 
@@ -105,6 +106,7 @@ class TestAgentResponse(unittest.TestCase):
                 memory_enabled = True,
                 tool_search_enabled = True,
                 max_turns = 56,
+                auto_archive_ttl_days = 56,
                 subagent_settings = { },
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),

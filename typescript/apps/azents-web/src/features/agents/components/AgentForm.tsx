@@ -126,6 +126,7 @@ export function AgentForm({
       memory_enabled: true,
       tool_search_enabled: true,
       max_turns: null,
+      auto_archive_ttl_days: 30,
       subagent_max_subagents: 3,
       subagent_max_depth: 1,
     },
@@ -179,6 +180,7 @@ export function AgentForm({
         memory_enabled: agent.memory_enabled,
         tool_search_enabled: agent.tool_search_enabled,
         max_turns: agent.max_turns ?? null,
+        auto_archive_ttl_days: agent.auto_archive_ttl_days,
         subagent_max_subagents: agent.subagent_settings.max_subagents ?? 3,
         subagent_max_depth: agent.subagent_settings.max_depth ?? 1,
       });
@@ -378,6 +380,25 @@ export function AgentForm({
               autosize
               key={form.key("system_prompt")}
               {...form.getInputProps("system_prompt")}
+            />
+          )}
+
+          {showProfile && (
+            <NumberInput
+              label={t("autoArchiveTtlDaysLabel")}
+              description={t("autoArchiveTtlDaysDescription")}
+              min={1}
+              step={1}
+              allowDecimal={false}
+              allowNegative={false}
+              value={form.values.auto_archive_ttl_days}
+              onChange={(value) => {
+                form.setFieldValue(
+                  "auto_archive_ttl_days",
+                  typeof value === "number" ? value : 1,
+                );
+              }}
+              error={form.errors.auto_archive_ttl_days}
             />
           )}
 

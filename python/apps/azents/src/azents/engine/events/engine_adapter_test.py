@@ -2523,6 +2523,8 @@ def _agent_session() -> AgentSession:
         title_generated_at=None,
         title_generation_event_id=None,
         last_user_input_at=now,
+        last_activity_at=now,
+        pinned=False,
         created_at=now,
         updated_at=now,
         started_at=now,

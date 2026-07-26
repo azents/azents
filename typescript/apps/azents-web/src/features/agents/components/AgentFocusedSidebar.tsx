@@ -43,6 +43,7 @@ import {
   IconLogout,
   IconMoon,
   IconPencil,
+  IconPin,
   IconPlus,
   IconRefresh,
   IconSettings,
@@ -89,10 +90,12 @@ interface AgentFocusedSidebarProps {
   creatingSession?: boolean;
   renamingSessionId?: string | null;
   archivingSessionId?: string | null;
+  pinningSessionId?: string | null;
   restoringSessionId?: string | null;
   onCreateSession?: () => void;
   onRenameSession?: (sessionId: string, title: string | null) => Promise<void>;
   onArchiveSession?: (sessionId: string) => void;
+  onSetSessionPinned?: (sessionId: string, pinned: boolean) => void;
   onRestoreSession?: (sessionId: string) => void;
   onNavigate?: () => void;
 }
@@ -206,10 +209,12 @@ export function AgentFocusedSidebar({
   creatingSession = false,
   renamingSessionId = null,
   archivingSessionId = null,
+  pinningSessionId = null,
   restoringSessionId = null,
   onCreateSession,
   onRenameSession,
   onArchiveSession,
+  onSetSessionPinned,
   onRestoreSession,
   onNavigate,
 }: AgentFocusedSidebarProps): React.ReactElement {
@@ -509,8 +514,10 @@ export function AgentFocusedSidebar({
               const showUnreadIndicator =
                 !running && session.unread_terminal_run_id !== null;
               const archiving = archivingSessionId === session.id;
+              const pinning = pinningSessionId === session.id;
               const showActions =
                 onRenameSession != null ||
+                (!isPrimary && onSetSessionPinned != null) ||
                 (!running && !isPrimary && onArchiveSession != null);
               return (
                 <NavLink
@@ -547,6 +554,15 @@ export function AgentFocusedSidebar({
                           {t("sessions.primaryBadge")}
                         </Badge>
                       )}
+                      {session.pinned && (
+                        <Tooltip label={t("sessions.pinned")}>
+                          <IconPin
+                            size={rem(16)}
+                            aria-label={t("sessions.pinned")}
+                            style={{ flexShrink: 0 }}
+                          />
+                        </Tooltip>
+                      )}
                       {showActions && (
                         <Menu
                           shadow="md"
@@ -561,7 +577,9 @@ export function AgentFocusedSidebar({
                               size="sm"
                               aria-label={t("sessions.actions")}
                               loading={
-                                renamingSessionId === session.id || archiving
+                                renamingSessionId === session.id ||
+                                archiving ||
+                                pinning
                               }
                               onClick={(event) => {
                                 event.preventDefault();
@@ -582,6 +600,24 @@ export function AgentFocusedSidebar({
                                 }}
                               >
                                 {t("sessions.rename")}
+                              </Menu.Item>
+                            )}
+                            {!isPrimary && onSetSessionPinned && (
+                              <Menu.Item
+                                leftSection={<IconPin size={rem(16)} />}
+                                disabled={pinning}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  onSetSessionPinned(
+                                    session.id,
+                                    !session.pinned,
+                                  );
+                                }}
+                              >
+                                {session.pinned
+                                  ? t("sessions.unpin")
+                                  : t("sessions.pin")}
                               </Menu.Item>
                             )}
                             {!running && !isPrimary && onArchiveSession && (

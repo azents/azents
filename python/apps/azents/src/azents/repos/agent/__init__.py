@@ -72,6 +72,7 @@ class AgentRepository:
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,
             max_turns=create.max_turns,
+            auto_archive_ttl_days=create.auto_archive_ttl_days,
             subagent_settings=create.subagent_settings.model_dump(mode="json"),
         )
         session.add(rdb_agent)
@@ -212,6 +213,8 @@ class AgentRepository:
             db_values["tool_search_enabled"] = update["tool_search_enabled"]
         if "max_turns" in update:
             db_values["max_turns"] = update["max_turns"]
+        if "auto_archive_ttl_days" in update:
+            db_values["auto_archive_ttl_days"] = update["auto_archive_ttl_days"]
         if "subagent_settings" in update:
             db_values["subagent_settings"] = update["subagent_settings"].model_dump(
                 mode="json"
@@ -286,6 +289,7 @@ class AgentRepository:
             memory_enabled=rdb.memory_enabled,
             tool_search_enabled=rdb.tool_search_enabled,
             max_turns=rdb.max_turns,
+            auto_archive_ttl_days=rdb.auto_archive_ttl_days,
             subagent_settings=subagent_settings,
             avatar=avatar,
             created_at=rdb.created_at,

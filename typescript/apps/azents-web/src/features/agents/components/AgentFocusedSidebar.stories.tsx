@@ -30,6 +30,7 @@ const agent: AgentResponse = {
   memory_enabled: true,
   tool_search_enabled: false,
   max_turns: null,
+  auto_archive_ttl_days: 30,
   subagent_settings: { max_subagents: 3, max_depth: 1 },
   created_at: "2026-06-25T08:00:00Z",
   updated_at: "2026-06-25T08:00:00Z",
@@ -49,6 +50,7 @@ const sessions: AgentSessionResponse[] = [
     archive_retention_days_snapshot: null,
     primary_kind: "team_primary",
     run_state: "idle",
+    pinned: false,
     unread_terminal_run_id: null,
     created_at: "2026-06-24T08:00:00Z",
     updated_at: "2026-06-26T04:30:00Z",
@@ -66,6 +68,7 @@ const sessions: AgentSessionResponse[] = [
     archive_retention_days_snapshot: null,
     primary_kind: null,
     run_state: "running",
+    pinned: false,
     unread_terminal_run_id: null,
     created_at: "2026-06-25T09:00:00Z",
     updated_at: "2026-06-25T11:45:00Z",
@@ -83,6 +86,7 @@ const sessions: AgentSessionResponse[] = [
     archive_retention_days_snapshot: null,
     primary_kind: null,
     run_state: "idle",
+    pinned: false,
     unread_terminal_run_id: null,
     created_at: "2026-06-25T01:00:00Z",
     updated_at: "2026-06-25T03:10:00Z",
@@ -100,6 +104,7 @@ const archivedSessions: AgentSessionResponse[] = [
     status: "archived",
     primary_kind: null,
     run_state: "idle",
+    pinned: false,
     unread_terminal_run_id: null,
     archived_at: "2026-07-18T04:30:00Z",
     purge_after: "2026-08-17T04:30:00Z",
@@ -117,6 +122,7 @@ const archivedSessions: AgentSessionResponse[] = [
     status: "archived",
     primary_kind: null,
     run_state: "idle",
+    pinned: false,
     unread_terminal_run_id: null,
     archived_at: "2026-07-10T01:00:00Z",
     purge_after: null,
@@ -153,6 +159,7 @@ const meta = {
     onCreateSession: () => {},
     onRenameSession: async () => {},
     onArchiveSession: () => {},
+    onSetSessionPinned: () => {},
     onRestoreSession: () => {},
   },
 } satisfies Meta<typeof AgentFocusedSidebar>;
@@ -181,6 +188,14 @@ export const Unread = {
 export const Running = {
   args: {
     sessions: sessions.filter((session) => session.id === "sess_release"),
+  },
+} satisfies Story;
+
+export const Pinned = {
+  args: {
+    sessions: sessions
+      .filter((session) => session.id === "sess_ci")
+      .map((session) => ({ ...session, pinned: true })),
   },
 } satisfies Story;
 

@@ -194,6 +194,8 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
             title_generated_at=None,
             title_generation_event_id=None,
             last_user_input_at=now,
+            last_activity_at=now,
+            pinned=False,
             started_at=now,
             created_at=now,
             updated_at=now,

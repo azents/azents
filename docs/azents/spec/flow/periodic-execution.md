@@ -11,6 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
+  - python/apps/azents/src/azents/services/chat/__init__.py
   - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/scheduled_task_state/__init__.py
@@ -25,8 +26,8 @@ code_paths:
   - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-07-24
-spec_version: 10
+last_verified_at: 2026-07-26
+spec_version: 11
 ---
 
 # Periodic Execution Flow Spec
@@ -58,9 +59,9 @@ A definition includes:
 The database does not store task definitions or schedule overrides. It stores current runtime state only.
 
 Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
-`archived_session_retention_recalculation`, `archived_session_purge`, `agent_decommission`, and
-`file_lifecycle_cleanup`. `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
-summary and has no external network dependency.
+`archived_session_retention_recalculation`, `archived_session_purge`, `session_auto_archive`,
+`agent_decommission`, and `file_lifecycle_cleanup`. `scheduler_heartbeat` is a no-op heartbeat that
+returns a small execution summary and has no external network dependency.
 
 ## Execution backend
 
@@ -191,6 +192,17 @@ The successful task result and completion log include these lifecycle counters:
 
 The pending snapshot is used only for observability. The actual object-store batch remains bounded at 100 Artifact rows, 100 ExchangeFile rows, and 200 ModelFile rows, with terminal rows selected after the metadata work so existing retry ordering is preserved.
 
+## Session automatic archive task
+
+`session_auto_archive` runs every five minutes with a ten-minute task timeout and bounded
+one-to-thirty-minute scheduler retry. Each pass reads at most 100 oldest active non-primary unpinned
+root Session candidates, then delegates each candidate to the normal Session archive transition. That
+transition locks the full tree and revalidates dynamic Agent TTL eligibility, pin state, latest
+activity across descendants, and running work before archive side effects begin, so a stale candidate
+read cannot archive a newly active or newly pinned tree. The task result reports `scanned`,
+`archived`, and `skipped`; skipped candidates are expected races or no-longer-eligible roots rather
+than batch failure.
+
 ## Archived-session retention recalculation task
 
 `archived_session_retention_recalculation` runs every minute with a two-minute task timeout and
@@ -279,6 +291,8 @@ Model catalog source sync is a later consumer of this scheduler.
 
 - **2026-07-24** — v10. Clarified that lifecycle cleanup treats typed file provenance and nullable
   unresolved ModelFile Run lineage as metadata, never as User or execution authority.
+- **2026-07-26** — v11. Added the bounded five-minute `session_auto_archive` task and its
+  lock-and-recheck eligibility behavior.
 - **2026-07-23** — v9. Made existing Git worktree participant retries database-only so they converge without Runtime availability.
 - **2026-07-19** — v4. Added the durable archived-session retention recalculation and purge tasks, including intervals, leases, bounded batching, stale-job reconciliation, fencing, retry, and cleanup ordering.
 - **2026-07-21** — v5. Isolated ordinary scheduler task lifecycle failures so one task cannot terminate the scheduler process; cancellation remains a scheduler shutdown signal.

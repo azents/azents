@@ -343,6 +343,11 @@ class PrimarySessionArchiveBlocked:
 
 
 @dataclasses.dataclass(frozen=True)
+class PrimarySessionPinBlocked:
+    """Team primary AgentSession pin updates are blocked."""
+
+
+@dataclasses.dataclass(frozen=True)
 class RunningSessionArchiveBlocked:
     """Running AgentSession archive is blocked."""
 
@@ -382,4 +387,10 @@ UpdateSessionTitleError = (
     | SessionAccessDenied
     | SubagentSessionReadOnly
     | InvalidSessionTitle
+)
+SetSessionPinnedError = (
+    SessionNotFound
+    | SessionAccessDenied
+    | SubagentSessionReadOnly
+    | PrimarySessionPinBlocked
 )

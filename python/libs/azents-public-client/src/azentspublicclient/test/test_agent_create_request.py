@@ -53,6 +53,7 @@ class TestAgentCreateRequest(unittest.TestCase):
                 memory_enabled = True,
                 tool_search_enabled = True,
                 max_turns = 56,
+                auto_archive_ttl_days = 56,
                 subagent_settings = { }
             )
         else:

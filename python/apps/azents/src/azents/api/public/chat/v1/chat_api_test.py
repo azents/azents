@@ -33,6 +33,7 @@ from azents.api.public.chat.v1 import (
     list_live_events,
     restore_agent_session,
     stop_session_run,
+    update_agent_session_pin,
     update_agent_session_title,
     update_session_goal_status,
 )
@@ -41,6 +42,7 @@ from azents.api.public.chat.v1 import (
 )
 from azents.api.public.chat.v1.data import (
     AgentSessionCreateRequest,
+    AgentSessionPinUpdateRequest,
     AgentSessionTitleUpdateRequest,
     ChatCommandWriteRequest,
     ChatEditMessageWriteRequest,
@@ -104,6 +106,7 @@ from azents.services.chat.data import (
     InvalidSessionTitle,
     PaginatedEvents,
     PrimarySessionArchiveBlocked,
+    PrimarySessionPinBlocked,
     RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionNotFound,
@@ -366,6 +369,8 @@ class _BufferedInputService:
                     last_user_input_at=datetime.datetime(
                         2026, 6, 5, tzinfo=datetime.UTC
                     ),
+                    last_activity_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                    pinned=False,
                     started_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                     created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                     updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
@@ -483,6 +488,8 @@ class _RestWriteChatService:
                 title_generated_at=None,
                 title_generation_event_id=None,
                 last_user_input_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                last_activity_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                pinned=False,
                 started_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
@@ -529,6 +536,8 @@ class _StopChatService:
                 title_generated_at=None,
                 title_generation_event_id=None,
                 last_user_input_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                last_activity_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                pinned=False,
                 started_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
@@ -864,6 +873,8 @@ class _EventService:
                 title_generated_at=None,
                 title_generation_event_id=None,
                 last_user_input_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                last_activity_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                pinned=False,
                 started_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
@@ -940,6 +951,8 @@ class _AgentSessionRouteChatService:
             title_generated_at=None,
             title_generation_event_id=None,
             last_user_input_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+            last_activity_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+            pinned=False,
             started_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
@@ -960,6 +973,8 @@ class _AgentSessionRouteChatService:
             title_generated_at=None,
             title_generation_event_id=None,
             last_user_input_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+            last_activity_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+            pinned=False,
             run_state=AgentSessionRunState.RUNNING,
             started_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
@@ -975,6 +990,7 @@ class _AgentSessionRouteChatService:
             }
         )
         self.title: str | None = None
+        self.pinned: bool | None = None
         self.result: Result[AgentSession, SessionNotFound] = Success(
             self.primary_session
         )
@@ -989,6 +1005,10 @@ class _AgentSessionRouteChatService:
                 cleanup_requested=False,
             )
         )
+        self.pin_result: Result[
+            AgentSession,
+            SessionNotFound | PrimarySessionPinBlocked,
+        ] = Success(self.secondary_session)
 
     async def get_team_primary_session(
         self,
@@ -1151,6 +1171,26 @@ class _AgentSessionRouteChatService:
             return Failure(InvalidSessionTitle(reason="Invalid title."))
         self.primary_session = self.primary_session.model_copy(update={"title": title})
         return Success(self.primary_session)
+
+    async def set_session_pinned(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        pinned: bool,
+    ) -> Result[AgentSession, SessionNotFound | PrimarySessionPinBlocked]:
+        """Return updated automatic-archive protection state."""
+        del user_id
+        self.agent_id = agent_id
+        self.session_id = session_id
+        self.pinned = pinned
+        if isinstance(self.pin_result, Failure):
+            return self.pin_result
+        self.secondary_session = self.secondary_session.model_copy(
+            update={"pinned": pinned}
+        )
+        return Success(self.secondary_session)
 
 
 class _RouteWorktreeCleanupService:
@@ -1331,6 +1371,44 @@ class TestAgentSessionRoutes:
         assert response.title == "Design review"
         assert chat_service.session_id == "1123456789abcdef0123456789abcdef"
         assert chat_service.title == "Design review"
+
+    async def test_update_agent_session_pin_returns_updated_session(self) -> None:
+        """Pin route returns the updated automatic-archive protection state."""
+        chat_service = _AgentSessionRouteChatService()
+
+        response = await update_agent_session_pin(
+            agent_id="agent-1",
+            session_id="2123456789abcdef0123456789abcdef",
+            request=AgentSessionPinUpdateRequest(pinned=True),
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+        )
+
+        assert response.pinned is True
+        assert chat_service.agent_id == "agent-1"
+        assert chat_service.session_id == "2123456789abcdef0123456789abcdef"
+        assert chat_service.pinned is True
+
+    async def test_update_agent_session_pin_rejects_team_primary(self) -> None:
+        """Primary-session pin attempts are exposed as conflicts."""
+        chat_service = _AgentSessionRouteChatService()
+        chat_service.pin_result = Failure(PrimarySessionPinBlocked())
+
+        try:
+            await update_agent_session_pin(
+                agent_id="agent-1",
+                session_id="1123456789abcdef0123456789abcdef",
+                request=AgentSessionPinUpdateRequest(pinned=True),
+                current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            )
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 409
+            assert getattr(exc, "detail", None) == (
+                "Team primary session cannot be pinned."
+            )
+        else:
+            raise AssertionError("Expected HTTPException")
 
     async def test_archive_agent_session_returns_no_content(self) -> None:
         """Archive route returns no content for an allowed non-primary session."""

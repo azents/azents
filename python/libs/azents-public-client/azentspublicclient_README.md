@@ -154,6 +154,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_retry_failed_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
 *ChatV1Api* | [**chat_v1_stop_session_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
+*ChatV1Api* | [**chat_v1_update_agent_session_pin**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_agent_session_pin) | **PATCH** /chat/v1/agents/{agent_id}/sessions/{session_id}/pin | Update Agent Session Pin
 *ChatV1Api* | [**chat_v1_update_agent_session_title**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_agent_session_title) | **PATCH** /chat/v1/sessions/{session_id}/title | Update Agent Session Title
 *ChatV1Api* | [**chat_v1_update_session_goal**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal) | **PATCH** /chat/v1/sessions/{session_id}/goal | Update Session Goal
 *ChatV1Api* | [**chat_v1_update_session_goal_status**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal_status) | **PATCH** /chat/v1/sessions/{session_id}/goal/status | Update Session Goal Status
@@ -298,6 +299,7 @@ Class | Method | HTTP request | Description
  - [AgentRuntimeSummaryResponse](azentspublicclient/docs/AgentRuntimeSummaryResponse.md)
  - [AgentSessionCreateRequest](azentspublicclient/docs/AgentSessionCreateRequest.md)
  - [AgentSessionListResponse](azentspublicclient/docs/AgentSessionListResponse.md)
+ - [AgentSessionPinUpdateRequest](azentspublicclient/docs/AgentSessionPinUpdateRequest.md)
  - [AgentSessionPrimaryKind](azentspublicclient/docs/AgentSessionPrimaryKind.md)
  - [AgentSessionProjectDefaultsResponse](azentspublicclient/docs/AgentSessionProjectDefaultsResponse.md)
  - [AgentSessionProjectDefaultsResponseItemsInner](azentspublicclient/docs/AgentSessionProjectDefaultsResponseItemsInner.md)

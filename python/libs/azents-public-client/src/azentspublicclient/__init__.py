@@ -76,6 +76,7 @@ __all__ = [
     "AgentRuntimeSummaryResponse",
     "AgentSessionCreateRequest",
     "AgentSessionListResponse",
+    "AgentSessionPinUpdateRequest",
     "AgentSessionPrimaryKind",
     "AgentSessionProjectDefaultsResponse",
     "AgentSessionProjectDefaultsResponseItemsInner",
@@ -481,6 +482,7 @@ from azentspublicclient.models.agent_runtime_response import AgentRuntimeRespons
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse as AgentRuntimeSummaryResponse
 from azentspublicclient.models.agent_session_create_request import AgentSessionCreateRequest as AgentSessionCreateRequest
 from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse as AgentSessionListResponse
+from azentspublicclient.models.agent_session_pin_update_request import AgentSessionPinUpdateRequest as AgentSessionPinUpdateRequest
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind as AgentSessionPrimaryKind
 from azentspublicclient.models.agent_session_project_defaults_response import AgentSessionProjectDefaultsResponse as AgentSessionProjectDefaultsResponse
 from azentspublicclient.models.agent_session_project_defaults_response_items_inner import AgentSessionProjectDefaultsResponseItemsInner as AgentSessionProjectDefaultsResponseItemsInner
