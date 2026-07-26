@@ -9,6 +9,9 @@ code_paths:
   - python/apps/azents/src/azents/api/public/external_channel/v1/route.py
   - python/apps/azents/src/azents/services/external_channel/admission.py
   - python/apps/azents/src/azents/services/external_channel/http_admission.py
+  - python/apps/azents/src/azents/services/external_channel/interaction.py
+  - python/apps/azents/src/azents/services/external_channel/selector.py
+  - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
   - python/apps/azents/src/azents/services/external_channel/slack_http.py
   - python/apps/azents/src/azents/services/external_channel/slack_socket.py
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
@@ -25,15 +28,20 @@ code_paths:
   - testenv/azents/e2e/src/tests/azents/public/test_external_channels.py
 api_routes:
   - /external-channel/v1/slack/events
-last_verified_at: 2026-07-24
-spec_version: 8
+last_verified_at: 2026-07-26
+spec_version: 9
 ---
 
 # External Channel Provider Ingress
 
 ## Scope
 
-The Slack adapter accepts only app-member public or private channel traffic. Slack Connect, DMs, group DMs, shortcuts, reactions, slash commands, and unrelated bot auto-triggers are outside the current scope. A tracked conversation is one Slack thread rooted by an eligible App mention and owned by a dedicated route whose Agent lifecycle is active.
+The Slack adapter accepts app-member public or private channel traffic plus the
+supported message-shortcut and selector interaction callbacks. Slack Connect, DMs,
+group DMs, reactions, slash commands, and unrelated bot auto-triggers are outside
+the current scope. A tracked conversation is one Slack thread rooted by an eligible
+App mention or message shortcut and resolved to one available Agent route whose
+Agent lifecycle is active.
 
 ## HTTP Admission
 
@@ -59,12 +67,32 @@ successful HMAC verification.
 
 Duplicate `(connection_id, provider_event_id)` callbacks reuse the admitted event and still receive a successful acknowledgement.
 
+## Interactive Admission and Selection
+
+Signed Slack interaction callbacks use the same fixed endpoint and App/Team candidate
+selection as Events API payloads. JSON events and form-encoded interactions are
+bounded before parsing and authenticated against the selected connection's Signing
+Secret.
+
+Message shortcuts retain the selected source message and metadata-only files in a
+durable conversation admission before acknowledgement. A Multi App mention with no
+valid channel default also creates one pending admission and a selector control. The
+provider trigger ID is carried only in the in-memory handoff needed for the immediate
+modal mutation; it is never persisted, logged, or replayed.
+
+Block actions open a paged/searchable modal from the current available route catalog.
+Private metadata is signed and binds connection, resource, admission, initiating
+principal, original interaction, and page offset. Navigation and submission recheck
+that scope, admission expiry, route availability, Workspace boundary, and callback
+actor before any selection. Duplicate callbacks reuse the durable interaction claim,
+and one admission can select at most once.
+
 ## Socket Mode Admission
 
 A connection-selected Socket worker acquires a fenced lease before opening `apps.connections.open` with the app-level token. The WebSocket client admits Events API envelopes through the same durable admission service and sends the exact envelope acknowledgement only after admission returns. Failed admission remains unacknowledged.
 
 Socket refresh/reconnect reasons are normalized. Invalid authentication moves the
-connection to `reconnect_required` without changing its connection-to-Agent relationship. Socket-only gap
+connection to `reconnect_required` without changing its route catalog. Socket-only gap
 reasons are persisted for operators. Lease owner and expiry fence heartbeat, renew,
 release, gap, and active-state writes. Shutdown and cancellation close the socket and
 release ownership without exposing tokens.
@@ -76,15 +104,18 @@ Production permits only secure Slack endpoints. Test-only HTTP and insecure WebS
 The worker claims admitted events in bounded batches with a claim owner and expiry. Processing is at-least-once and every canonical insert/update is idempotent.
 
 - Provider health failures and token revocation update connection health without
-  changing the configured connection-to-Agent relationship, bindings, or work.
+  changing route catalog state, bindings, or work.
 - Every event-persistence and hydration-page transaction locks its `active` or
-  `degraded` connection while selecting the active Agent route, then locks the
-  active binding before the resource. This common connection→binding→resource
-  order serializes disconnect before or after, never between, route admission and
-  canonical writes.
+  `degraded` connection before route, resource, admission, and binding state. This
+  common order serializes disconnect, route/default mutation, selection, and binding
+  activation rather than allowing them to commit across one another.
 - App uninstall terminalizes provider resources and credentials while preserving the
-  connection-to-Agent relationship for later reconfiguration.
+  route catalog for later reconfiguration.
 - Eligible invocation messages validate channel membership and Slack Connect/DM exclusion before creating a tracked resource.
+- An existing active binding always wins. Otherwise Single uses its sole route,
+  Multi uses one valid channel default, and unresolved Multi traffic waits for
+  explicit selection. Empty, removed, stale, or ambiguous catalogs never fall back
+  to an arbitrary Agent.
 - Unlinked ordinary messages wait briefly for an out-of-order correlated mention, then become ignored rather than creating a resource.
 - Messages authored by the configured Slack App or bot are ignored during ordinary event processing and history hydration, preventing provider output from re-entering Agent context.
 - Canonical principals, messages, revisions, and pending context are stored before access decisions.
@@ -130,6 +161,9 @@ Deterministic E2E uses signed raw callbacks and a fake HTTP/WebSocket provider t
 
 ## Changelog
 
+- **2026-07-26** (spec_version 9) — Added signed shortcut and selector interaction
+  admission, transient trigger handling, durable selection scope, and deterministic
+  binding/default/Single route resolution.
 - **2026-07-24** (spec_version 8) — Added already-granted initial binding root
   creation with Agent automatic Project snapshotting and existing-binding reuse.
 - **2026-07-23** (spec_version 7) — Added bounded Slack file projection shared by HTTP,

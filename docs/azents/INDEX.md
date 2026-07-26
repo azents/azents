@@ -15,9 +15,9 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-24 | 54 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-26 | 55 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-24 | 132 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-24 | 15 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-26 | 16 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-23 | 11 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
@@ -25,7 +25,7 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-23 | 4 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-24 | 74 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-24 | 47 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-26 | 48 |
 
 ## Living Specs — Flow
 
@@ -37,10 +37,10 @@ Design documents are accumulated records and are not listed individually in this
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-22 | 41 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-24 | 6 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-25 | 12 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 9 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-24 | 8 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-26 | 7 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-26 | 13 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-26 | 10 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-26 | 9 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-25 | 30 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -334,7 +334,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Slack Connection Setup and Management Requirements](requirements/slack-260722-connection-management.md) | slack-260722 | 2026-07-22 | - |
 | [Readable Slack Channel Messages Requirements](requirements/slack-260723-readable-channel-messages.md) | slack-260723 | 2026-07-23 | 2026-07-23 |
 | [External Channel Exchange File Publication Requirements](requirements/slack-260725-outbound-exchange-files.md) | slack-260725 | 2026-07-25 | 2026-07-25 |
-| [Multi-Agent Slack App Routing Requirements](requirements/slackapp-260725-multi-agent-routing.md) | slackapp-260725 | 2026-07-25 | - |
+| [Multi-Agent Slack App Routing Requirements](requirements/slackapp-260725-multi-agent-routing.md) | slackapp-260725 | 2026-07-25 | 2026-07-26 |
 | [Slack Channel Control Feedback Requirements](requirements/slackops-260723-channel-control-feedback.md) | slackops-260723 | 2026-07-23 | 2026-07-23 |
 | [Stage 4 (browser/web QA) Historical Requirements Reconstruction](requirements/stage4-260410-stage4-web.md) | stage4-260410 | 2026-04-10 | 2026-04-10 |
 | [Use Standard Responses for ChatGPT OAuth Historical Requirements Reconstruction](requirements/standard-260716-standard-responses-for-chatgpt-oauth.md) | standard-260716 | 2026-07-16 | - |
