@@ -201,12 +201,12 @@ function getInputActionQuery(inputValue: string): string | null {
     return null;
   }
 
-  const commandSegment = inputValue.slice(1);
-  if (/\s/.test(commandSegment)) {
-    return null;
-  }
-
+  const commandSegment = inputValue.slice(1).match(/^\S*/)?.[0] ?? "";
   return commandSegment.toLowerCase();
+}
+
+function getInputActionMessage(inputValue: string): string {
+  return inputValue.slice(1).replace(/^\S*\s*/, "");
 }
 
 interface ComposerDraft {
@@ -1043,11 +1043,12 @@ export const ChatInput = memo(function ChatInput({
       setSelectedAction(definition);
       setInputActionSuggestionsDismissed(false);
       setActiveInputActionIndex(0);
-      setInputValue("");
-      persistDraft("", normalizedAction, inferenceProfile);
+      const message = getInputActionMessage(inputValue);
+      setInputValue(message);
+      persistDraft(message, normalizedAction, inferenceProfile);
       textareaRef.current?.focus();
     },
-    [inferenceProfile, persistDraft],
+    [inferenceProfile, inputValue, persistDraft],
   );
 
   const handleInputFocus = useCallback((): void => {

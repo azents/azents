@@ -373,6 +373,25 @@ export const SelectedActionChip = {
   },
 } satisfies Story;
 
+export const SelectedActionPreservesMessage = {
+  args: {
+    ...baseArgs,
+    initialInputValue: "/co Hello, Azents!",
+    sessionId: "story-session-selected-action-preserves-message",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByRole("textbox");
+    await userEvent.click(input);
+    await expect(
+      canvas.getByRole("option", { name: /compact/i }),
+    ).toBeVisible();
+    await userEvent.click(canvas.getByRole("option", { name: /compact/i }));
+    await expect(canvas.getByText("/compact")).toBeVisible();
+    await expect(input).toHaveValue("Hello, Azents!");
+  },
+} satisfies Story;
+
 export const CleanupActionSelection = {
   args: {
     ...baseArgs,
