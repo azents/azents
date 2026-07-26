@@ -45,6 +45,9 @@ class ServerToRuntimeTransferError(RuntimeError):
         self.failure = failure
 
 
+_CANCELLATION_RETRY_LIMIT = 8
+
+
 @dataclass(frozen=True)
 class ServerToRuntimeSourceMetadata:
     """Authorized source metadata that never contains bytes or storage authority."""
@@ -320,8 +323,6 @@ class ServerToRuntimeTransferService:
             )
             expected_revision = status.revision
             preparation.revision = expected_revision
-            await preparation.clear_cleanup()
-            expected_revision = preparation.revision
             status = await self.coordinator.dispatch_transfer(
                 CoordinatorDispatchTransferRequest(
                     identity=identity,
@@ -340,12 +341,14 @@ class ServerToRuntimeTransferService:
             await self._cancel(
                 identity,
                 preparation.revision if preparation is not None else expected_revision,
+                request.deadline_at,
             )
             raise
         except Exception:
             await self._cancel(
                 identity,
                 preparation.revision if preparation is not None else expected_revision,
+                request.deadline_at,
             )
             raise
 
@@ -384,38 +387,36 @@ class ServerToRuntimeTransferService:
         self,
         identity: CoordinatorTransferIdentity,
         expected_revision: int | None,
+        deadline_at: datetime,
     ) -> None:
         if expected_revision is None:
             return
-        try:
-            status = await self.coordinator.cancel_transfer(
-                CoordinatorCancelTransferRequest(
-                    identity=identity,
-                    expected_revision=expected_revision,
-                    reason=CoordinatorCancellationReason.CALLER,
-                )
-            )
-        except Exception:
-            status = await self.coordinator.get_transfer_status(
-                CoordinatorGetTransferStatusRequest(identity=identity)
-            )
-            if status.phase is CoordinatorTransferPhase.TERMINAL:
-                return
+        revision = expected_revision
+        for _ in range(_CANCELLATION_RETRY_LIMIT):
             try:
-                await self.coordinator.cancel_transfer(
+                status = await self.coordinator.cancel_transfer(
                     CoordinatorCancelTransferRequest(
                         identity=identity,
-                        expected_revision=status.revision,
+                        expected_revision=revision,
                         reason=CoordinatorCancellationReason.CALLER,
                     )
                 )
-            except Exception as exc:
-                raise ServerToRuntimeTransferError(
-                    "Runtime transfer cancellation could not be confirmed"
-                ) from exc
-            return
-        if status.phase is CoordinatorTransferPhase.TERMINAL:
-            return
+            except Exception:
+                status = await self.coordinator.get_transfer_status(
+                    CoordinatorGetTransferStatusRequest(identity=identity)
+                )
+            if (
+                status.phase is CoordinatorTransferPhase.TERMINAL
+                or status.cancellation_requested
+            ):
+                return
+            revision = status.revision
+            if self.clock() >= deadline_at:
+                break
+            await asyncio.sleep(0)
+        raise ServerToRuntimeTransferError(
+            "Runtime transfer cancellation could not be confirmed"
+        )
 
     def _validate_request(self, request: ServerToRuntimeTransferRequest) -> None:
         if not request.destination.startswith("/"):

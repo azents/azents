@@ -409,9 +409,9 @@ async def test_pre_ready_canonical_cleanup_survives_revalidation_or_ready_failur
     assert protected is not None
 
     rejected = await coordinator.mark_ready(
-        admitted,
-        expected_revision=admitted.revision,
-        object_handle=object_handle_for(admitted),
+        protected,
+        expected_revision=protected.revision,
+        object_handle="different-object",
         size=3,
         sha256="a" * 64,
     )
@@ -427,6 +427,43 @@ async def test_pre_ready_canonical_cleanup_survives_revalidation_or_ready_failur
     assert cancelled.phase.value == "terminal"
     assert len(cleanup.records) == 1
     assert cleanup.records[0].preparation_object_handle == object_handle_for(admitted)
+
+
+@pytest.mark.asyncio
+async def test_ready_atomically_consumes_pre_ready_canonical_cleanup() -> None:
+    """READY atomically transfers canonical cleanup responsibility to the object."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=_Cleanup(),
+        clock=lambda: _NOW,
+    )
+    admitted = await coordinator.admit(_admission(), lease_id="lease-1")
+    assert admitted is not None
+    protected = await state.promote_preparation_cleanup(
+        admitted.admission.transfer_id,
+        attempt_id=admitted.admission.attempt_id,
+        runtime_id=admitted.admission.runtime_id,
+        desired_generation=admitted.admission.desired_generation,
+        expected_revision=admitted.revision,
+        preparation_object_handle=object_handle_for(admitted),
+    )
+    assert protected is not None
+
+    ready = await coordinator.mark_ready(
+        protected,
+        expected_revision=protected.revision,
+        object_handle=object_handle_for(protected),
+        size=3,
+        sha256="a" * 64,
+    )
+
+    assert ready is not None
+    assert ready.object is not None
+    assert ready.object.key == object_handle_for(admitted)
+    assert ready.preparation_object_handle is None
+    assert ready.pre_ready_object_handle is None
 
 
 @pytest.mark.asyncio

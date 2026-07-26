@@ -30,6 +30,15 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 )
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
+from azents.runtime.transfer.data import (
+    RuntimeTransferAdmission,
+    RuntimeTransferConfig,
+    RuntimeTransferDirection,
+    RuntimeTransferObject,
+    RuntimeTransferPreparationCleanupState,
+    RuntimeTransferRecord,
+)
+from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 from azents.runtime.transfer.server_to_runtime import (
     PreparedServerToRuntimeObject,
     ServerToRuntimePreparation,
@@ -51,12 +60,15 @@ class Source:
     revalidated: bool = True
     prepare_calls: int = 0
     preparation_revision: int | None = None
+    cleanup_handles: tuple[CoordinatorOpaqueObjectHandle, ...] = ()
 
     async def prepare(
         self, *, preparation: ServerToRuntimePreparation
     ) -> PreparedServerToRuntimeObject:
         self.prepare_calls += 1
         assert preparation.admitted_object_handle == _HANDLE
+        for cleanup_handle in self.cleanup_handles:
+            await preparation.promote_cleanup(preparation_object_handle=cleanup_handle)
         if self.preparation_revision is not None:
             preparation.revision = self.preparation_revision
         return self.prepared
@@ -71,6 +83,7 @@ class Coordinator:
         self.calls: list[tuple[str, object]] = []
         self.admit_request: CoordinatorAdmitTransferRequest | None = None
         self.reject_first_cancellation = False
+        self.cancellation_rejections = 0
 
     async def admit_transfer(
         self, request: CoordinatorAdmitTransferRequest
@@ -107,6 +120,9 @@ class Coordinator:
         self, request: CoordinatorCancelTransferRequest
     ) -> CoordinatorTransferStatus:
         self.calls.append(("cancel", request))
+        if self.cancellation_rejections > 0:
+            self.cancellation_rejections -= 1
+            raise ServerToRuntimeTransferError("Transfer revision is stale")
         if self.reject_first_cancellation:
             self.reject_first_cancellation = False
             raise ServerToRuntimeTransferError("Transfer revision is stale")
@@ -138,16 +154,176 @@ class Coordinator:
         return _status(request.expected_revision + 1)
 
 
+class StrictStateCoordinator:
+    """Exercise service cleanup handoff against the real state transition."""
+
+    def __init__(self) -> None:
+        self.state = InMemoryRuntimeTransferStateStore(
+            config=RuntimeTransferConfig(
+                per_runtime_attempts=8,
+                per_runtime_bytes=100,
+                deployment_attempts=8,
+                deployment_bytes=100,
+                admission_lease=timedelta(minutes=5),
+                consumer_lease=timedelta(minutes=1),
+                stream_lease=timedelta(seconds=30),
+                terminal_ttl=timedelta(minutes=5),
+                list_page_size=10,
+            ),
+            clock=lambda: _NOW,
+        )
+
+    async def admit_transfer(
+        self, request: CoordinatorAdmitTransferRequest
+    ) -> CoordinatorAdmitTransferResult:
+        assert request.overwrite is not None
+        admitted = await self.state.admit(
+            RuntimeTransferAdmission(
+                transfer_id=request.identity.transfer_id,
+                attempt_id=request.identity.attempt_id,
+                direction=RuntimeTransferDirection.DOWNLOAD,
+                runtime_id=request.identity.runtime_id,
+                desired_generation=request.identity.desired_generation,
+                operation_id=request.identity.operation_id,
+                session_id=request.identity.session_id,
+                agent_id=request.identity.agent_id,
+                runtime_path=request.runtime_path,
+                overwrite=request.overwrite,
+                expected_size=request.expected_manifest.size or 0,
+                expected_sha256=request.expected_manifest.sha256,
+                product_maximum_size=request.product_maximum_size or 0,
+                provider_maximum_size=request.provider_maximum_size or 0,
+                deadline_at=request.deadline_at,
+                source_expires_at=request.source_expires_at,
+                resource_class=request.resource_class,
+            ),
+            lease_id=request.lease_id,
+        )
+        assert admitted is not None
+        return CoordinatorAdmitTransferResult(
+            status=_status(admitted.revision, identity=request.identity),
+            admitted_object_handle=_HANDLE,
+        )
+
+    async def mark_transfer_ready(
+        self, request: CoordinatorMarkTransferReadyRequest
+    ) -> CoordinatorTransferStatus:
+        ready = await self.state.mark_ready(
+            request.identity.transfer_id,
+            attempt_id=request.identity.attempt_id,
+            runtime_id=request.identity.runtime_id,
+            desired_generation=request.identity.desired_generation,
+            expected_revision=request.expected_revision,
+            object=RuntimeTransferObject(
+                request.object_handle.value,
+                request.object_manifest.size or 0,
+                request.object_manifest.sha256,
+            ),
+        )
+        assert ready is not None
+        return _status(
+            ready.revision,
+            identity=request.identity,
+            phase=CoordinatorTransferPhase.READY,
+        )
+
+    async def dispatch_transfer(
+        self, request: CoordinatorDispatchTransferRequest
+    ) -> CoordinatorTransferStatus:
+        record = await self._record(request.identity)
+        return _status(
+            record.revision,
+            identity=request.identity,
+            phase=CoordinatorTransferPhase.READY,
+            dispatch_status=CoordinatorDispatchStatus.ENQUEUED,
+        )
+
+    async def get_transfer_status(
+        self, request: CoordinatorGetTransferStatusRequest
+    ) -> CoordinatorTransferStatus:
+        record = await self._record(request.identity)
+        return _status(
+            record.revision,
+            identity=request.identity,
+            phase=CoordinatorTransferPhase.TERMINAL,
+            outcome=CoordinatorTransferOutcome.SUCCEEDED,
+        )
+
+    async def cancel_transfer(
+        self, request: CoordinatorCancelTransferRequest
+    ) -> CoordinatorTransferStatus:
+        return _status(
+            request.expected_revision,
+            identity=request.identity,
+            phase=CoordinatorTransferPhase.TERMINAL,
+            outcome=CoordinatorTransferOutcome.CANCELLED,
+        )
+
+    async def register_preparation_cleanup(
+        self,
+        request: CoordinatorRegisterPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        registered = await self.state.register_preparation_cleanup(
+            request.identity.transfer_id,
+            attempt_id=request.identity.attempt_id,
+            runtime_id=request.identity.runtime_id,
+            desired_generation=request.identity.desired_generation,
+            expected_revision=request.expected_revision,
+            preparation_object_handle=request.preparation_object_handle.value,
+            multipart_cleanup_handle=request.multipart_cleanup_handle.value,
+        )
+        assert registered is not None
+        return _status(registered.revision, identity=request.identity)
+
+    async def promote_preparation_cleanup(
+        self,
+        request: CoordinatorPromotePreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        promoted = await self.state.promote_preparation_cleanup(
+            request.identity.transfer_id,
+            attempt_id=request.identity.attempt_id,
+            runtime_id=request.identity.runtime_id,
+            desired_generation=request.identity.desired_generation,
+            expected_revision=request.expected_revision,
+            preparation_object_handle=request.preparation_object_handle.value,
+        )
+        assert promoted is not None
+        return _status(promoted.revision, identity=request.identity)
+
+    async def clear_preparation_cleanup(
+        self,
+        request: CoordinatorClearPreparationCleanupRequest,
+    ) -> CoordinatorTransferStatus:
+        cleared = await self.state.clear_preparation_cleanup(
+            request.identity.transfer_id,
+            attempt_id=request.identity.attempt_id,
+            expected_revision=request.expected_revision,
+        )
+        assert cleared is not None
+        return _status(cleared.revision, identity=request.identity)
+
+    async def _record(
+        self,
+        identity: CoordinatorTransferIdentity,
+    ) -> RuntimeTransferRecord:
+        record = await self.state.get(identity.transfer_id)
+        assert record is not None
+        assert record.admission.attempt_id == identity.attempt_id
+        return record
+
+
 def _status(
     revision: int,
     *,
+    identity: CoordinatorTransferIdentity | None = None,
     phase: CoordinatorTransferPhase = CoordinatorTransferPhase.PREPARING,
     dispatch_status: CoordinatorDispatchStatus = CoordinatorDispatchStatus.NOT_BOUND,
     outcome: CoordinatorTransferOutcome | None = None,
     failure: CoordinatorTransferFailure | None = None,
 ) -> CoordinatorTransferStatus:
     return CoordinatorTransferStatus(
-        identity=CoordinatorTransferIdentity(
+        identity=identity
+        or CoordinatorTransferIdentity(
             transfer_id="transfer",
             attempt_id="attempt",
             runtime_id="runtime",
@@ -218,7 +394,6 @@ async def test_transfer_admits_before_source_prepare_and_terminal_success() -> N
     assert [name for name, _ in coordinator.calls] == [
         "admit",
         "ready",
-        "clear_cleanup",
         "dispatch",
         "status",
     ]
@@ -292,6 +467,60 @@ async def test_transfer_uses_source_preparation_cleanup_revision_for_ready() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_kind", "cleanup_handles"),
+    [
+        ("managed", (_HANDLE,)),
+        ("vfs", (_HANDLE,)),
+        (
+            "provider",
+            (
+                CoordinatorOpaqueObjectHandle("provider-temporary"),
+                _HANDLE,
+            ),
+        ),
+    ],
+)
+async def test_transfer_service_handoffs_each_source_cleanup_topology_to_ready(
+    source_kind: str,
+    cleanup_handles: tuple[CoordinatorOpaqueObjectHandle, ...],
+) -> None:
+    """Managed, VFS, and provider preparation all satisfy strict READY handoff."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            f"{source_kind}://safe",
+            source_kind,
+            "file",
+            "text/plain",
+            3,
+            "a" * 64,
+            None,
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+        cleanup_handles=cleanup_handles,
+    )
+    coordinator = StrictStateCoordinator()
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(milliseconds=1),
+    )
+
+    await service.transfer(_request(source))
+
+    record = await coordinator.state.get(next(iter(coordinator.state.current_attempts)))
+    assert record is not None
+    assert record.object is not None
+    assert record.object.key == _HANDLE.value
+    assert (
+        record.preparation_cleanup_state
+        is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+    )
+    assert record.preparation_object_handle is None
+    assert record.pre_ready_object_handle is None
+
+
+@pytest.mark.asyncio
 async def test_expired_deadline_rejects_before_admission_or_source_work() -> None:
     source = Source(
         ServerToRuntimeSourceMetadata(
@@ -338,6 +567,44 @@ async def test_cancellation_propagates_after_coordinator_cancellation() -> None:
     cancellation = coordinator.calls[-1][1]
     assert isinstance(cancellation, CoordinatorCancelTransferRequest)
     assert cancellation.expected_revision == 4
+
+
+@pytest.mark.asyncio
+async def test_cancellation_retries_each_new_fenced_revision_until_confirmed() -> None:
+    """Caller cancellation survives consecutive revision fences."""
+    source = Source(
+        ServerToRuntimeSourceMetadata(
+            "exchange://safe", "exchange", "file", "text/plain", 3, "a" * 64, None
+        ),
+        PreparedServerToRuntimeObject(_HANDLE, 3, "a" * 64),
+    )
+    coordinator = Coordinator(
+        [
+            _status(4, phase=CoordinatorTransferPhase.READY),
+            _status(5, phase=CoordinatorTransferPhase.READY),
+            _status(6, phase=CoordinatorTransferPhase.READY),
+        ]
+    )
+    coordinator.cancellation_rejections = 2
+    service = ServerToRuntimeTransferService(
+        coordinator=coordinator,
+        clock=lambda: _NOW,
+        status_poll_interval=timedelta(seconds=10),
+    )
+
+    task = asyncio.create_task(service.transfer(_request(source)))
+    await asyncio.sleep(0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    cancellations = [request for name, request in coordinator.calls if name == "cancel"]
+    assert [
+        request.expected_revision
+        for request in cancellations
+        if isinstance(request, CoordinatorCancelTransferRequest)
+    ] == [4, 5, 6]
 
 
 @pytest.mark.asyncio
