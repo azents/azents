@@ -276,6 +276,8 @@ class RunnerTransferManager:
         stage_name = _temporary_name(intent, "download")
         stage_fd: int | None = None
         stage_exists = False
+        stage_identity: _FileIdentity | None = None
+        published = False
         try:
             stage_fd = os.open(
                 stage_name,
@@ -284,6 +286,7 @@ class RunnerTransferManager:
                 dir_fd=parent_fd,
             )
             stage_exists = True
+            stage_identity = _regular_identity(os.fstat(stage_fd))
             await self._register_orphan(intent.runtime_path, stage_name, stage_fd)
             offset = 0
             digest = hashlib.sha256()
@@ -338,12 +341,8 @@ class RunnerTransferManager:
                         src_dir_fd=parent_fd,
                         dst_dir_fd=parent_fd,
                     )
-                if stage_exists:
-                    with contextlib.suppress(OSError):
-                        os.unlink(stage_name, dir_fd=parent_fd)
-                        stage_exists = False
-                with contextlib.suppress(OSError):
-                    await asyncio.to_thread(os.fsync, parent_fd)
+                published = True
+            self._release_orphan_later(stage_name)
             return RunnerTransferResult(
                 identity=intent.identity,
                 operation_id=intent.operation_id,
@@ -358,10 +357,10 @@ class RunnerTransferManager:
         finally:
             if stage_fd is not None:
                 os.close(stage_fd)
-            if stage_exists:
-                with contextlib.suppress(FileNotFoundError):
-                    os.unlink(stage_name, dir_fd=parent_fd)
-            await self._release_orphan(stage_name)
+            if stage_exists and stage_identity is not None:
+                _unlink_if_owned(parent_fd, stage_name, stage_identity)
+            if not published:
+                self._release_orphan_later(stage_name)
             os.close(parent_fd)
 
     async def _upload(
@@ -376,9 +375,12 @@ class RunnerTransferManager:
         snapshot_name = _temporary_name(intent, "upload")
         source_fd: int | None = None
         snapshot_fd: int | None = None
+        snapshot_identity: _FileIdentity | None = None
         try:
             source_fd = os.open(
-                source_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd
+                source_name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=parent_fd,
             )
             before = _regular_identity(os.fstat(source_fd))
             if before.size != expected_size:
@@ -389,6 +391,7 @@ class RunnerTransferManager:
                 0o600,
                 dir_fd=parent_fd,
             )
+            snapshot_identity = _regular_identity(os.fstat(snapshot_fd))
             await self._register_orphan(intent.runtime_path, snapshot_name, snapshot_fd)
             digest = hashlib.sha256()
             copied = 0
@@ -467,9 +470,9 @@ class RunnerTransferManager:
                 os.close(source_fd)
             if snapshot_fd is not None:
                 os.close(snapshot_fd)
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(snapshot_name, dir_fd=parent_fd)
-            await self._release_orphan(snapshot_name)
+            if snapshot_identity is not None:
+                _unlink_if_owned(parent_fd, snapshot_name, snapshot_identity)
+            self._release_orphan_later(snapshot_name)
             os.close(parent_fd)
 
     async def _emit(self, result: RunnerTransferResult) -> None:
@@ -511,6 +514,18 @@ class RunnerTransferManager:
             _remove_orphan_record,
             self._orphan_root,
             temporary_name,
+        )
+
+    def _release_orphan_later(self, temporary_name: str) -> None:
+        self._active_temporary_names.discard(temporary_name)
+        if self._orphan_root is None:
+            return
+        asyncio.create_task(
+            asyncio.to_thread(
+                _remove_orphan_record,
+                self._orphan_root,
+                temporary_name,
+            )
         )
 
     async def _reclaim_orphans_forever(self) -> None:
@@ -763,6 +778,18 @@ def _write_all(fd: int, data: bytes) -> None:
         view = view[written:]
 
 
+def _unlink_if_owned(parent_fd: int, name: str, identity: _FileIdentity) -> None:
+    try:
+        observed = _regular_identity(
+            os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        )
+    except FileNotFoundError, _TransferFailure:
+        return
+    if observed == identity:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(name, dir_fd=parent_fd)
+
+
 def _local_io_failure(intent: RunnerTransferIntent) -> RunnerTransferFailure:
     if intent.direction is RunnerTransferDirection.DOWNLOAD:
         return RunnerTransferFailure.DESTINATION_FAILED
@@ -834,7 +861,13 @@ def _reclaim_orphan_files(
             parent, temporary_name, device, inode, created_at = record
             if temporary_name in active_names or now < created_at + _ORPHAN_MINIMUM_AGE:
                 continue
-            removed = _remove_owned_orphan(parent, temporary_name, device, inode)
+            removed = _remove_owned_orphan(
+                root,
+                parent,
+                temporary_name,
+                device,
+                inode,
+            )
             if removed:
                 reclaimed += 1
             with contextlib.suppress(FileNotFoundError):
@@ -891,11 +924,14 @@ def _read_orphan_record(
 
 
 def _remove_owned_orphan(
+    root: Path,
     parent: str,
     temporary_name: str,
     device: int,
     inode: int,
 ) -> bool:
+    if not PurePath(parent).is_relative_to(root):
+        return False
     try:
         parent_fd, _name = _open_parent(
             str(PurePath(parent) / "placeholder"),

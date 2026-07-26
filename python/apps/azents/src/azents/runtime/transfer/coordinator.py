@@ -513,14 +513,13 @@ class RuntimeTransferCoordinator:
                 if record.runner_result_confirmed_at is not None:
                     await self._append_upload_success_reply(record)
                     continue
-                if _record_expired(record, self._now()):
-                    await self.expire(record)
-                    continue
                 connection = await self._runner_connection(record)
                 if connection is None:
                     await self.fence_generation(record, missing_connection=True)
                 elif connection.generation != record.accepted_runner_generation:
                     await self.fence_generation(record, missing_connection=False)
+                elif _record_expired(record, self._now()):
+                    await self.expire(record)
             if page.cursor is None:
                 return observed
             cursor = page.cursor
@@ -925,8 +924,6 @@ class RuntimeTransferCoordinator:
                         await self._append_upload_success_reply(record)
                     elif record.upload_response_committed_at is not None:
                         continue
-                    elif _record_expired(record, self._now()):
-                        await self.expire(record)
                     else:
                         await self.fence_generation(
                             record,
