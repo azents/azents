@@ -307,6 +307,7 @@ export const InputActionSuggestions = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("textbox"));
     await expect(
       canvas.getByText(
         "Polish the composer layout and verify the mobile model picker",
@@ -330,6 +331,24 @@ export const InputActionSuggestions = {
     await expect(
       suggestions.getBoundingClientRect().bottom,
     ).toBeLessThanOrEqual(todoPreview.getBoundingClientRect().top);
+  },
+} satisfies Story;
+
+export const InputActionSuggestionsCloseOnBlur = {
+  args: {
+    ...baseArgs,
+    initialInputValue: "/",
+    sessionId: "story-session-suggestions-close-on-blur",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByRole("textbox");
+    await userEvent.click(input);
+    await expect(canvas.getByRole("listbox")).toBeVisible();
+    await userEvent.tab();
+    await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
+    await userEvent.click(input);
+    await expect(canvas.getByRole("listbox")).toBeVisible();
   },
 } satisfies Story;
 
