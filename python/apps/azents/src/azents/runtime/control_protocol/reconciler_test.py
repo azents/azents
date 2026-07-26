@@ -11,15 +11,33 @@ from azents.core.enums import (
     LLMProvider,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimePolicySnapshotApplicationState,
+    RuntimeProviderAvailabilityMode,
     RuntimeProviderConnectionState,
+    RuntimeProviderContractStatus,
+    RuntimeProviderKind,
+    RuntimeProviderLifecycleState,
     RuntimeProviderObservedState,
+    RuntimeProviderRegistrationMethod,
+    RuntimeProviderScope,
+)
+from azents.core.runtime_execution_policy import (
+    canonical_runtime_execution_policy,
+    digest_runtime_execution_policy,
+    standard_runtime_execution_policy,
 )
 from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifier
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.runtime_provider_policy import (
+    RDBRuntimePolicySnapshot,
+    RDBRuntimeProviderContractRevision,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.runtime_provider.data import RuntimeProviderCreate
+from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
@@ -69,6 +87,11 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None
+        await _attach_execution_policy(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=command.desired_generation,
+        )
         await runtime_repository.mark_lifecycle_dispatched(
             session,
             runtime.id,
@@ -160,6 +183,11 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
             RuntimeDesiredState.STOPPED,
         )
         assert command is not None
+        await _attach_execution_policy(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=command.desired_generation,
+        )
         await runtime_repository.mark_lifecycle_dispatched(
             session,
             runtime.id,
@@ -265,6 +293,11 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
             runtime.id,
         )
         assert requested is not None
+        await _attach_execution_policy(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=requested.desired_generation,
+        )
         connected = await runtime_repository.record_provider_connection_state(
             session,
             runtime.id,
@@ -377,3 +410,72 @@ async def _create_agent(
     session.add(agent)
     await session.flush()
     return agent.id
+
+
+async def _attach_execution_policy(
+    session: AsyncSession,
+    *,
+    runtime_id: str,
+    target_desired_generation: int,
+) -> None:
+    provider = await RuntimeProviderRepository().create(
+        session,
+        RuntimeProviderCreate(
+            provider_id="provider-1",
+            scope=RuntimeProviderScope.SYSTEM,
+            workspace_id=None,
+            kind=RuntimeProviderKind.KUBERNETES,
+            display_name="Reconciler Test Provider",
+            registration_method=RuntimeProviderRegistrationMethod.ADMIN,
+            enabled=True,
+            lifecycle_state=RuntimeProviderLifecycleState.ACTIVE,
+            availability_mode=RuntimeProviderAvailabilityMode.PLATFORM_WIDE,
+            capabilities={},
+            config_schema=None,
+            metadata=None,
+        ),
+    )
+    contract = RDBRuntimeProviderContractRevision(
+        provider_id=provider.id,
+        digest="c" * 64,
+        implementation_version="test",
+        protocol_version="agent-runtime-provider.v1",
+        contract={},
+        compatibility={},
+        status=RuntimeProviderContractStatus.ACCEPTED,
+    )
+    session.add(contract)
+    await session.flush()
+
+    policy = standard_runtime_execution_policy()
+    canonical_policy = canonical_runtime_execution_policy(policy)
+    assert isinstance(canonical_policy, dict)
+    snapshot = RDBRuntimePolicySnapshot(
+        runtime_id=runtime_id,
+        provider_id=provider.id,
+        contract_revision_id=contract.id,
+        resolved_config={},
+        source_trace={},
+        digest=digest_runtime_execution_policy(policy),
+        target_desired_generation=target_desired_generation,
+        application_state=RuntimePolicySnapshotApplicationState.PENDING,
+        execution_profile_id=None,
+        execution_platform_version=1,
+        execution_profile_version=1,
+        execution_workspace_version=1,
+        execution_agent_version=1,
+        resolved_execution_policy=canonical_policy,
+        execution_source_trace={},
+        execution_provider_compatibility={},
+        execution_target_digest=digest_runtime_execution_policy(policy),
+    )
+    session.add(snapshot)
+    await session.flush()
+    await session.execute(
+        sa.update(RDBAgentRuntime)
+        .where(RDBAgentRuntime.id == runtime_id)
+        .values(
+            runtime_provider_resource_id=provider.id,
+            runtime_policy_snapshot_id=snapshot.id,
+        )
+    )

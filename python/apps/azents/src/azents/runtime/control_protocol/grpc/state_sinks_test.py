@@ -20,7 +20,12 @@ from azents.core.enums import (
     LLMProvider,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimeProviderAvailabilityMode,
+    RuntimeProviderKind,
+    RuntimeProviderLifecycleState,
     RuntimeProviderObservedState,
+    RuntimeProviderRegistrationMethod,
+    RuntimeProviderScope,
     RuntimeRunnerState,
 )
 from azents.rdb.models.agent import RDBAgent
@@ -29,6 +34,8 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntimeFailurePatch
+from azents.repos.runtime_provider.data import RuntimeProviderCreate
+from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
@@ -410,7 +417,29 @@ async def _create_runtime(session: AsyncSession, slug: str) -> str:
     session.add(agent)
     await session.flush()
 
+    provider = await RuntimeProviderRepository().create(
+        session,
+        RuntimeProviderCreate(
+            provider_id="system-kubernetes",
+            scope=RuntimeProviderScope.SYSTEM,
+            workspace_id=None,
+            kind=RuntimeProviderKind.KUBERNETES,
+            display_name="State Sink Test Provider",
+            registration_method=RuntimeProviderRegistrationMethod.ADMIN,
+            enabled=True,
+            lifecycle_state=RuntimeProviderLifecycleState.ACTIVE,
+            availability_mode=RuntimeProviderAvailabilityMode.PLATFORM_WIDE,
+            capabilities={},
+            config_schema=None,
+            metadata=None,
+        ),
+    )
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent.id)
+    await session.execute(
+        sa.update(RDBAgentRuntime)
+        .where(RDBAgentRuntime.id == runtime.id)
+        .values(runtime_provider_resource_id=provider.id)
+    )
     return runtime.id
 
 
