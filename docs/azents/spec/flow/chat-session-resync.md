@@ -8,7 +8,8 @@ touches_domains: [conversation, agent, external-channel]
 code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/services/chat/**
-  - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/mailbox.py
+  - python/apps/azents/src/azents/rdb/models/mailbox_item.py
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/transport/chat.py
@@ -18,8 +19,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-22
-spec_version: 41
+last_verified_at: 2026-07-26
+spec_version: 42
 ---
 
 # Chat Session Resync
@@ -39,7 +40,7 @@ Chat screen has two timeline states.
 | --- | --- |
 | Auth | WebSocket ticket or REST JWT must be valid. |
 | Session access | Requester must be session workspace member. |
-| Backend live source | `/live` must be able to read Redis live projections, `input_buffers`, running `agent_runs`, and active `action_executions`. |
+| Backend live source | `/live` must be able to read Redis live projections, `mailbox_items`, running `agent_runs`, and active `action_executions`. |
 | Frontend state | Session component is remounted by session key and does not share cross-session state. |
 
 ## 3. Initial Entry Sequence
@@ -73,6 +74,8 @@ sequenceDiagram
 | `history_event_appended` | server → client | `session_id`, `event` | persisted event append. |
 | `live_event_upserted` | server → client | `session_id`, `event` | non-durable live event projection upsert. |
 | `live_event_removed` | server → client | `session_id`, `event_id` | non-durable live projection removal. |
+| `mailbox_item_upserted` | server → client | `session_id`, `mailbox_item` | one typed pending mailbox envelope projection upsert. |
+| `mailbox_item_removed` | server → client | `session_id`, `mailbox_item_id` | removes one pending mailbox envelope after durable promotion, action handoff, or deletion. |
 | `live_run_updated` | server → client | `session_id`, `run` | authoritative current Run projection replacement, including `run.operation` and `run.retry`. |
 | `live_run_cleared` | server → client | `session_id`, `run_id` | removes the current run only when the terminal Run ID matches exactly. |
 | `input_actions_updated` | server → client | `session_id` | composer action definitions changed; client reloads `/actions`. |
@@ -140,7 +143,7 @@ Response fields:
 | Field | Meaning |
 | --- | --- |
 | `partial_history.items` | ordered partial history projection list to synthesize after durable history, including current assistant/reasoning partials and provider-tool activity. |
-| `input_buffers` | pending user input buffer projection list not yet injected into model turn. |
+| `mailbox_items` | ordered typed pending mailbox envelope projections not yet promoted into a model turn or handed to an action execution. Each envelope contains ordered items with stable `(mailbox_item_id, item_key)` identity and source-safe presentation data. |
 | `run` | currently running Run projection. `null` if absent. Includes profile provenance, nullable `model_call_started_at`, optional stable `run.operation` for context preparation, and optional `run.retry` with provider/runtime presentation kind, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history. |
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |
@@ -159,7 +162,7 @@ backoff. Successful commit, failure exhaustion, cancellation, and User Stop remo
 the authoritative Run replacement. Transient `compaction_started` and `compaction_complete` controls
 may trigger reconciliation, but they are not the source of truth for the preparation indicator.
 
-`snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.action_executions` is the current nonterminal operation TurnAction projection list.
+`snapshot` in REST write response follows the same taxonomy. `snapshot.partial_history_events` is the partial history projection list synthesized into the chat timeline, `snapshot.mailbox_items` is the typed pending mailbox envelope projection list, `snapshot.todo` is the same session Todo snapshot, and `snapshot.action_executions` is the current nonterminal operation TurnAction projection list.
 
 History events and live/pending event projections preserve immutable requested profile intent. They do not embed associated AgentRun summaries or change when run provenance changes. The dedicated live Run projection carries the current run's allowlisted inference summary. Unknown physical resolution is never derived from Composer or Agent defaults.
 
@@ -167,7 +170,7 @@ A valid non-null running `/live.run` projection overrides a contradictory Sessio
 frontend replacement, `run: null` is an explicit authoritative absence, while a malformed non-null
 Run is an invalid observation that preserves the last valid Run and emits a diagnostic. WebSocket
 observations advance a local generation, and each REST request records its start generation and
-request epoch. A REST response replaces Run, partial history, input buffers, Todo, and action
+request epoch. A REST response replaces Run, partial history, mailbox items, Todo, and action
 executions only when no newer WebSocket observation or newer REST request has superseded it. Exact
 `run_id` matching is also required for `RunComplete`, `RunStopped`, and `live_run_cleared`; a delayed
 Run A event cannot clear active Run B.
@@ -203,7 +206,7 @@ projected status, latest task/message preview, unread terminal result flag, late
 terminal result source event id, terminal result message preview, and children. The unread terminal
 result flag applies only to non-root child nodes because root sessions do not have a parent observer.
 It remains true while a terminal result is only projected on the child Run, queued in the direct
-parent mailbox, or observed by `wait_agent`; it becomes false only after the validated `agent_result`
+parent mailbox, or observed by `wait`; it becomes false only after the validated `agent_result`
 is promoted into the direct parent's durable transcript and advances the monotonic observation cursor.
 Projected status treats a parent-interrupted subtree as interrupted for all descendants that do not
 have a newer terminal run. Siblings with message activity are sorted by their latest explicit
@@ -245,7 +248,7 @@ Draft persistence and last-selected-profile persistence are separate agent/sessi
 - WS events are replayed on baseline, then applied in realtime.
 - When the active root Session exposes `unread_terminal_run_id`, the client acknowledges that observed boundary only after a fresh latest history/live baseline has committed, the view is `READY`, the timeline is `LATEST_FOLLOWING`, and the document is visible. Route entry, failed/incomplete resync, hidden tabs, and detached history browsing never acknowledge. The acknowledgement invalidates both active Session detail and list projections; a newer terminal boundary remains unread when the request names an older Run.
 - The Agent rail renders an unread terminal-result dot only while the Session is idle. A running Session with an older unread boundary renders its running spinner without the dot; the durable boundary remains unchanged and becomes visible again after the Session returns to idle unless a later acknowledgement clears or replaces it.
-- Can display pending input buffer, model response pending indicator, compaction indicator, todo preview, and compact action execution progress blocks. Nonterminal operation projections render at the live timeline tail immediately above pending input buffers and the composer, without using the consumed source buffer as a visual anchor. Terminal completed, failed, and cancelled blocks are reconstructed from durable `action_execution_result` history events and render at their transcript positions.
+- Can display typed pending mailbox envelopes/items, model response pending indicator, compaction indicator, todo preview, and compact action execution progress blocks. Pending items render with source-specific presentation and common reduced emphasis. Nonterminal operation projections render at the live timeline tail immediately above pending mailbox items and the composer, without using the consumed source envelope as a visual anchor. Terminal completed, failed, and cancelled blocks are reconstructed from durable `action_execution_result` history events and render at their transcript positions.
 - Operation TurnAction execution is live progress, not model response pending state. It does not by itself replace the composer with a stop control or block new input.
 - When `run.retry` is present, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history. The shared Run indicator remains at the live timeline tail for the full active Run rather than being limited to `waiting_for_model` or `streaming_model`; it shows an unlabeled model-call duration only while `model_call_started_at` is present.
 - Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
@@ -265,7 +268,7 @@ Draft persistence and last-selected-profile persistence are separate agent/sessi
 ### DETACHED_HISTORY_BROWSING
 
 - Does not render live state. Todo preview is also treated as live state and hidden.
-- Hides pending input buffers and live-only indicators, including nonterminal action execution progress; durable terminal action execution results remain in their history positions.
+- Hides pending mailbox envelopes/items and live-only indicators, including nonterminal action execution progress; durable terminal action execution results remain in their history positions.
 - WS durable or live observations do not mutate the visible detached history or detached live state. A durable append records only confirmed newer availability; live upserts/removals and live Run/action updates are ignored for detached rendering.
 - A successful periodic/resume baseline may also confirm a newer durable gap by comparing the fresh latest cursor with the cursor saved on detach.
 - The “new message” button is displayed only when a durable append or fresh latest cursor confirms an actual latest-direction gap, not by detached state or live-only activity itself.
@@ -364,7 +367,7 @@ finite transaction periodically.
 
 - Given: live state is displayed at latest tail.
 - When: user actually loads older history pagination.
-- Then: timeline state transitions to `DETACHED_HISTORY_BROWSING` and pending input/live indicators are hidden.
+- Then: timeline state transitions to `DETACHED_HISTORY_BROWSING` and pending mailbox/live indicators are hidden.
 
 **TC-6: New-message button latest reset**
 
@@ -412,7 +415,7 @@ finite transaction periodically.
 
 **TC-13: Operation live-to-durable handover**
 
-- Given: a live operation card is visible above pending input buffers.
+- Given: a live operation card is visible above pending mailbox items.
 - When: its completed, failed, or cancelled durable result arrives before or after `action_execution_removed`.
 - Then: the live card disappears, exactly one durable card remains at the result event position, and a delayed live update with the same execution ID cannot recreate a duplicate.
 
@@ -428,15 +431,17 @@ finite transaction periodically.
 - Public WebSocket delivery uses canonical action envelopes plus the listed control frames; the server does not emit raw top-level durable Events or internal runtime telemetry.
 - Every resync is a finite epoch/generation-guarded transaction with a fresh REST query and eventual release of its owned observation buffer.
 - REST baseline is applied as latest source only after session subscription ack and a successful health check for that transaction.
-- REST `/live` does not return aggregate event list and returns live state taxonomy snapshot split into `partial_history`, `input_buffers`, `run`, `session_run_state`, `todo`, and `action_executions`.
+- REST `/live` does not return an aggregate event list and returns live state split into `partial_history`, typed `mailbox_items`, `run`, `session_run_state`, `todo`, and `action_executions`.
 - `live_run_updated` and REST `/live.run` are the authoritative current Run snapshot sources; clients replace the stored Run rather than merging individual operation, retry, or profile fields.
 - `run.operation` restores one stable context-preparation indicator across reconnect and retry; transient compaction controls do not reconstruct that state.
 - `run.retry.error_kind` distinguishes provider presentation from runtime presentation without exposing provider identity or taxonomy.
 - Requested inference intent is restored from durable/pending data, and unresolved physical provenance is never inferred from current Agent or Composer state.
 - Usage provenance requires an exact run-id match.
-- `action_execution_updated` and REST `/live.action_executions` are the authoritative nonterminal operation progress sources; clients upsert by execution ID and render live executions above pending input without requiring a transcript or buffer anchor.
+- `action_execution_updated` and REST `/live.action_executions` are the authoritative nonterminal operation progress sources; clients upsert by execution ID and render live executions above pending mailbox items without requiring a transcript or mailbox anchor.
 - One stable execution ID joins live state to the durable `action_execution_result`; durable history wins deduplication, and `action_execution_removed` is an idempotent live-state removal signal.
-- REST write `snapshot` does not return aggregate `live_events` and returns live state taxonomy snapshot split into `partial_history_events`, `input_buffer_events`, `run`, `session_run_state`, `todo`, and `action_executions`.
+- REST write `snapshot` does not return aggregate `live_events` and returns live state split into `partial_history_events`, `mailbox_items`, `run`, `session_run_state`, `todo`, and `action_executions`.
+- Pending mailbox envelopes are reconciled by envelope ID and item key. A duplicate upsert replaces one envelope idempotently; a durable history observation suppresses the matching `(mailbox_item_id, item_key)` pending item; an active action execution suppresses the pending envelope by `source_mailbox_item_id`; and a delayed stale observation cannot resurrect suppressed pending state.
+- Promotion and action handoff publish durable/action ownership before `mailbox_item_removed`. Delete-in-flight pending items use reduced deletion emphasis and restore on mutation failure; successful deletion suppresses delayed reappearance. Detached history ignores mailbox/live rendering changes and only records newer durable history availability.
 - Detached state does not synthesize or mutate live state below the history window; live-only observations do not confirm a newer durable gap.
 - Entering detached state itself does not mean “new message” exists.
 - Follow stop does not mean entering detached state or live event buffering.

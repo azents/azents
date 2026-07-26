@@ -11,12 +11,13 @@ code_paths:
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
-  - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/mailbox.py
+  - python/apps/azents/src/azents/rdb/models/mailbox_item.py
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-07-23
-spec_version: 11
+last_verified_at: 2026-07-26
+spec_version: 12
 ---
 
 # Goal Domain Spec
@@ -87,7 +88,7 @@ The required order is:
 2. That terminalization atomically stores the Run ID in
    `AgentSession.pending_idle_continuation_run_id`. Other terminal statuses do not create this
    pointer.
-3. The runner confirms there is no pending command, wake-producing input buffer, queued actionable
+3. The runner confirms there is no pending command, wake-producing mailbox item, queued actionable
    wake-up, or active Run. Starting an actionable replacement Run clears an earlier pointer because
    that earlier boundary did not remain idle.
 4. The runner resolves current session hook providers and dispatches `on_session_idle` with the
@@ -95,27 +96,27 @@ The required order is:
 5. Goal Toolkit returns continuation input only when the current Goal has `status == active` and a
    non-empty `objective`.
 6. One transaction rechecks the durable idle conditions, conditionally consumes the matching pointer,
-   and either inserts `InputBufferKind.GOAL_CONTINUATION` rows plus `running` state or commits
+   and either inserts typed `goal_continuation` mailbox envelopes plus `running` state or commits
    `idle` state when no hook returns continuation input.
-7. Continuation InputBuffers use deterministic Run/provider/ordinal idempotency keys. The worker
-   publishes newly created pending input-buffer live state and sends a broker wake-up signal after
+7. Continuation mailbox envelopes use deterministic Run/provider/ordinal idempotency keys. The worker
+   publishes newly created typed pending mailbox state and sends a broker wake-up signal after
    commit.
 
 `paused`, `blocked`, `complete`, or empty Goal state returns no continuation. If the latest terminal
 run status is `failed`, `stopped`, `interrupted`, or `cancelled`, idle continuation is skipped even
 though the session may still transition to `idle`. If retry is active, the run remains `running` and
-the idle continuation path is not reached. If any pending input buffer already exists when the idle
+the idle continuation path is not reached. If any pending mailbox item already exists when the idle
 hook boundary is reached, idle continuation is deferred so existing user or system input runs first.
 
 Hook providers do not write durable transcript events and do not send broker wake-ups directly. They
-return `SessionContinuationInput`; the worker converts it into session-bound input buffers. Broker
+return `SessionContinuationInput`; the worker converts it into session-bound mailbox envelopes. Broker
 wake-up is only a signal. The recoverable source of truth is the pending idle-continuation pointer
-until its atomic outcome commits, then the pending input buffer plus the same-transaction `running`
+until its atomic outcome commits, then the pending mailbox envelope plus the same-transaction `running`
 state transition.
 
-A broker wake-up with no pending InputBuffer still starts a turn when the transcript tail after the
+A broker wake-up with no pending mailbox item still starts a turn when the transcript tail after the
 latest run marker contains an actionable direct control event, including `goal_updated`. A wake-up
-with neither pending input nor an actionable transcript tail is ignored.
+with neither pending mailbox item nor an actionable transcript tail is ignored.
 
 ## 4. Goal Control Events
 
@@ -129,7 +130,7 @@ External Channel.
 Common event shape:
 
 - kind: `goal_continuation`
-- source: promoted from `InputBufferKind.GOAL_CONTINUATION`
+- source: promoted from a `goal_continuation` mailbox envelope
 - payload shape: `UserMessagePayload`
 - content: continuation input content returned by the idle hook
 - attachments: empty list
@@ -189,7 +190,7 @@ It is UI-only and is not lowered into model input.
 Forbidden behavior:
 
 - Do not append `goal_continuation` directly from the idle hook.
-- Do not store `goal_continuation` in any runtime-bound buffer.
+- Do not store `goal_continuation` in any runtime-bound mailbox item.
 - Do not render `goal_continuation` or `goal_updated` as user-authored chat bubbles.
 
 ## 5. Prompt Rendering Boundary
@@ -240,9 +241,9 @@ Goal state:
 Goal continuation/update:
 
 - Do not display raw prompt prose.
-- Do not display as a user-authored pending bubble.
-- Do not expose delete controls.
-- Timeline UI may show a non-interactive indicator.
+- Do not display as a user-authored message.
+- Pending state uses the typed Goal continuation projection with common reduced emphasis; any delete
+  affordance follows existing mailbox mutation authorization rather than presentation visibility.
 - A `goal_continuation` carrying `source=external_channel` uses a Channel Work continuation label
   and channel/message icon. Goal-sourced continuation retains the Goal label and target icon.
 
@@ -259,7 +260,7 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/engine/tools/goal_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/litellm_responses_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/engine/hooks/dispatcher_test.py`
-- `cd python/apps/azents && uv run pytest src/azents/services/input_buffer_test.py`
+- `cd python/apps/azents && uv run pytest src/azents/services/mailbox_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/worker/session/idle_continuation_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/api/public/chat/v1/chat_api_test.py`
 - `cd python/apps/azents && uv run pyright`

@@ -6,6 +6,7 @@ tags: [agent, mailbox, engine]
 document_role: primary
 document_type: requirements
 snapshot_id: mailbox-260726
+implemented: 2026-07-26
 ---
 
 # Unified Agent Input Mailbox Requirements
