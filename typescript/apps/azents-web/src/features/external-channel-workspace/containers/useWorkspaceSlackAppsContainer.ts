@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import type {
+  DiscordMultiConnectionDraft,
   MultiConnectionDraft,
   SlackManagementHandoffState,
   WorkspaceMultiAppsState,
@@ -20,6 +21,11 @@ const EMPTY_DRAFT: MultiConnectionDraft = {
   appId: "",
   transport: "http",
   credentials: { botToken: "", signingSecret: "", appToken: "" },
+};
+const EMPTY_DISCORD_DRAFT: DiscordMultiConnectionDraft = {
+  appId: "",
+  targetGuildId: "",
+  botToken: "",
 };
 
 export interface WorkspaceSlackAppsContainerProps {
@@ -44,6 +50,8 @@ export interface WorkspaceSlackAppsContainerOutput {
   previewDisconnect: boolean;
   setupDraft: MultiConnectionDraft;
   editDraft: MultiConnectionDraft;
+  discordSetupDraft: DiscordMultiConnectionDraft;
+  discordEditDraft: DiscordMultiConnectionDraft;
   agentId: string;
   providerChannelId: string;
   defaultRouteId: string;
@@ -63,11 +71,15 @@ export interface WorkspaceSlackAppsContainerOutput {
   onSelectConnection: (connectionId: string) => void;
   onSetupDraftChange: (draft: MultiConnectionDraft) => void;
   onEditDraftChange: (draft: MultiConnectionDraft) => void;
+  onDiscordSetupDraftChange: (draft: DiscordMultiConnectionDraft) => void;
+  onDiscordEditDraftChange: (draft: DiscordMultiConnectionDraft) => void;
   onAgentIdChange: (agentId: string) => void;
   onProviderChannelIdChange: (channelId: string) => void;
   onDefaultRouteIdChange: (routeId: string) => void;
   onCreate: () => void;
   onSaveConnection: () => void;
+  onCreateDiscord: () => void;
+  onSaveDiscordConnection: () => void;
   onValidate: () => void;
   onPreviewRouteRemoval: (routeId: string) => void;
   onRemoveRoute: () => void;
@@ -115,6 +127,10 @@ export function useWorkspaceSlackAppsContainer({
   const [setupDraft, setSetupDraft] =
     useState<MultiConnectionDraft>(EMPTY_DRAFT);
   const [editDraft, setEditDraft] = useState<MultiConnectionDraft>(EMPTY_DRAFT);
+  const [discordSetupDraft, setDiscordSetupDraft] =
+    useState<DiscordMultiConnectionDraft>(EMPTY_DISCORD_DRAFT);
+  const [discordEditDraft, setDiscordEditDraft] =
+    useState<DiscordMultiConnectionDraft>(EMPTY_DISCORD_DRAFT);
   const [agentId, setAgentId] = useState("");
   const [providerChannelId, setProviderChannelId] = useState("");
   const [defaultRouteId, setDefaultRouteId] = useState("");
@@ -198,6 +214,20 @@ export function useWorkspaceSlackAppsContainer({
   }, [detailQuery.data]);
 
   useEffect((): void => {
+    if (detailQuery.data?.provider !== "discord") {
+      return;
+    }
+    setDiscordEditDraft({
+      appId: detailQuery.data.provider_app_id ?? "",
+      targetGuildId:
+        typeof detailQuery.data.provider_config?.target_guild_id === "string"
+          ? detailQuery.data.provider_config.target_guild_id
+          : "",
+      botToken: "",
+    });
+  }, [detailQuery.data]);
+
+  useEffect((): void => {
     if (!handoffQuery.data) {
       return;
     }
@@ -229,12 +259,26 @@ export function useWorkspaceSlackAppsContainer({
     },
     onError: (error) => void fail(error),
   });
+  const createDiscordMutation =
+    trpc.externalChannel.setupMultiDiscordConnection.useMutation({
+      onSuccess: async (result) => {
+        setDiscordSetupDraft(EMPTY_DISCORD_DRAFT);
+        setSelectedConnectionId(result.connection.id);
+        await refresh();
+      },
+      onError: (error) => void fail(error),
+    });
   const updateMutation = trpc.externalChannel.updateMultiConnection.useMutation(
     {
       onSuccess: () => void refresh(),
       onError: (error) => void fail(error),
     },
   );
+  const updateDiscordMutation =
+    trpc.externalChannel.updateMultiDiscordConnection.useMutation({
+      onSuccess: () => void refresh(),
+      onError: (error) => void fail(error),
+    });
   const validateMutation =
     trpc.externalChannel.validateMultiConnection.useMutation({
       onSuccess: () => void refresh(),
@@ -297,7 +341,9 @@ export function useWorkspaceSlackAppsContainer({
   const generation = selectedConnection?.generation ?? null;
   const busy =
     createMutation.isPending ||
+    createDiscordMutation.isPending ||
     updateMutation.isPending ||
+    updateDiscordMutation.isPending ||
     validateMutation.isPending ||
     addRouteMutation.isPending ||
     removeRouteMutation.isPending ||
@@ -349,6 +395,8 @@ export function useWorkspaceSlackAppsContainer({
     previewDisconnect,
     setupDraft,
     editDraft,
+    discordSetupDraft,
+    discordEditDraft,
     agentId,
     providerChannelId,
     defaultRouteId,
@@ -382,6 +430,8 @@ export function useWorkspaceSlackAppsContainer({
     },
     onSetupDraftChange: setSetupDraft,
     onEditDraftChange: setEditDraft,
+    onDiscordSetupDraftChange: setDiscordSetupDraft,
+    onDiscordEditDraftChange: setDiscordEditDraft,
     onAgentIdChange: setAgentId,
     onProviderChannelIdChange: setProviderChannelId,
     onDefaultRouteIdChange: setDefaultRouteId,
@@ -395,6 +445,17 @@ export function useWorkspaceSlackAppsContainer({
           botToken: setupDraft.credentials.botToken,
           signingSecret: setupDraft.credentials.signingSecret,
           appToken: setupDraft.credentials.appToken || null,
+        },
+      });
+    },
+    onCreateDiscord: () => {
+      setActionError(null);
+      createDiscordMutation.mutate({
+        handle,
+        appId: discordSetupDraft.appId,
+        credentials: {
+          botToken: discordSetupDraft.botToken,
+          targetGuildId: discordSetupDraft.targetGuildId,
         },
       });
     },
@@ -412,6 +473,21 @@ export function useWorkspaceSlackAppsContainer({
           botToken: editDraft.credentials.botToken,
           signingSecret: editDraft.credentials.signingSecret,
           appToken: editDraft.credentials.appToken || null,
+        },
+      });
+    },
+    onSaveDiscordConnection: () => {
+      if (selectedConnectionId === null) {
+        return;
+      }
+      setActionError(null);
+      updateDiscordMutation.mutate({
+        handle,
+        connectionId: selectedConnectionId,
+        appId: discordEditDraft.appId,
+        credentials: {
+          botToken: discordEditDraft.botToken,
+          targetGuildId: discordEditDraft.targetGuildId,
         },
       });
     },

@@ -32,7 +32,10 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import type { WorkspaceSlackAppsContainerOutput } from "../containers/useWorkspaceSlackAppsContainer";
-import type { MultiConnectionDraft } from "../types";
+import type {
+  DiscordMultiConnectionDraft,
+  MultiConnectionDraft,
+} from "../types";
 import type { ExternalChannelTransport } from "@azents/public-client";
 import type { ReactElement } from "react";
 
@@ -64,6 +67,14 @@ function isDraftComplete(draft: MultiConnectionDraft): boolean {
     draft.credentials.botToken.trim() !== "" &&
     draft.credentials.signingSecret.trim() !== "" &&
     (draft.transport === "http" || draft.credentials.appToken.trim() !== "")
+  );
+}
+
+function isDiscordDraftComplete(draft: DiscordMultiConnectionDraft): boolean {
+  return (
+    draft.appId.trim() !== "" &&
+    draft.targetGuildId.trim() !== "" &&
+    draft.botToken.trim() !== ""
   );
 }
 
@@ -143,6 +154,48 @@ function CredentialFields({
               appToken: event.currentTarget.value,
             },
           })
+        }
+      />
+      <Text size="xs" c="dimmed">
+        {t("credentialSafety")}
+      </Text>
+    </Stack>
+  );
+}
+
+function DiscordCredentialFields({
+  draft,
+  onChange,
+}: {
+  draft: DiscordMultiConnectionDraft;
+  onChange: (draft: DiscordMultiConnectionDraft) => void;
+}): ReactElement {
+  const t = useTranslations("workspace.slackApps");
+
+  return (
+    <Stack gap="xs">
+      <TextInput
+        label={t("discordAppId")}
+        required
+        value={draft.appId}
+        onChange={(event) =>
+          onChange({ ...draft, appId: event.currentTarget.value })
+        }
+      />
+      <TextInput
+        label={t("discordGuildId")}
+        required
+        value={draft.targetGuildId}
+        onChange={(event) =>
+          onChange({ ...draft, targetGuildId: event.currentTarget.value })
+        }
+      />
+      <PasswordInput
+        label={t("discordBotToken")}
+        required
+        value={draft.botToken}
+        onChange={(event) =>
+          onChange({ ...draft, botToken: event.currentTarget.value })
         }
       />
       <Text size="xs" c="dimmed">
@@ -441,25 +494,46 @@ export function WorkspaceSlackApps(
       )}
 
       {props.canManage && (
-        <Paper withBorder p="md" radius="md">
-          <Stack gap="sm">
-            <Text fw={700}>{t("createTitle")}</Text>
-            <CredentialFields
-              draft={props.setupDraft}
-              onChange={props.onSetupDraftChange}
-            />
-            <Group justify="flex-end">
-              <Button
-                leftSection={<IconPlugConnected size={16} />}
-                loading={props.busy}
-                disabled={!isDraftComplete(props.setupDraft)}
-                onClick={props.onCreate}
-              >
-                {t("create")}
-              </Button>
-            </Group>
-          </Stack>
-        </Paper>
+        <Stack gap="md">
+          <Paper withBorder p="md" radius="md">
+            <Stack gap="sm">
+              <Text fw={700}>{t("createTitle")}</Text>
+              <CredentialFields
+                draft={props.setupDraft}
+                onChange={props.onSetupDraftChange}
+              />
+              <Group justify="flex-end">
+                <Button
+                  leftSection={<IconPlugConnected size={16} />}
+                  loading={props.busy}
+                  disabled={!isDraftComplete(props.setupDraft)}
+                  onClick={props.onCreate}
+                >
+                  {t("create")}
+                </Button>
+              </Group>
+            </Stack>
+          </Paper>
+          <Paper withBorder p="md" radius="md">
+            <Stack gap="sm">
+              <Text fw={700}>{t("discordCreateTitle")}</Text>
+              <DiscordCredentialFields
+                draft={props.discordSetupDraft}
+                onChange={props.onDiscordSetupDraftChange}
+              />
+              <Group justify="flex-end">
+                <Button
+                  leftSection={<IconPlugConnected size={16} />}
+                  loading={props.busy}
+                  disabled={!isDiscordDraftComplete(props.discordSetupDraft)}
+                  onClick={props.onCreateDiscord}
+                >
+                  {t("discordCreate")}
+                </Button>
+              </Group>
+            </Stack>
+          </Paper>
+        </Stack>
       )}
 
       <Paper withBorder radius="md" p="md">
@@ -634,12 +708,21 @@ export function WorkspaceSlackApps(
             {props.canManage && !selectedConnectionIsDisconnected && (
               <>
                 <Text size="sm" c="dimmed">
-                  {t("replaceCredentials")}
+                  {props.selectedConnection.provider === "discord"
+                    ? t("discordReplaceCredentials")
+                    : t("replaceCredentials")}
                 </Text>
-                <CredentialFields
-                  draft={props.editDraft}
-                  onChange={props.onEditDraftChange}
-                />
+                {props.selectedConnection.provider === "discord" ? (
+                  <DiscordCredentialFields
+                    draft={props.discordEditDraft}
+                    onChange={props.onDiscordEditDraftChange}
+                  />
+                ) : (
+                  <CredentialFields
+                    draft={props.editDraft}
+                    onChange={props.onEditDraftChange}
+                  />
+                )}
                 <Group justify="flex-end">
                   <Button
                     variant="default"
@@ -651,8 +734,16 @@ export function WorkspaceSlackApps(
                   </Button>
                   <Button
                     loading={props.busy}
-                    disabled={!isDraftComplete(props.editDraft)}
-                    onClick={props.onSaveConnection}
+                    disabled={
+                      props.selectedConnection.provider === "discord"
+                        ? !isDiscordDraftComplete(props.discordEditDraft)
+                        : !isDraftComplete(props.editDraft)
+                    }
+                    onClick={
+                      props.selectedConnection.provider === "discord"
+                        ? props.onSaveDiscordConnection
+                        : props.onSaveConnection
+                    }
                   >
                     {t("save")}
                   </Button>

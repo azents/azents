@@ -20,6 +20,12 @@ export interface MultiConnectionDraft {
   credentials: SlackCredentialDraft;
 }
 
+export interface DiscordMultiConnectionDraft {
+  appId: string;
+  targetGuildId: string;
+  botToken: string;
+}
+
 export type WorkspaceMultiAppsState =
   | { type: "LOADING" }
   | { type: "FORBIDDEN"; message: string }
