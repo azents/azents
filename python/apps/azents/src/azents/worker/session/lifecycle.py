@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import (
+    AgentRunParentResultDeliveryState,
     AgentRunPhase,
     AgentRunStatus,
     MailboxSchedulingMode,
@@ -75,6 +76,33 @@ class SessionLifecycleService:
     async def send_session_wake_up(self, message: SessionWakeUp) -> None:
         """Send wake-up through the existing session broker path."""
         await self.broker.send_message(message)
+
+    async def notify_parent_result_activity(self, run_id: str) -> None:
+        """Notify a live parent after committed terminal-result admission."""
+        async with self.session_manager() as session:
+            run = await self.agent_run_repository.get_by_id(session, run_id)
+            if (
+                run is None
+                or run.parent_result_delivery_state
+                is not AgentRunParentResultDeliveryState.ENQUEUED
+            ):
+                return
+            source = (
+                await self.agent_session_repository.get_session_agent_by_session_id(
+                    session,
+                    run.session_id,
+                )
+            )
+            if source is None or source.parent_session_agent_id is None:
+                return
+            parent = await self.agent_session_repository.get_session_agent_by_id(
+                session,
+                source.parent_session_agent_id,
+            )
+            if parent is None:
+                return
+            parent_session_id = parent.agent_session_id
+        await self.broker.notify_mailbox_activity(parent_session_id)
 
     async def set_session_activity(
         self,
@@ -534,8 +562,10 @@ class SessionLifecycleService:
         *,
         owner_generation: int,
         status: AgentRunStatus,
-    ) -> None:
+    ) -> list[str]:
         """Close remaining AgentRun projections and finalize parent delivery."""
+
+        transitioned_run_ids: list[str] = []
 
         async def mark_terminal(db_session: AsyncSession) -> None:
             await self._lock_owned_session(
@@ -549,12 +579,14 @@ class SessionLifecycleService:
                 status=status,
                 ended_at=datetime.datetime.now(datetime.UTC),
             )
+            transitioned_run_ids.extend(run.id for run in runs)
             await self.terminal_finalization_coordinator.finalize_runs_in_session(
                 db_session,
-                run_ids=[run.id for run in runs],
+                run_ids=transitioned_run_ids,
             )
 
         await self.run_short_db(mark_terminal)
+        return transitioned_run_ids
 
     async def mark_agent_run_terminal_if_running(
         self,

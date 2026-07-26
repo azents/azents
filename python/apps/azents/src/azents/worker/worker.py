@@ -19,6 +19,8 @@ from fastapi import Depends
 from azents.broker.types import (
     BrokerMessage,
     SessionBroker,
+    SessionMailboxActivity,
+    WorkerSignal,
 )
 from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
 from azents.services.external_channel.event_processor import (
@@ -133,6 +135,11 @@ class AgentWorker:
 
                 backoff = _INITIAL_BACKOFF
                 for message in messages:
+                    if isinstance(message, SessionMailboxActivity):
+                        runner = runners.get(message.session_id)
+                        if runner is not None and not runner.terminated:
+                            runner.runner.notify_mailbox_activity()
+                        continue
                     session_id = message.session_id
                     runner = runners.get(session_id)
                     if runner is None or runner.terminated:
@@ -190,7 +197,7 @@ class AgentWorker:
 
     async def _receive_or_shutdown(
         self, shutdown_event: asyncio.Event
-    ) -> list[BrokerMessage]:
+    ) -> list[WorkerSignal]:
         """Wait for message receive or shutdown.
 
         When shutdown_event is set, exit immediately regardless of message receipt.

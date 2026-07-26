@@ -36,6 +36,7 @@ from azents.worker.session.execution_snapshot import (
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.inbox import SessionRunnerInbox
 from azents.worker.session.lifecycle import SessionLifecycleService
+from azents.worker.session.mailbox_activity import MailboxActivityObserver
 from azents.worker.session.supervisor import (
     RunStopController,
     RunTaskSupervisor,
@@ -129,6 +130,7 @@ class SessionRunner:
         self.run_active = False
         self.handover_wake_up: SessionWakeUp | None = None
         self.handover_required = False
+        self.mailbox_activity_observer: MailboxActivityObserver | None = None
 
     @property
     def terminated(self) -> bool:
@@ -164,6 +166,11 @@ class SessionRunner:
         :param message: Broker message to process
         """
         self.inbox.enqueue(message, stop_controller=self.stop_controller)
+
+    def notify_mailbox_activity(self) -> None:
+        """Notify the active Run without creating scheduler work."""
+        if self.mailbox_activity_observer is not None:
+            self.mailbox_activity_observer.notify()
 
     async def prepare_toolkits(
         self,
@@ -243,14 +250,22 @@ class SessionRunner:
         """Delegate engine execution to stop/shutdown supervisor."""
         if self.owner_generation is None:
             raise RuntimeError("Session ownership generation was not claimed")
-        return await self.run_supervisor.run(
-            snapshot,
-            poll_fn=self._make_poll_fn(),
-            check_stop=self._make_check_stop_fn(message.session_id),
-            prepare_toolkits=self.prepare_toolkits,
-            drain_stop_signals=self._drain_stop_signals,
-            model_transport_state=self.model_transport_state,
-        )
+        observer = MailboxActivityObserver()
+        self.mailbox_activity_observer = observer
+        observer.notify()
+        try:
+            return await self.run_supervisor.run(
+                snapshot,
+                poll_fn=self._make_poll_fn(),
+                check_stop=self._make_check_stop_fn(message.session_id),
+                prepare_toolkits=self.prepare_toolkits,
+                drain_stop_signals=self._drain_stop_signals,
+                model_transport_state=self.model_transport_state,
+                mailbox_activity_observer=observer,
+            )
+        finally:
+            observer.close()
+            self.mailbox_activity_observer = None
 
     async def _clear_activity_after_failed_message(
         self,
@@ -698,6 +713,8 @@ class SessionRunner:
             ) and not self.stop_controller.user_stop_requested:
                 self.handover_wake_up = message
         await self._enqueue_wake_up_after_stop_if_needed(message)
+        if result.terminal_event_observed and result.run_id is not None:
+            await self.session_lifecycle.notify_parent_result_activity(result.run_id)
         if self.shutdown_event.is_set():
             self._drain_stop_signals()
         return result

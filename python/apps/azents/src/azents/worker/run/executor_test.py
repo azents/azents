@@ -1088,6 +1088,7 @@ class _UserStopFinalizer:
 
     def __init__(self) -> None:
         self.interrupted_runs: list[tuple[str, str]] = []
+        self.parent_result_activity_run_ids: list[str] = []
 
     async def record_interrupted_run(
         self,
@@ -3298,7 +3299,7 @@ async def test_execute_clears_live_projection_after_run_complete(
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
-    assert result.toolkits == []
+    assert [binding.slug for binding in result.toolkits] == ["wait"]
     assert result.terminal_event_observed is True
     assert result.run_id is not None
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
@@ -3949,6 +3950,7 @@ async def test_execute_prioritizes_stop_over_provider_failure_persistence(
     assert lifecycle.retry_states == []
     assert finalizer.inputs == []
     assert user_stop_finalizer.interrupted_runs == [("session-001", "run-001")]
+    assert user_stop_finalizer.parent_result_activity_run_ids == []
     assert live_event_projector.live_run_clears == [("session-001", "run-001")]
 
 

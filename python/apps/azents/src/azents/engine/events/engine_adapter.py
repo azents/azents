@@ -609,6 +609,7 @@ class AgentEngineAdapter:
                     resource_authority=context.resource_authority,
                     publish_event=context.publish_event,
                     check_stop=check_stop,
+                    mailbox_activity_observer=context.mailbox_activity_observer,
                 ),
             )
             catalog = project_tool_catalog_for_client_compatibility(

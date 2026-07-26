@@ -72,6 +72,7 @@ class TurnContext:
     run_index: int = 1
     check_stop: CheckStop | None = None
     resource_authority: SessionResourceAuthority | None = None
+    mailbox_activity_observer: object | None = None
 
 
 @dataclasses.dataclass(frozen=True)

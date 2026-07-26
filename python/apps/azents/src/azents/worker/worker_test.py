@@ -396,6 +396,7 @@ class _RunExecutor:
         owner_generation: int,
         tool_admission_barrier: object,
         model_transport_state: object,
+        mailbox_activity_observer: object | None = None,
     ) -> RunExecutionResult:
         """Delegate to Host message handling fake."""
         del (
@@ -404,6 +405,7 @@ class _RunExecutor:
             owner_generation,
             tool_admission_barrier,
             model_transport_state,
+            mailbox_activity_observer,
         )
         if snapshot.pending_command is not None:
             self.host.commands.append(
@@ -515,6 +517,7 @@ class _Host:
         self.idle_mark_attempted = asyncio.Event()
         self.cleared_session_ids: list[str] = []
         self.finalized_user_stop_session_ids: list[str] = []
+        self.parent_result_activity_run_ids: list[str] = []
         self.idle_session_ids: list[str] = []
         self.idle_continuation_calls: list[
             tuple[CanonicalExecutionSnapshot, list[ToolkitBinding]]
@@ -641,6 +644,10 @@ class _Host:
     async def send_session_wake_up(self, message: SessionWakeUp) -> None:
         """Store wake-up messages sent for handover."""
         self.handover_messages.append(message)
+
+    async def notify_parent_result_activity(self, run_id: str) -> None:
+        """Store parent-result activity notifications."""
+        self.parent_result_activity_run_ids.append(run_id)
 
     async def finalize_user_stop(
         self,
@@ -1025,6 +1032,7 @@ async def test_terminal_run_marks_idle_before_idle_continuation() -> None:
         await runner.shutdown()
 
     assert host.idle_session_ids == ["session-001"]
+    assert host.parent_result_activity_run_ids == ["run-001"]
     assert len(host.idle_continuation_calls) == 1
     snapshot, toolkits = host.idle_continuation_calls[0]
     assert snapshot.session_id == message.session_id

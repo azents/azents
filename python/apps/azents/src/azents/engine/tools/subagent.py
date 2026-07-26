@@ -2,15 +2,13 @@
 
 # ruff: noqa: E501
 
-import asyncio
 import dataclasses
 import datetime
 import json
-import time
 from textwrap import dedent
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
@@ -69,7 +67,7 @@ All agents in the team, including the agents that you can assign tasks to, are e
 You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.
 Child agents can also spawn their own sub-agents.
 You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.
-Use `wait_agent` to pause until your mailbox changes or all descendants become idle.
+Use `wait` to pause until your mailbox changes or all descendants become idle.
 
 You will receive messages in the model input in the form:
 ```
@@ -100,7 +98,7 @@ Payload:
 ```
 You may also see them addressed as to=/root/..., which indicates your identity is /root/..."""
 
-_SHARED_USAGE_HINT_TEXT = """Note that collaboration tools cannot be called from inside `exec_command`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, since they are intentionally absent from `exec_command`.
+_SHARED_USAGE_HINT_TEXT = """Note that collaboration tools cannot be called from inside `exec_command`. Call `spawn_agent`, `send_message`, `followup_task`, `wait`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, since they are intentionally absent from `exec_command`.
 
 All agents share the same directory. In detail:
 - All agents have access to the same container and filesystem as you.
@@ -161,19 +159,6 @@ class FollowupTaskInput(BaseModel):
     task: str = Field(description="Follow-up task to assign and wake")
 
 
-class WaitAgentInput(BaseModel):
-    """wait_agent tool input."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    timeout_seconds: int = Field(
-        default=30,
-        ge=0,
-        le=600,
-        description="Maximum mailbox activity wait in seconds. Defaults to 30.",
-    )
-
-
 class InterruptAgentInput(BaseModel):
     """interrupt_agent tool input."""
 
@@ -181,8 +166,6 @@ class InterruptAgentInput(BaseModel):
 
 
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
-
-_WAIT_AGENT_POLL_INTERVAL_SECONDS = 0.1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -194,13 +177,6 @@ class _TargetResolution:
 @dataclasses.dataclass(frozen=True)
 class _SpawnInferenceProfile:
     state: SessionInferenceState
-
-
-@dataclasses.dataclass(frozen=True)
-class _WaitObservation:
-    mailbox_updated: bool
-    descendant_count: int
-    active_paths: tuple[str, ...]
 
 
 class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
@@ -249,7 +225,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 self._spawn_agent_tool(parent_run_id=context.run_id),
                 self._send_message_tool(),
                 self._followup_task_tool(),
-                self._wait_agent_tool(),
                 self._interrupt_agent_tool(),
                 self._list_agents_tool(),
             ],
@@ -585,6 +560,9 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     session_agent_id=resolution.target.id,
                     last_task_message=input.message,
                 )
+            await self.broker.notify_mailbox_activity(
+                resolution.target.agent_session_id
+            )
             await self._publish_tree_changed(resolution.target)
             return _json(
                 {
@@ -643,98 +621,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             )
 
         return make_tool(followup_task, name="followup_task")
-
-    def _wait_agent_tool(self) -> FunctionTool:
-        async def wait_agent(input: WaitAgentInput) -> str:
-            """Wait for current mailbox activity or descendant idleness."""
-            return await self._wait_agent(input.timeout_seconds)
-
-        return make_tool(wait_agent, name="wait_agent")
-
-    async def _wait_agent(self, timeout_seconds: int) -> str:
-        """Poll mailbox activity with descendant-idle fallback."""
-        deadline = time.monotonic() + timeout_seconds
-        while True:
-            observation = await self._observe_wait_state()
-            immediate = self._wait_observation_result(observation)
-            if immediate is not None:
-                if observation.mailbox_updated or observation.descendant_count == 0:
-                    return immediate
-                final = await self._observe_wait_state()
-                final_result = self._wait_observation_result(final)
-                if final_result is not None:
-                    return final_result
-                observation = final
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                final = await self._observe_wait_state()
-                final_result = self._wait_observation_result(final)
-                if final_result is not None:
-                    return final_result
-                return _json(
-                    {
-                        "message": "Wait timed out; active descendants: "
-                        + ", ".join(final.active_paths),
-                        "timed_out": True,
-                    }
-                )
-            await asyncio.sleep(min(_WAIT_AGENT_POLL_INTERVAL_SECONDS, remaining))
-
-    async def _observe_wait_state(self) -> _WaitObservation:
-        """Read current mailbox state and descendant activity."""
-        current_session_id = self._current_session_id()
-        mailbox_updated = await self.mailbox_item_service.has_pending_agent_messages(
-            current_session_id
-        )
-        async with self.session_manager() as session:
-            current = await self._current_session_agent(session)
-            descendants = (
-                await self.agent_session_repository.list_descendant_session_agents(
-                    session,
-                    session_agent_id=current.id,
-                    include_self=False,
-                )
-            )
-            session_ids = [agent.agent_session_id for agent in descendants]
-            sessions = await self.agent_session_repository.list_by_ids(
-                session,
-                agent_session_ids=session_ids,
-            )
-            latest_runs = await self.agent_run_repository.list_latest_by_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-        active_paths: list[str] = []
-        for descendant in descendants:
-            session = sessions.get(descendant.agent_session_id)
-            latest_run = latest_runs.get(descendant.agent_session_id)
-            if _session_agent_active(session, latest_run) or (
-                await self.mailbox_item_service.has_pending_wake_session_mailbox_items(
-                    descendant.agent_session_id
-                )
-            ):
-                active_paths.append(descendant.path)
-        return _WaitObservation(
-            mailbox_updated=mailbox_updated,
-            descendant_count=len(descendants),
-            active_paths=tuple(active_paths),
-        )
-
-    @staticmethod
-    def _wait_observation_result(observation: _WaitObservation) -> str | None:
-        """Return a completed wait result when observation is terminal."""
-        if observation.mailbox_updated:
-            return _json({"message": "Mailbox updated.", "timed_out": False})
-        if observation.descendant_count == 0:
-            return _json(
-                {"message": "No descendant agents to wait for.", "timed_out": False}
-            )
-        if not observation.active_paths:
-            return _json(
-                {"message": "All descendant agents are idle.", "timed_out": False}
-            )
-        return None
 
     def _interrupt_agent_tool(self) -> FunctionTool:
         async def interrupt_agent(input: InterruptAgentInput) -> str:
@@ -958,7 +844,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             The next message is your current direct assignment.
 
             Do not treat agent identities or tool calls in the inherited history as
-            your own actions. Never call wait_agent on yourself. wait_agent is only
+            your own actions. Never call wait on yourself. wait is only
             for observing your descendants.
             """
         )

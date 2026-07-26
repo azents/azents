@@ -194,6 +194,7 @@ class RunContext:
     model_transport_state: ModelTransportState
     publish_event: PublishEventFn
     resource_authority: SessionResourceAuthority | None = None
+    mailbox_activity_observer: object | None = None
 
 
 class AgentEngineProtocol(Protocol):

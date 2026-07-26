@@ -14,7 +14,7 @@ from .redis import (
     decode_session_wake_up,
     encode_session_wake_up,
 )
-from .types import SessionStopSignal, SessionWakeUp
+from .types import SessionMailboxActivity, SessionStopSignal, SessionWakeUp
 
 
 @pytest_asyncio.fixture
@@ -133,6 +133,38 @@ class TestRedisBrokerMessages:
         received = await worker.receive_messages()
 
         assert received == [message]
+
+    async def test_mailbox_activity_routes_to_existing_owner(
+        self,
+        redis: Redis,
+    ) -> None:
+        """Mailbox activity reaches a live owner without creating a wake-up."""
+        sender = RedisBroker(redis)
+        worker = RedisBroker(redis, worker_id="worker-1")
+        await worker.setup()
+        wake_up = SessionWakeUp(session_id="session-1")
+
+        await sender.send_message(wake_up)
+        assert await worker.receive_messages() == [wake_up]
+
+        await sender.notify_mailbox_activity(wake_up.session_id)
+
+        assert await worker.receive_messages() == [
+            SessionMailboxActivity(session_id=wake_up.session_id)
+        ]
+
+    async def test_mailbox_activity_is_dropped_without_live_owner(
+        self,
+        redis: Redis,
+    ) -> None:
+        """Idle sessions do not receive mailbox-only activity signals."""
+        sender = RedisBroker(redis)
+        worker = RedisBroker(redis, worker_id="worker-1")
+        await worker.setup()
+
+        await sender.notify_mailbox_activity("session-1")
+
+        assert await redis.xlen("azents:worker:worker-1:incoming") == 0
 
     async def test_cutover_barrier_blocks_new_session_ownership(
         self,
