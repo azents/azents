@@ -31,6 +31,7 @@ export interface WorkspaceSlackAppsContainerProps {
 export interface WorkspaceSlackAppsContainerOutput {
   handle: string;
   state: WorkspaceMultiAppsState;
+  connectionOffset: number;
   selectedConnectionId: string | null;
   selectedConnection: ManagedMultiConnection | null;
   routeItems: ManagedMultiRoute[];
@@ -51,9 +52,13 @@ export interface WorkspaceSlackAppsContainerOutput {
   busy: boolean;
   actionError: string | null;
   detailError: string | null;
+  routeImpactError: string | null;
+  connectionImpactError: string | null;
   connectionLoading: boolean;
   routesLoading: boolean;
   defaultsLoading: boolean;
+  routeImpactLoading: boolean;
+  connectionImpactLoading: boolean;
   canManage: boolean;
   onSelectConnection: (connectionId: string) => void;
   onSetupDraftChange: (draft: MultiConnectionDraft) => void;
@@ -73,8 +78,11 @@ export interface WorkspaceSlackAppsContainerOutput {
   onPreviewDisconnect: () => void;
   onDisconnect: () => void;
   onCancelPreview: () => void;
+  onConnectionPage: (offset: number) => void;
   onRoutePage: (offset: number) => void;
   onDefaultPage: (offset: number) => void;
+  onRetryRouteImpact: () => void;
+  onRetryConnectionImpact: () => void;
 }
 
 function errorCode(error: unknown): string | null {
@@ -101,6 +109,7 @@ export function useWorkspaceSlackAppsContainer({
   const [selectedConnectionId, setSelectedConnectionId] = useState<
     string | null
   >(initialConnectionId ?? null);
+  const [connectionOffset, setConnectionOffset] = useState(0);
   const [routeOffset, setRouteOffset] = useState(0);
   const [defaultOffset, setDefaultOffset] = useState(0);
   const [setupDraft, setSetupDraft] =
@@ -115,8 +124,8 @@ export function useWorkspaceSlackAppsContainer({
   const meQuery = trpc.workspaceMember.me.useQuery({ handle });
   const listQuery = trpc.externalChannel.listMultiConnections.useQuery({
     handle,
-    offset: 0,
-    limit: 100,
+    offset: connectionOffset,
+    limit: PAGE_SIZE,
   });
   const canManage =
     meQuery.data?.role === "owner" || meQuery.data?.role === "manager";
@@ -126,9 +135,16 @@ export function useWorkspaceSlackAppsContainer({
       return;
     }
     setSelectedConnectionId(
-      initialConnectionId ?? listQuery.data?.items[0]?.id ?? null,
+      (connectionOffset === 0 ? initialConnectionId : null) ??
+        listQuery.data?.items[0]?.id ??
+        null,
     );
-  }, [initialConnectionId, listQuery.data?.items, selectedConnectionId]);
+  }, [
+    connectionOffset,
+    initialConnectionId,
+    listQuery.data?.items,
+    selectedConnectionId,
+  ]);
 
   const detailQuery = trpc.externalChannel.getMultiConnection.useQuery(
     { handle, connectionId: selectedConnectionId ?? "missing" },
@@ -277,8 +293,6 @@ export function useWorkspaceSlackAppsContainer({
     detailQuery.error?.message ??
     routesQuery.error?.message ??
     defaultsQuery.error?.message ??
-    routeImpactQuery.error?.message ??
-    connectionImpactQuery.error?.message ??
     null;
   const generation = selectedConnection?.generation ?? null;
   const busy =
@@ -322,6 +336,7 @@ export function useWorkspaceSlackAppsContainer({
   return {
     handle,
     state,
+    connectionOffset,
     selectedConnectionId,
     selectedConnection,
     routeItems: routesQuery.data?.items ?? [],
@@ -345,9 +360,14 @@ export function useWorkspaceSlackAppsContainer({
     busy,
     actionError,
     detailError,
+    routeImpactError: routeImpactQuery.error?.message ?? null,
+    connectionImpactError: connectionImpactQuery.error?.message ?? null,
     connectionLoading: selectedConnectionId !== null && detailQuery.isPending,
     routesLoading: selectedConnectionId !== null && routesQuery.isPending,
     defaultsLoading: selectedConnectionId !== null && defaultsQuery.isPending,
+    routeImpactLoading: previewRouteId !== null && routeImpactQuery.isFetching,
+    connectionImpactLoading:
+      previewDisconnect && connectionImpactQuery.isFetching,
     canManage,
     onSelectConnection: (connectionId) => {
       setSelectedConnectionId(connectionId);
@@ -487,10 +507,29 @@ export function useWorkspaceSlackAppsContainer({
       setPreviewRouteId(null);
       setPreviewDisconnect(false);
     },
+    onConnectionPage: (offset) => {
+      setConnectionOffset(offset);
+      setSelectedConnectionId(null);
+      setRouteOffset(0);
+      setDefaultOffset(0);
+      setAgentId("");
+      setProviderChannelId("");
+      setDefaultRouteId("");
+      setPreviewRouteId(null);
+      setPreviewDisconnect(false);
+      setActionError(null);
+    },
     onRoutePage: (offset) => {
       setRouteOffset(offset);
+      setDefaultRouteId("");
       setPreviewRouteId(null);
     },
     onDefaultPage: setDefaultOffset,
+    onRetryRouteImpact: () => {
+      void routeImpactQuery.refetch();
+    },
+    onRetryConnectionImpact: () => {
+      void connectionImpactQuery.refetch();
+    },
   };
 }

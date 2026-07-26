@@ -1381,7 +1381,7 @@
     "slackApps": {
       "title": "Slack 앱",
       "description": "워크스페이스 소유 Slack Multi App, 에이전트 카탈로그 및 채널 기본값을 관리합니다.",
-      "appCount": "앱 {count}개",
+      "appCount": "이 페이지의 앱 {count}개",
       "createTitle": "Slack Multi App 연결",
       "create": "Slack 앱 연결",
       "appsTitle": "Slack 앱",
@@ -1441,6 +1441,7 @@
       "routeImpactTitle": "에이전트 연결 제거 영향 확인",
       "routeImpactDescription": "채널 기본값 {defaults}개를 제거하고, 활성 연결 {bindings}개를 종료하며, 진행 중인 선택 요청 {admissions}개를 만료시킵니다.",
       "loadingImpact": "현재 영향 미리보기를 불러오는 중…",
+      "retry": "다시 시도",
       "confirmRemove": "에이전트 제거",
       "cancel": "취소",
       "defaultsTitle": "채널 기본값",

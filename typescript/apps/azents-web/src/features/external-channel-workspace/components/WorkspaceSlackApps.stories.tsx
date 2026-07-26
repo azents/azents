@@ -92,6 +92,7 @@ const noop = (): void => {};
 const args: WorkspaceSlackAppsContainerOutput = {
   handle: "engineering",
   state: { type: "LOADED", connections: [connection] },
+  connectionOffset: 0,
   selectedConnectionId: connection.id,
   selectedConnection: connection,
   routeItems: routes,
@@ -120,9 +121,13 @@ const args: WorkspaceSlackAppsContainerOutput = {
   busy: false,
   actionError: null,
   detailError: null,
+  routeImpactError: null,
+  connectionImpactError: null,
   connectionLoading: false,
   routesLoading: false,
   defaultsLoading: false,
+  routeImpactLoading: false,
+  connectionImpactLoading: false,
   canManage: true,
   onSelectConnection: noop,
   onSetupDraftChange: noop,
@@ -142,8 +147,11 @@ const args: WorkspaceSlackAppsContainerOutput = {
   onPreviewDisconnect: noop,
   onDisconnect: noop,
   onCancelPreview: noop,
+  onConnectionPage: noop,
   onRoutePage: noop,
   onDefaultPage: noop,
+  onRetryRouteImpact: noop,
+  onRetryConnectionImpact: noop,
 };
 
 const meta = {
@@ -228,6 +236,16 @@ export const ReconnectRequired = {
   },
 } satisfies Story;
 
+export const DisconnectedHistory = {
+  args: {
+    selectedConnection: { ...connection, status: "disconnected" },
+    state: {
+      type: "LOADED",
+      connections: [{ ...connection, status: "disconnected" }],
+    },
+  },
+} satisfies Story;
+
 export const RouteImpactPreview = {
   args: {
     previewRouteId: availableRoute.id,
@@ -244,6 +262,14 @@ export const RouteImpactPreview = {
       affected_bindings: [],
     },
     onRemoveRoute: fn(),
+  },
+} satisfies Story;
+
+export const RouteImpactError = {
+  args: {
+    previewRouteId: availableRoute.id,
+    routeImpactError: "Unable to load the current route impact.",
+    onRetryRouteImpact: fn(),
   },
 } satisfies Story;
 
@@ -264,6 +290,14 @@ export const DisconnectImpactPreview = {
       affected_bindings: [],
     },
     onDisconnect: fn(),
+  },
+} satisfies Story;
+
+export const DisconnectImpactError = {
+  args: {
+    previewDisconnect: true,
+    connectionImpactError: "Unable to load the current connection impact.",
+    onRetryConnectionImpact: fn(),
   },
 } satisfies Story;
 

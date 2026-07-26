@@ -1381,7 +1381,7 @@
     "slackApps": {
       "title": "Applications Slack",
       "description": "Gérez les applications Slack Multi appartenant à l’espace de travail, les catalogues d’agents et les valeurs par défaut des canaux.",
-      "appCount": "{count} application(s)",
+      "appCount": "{count} application(s) sur cette page",
       "createTitle": "Connecter une application Slack Multi",
       "create": "Connecter l’application Slack",
       "appsTitle": "Applications Slack",
@@ -1441,6 +1441,7 @@
       "routeImpactTitle": "Vérifier l’impact de la suppression de la route",
       "routeImpactDescription": "Cette action supprime {defaults} valeur(s) par défaut de canal, termine {bindings} liaison(s) active(s) et fait expirer {admissions} admission(s) ouverte(s).",
       "loadingImpact": "Chargement de l’aperçu de l’impact actuel…",
+      "retry": "Réessayer",
       "confirmRemove": "Supprimer l’agent",
       "cancel": "Annuler",
       "defaultsTitle": "Valeurs par défaut des canaux",

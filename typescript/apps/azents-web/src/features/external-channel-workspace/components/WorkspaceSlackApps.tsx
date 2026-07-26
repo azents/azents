@@ -20,6 +20,7 @@ import {
   Text,
   TextInput,
   Title,
+  UnstyledButton,
 } from "@mantine/core";
 import {
   IconAlertTriangle,
@@ -282,6 +283,7 @@ function FocusedHandoff({
       value: route.id,
       label: route.agent_name ?? route.agent_id_snapshot,
     }));
+  const canEditDefault = props.selectedConnection.status !== "disconnected";
 
   return (
     <Stack gap="lg" p={{ base: "md", sm: "xl" }} maw={rem(820)} mx="auto">
@@ -330,21 +332,29 @@ function FocusedHandoff({
             placeholder={t("selectRoute")}
             data={routeOptions}
             value={props.defaultRouteId}
+            disabled={!canEditDefault}
             onChange={(value) => props.onDefaultRouteIdChange(value ?? "")}
           />
+          {(props.routeItems.length > 0 || props.routeOffset > 0) && (
+            <Pagination
+              offset={props.routeOffset}
+              count={props.routeItems.length}
+              onChange={props.onRoutePage}
+            />
+          )}
           <Group justify="flex-end">
             <Button
               color="red"
               variant="default"
               loading={props.busy}
-              disabled={!props.canManage}
+              disabled={!canEditDefault}
               onClick={() => props.onClearDefault(handoff.provider_channel_id)}
             >
               {t("clear")}
             </Button>
             <Button
               loading={props.busy}
-              disabled={props.defaultRouteId === ""}
+              disabled={!canEditDefault || props.defaultRouteId === ""}
               onClick={props.onSetDefault}
             >
               {t("setDefault")}
@@ -400,6 +410,8 @@ export function WorkspaceSlackApps(
       value: route.id,
       label: route.agent_name ?? route.agent_id_snapshot,
     }));
+  const selectedConnectionIsDisconnected =
+    props.selectedConnection?.status === "disconnected";
 
   return (
     <Stack gap="lg" p={{ base: "md", sm: "xl" }} maw={rem(1320)} mx="auto">
@@ -458,95 +470,102 @@ export function WorkspaceSlackApps(
               {t("historyVisible")}
             </Text>
           </Group>
-          {props.state.connections.length === 0 ? (
+          {props.state.connections.length === 0 &&
+          props.connectionOffset === 0 ? (
             <Text c="dimmed">{t("empty")}</Text>
           ) : (
-            <ScrollArea type="auto">
-              <Table
-                striped
-                highlightOnHover
-                miw={rem(980)}
-                verticalSpacing="sm"
-              >
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>{t("app")}</Table.Th>
-                    <Table.Th>{t("status")}</Table.Th>
-                    <Table.Th>{t("agents")}</Table.Th>
-                    <Table.Th>{t("defaults")}</Table.Th>
-                    <Table.Th>{t("transportLabel")}</Table.Th>
-                    <Table.Th>{t("lastHealth")}</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {props.state.connections.map((connection) => (
-                    <Table.Tr
-                      key={connection.id}
-                      style={{ cursor: "pointer" }}
-                      {...(props.selectedConnectionId === connection.id
-                        ? { bg: "var(--mantine-color-blue-light)" }
-                        : {})}
-                      tabIndex={0}
-                      aria-selected={
-                        props.selectedConnectionId === connection.id
-                      }
-                      onClick={() => props.onSelectConnection(connection.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          props.onSelectConnection(connection.id);
-                        }
-                      }}
-                    >
-                      <Table.Td>
-                        <Text fw={600}>
-                          {connection.provider_app_id ?? connection.id}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          {connection.provider_tenant_id ??
-                            t("identityUnavailable")}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge
-                          color={statusColor(connection.status)}
-                          variant="light"
-                        >
-                          {t(`statusValue.${connection.status}`)}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge
-                          color={
-                            connection.active_agent_count === 0
-                              ? "yellow"
-                              : "blue"
-                          }
-                          variant="light"
-                        >
-                          {t("agentCount", {
-                            count: connection.active_agent_count,
-                          })}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge color="gray" variant="light">
-                          {t("defaultCount", {
-                            count: connection.configured_default_count,
-                          })}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        {t(`transport.${connection.transport}`)}
-                      </Table.Td>
-                      <Table.Td>
-                        {formatDate(connection.last_health_at)}
-                      </Table.Td>
+            <>
+              <ScrollArea type="auto">
+                <Table
+                  striped
+                  highlightOnHover
+                  miw={rem(980)}
+                  verticalSpacing="sm"
+                >
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>{t("app")}</Table.Th>
+                      <Table.Th>{t("status")}</Table.Th>
+                      <Table.Th>{t("agents")}</Table.Th>
+                      <Table.Th>{t("defaults")}</Table.Th>
+                      <Table.Th>{t("transportLabel")}</Table.Th>
+                      <Table.Th>{t("lastHealth")}</Table.Th>
                     </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </ScrollArea>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {props.state.connections.map((connection) => (
+                      <Table.Tr
+                        key={connection.id}
+                        {...(props.selectedConnectionId === connection.id
+                          ? { bg: "var(--mantine-color-blue-light)" }
+                          : {})}
+                      >
+                        <Table.Td>
+                          <UnstyledButton
+                            w="100%"
+                            ta="left"
+                            aria-pressed={
+                              props.selectedConnectionId === connection.id
+                            }
+                            onClick={() =>
+                              props.onSelectConnection(connection.id)
+                            }
+                          >
+                            <Text fw={600}>
+                              {connection.provider_app_id ?? connection.id}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              {connection.provider_tenant_id ??
+                                t("identityUnavailable")}
+                            </Text>
+                          </UnstyledButton>
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge
+                            color={statusColor(connection.status)}
+                            variant="light"
+                          >
+                            {t(`statusValue.${connection.status}`)}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge
+                            color={
+                              connection.active_agent_count === 0
+                                ? "yellow"
+                                : "blue"
+                            }
+                            variant="light"
+                          >
+                            {t("agentCount", {
+                              count: connection.active_agent_count,
+                            })}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge color="gray" variant="light">
+                            {t("defaultCount", {
+                              count: connection.configured_default_count,
+                            })}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          {t(`transport.${connection.transport}`)}
+                        </Table.Td>
+                        <Table.Td>
+                          {formatDate(connection.last_health_at)}
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+              <Pagination
+                offset={props.connectionOffset}
+                count={props.state.connections.length}
+                onChange={props.onConnectionPage}
+              />
+            </>
           )}
         </Stack>
       </Paper>
@@ -612,40 +631,39 @@ export function WorkspaceSlackApps(
                   {t("noAgentsDescription")}
                 </Alert>
               )}
-            {props.canManage &&
-              props.selectedConnection.status !== "disconnected" && (
-                <>
-                  <Text size="sm" c="dimmed">
-                    {t("replaceCredentials")}
-                  </Text>
-                  <CredentialFields
-                    draft={props.editDraft}
-                    onChange={props.onEditDraftChange}
-                  />
-                  <Group justify="flex-end">
-                    <Button
-                      variant="default"
-                      leftSection={<IconRefresh size={16} />}
-                      loading={props.busy}
-                      onClick={props.onValidate}
-                    >
-                      {t("validate")}
-                    </Button>
-                    <Button
-                      loading={props.busy}
-                      disabled={!isDraftComplete(props.editDraft)}
-                      onClick={props.onSaveConnection}
-                    >
-                      {t("save")}
-                    </Button>
-                  </Group>
-                </>
-              )}
+            {props.canManage && !selectedConnectionIsDisconnected && (
+              <>
+                <Text size="sm" c="dimmed">
+                  {t("replaceCredentials")}
+                </Text>
+                <CredentialFields
+                  draft={props.editDraft}
+                  onChange={props.onEditDraftChange}
+                />
+                <Group justify="flex-end">
+                  <Button
+                    variant="default"
+                    leftSection={<IconRefresh size={16} />}
+                    loading={props.busy}
+                    onClick={props.onValidate}
+                  >
+                    {t("validate")}
+                  </Button>
+                  <Button
+                    loading={props.busy}
+                    disabled={!isDraftComplete(props.editDraft)}
+                    onClick={props.onSaveConnection}
+                  >
+                    {t("save")}
+                  </Button>
+                </Group>
+              </>
+            )}
 
             <Divider />
             <Stack gap="sm">
               <Text fw={700}>{t("catalogTitle")}</Text>
-              {props.canManage && (
+              {props.canManage && !selectedConnectionIsDisconnected && (
                 <Group align="end">
                   <TextInput
                     flex={1}
@@ -707,6 +725,7 @@ export function WorkspaceSlackApps(
                             </Table.Td>
                             <Table.Td>
                               {props.canManage &&
+                                !selectedConnectionIsDisconnected &&
                                 (route.catalog_status === "removed" ? (
                                   <Button
                                     size="xs"
@@ -750,22 +769,37 @@ export function WorkspaceSlackApps(
                   icon={<IconAlertTriangle size={16} />}
                   title={t("routeImpactTitle")}
                 >
-                  {props.routeImpact
-                    ? t("routeImpactDescription", {
-                        defaults: props.routeImpact.active_default_count,
-                        bindings: props.routeImpact.active_binding_count,
-                        admissions: props.routeImpact.open_admission_count,
-                      })
-                    : t("loadingImpact")}
+                  {props.routeImpactError
+                    ? props.routeImpactError
+                    : props.routeImpact
+                      ? t("routeImpactDescription", {
+                          defaults: props.routeImpact.active_default_count,
+                          bindings: props.routeImpact.active_binding_count,
+                          admissions: props.routeImpact.open_admission_count,
+                        })
+                      : t("loadingImpact")}
                   <Group mt="sm">
                     <Button
                       size="xs"
                       color="red"
-                      loading={props.busy || !props.routeImpact}
+                      loading={props.busy || props.routeImpactLoading}
+                      disabled={
+                        props.routeImpact === null ||
+                        props.routeImpactError !== null
+                      }
                       onClick={props.onRemoveRoute}
                     >
                       {t("confirmRemove")}
                     </Button>
+                    {props.routeImpactError && (
+                      <Button
+                        size="xs"
+                        variant="light"
+                        onClick={props.onRetryRouteImpact}
+                      >
+                        {t("retry")}
+                      </Button>
+                    )}
                     <Button
                       size="xs"
                       variant="default"
@@ -781,7 +815,7 @@ export function WorkspaceSlackApps(
             <Divider />
             <Stack gap="sm">
               <Text fw={700}>{t("defaultsTitle")}</Text>
-              {props.canManage && (
+              {props.canManage && !selectedConnectionIsDisconnected && (
                 <Group align="end" grow>
                   <TextInput
                     label={t("channelId")}
@@ -849,21 +883,23 @@ export function WorkspaceSlackApps(
                               </Badge>
                             </Table.Td>
                             <Table.Td>
-                              {props.canManage && item.status === "active" && (
-                                <Button
-                                  size="xs"
-                                  color="red"
-                                  variant="subtle"
-                                  loading={props.busy}
-                                  onClick={() =>
-                                    props.onClearDefault(
-                                      item.provider_channel_id,
-                                    )
-                                  }
-                                >
-                                  {t("clear")}
-                                </Button>
-                              )}
+                              {props.canManage &&
+                                !selectedConnectionIsDisconnected &&
+                                item.status === "active" && (
+                                  <Button
+                                    size="xs"
+                                    color="red"
+                                    variant="subtle"
+                                    loading={props.busy}
+                                    onClick={() =>
+                                      props.onClearDefault(
+                                        item.provider_channel_id,
+                                      )
+                                    }
+                                  >
+                                    {t("clear")}
+                                  </Button>
+                                )}
                             </Table.Td>
                           </Table.Tr>
                         ))}
@@ -879,31 +915,32 @@ export function WorkspaceSlackApps(
               )}
             </Stack>
 
-            {props.canManage &&
-              props.selectedConnection.status !== "disconnected" && (
-                <>
-                  <Divider />
-                  <Group justify="space-between">
-                    <Box>
-                      <Text fw={700} c="red">
-                        {t("disconnectTitle")}
-                      </Text>
-                      <Text size="sm" c="dimmed">
-                        {t("disconnectDescription")}
-                      </Text>
-                    </Box>
-                    <Button
-                      color="red"
-                      variant="light"
-                      leftSection={<IconTrash size={16} />}
-                      onClick={props.onPreviewDisconnect}
-                    >
-                      {t("disconnect")}
-                    </Button>
-                  </Group>
-                  {props.previewDisconnect && (
-                    <Alert color="red" title={t("connectionImpactTitle")}>
-                      {props.connectionImpact
+            {props.canManage && !selectedConnectionIsDisconnected && (
+              <>
+                <Divider />
+                <Group justify="space-between">
+                  <Box>
+                    <Text fw={700} c="red">
+                      {t("disconnectTitle")}
+                    </Text>
+                    <Text size="sm" c="dimmed">
+                      {t("disconnectDescription")}
+                    </Text>
+                  </Box>
+                  <Button
+                    color="red"
+                    variant="light"
+                    leftSection={<IconTrash size={16} />}
+                    onClick={props.onPreviewDisconnect}
+                  >
+                    {t("disconnect")}
+                  </Button>
+                </Group>
+                {props.previewDisconnect && (
+                  <Alert color="red" title={t("connectionImpactTitle")}>
+                    {props.connectionImpactError
+                      ? props.connectionImpactError
+                      : props.connectionImpact
                         ? t("connectionImpactDescription", {
                             routes: props.connectionImpact.active_route_count,
                             defaults:
@@ -912,27 +949,40 @@ export function WorkspaceSlackApps(
                               props.connectionImpact.active_binding_count,
                           })
                         : t("loadingImpact")}
-                      <Group mt="sm">
+                    <Group mt="sm">
+                      <Button
+                        size="xs"
+                        color="red"
+                        loading={props.busy || props.connectionImpactLoading}
+                        disabled={
+                          props.connectionImpact === null ||
+                          props.connectionImpactError !== null
+                        }
+                        onClick={props.onDisconnect}
+                      >
+                        {t("confirmDisconnect")}
+                      </Button>
+                      {props.connectionImpactError && (
                         <Button
                           size="xs"
-                          color="red"
-                          loading={props.busy || !props.connectionImpact}
-                          onClick={props.onDisconnect}
+                          variant="light"
+                          onClick={props.onRetryConnectionImpact}
                         >
-                          {t("confirmDisconnect")}
+                          {t("retry")}
                         </Button>
-                        <Button
-                          size="xs"
-                          variant="default"
-                          onClick={props.onCancelPreview}
-                        >
-                          {t("cancel")}
-                        </Button>
-                      </Group>
-                    </Alert>
-                  )}
-                </>
-              )}
+                      )}
+                      <Button
+                        size="xs"
+                        variant="default"
+                        onClick={props.onCancelPreview}
+                      >
+                        {t("cancel")}
+                      </Button>
+                    </Group>
+                  </Alert>
+                )}
+              </>
+            )}
           </Stack>
         </Paper>
       )}

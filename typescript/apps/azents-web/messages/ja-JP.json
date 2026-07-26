@@ -1381,7 +1381,7 @@
     "slackApps": {
       "title": "Slack アプリ",
       "description": "ワークスペース所有の Slack Multi App、エージェントカタログ、チャンネル既定値を管理します。",
-      "appCount": "{count} 件のアプリ",
+      "appCount": "このページのアプリ {count} 件",
       "createTitle": "Slack Multi App を接続",
       "create": "Slack アプリを接続",
       "appsTitle": "Slack アプリ",
@@ -1441,6 +1441,7 @@
       "routeImpactTitle": "ルート削除の影響を確認",
       "routeImpactDescription": "チャンネル既定値 {defaults} 件を削除し、アクティブなバインディング {bindings} 件を終了し、未完了の選択要求 {admissions} 件を期限切れにします。",
       "loadingImpact": "現在の影響プレビューを読み込み中…",
+      "retry": "再試行",
       "confirmRemove": "エージェントを削除",
       "cancel": "キャンセル",
       "defaultsTitle": "チャンネル既定値",
