@@ -9,6 +9,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     KubernetesApi,
     LeaseResource,
     LeaseSpec,
+    NetworkPolicyResource,
     ObjectMeta,
     PersistentVolumeClaimResource,
     PodResource,
@@ -81,6 +82,23 @@ class FakeKubernetesApi(KubernetesApi):
     ) -> Sequence[PersistentVolumeClaimResource]:
         """Unused by leader tests."""
         return ()
+
+    async def get_network_policy(
+        self,
+        name: str,
+        namespace: str,
+    ) -> NetworkPolicyResource | None:
+        """Unused by leader tests."""
+        return None
+
+    async def apply_network_policy(
+        self,
+        network_policy: NetworkPolicyResource,
+    ) -> None:
+        """Unused by leader tests."""
+
+    async def delete_network_policy(self, name: str, namespace: str) -> None:
+        """Unused by leader tests."""
 
     async def get_lease(self, name: str, namespace: str) -> LeaseResource | None:
         """Return the fake Lease."""

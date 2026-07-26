@@ -71,6 +71,16 @@ spec:
               value: {{ .Values.runtimeProviderKubernetes.storage.className | quote }}
             - name: AZ_RUNTIME_PROVIDER_PVC_SIZE
               value: {{ .Values.runtimeProviderKubernetes.storage.size | quote }}
+            - name: AZ_RUNTIME_PROVIDER_GATEWAY_IMAGE
+              value: {{ include "azents.runtimeGatewayImage" . | quote }}
+            - name: AZ_RUNTIME_PROVIDER_ENGINE_IMAGE
+              value: {{ include "azents.runtimeEngineImage" . | quote }}
+            - name: AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE
+              value: {{ include "azents.serverNamespace" . | quote }}
+            - name: AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_LABELS
+              value: {{ dict "app.kubernetes.io/component" "runtime-control" "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/name" (include "azents.name" .) | toJson | quote }}
+            - name: AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT
+              value: "8030"
             - name: AZ_RUNTIME_RUNNER_RESOURCES
               value: {{ .Values.runtimeProviderKubernetes.runnerResources | toJson | quote }}
             - name: AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION

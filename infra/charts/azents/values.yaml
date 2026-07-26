@@ -182,6 +182,16 @@ runtimeProviderKubernetes:
     tag: ""
     digest: ""
     pullPolicy: IfNotPresent
+  gatewayImage:
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  engineImage:
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
   serviceAccount:
     create: true
     name: ""

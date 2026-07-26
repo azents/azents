@@ -90,6 +90,17 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH", "/workspace/agent")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_STORAGE_CLASS", "gp3")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PVC_SIZE", "20Gi")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_GATEWAY_IMAGE", "gateway@sha256:test")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE", "engine@sha256:test")
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE",
+        "azents",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_LABELS",
+        '{"app.kubernetes.io/component":"runtime-control"}',
+    )
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT", "8030")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_ANNOTATIONS", "{}")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_NODE_SELECTOR", "{}")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_TOLERATIONS", "[]")
@@ -111,6 +122,13 @@ def test_provider_settings_defaults_runner_resources_to_none(
     assert settings.runner_resources is None
     assert settings.runner_env == {}
     assert settings.image_pull_secrets == ()
+    assert settings.gateway_image == "gateway@sha256:test"
+    assert settings.engine_image == "engine@sha256:test"
+    assert settings.runtime_control_namespace == "azents"
+    assert settings.runtime_control_labels == {
+        "app.kubernetes.io/component": "runtime-control"
+    }
+    assert settings.runtime_control_port == 8030
     assert settings.service_account_token_file == provider_env
     assert read_service_account_token(provider_env) == "test-provider-credential"
 

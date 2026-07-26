@@ -15,13 +15,23 @@ import aiohttp
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ContainerResourceClaim,
     ContainerResources,
+    ContainerSecurityContext,
     ContainerSpec,
+    EmptyDirVolume,
     EnvVar,
+    ExecAction,
+    IpBlock,
     KubernetesApi,
     KubernetesResourceQuantity,
+    LabelSelector,
     LeaseResource,
     LeaseSpec,
     LocalObjectReference,
+    NetworkPolicyEgressRule,
+    NetworkPolicyPeer,
+    NetworkPolicyPort,
+    NetworkPolicyResource,
+    NetworkPolicySpec,
     ObjectMeta,
     PersistentVolumeClaimResource,
     PersistentVolumeClaimSpec,
@@ -31,6 +41,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodSpec,
     PodStatus,
     PodWatchEvent,
+    Probe,
     Toleration,
     VolumeMount,
 )
@@ -241,6 +252,46 @@ class KubernetesHttpApi(KubernetesApi):
         )
         return tuple(_pvc_resource(item) for item in cast(JsonObject, data)["items"])
 
+    async def get_network_policy(
+        self,
+        name: str,
+        namespace: str,
+    ) -> NetworkPolicyResource | None:
+        data = await self._request_json(
+            "GET",
+            (
+                f"/apis/networking.k8s.io/v1/namespaces/{namespace}"
+                f"/networkpolicies/{name}"
+            ),
+            allow_not_found=True,
+        )
+        return None if data is None else network_policy_resource(data)
+
+    async def apply_network_policy(
+        self,
+        network_policy: NetworkPolicyResource,
+    ) -> None:
+        namespace = network_policy.metadata.namespace
+        name = network_policy.metadata.name
+        await self._create_or_patch(
+            (
+                f"/apis/networking.k8s.io/v1/namespaces/{namespace}"
+                f"/networkpolicies/{name}"
+            ),
+            f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies",
+            network_policy_manifest(network_policy),
+        )
+
+    async def delete_network_policy(self, name: str, namespace: str) -> None:
+        await self._request_json(
+            "DELETE",
+            (
+                f"/apis/networking.k8s.io/v1/namespaces/{namespace}"
+                f"/networkpolicies/{name}"
+            ),
+            allow_not_found=True,
+        )
+
     async def get_lease(self, name: str, namespace: str) -> LeaseResource | None:
         data = await self._request_json(
             "GET",
@@ -360,13 +411,7 @@ def pod_manifest(pod: PodResource) -> JsonObject:
         "containers": [
             _container_manifest(container) for container in pod.spec.containers
         ],
-        "volumes": [
-            {
-                "name": volume.name,
-                "persistentVolumeClaim": {"claimName": volume.claim_name},
-            }
-            for volume in pod.spec.volumes
-        ],
+        "volumes": [_volume_manifest(volume) for volume in pod.spec.volumes],
     }
     if pod.spec.service_account_name is not None:
         spec["serviceAccountName"] = pod.spec.service_account_name
@@ -375,12 +420,15 @@ def pod_manifest(pod: PodResource) -> JsonObject:
             {"name": secret.name} for secret in pod.spec.image_pull_secrets
         ]
     if pod.spec.security_context is not None:
-        spec["securityContext"] = {
-            "runAsUser": pod.spec.security_context.run_as_user,
-            "runAsGroup": pod.spec.security_context.run_as_group,
+        security_context: JsonObject = {
             "fsGroup": pod.spec.security_context.fs_group,
             "fsGroupChangePolicy": pod.spec.security_context.fs_group_change_policy,
         }
+        if pod.spec.security_context.run_as_user is not None:
+            security_context["runAsUser"] = pod.spec.security_context.run_as_user
+        if pod.spec.security_context.run_as_group is not None:
+            security_context["runAsGroup"] = pod.spec.security_context.run_as_group
+        spec["securityContext"] = security_context
     if pod.spec.node_selector:
         spec["nodeSelector"] = dict(pod.spec.node_selector)
     if pod.spec.tolerations:
@@ -409,16 +457,71 @@ def _container_manifest(container: ContainerSpec) -> JsonObject:
     manifest: JsonObject = {
         "name": container.name,
         "image": container.image,
+        "args": list(container.args),
         "workingDir": container.working_dir,
+        "securityContext": _container_security_context_manifest(
+            container.security_context
+        ),
         "env": [{"name": item.name, "value": item.value} for item in container.env],
         "volumeMounts": [
-            {"name": item.name, "mountPath": item.mount_path}
+            {
+                "name": item.name,
+                "mountPath": item.mount_path,
+                "readOnly": item.read_only,
+            }
             for item in container.volume_mounts
         ],
     }
+    if container.command is not None:
+        manifest["command"] = list(container.command)
+    if container.readiness_probe is not None:
+        manifest["readinessProbe"] = _probe_manifest(container.readiness_probe)
     if container.resources is not None:
         manifest["resources"] = _container_resources_manifest(container.resources)
     return manifest
+
+
+def _container_security_context_manifest(
+    security_context: ContainerSecurityContext,
+) -> JsonObject:
+    return {
+        "privileged": security_context.privileged,
+        "allowPrivilegeEscalation": security_context.allow_privilege_escalation,
+        "readOnlyRootFilesystem": security_context.read_only_root_filesystem,
+        "runAsNonRoot": security_context.run_as_non_root,
+        "runAsUser": security_context.run_as_user,
+        "runAsGroup": security_context.run_as_group,
+        "capabilities": {
+            "add": list(security_context.capabilities_add),
+            "drop": list(security_context.capabilities_drop),
+        },
+    }
+
+
+def _probe_manifest(probe: Probe) -> JsonObject:
+    return {
+        "exec": {"command": list(probe.exec_action.command)},
+        "initialDelaySeconds": probe.initial_delay_seconds,
+        "periodSeconds": probe.period_seconds,
+        "timeoutSeconds": probe.timeout_seconds,
+        "failureThreshold": probe.failure_threshold,
+    }
+
+
+def _volume_manifest(
+    volume: PersistentVolumeClaimVolume | EmptyDirVolume,
+) -> JsonObject:
+    if isinstance(volume, PersistentVolumeClaimVolume):
+        return {
+            "name": volume.name,
+            "persistentVolumeClaim": {"claimName": volume.claim_name},
+        }
+    empty_dir: JsonObject = {}
+    if volume.medium is not None:
+        empty_dir["medium"] = volume.medium
+    if volume.size_limit is not None:
+        empty_dir["sizeLimit"] = volume.size_limit
+    return {"name": volume.name, "emptyDir": empty_dir}
 
 
 def _pvc_manifest(pvc: PersistentVolumeClaimResource) -> JsonObject:
@@ -434,6 +537,55 @@ def _pvc_manifest(pvc: PersistentVolumeClaimResource) -> JsonObject:
             },
         },
     }
+
+
+def network_policy_manifest(network_policy: NetworkPolicyResource) -> JsonObject:
+    """Serialize one Provider-owned Runtime NetworkPolicy."""
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": _metadata(network_policy.metadata),
+        "spec": {
+            "podSelector": _label_selector_manifest(network_policy.spec.pod_selector),
+            "policyTypes": list(network_policy.spec.policy_types),
+            "ingress": list(network_policy.spec.ingress),
+            "egress": [
+                _network_policy_egress_manifest(rule)
+                for rule in network_policy.spec.egress
+            ],
+        },
+    }
+
+
+def _network_policy_egress_manifest(
+    rule: NetworkPolicyEgressRule,
+) -> JsonObject:
+    value: JsonObject = {
+        "to": [_network_policy_peer_manifest(peer) for peer in rule.peers],
+    }
+    if rule.ports:
+        value["ports"] = [
+            {"protocol": port.protocol, "port": port.port} for port in rule.ports
+        ]
+    return value
+
+
+def _network_policy_peer_manifest(peer: NetworkPolicyPeer) -> JsonObject:
+    value: JsonObject = {}
+    if peer.namespace_selector is not None:
+        value["namespaceSelector"] = _label_selector_manifest(peer.namespace_selector)
+    if peer.pod_selector is not None:
+        value["podSelector"] = _label_selector_manifest(peer.pod_selector)
+    if peer.ip_block is not None:
+        value["ipBlock"] = {
+            "cidr": peer.ip_block.cidr,
+            "except": list(peer.ip_block.except_cidrs),
+        }
+    return value
+
+
+def _label_selector_manifest(selector: LabelSelector) -> JsonObject:
+    return {"matchLabels": dict(selector.match_labels)}
 
 
 def _container_resources_manifest(resources: ContainerResources) -> JsonObject:
@@ -588,23 +740,84 @@ def _container(data: JsonObject) -> ContainerSpec:
     return ContainerSpec(
         name=str(data["name"]),
         image=str(data["image"]),
+        command=(
+            None
+            if data.get("command") is None
+            else tuple(str(item) for item in data["command"])
+        ),
+        args=tuple(str(item) for item in data.get("args", [])),
         working_dir=str(data.get("workingDir") or ""),
         resources=_container_resources(data.get("resources")),
+        security_context=_container_security_context(
+            cast(JsonObject, data.get("securityContext") or {})
+        ),
+        readiness_probe=_probe(cast(JsonObject | None, data.get("readinessProbe"))),
         env=tuple(
             EnvVar(name=str(item["name"]), value=str(item.get("value") or ""))
             for item in data.get("env", [])
         ),
         volume_mounts=tuple(
-            VolumeMount(name=str(item["name"]), mount_path=str(item["mountPath"]))
+            VolumeMount(
+                name=str(item["name"]),
+                mount_path=str(item["mountPath"]),
+                read_only=bool(item.get("readOnly", False)),
+            )
             for item in data.get("volumeMounts", [])
         ),
     )
 
 
-def _volume(data: JsonObject) -> PersistentVolumeClaimVolume:
-    return PersistentVolumeClaimVolume(
+def _volume(data: JsonObject) -> PersistentVolumeClaimVolume | EmptyDirVolume:
+    persistent_volume_claim = cast(
+        JsonObject | None,
+        data.get("persistentVolumeClaim"),
+    )
+    if persistent_volume_claim is not None:
+        return PersistentVolumeClaimVolume(
+            name=str(data["name"]),
+            claim_name=str(persistent_volume_claim["claimName"]),
+        )
+    empty_dir = cast(JsonObject | None, data.get("emptyDir"))
+    if empty_dir is None:
+        raise RuntimeError("unsupported Runtime Pod volume type")
+    return EmptyDirVolume(
         name=str(data["name"]),
-        claim_name=str(cast(JsonObject, data["persistentVolumeClaim"])["claimName"]),
+        medium=cast(str | None, empty_dir.get("medium")),
+        size_limit=cast(
+            KubernetesResourceQuantity | None,
+            empty_dir.get("sizeLimit"),
+        ),
+    )
+
+
+def _container_security_context(data: JsonObject) -> ContainerSecurityContext:
+    capabilities = cast(JsonObject, data.get("capabilities") or {})
+    return ContainerSecurityContext(
+        privileged=bool(data.get("privileged", False)),
+        allow_privilege_escalation=bool(data.get("allowPrivilegeEscalation", False)),
+        read_only_root_filesystem=bool(data.get("readOnlyRootFilesystem", False)),
+        run_as_non_root=bool(data.get("runAsNonRoot", False)),
+        run_as_user=int(data.get("runAsUser") or 0),
+        run_as_group=int(data.get("runAsGroup") or 0),
+        capabilities_add=tuple(str(item) for item in capabilities.get("add", [])),
+        capabilities_drop=tuple(str(item) for item in capabilities.get("drop", [])),
+    )
+
+
+def _probe(data: JsonObject | None) -> Probe | None:
+    if data is None:
+        return None
+    exec_action = cast(JsonObject | None, data.get("exec"))
+    if exec_action is None:
+        raise RuntimeError("Runtime container readiness probe must use exec")
+    return Probe(
+        exec_action=ExecAction(
+            command=tuple(str(item) for item in exec_action.get("command", []))
+        ),
+        initial_delay_seconds=int(data.get("initialDelaySeconds") or 0),
+        period_seconds=int(data.get("periodSeconds") or 0),
+        timeout_seconds=int(data.get("timeoutSeconds") or 0),
+        failure_threshold=int(data.get("failureThreshold") or 0),
     )
 
 
@@ -615,16 +828,11 @@ def _pod_security_context(data: JsonObject | None) -> PodSecurityContext | None:
     run_as_group = data.get("runAsGroup")
     fs_group = data.get("fsGroup")
     fs_group_change_policy = data.get("fsGroupChangePolicy")
-    if (
-        run_as_user is None
-        or run_as_group is None
-        or fs_group is None
-        or fs_group_change_policy is None
-    ):
+    if fs_group is None or fs_group_change_policy is None:
         return None
     return PodSecurityContext(
-        run_as_user=int(run_as_user),
-        run_as_group=int(run_as_group),
+        run_as_user=None if run_as_user is None else int(run_as_user),
+        run_as_group=None if run_as_group is None else int(run_as_group),
         fs_group=int(fs_group),
         fs_group_change_policy=str(fs_group_change_policy),
     )
@@ -688,6 +896,76 @@ def _pvc_resource(data: JsonObject) -> PersistentVolumeClaimResource:
             access_modes=tuple(str(item) for item in spec.get("accessModes", [])),
             storage_request=str(requests.get("storage") or ""),
         ),
+    )
+
+
+def network_policy_resource(data: JsonObject) -> NetworkPolicyResource:
+    """Parse one Provider-owned Runtime NetworkPolicy."""
+    spec = cast(JsonObject, data["spec"])
+    return NetworkPolicyResource(
+        metadata=_object_meta(data),
+        spec=NetworkPolicySpec(
+            pod_selector=_label_selector_resource(
+                cast(JsonObject, spec.get("podSelector") or {})
+            ),
+            policy_types=tuple(str(item) for item in spec.get("policyTypes", [])),
+            ingress=tuple(spec.get("ingress", [])),
+            egress=tuple(
+                _network_policy_egress_rule(cast(JsonObject, item))
+                for item in spec.get("egress", [])
+            ),
+        ),
+    )
+
+
+def _network_policy_egress_rule(data: JsonObject) -> NetworkPolicyEgressRule:
+    return NetworkPolicyEgressRule(
+        peers=tuple(
+            _network_policy_peer(cast(JsonObject, item)) for item in data.get("to", [])
+        ),
+        ports=tuple(
+            NetworkPolicyPort(
+                protocol=str(item.get("protocol") or "TCP"),
+                port=int(item["port"]),
+            )
+            for item in data.get("ports", [])
+        ),
+    )
+
+
+def _network_policy_peer(data: JsonObject) -> NetworkPolicyPeer:
+    ip_block = cast(JsonObject | None, data.get("ipBlock"))
+    return NetworkPolicyPeer(
+        namespace_selector=(
+            None
+            if data.get("namespaceSelector") is None
+            else _label_selector_resource(cast(JsonObject, data["namespaceSelector"]))
+        ),
+        pod_selector=(
+            None
+            if data.get("podSelector") is None
+            else _label_selector_resource(cast(JsonObject, data["podSelector"]))
+        ),
+        ip_block=(
+            None
+            if ip_block is None
+            else IpBlock(
+                cidr=str(ip_block["cidr"]),
+                except_cidrs=tuple(str(item) for item in ip_block.get("except", [])),
+            )
+        ),
+    )
+
+
+def _label_selector_resource(data: JsonObject) -> LabelSelector:
+    return LabelSelector(
+        match_labels={
+            str(key): str(value)
+            for key, value in cast(
+                JsonObject,
+                data.get("matchLabels") or {},
+            ).items()
+        }
     )
 
 

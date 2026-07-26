@@ -41,6 +41,7 @@ class VolumeMount:
 
     name: str
     mount_path: str
+    read_only: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -68,13 +69,57 @@ class PersistentVolumeClaimVolume:
 
 
 @dataclasses.dataclass(frozen=True)
+class EmptyDirVolume:
+    """Pod-local ephemeral volume."""
+
+    name: str
+    medium: str | None
+    size_limit: KubernetesResourceQuantity | None
+
+
+type PodVolume = PersistentVolumeClaimVolume | EmptyDirVolume
+
+
+@dataclasses.dataclass(frozen=True)
 class PodSecurityContext:
     """Pod-level security context for Runtime workspace ownership."""
 
-    run_as_user: int
-    run_as_group: int
+    run_as_user: int | None
+    run_as_group: int | None
     fs_group: int
     fs_group_change_policy: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ContainerSecurityContext:
+    """Provider-owned per-container security context."""
+
+    privileged: bool
+    allow_privilege_escalation: bool
+    read_only_root_filesystem: bool
+    run_as_non_root: bool
+    run_as_user: int
+    run_as_group: int
+    capabilities_add: Sequence[str]
+    capabilities_drop: Sequence[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class ExecAction:
+    """Exec action used by a container probe."""
+
+    command: Sequence[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class Probe:
+    """Container readiness probe subset."""
+
+    exec_action: ExecAction
+    initial_delay_seconds: int
+    period_seconds: int
+    timeout_seconds: int
+    failure_threshold: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,12 +134,16 @@ class Toleration:
 
 @dataclasses.dataclass(frozen=True)
 class ContainerSpec:
-    """Runtime Runner container spec."""
+    """Provider-owned Runtime container spec."""
 
     name: str
     image: str
+    command: Sequence[str] | None
+    args: Sequence[str]
     working_dir: str
     resources: ContainerResources | None
+    security_context: ContainerSecurityContext
+    readiness_probe: Probe | None
     env: Sequence[EnvVar]
     volume_mounts: Sequence[VolumeMount]
 
@@ -110,7 +159,7 @@ class PodSpec:
     node_selector: Mapping[str, str]
     tolerations: Sequence[Toleration]
     containers: Sequence[ContainerSpec]
-    volumes: Sequence[PersistentVolumeClaimVolume]
+    volumes: Sequence[PodVolume]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -155,6 +204,64 @@ class PersistentVolumeClaimResource:
 
     metadata: ObjectMeta
     spec: PersistentVolumeClaimSpec
+
+
+@dataclasses.dataclass(frozen=True)
+class LabelSelector:
+    """Kubernetes label selector subset."""
+
+    match_labels: Mapping[str, str]
+
+
+@dataclasses.dataclass(frozen=True)
+class IpBlock:
+    """NetworkPolicy IP block peer."""
+
+    cidr: str
+    except_cidrs: Sequence[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class NetworkPolicyPeer:
+    """NetworkPolicy peer subset."""
+
+    namespace_selector: LabelSelector | None
+    pod_selector: LabelSelector | None
+    ip_block: IpBlock | None
+
+
+@dataclasses.dataclass(frozen=True)
+class NetworkPolicyPort:
+    """NetworkPolicy transport port."""
+
+    protocol: str
+    port: int
+
+
+@dataclasses.dataclass(frozen=True)
+class NetworkPolicyEgressRule:
+    """One additive NetworkPolicy egress rule."""
+
+    peers: Sequence[NetworkPolicyPeer]
+    ports: Sequence[NetworkPolicyPort]
+
+
+@dataclasses.dataclass(frozen=True)
+class NetworkPolicySpec:
+    """Runtime-specific NetworkPolicy spec."""
+
+    pod_selector: LabelSelector
+    policy_types: Sequence[str]
+    ingress: Sequence[object]
+    egress: Sequence[NetworkPolicyEgressRule]
+
+
+@dataclasses.dataclass(frozen=True)
+class NetworkPolicyResource:
+    """Runtime-specific NetworkPolicy resource."""
+
+    metadata: ObjectMeta
+    spec: NetworkPolicySpec
 
 
 @dataclasses.dataclass(frozen=True)
@@ -234,6 +341,25 @@ class KubernetesApi(Protocol):
         namespace: str,
     ) -> Sequence[PersistentVolumeClaimResource]:
         """List PVCs matching labels."""
+        ...
+
+    async def get_network_policy(
+        self,
+        name: str,
+        namespace: str,
+    ) -> NetworkPolicyResource | None:
+        """Return a NetworkPolicy by name."""
+        ...
+
+    async def apply_network_policy(
+        self,
+        network_policy: NetworkPolicyResource,
+    ) -> None:
+        """Create or update a NetworkPolicy."""
+        ...
+
+    async def delete_network_policy(self, name: str, namespace: str) -> None:
+        """Delete a NetworkPolicy when present."""
         ...
 
     async def get_lease(self, name: str, namespace: str) -> LeaseResource | None:

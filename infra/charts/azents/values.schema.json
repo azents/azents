@@ -580,6 +580,12 @@
         "runnerImage": {
           "$ref": "#/definitions/image"
         },
+        "gatewayImage": {
+          "$ref": "#/definitions/image"
+        },
+        "engineImage": {
+          "$ref": "#/definitions/image"
+        },
         "serviceAccount": {
           "$ref": "#/definitions/namedCreatable"
         },

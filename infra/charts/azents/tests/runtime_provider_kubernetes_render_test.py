@@ -22,6 +22,10 @@ def _helm_template(*values: str) -> str:
         "web.image.tag=sha",
         "adminWeb.image.repository=repo/admin-web",
         "adminWeb.image.tag=sha",
+        "runtimeProviderKubernetes.gatewayImage.repository=repo/gateway",
+        "runtimeProviderKubernetes.gatewayImage.tag=sha",
+        "runtimeProviderKubernetes.engineImage.repository=repo/engine",
+        "runtimeProviderKubernetes.engineImage.tag=sha",
         "secrets.existingSecrets.redis=azents-redis",
         "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
     )
@@ -120,8 +124,17 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_RUNNER_CPU_LIMIT" not in rendered
     assert "AZ_RUNTIME_RUNNER_MEMORY_LIMIT" not in rendered
     assert "AZ_RUNTIME_SERVICE_ACCOUNT_NAME" not in rendered
-    assert "azents-runtime-workload-isolation" in rendered
+    assert "azents-runtime-legacy-workload-egress" in rendered
+    assert "azents-runtime-execution-policy-default-deny" in rendered
     assert "azents/managed-by: azents-runtime-provider-kubernetes" in rendered
+    assert 'azents/execution-policy-managed: "true"' in rendered
+    assert "AZ_RUNTIME_PROVIDER_GATEWAY_IMAGE" in rendered
+    assert "repo/gateway:sha" in rendered
+    assert "AZ_RUNTIME_PROVIDER_ENGINE_IMAGE" in rendered
+    assert "repo/engine:sha" in rendered
+    assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE" in rendered
+    assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_LABELS" in rendered
+    assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT" in rendered
     assert "192.168.0.0/16" in rendered
     assert 'namespace: "default"' in rendered
     assert 'namespace: "azents-runtime"' in rendered
@@ -187,6 +200,49 @@ def test_runtime_provider_kubernetes_network_policy_allows_runtime_control() -> 
     assert 'app.kubernetes.io/name: "azents"' in rendered
     assert "port: 8030" in rendered
     assert runtime_control_index < public_rule_index < denied_index
+
+
+def test_runtime_provider_kubernetes_policy_managed_pods_fail_closed() -> None:
+    """Policy-managed Pods have a deny baseline and no broad legacy egress."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+    )
+
+    legacy_policy = rendered[
+        rendered.index("name: azents-runtime-legacy-workload-egress") : rendered.index(
+            "name: azents-runtime-execution-policy-default-deny"
+        )
+    ]
+    default_deny = rendered[
+        rendered.index("name: azents-runtime-execution-policy-default-deny") :
+    ]
+
+    assert "key: azents/execution-policy-managed" in legacy_policy
+    assert "operator: DoesNotExist" in legacy_policy
+    assert 'azents/execution-policy-managed: "true"' not in legacy_policy
+    assert 'azents/execution-policy-managed: "true"' in default_deny
+    assert "ingress: []" in default_deny
+    assert "egress: []" in default_deny
+    assert "cidr: 0.0.0.0/0" not in default_deny
+
+
+def test_runtime_provider_kubernetes_default_deny_cannot_be_disabled() -> None:
+    """Disabling legacy broad egress retains the policy-managed deny baseline."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+        "runtimeProviderKubernetes.networkPolicy.enabled=false",
+    )
+
+    assert "azents-runtime-legacy-workload-egress" not in rendered
+    assert "azents-runtime-execution-policy-default-deny" in rendered
 
 
 def test_runtime_provider_kubernetes_network_policy_allows_explicit_cidrs() -> None:
@@ -346,6 +402,7 @@ def test_runtime_provider_kubernetes_has_no_secret_or_tokenreview_authority() ->
     assert provider_rbac
     assert 'resources: ["pods"]' in provider_rbac
     assert 'resources: ["persistentvolumeclaims"]' in provider_rbac
+    assert 'resources: ["networkpolicies"]' in provider_rbac
     assert 'resources: ["leases"]' in provider_rbac
     assert "tokenreviews" not in provider_rbac
     assert 'resources: ["secrets"]' not in provider_rbac
