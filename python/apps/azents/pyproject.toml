@@ -44,7 +44,7 @@ dependencies = [
     "az-common",
     "litellm==1.91.3",
     "openai[realtime]==2.45.0",
-    "Pillow==12.2.0",
+    "Pillow==12.3.0",
     "redis==7.4.0",
     "mcp==1.28.1",
     "httpx==0.28.1",
