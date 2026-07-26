@@ -1,6 +1,7 @@
 """External Channel connection setup and provider health validation."""
 
 import datetime
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated, assert_never
@@ -43,6 +44,8 @@ from azents.services.external_channel.slack_http import (
     SlackConnectionValidation,
     SlackWebAPIClient,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalChannelConnectionNotFound(LookupError):
@@ -237,6 +240,15 @@ class ExternalChannelConnectionService:
             app_id=configuration.provider_app_id,
             transport=configuration.transport,
         )
+        if result.status != "valid":
+            logger.warning(
+                "Slack External Channel validation did not succeed",
+                extra={
+                    "connection_id": connection_id,
+                    "validation_code": result.code,
+                    "validation_status": result.status,
+                },
+            )
         checked_at = datetime.datetime.now(datetime.UTC)
         status = _connection_status(result)
         identity = result.identity

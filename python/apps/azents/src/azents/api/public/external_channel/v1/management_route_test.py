@@ -36,6 +36,11 @@ from azents.services.external_channel.data import (
     ExternalChannelConnectionStatusSnapshot,
     ExternalChannelCredentialSnapshot,
 )
+from azents.services.external_channel.discord_api import (
+    DiscordAPIConfigurationInvalid,
+    DiscordAPICredentialsInvalid,
+    DiscordAPIUnavailable,
+)
 from azents.services.external_channel.management import (
     ExternalChannelManagementGenerationChanged,
     ExternalChannelManagementNotFound,
@@ -112,7 +117,6 @@ def _client(
     *,
     role: WorkspaceUserRole = WorkspaceUserRole.OWNER,
     multi_app_enabled: bool = True,
-    discord_enabled: bool = False,
 ) -> TestClient:
     app = create_dummy_public_app()
     app.dependency_overrides[ExternalChannelManagementService] = lambda: service
@@ -134,7 +138,6 @@ def _client(
         ),
         api_url="https://api.example.test",
         external_channel_multi_app_enabled=multi_app_enabled,
-        external_channel_discord_enabled=discord_enabled,
     )
     return TestClient(app)
 
@@ -314,15 +317,31 @@ def test_multi_app_creation_is_blocked_before_mode_aware_enablement() -> None:
 
 
 @pytest.mark.parametrize(
-    "path",
+    ("path", "service_method"),
     [
-        "/external-channel/v1/workspaces/ws/agents/agent-1/external-channels/discord",
-        "/external-channel/v1/workspaces/ws/external-channels/discord/multi",
+        (
+            "/external-channel/v1/workspaces/ws/agents/agent-1/"
+            "external-channels/discord",
+            "setup_discord",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi",
+            "setup_multi_discord",
+        ),
     ],
 )
-def test_discord_creation_is_blocked_until_full_provider_rollout(path: str) -> None:
-    """Discord setup cannot create provider state before required later phases."""
+def test_discord_creation_is_available_without_a_rollout_flag(
+    path: str,
+    service_method: str,
+) -> None:
+    """Discord setup is available without deployment-scoped feature gates."""
     service = AsyncMock(spec=ExternalChannelManagementService)
+    service.setup_discord.return_value = ManagedConnectionSetup(
+        connection=_connection()
+    )
+    service.setup_multi_discord.return_value = ManagedMultiConnectionSetup(
+        connection=_multi_connection()
+    )
 
     response = _client(service).post(
         path,
@@ -339,14 +358,8 @@ def test_discord_creation_is_blocked_until_full_provider_rollout(path: str) -> N
         },
     )
 
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": (
-            "Discord External Channel creation is not enabled for this deployment."
-        )
-    }
-    service.setup_discord.assert_not_awaited()
-    service.setup_multi_discord.assert_not_awaited()
+    assert response.status_code == 201
+    getattr(service, service_method).assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -364,12 +377,13 @@ def test_discord_creation_is_blocked_until_full_provider_rollout(path: str) -> N
         ),
     ],
 )
-def test_discord_replacement_is_blocked_until_full_provider_rollout(
+def test_discord_replacement_is_available_without_a_rollout_flag(
     path: str,
     service_method: str,
 ) -> None:
-    """Discord replacement fails closed before it can persist a new secret."""
+    """Discord replacement is available without deployment-scoped feature gates."""
     service = AsyncMock(spec=ExternalChannelManagementService)
+    getattr(service, service_method).return_value = _discord_status()
 
     response = _client(service).put(
         path,
@@ -386,13 +400,8 @@ def test_discord_replacement_is_blocked_until_full_provider_rollout(
         },
     )
 
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": (
-            "Discord External Channel creation is not enabled for this deployment."
-        )
-    }
-    getattr(service, service_method).assert_not_awaited()
+    assert response.status_code == 200
+    getattr(service, service_method).assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -418,7 +427,7 @@ def test_discord_replacement_returns_redacted_status(
     service = AsyncMock(spec=ExternalChannelManagementService)
     getattr(service, service_method).return_value = _discord_status()
 
-    response = _client(service, discord_enabled=True).put(
+    response = _client(service).put(
         path,
         json={
             "app_id": "discord-app-1",
@@ -442,6 +451,77 @@ def test_discord_replacement_returns_redacted_status(
     getattr(service, service_method).assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    ("error", "expected_detail"),
+    [
+        (
+            DiscordAPICredentialsInvalid(),
+            {
+                "code": "discord_credentials_invalid",
+                "message": "Discord rejected the Bot Token.",
+                "action_hint": "Replace the Bot Token and try again.",
+            },
+        ),
+        (
+            DiscordAPIConfigurationInvalid(),
+            {
+                "code": "discord_callback_configuration_invalid",
+                "message": "Discord rejected the interaction endpoint.",
+                "action_hint": (
+                    "Check the Application configuration and public callback URL, "
+                    "then try again."
+                ),
+            },
+        ),
+        (
+            DiscordAPIUnavailable(),
+            {
+                "code": "discord_api_unavailable",
+                "message": "Discord is temporarily unavailable.",
+                "action_hint": "Try again later.",
+            },
+        ),
+        (
+            ValueError("Discord callback URL is not configured."),
+            {
+                "code": "discord_configuration_invalid",
+                "message": "Discord connection configuration is invalid.",
+                "action_hint": "Check the App settings and try again.",
+            },
+        ),
+    ],
+)
+def test_discord_setup_returns_safe_structured_provider_errors(
+    error: DiscordAPIConfigurationInvalid
+    | DiscordAPICredentialsInvalid
+    | DiscordAPIUnavailable
+    | ValueError,
+    expected_detail: dict[str, str],
+) -> None:
+    """Provider failures expose an actionable redacted error without Bot Token data."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.setup_discord.side_effect = error
+
+    response = _client(service).post(
+        "/external-channel/v1/workspaces/ws/agents/agent-1/external-channels/discord",
+        json={
+            "app_id": "discord-app-1",
+            "configuration": {
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+            },
+            "credentials": {
+                "provider": "discord",
+                "bot_token": "discord-bot-token",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": expected_detail}
+    assert "discord-bot-token" not in response.text
+
+
 def test_member_cannot_replace_workspace_discord_multi_app() -> None:
     """Workspace Multi credential rotation retains Manager-or-Owner authority."""
     service = AsyncMock(spec=ExternalChannelManagementService)
@@ -449,7 +529,6 @@ def test_member_cannot_replace_workspace_discord_multi_app() -> None:
     response = _client(
         service,
         role=WorkspaceUserRole.MEMBER,
-        discord_enabled=True,
     ).put(
         "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
         "connection-1",

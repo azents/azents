@@ -9,6 +9,7 @@ import type {
   WorkspaceMultiAppsState,
 } from "../types";
 import type {
+  ExternalChannelConnectionStatusSnapshot,
   ExternalChannelMultiConnectionImpact,
   ExternalChannelMultiRouteImpact,
   ManagedChannelDefault,
@@ -110,6 +111,17 @@ function errorCode(error: unknown): string | null {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+function validationMessage(
+  result: ExternalChannelConnectionStatusSnapshot,
+): string | null {
+  if (result.status === "active") {
+    return null;
+  }
+  return [result.message, result.action_hint]
+    .filter((value): value is string => value !== null && value !== "")
+    .join(" ");
 }
 
 export function useWorkspaceSlackAppsContainer({
@@ -270,18 +282,27 @@ export function useWorkspaceSlackAppsContainer({
     });
   const updateMutation = trpc.externalChannel.updateMultiConnection.useMutation(
     {
-      onSuccess: () => void refresh(),
+      onSuccess: (result) => {
+        setActionError(validationMessage(result));
+        void refresh();
+      },
       onError: (error) => void fail(error),
     },
   );
   const updateDiscordMutation =
     trpc.externalChannel.updateMultiDiscordConnection.useMutation({
-      onSuccess: () => void refresh(),
+      onSuccess: (result) => {
+        setActionError(validationMessage(result));
+        void refresh();
+      },
       onError: (error) => void fail(error),
     });
   const validateMutation =
     trpc.externalChannel.validateMultiConnection.useMutation({
-      onSuccess: () => void refresh(),
+      onSuccess: (result) => {
+        setActionError(validationMessage(result));
+        void refresh();
+      },
       onError: (error) => void fail(error),
     });
   const addRouteMutation = trpc.externalChannel.addMultiRoute.useMutation({

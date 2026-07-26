@@ -1,6 +1,7 @@
 """Authenticated External Channel management API."""
 
 import datetime
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -45,6 +46,12 @@ from azents.services.external_channel.data import (
     ExternalChannelConnectionStatusSnapshot,
     SlackConnectionCredentials,
 )
+from azents.services.external_channel.discord_api import (
+    DiscordAPIConfigurationInvalid,
+    DiscordAPICredentialsInvalid,
+    DiscordAPIError,
+    DiscordAPIUnavailable,
+)
 from azents.services.external_channel.management import (
     ExternalChannelDecisionInput,
     ExternalChannelManagementGenerationChanged,
@@ -56,6 +63,7 @@ from azents.services.external_channel.management import (
     slack_manifest_guidance,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -171,13 +179,11 @@ async def setup_multi_slack_connection(
 async def setup_multi_discord_connection(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ExternalChannelManagementService, Depends()],
-    config: Annotated[Config, Depends(get_config)],
     *,
     request_body: DiscordConnectionSetupRequest,
 ) -> ManagedMultiConnectionSetup:
     """Create a zero-Agent-capable configuring Workspace Discord Multi App."""
     _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
-    _require_discord_enabled(config)
     try:
         return await service.setup_multi_discord(
             workspace_id=member.workspace_id,
@@ -185,8 +191,18 @@ async def setup_multi_discord_connection(
             configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
+    except DiscordAPIError as error:
+        raise _discord_activation_error(
+            error,
+            operation="setup_multi",
+            connection_id=None,
+        ) from error
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise _discord_activation_error(
+            error,
+            operation="setup_multi",
+            connection_id=None,
+        ) from error
 
 
 @router.get("/workspaces/{handle}/external-channels/slack/multi/{connection_id}")
@@ -256,14 +272,12 @@ async def update_multi_slack_connection(
 async def update_multi_discord_connection(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ExternalChannelManagementService, Depends()],
-    config: Annotated[Config, Depends(get_config)],
     *,
     connection_id: str,
     request_body: DiscordConnectionSetupRequest,
 ) -> ExternalChannelConnectionStatusSnapshot:
     """Replace a Discord Multi App and reactivate its callback authority."""
     _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
-    _require_discord_enabled(config)
     try:
         return await service.update_multi_discord(
             workspace_id=member.workspace_id,
@@ -272,12 +286,22 @@ async def update_multi_discord_connection(
             configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
+    except DiscordAPIError as error:
+        raise _discord_activation_error(
+            error,
+            operation="update_multi",
+            connection_id=connection_id,
+        ) from error
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelConnectionStateChanged as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise _discord_activation_error(
+            error,
+            operation="update_multi",
+            connection_id=connection_id,
+        ) from error
 
 
 @router.post(
@@ -289,17 +313,29 @@ async def validate_multi_slack_connection(
     *,
     connection_id: str,
 ) -> ExternalChannelConnectionStatusSnapshot:
-    """Validate one Workspace Slack Multi App."""
+    """Validate one Workspace Multi App."""
     _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
     try:
         return await service.validate_multi_connection(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
         )
+    except DiscordAPIError as error:
+        raise _discord_activation_error(
+            error,
+            operation="validate_multi",
+            connection_id=connection_id,
+        ) from error
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelConnectionStateChanged as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise _discord_activation_error(
+            error,
+            operation="validate_multi",
+            connection_id=connection_id,
+        ) from error
 
 
 @router.delete("/workspaces/{handle}/external-channels/slack/multi/{connection_id}")
@@ -649,13 +685,11 @@ async def setup_slack_connection(
 async def setup_discord_connection(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ExternalChannelManagementService, Depends()],
-    config: Annotated[Config, Depends(get_config)],
     *,
     agent_id: str,
     request_body: DiscordConnectionSetupRequest,
 ) -> ManagedConnectionSetup:
     """Create a configuring dedicated Discord App and its sole Agent route."""
-    _require_discord_enabled(config)
     try:
         return await service.setup_discord(
             workspace_id=member.workspace_id,
@@ -665,12 +699,19 @@ async def setup_discord_connection(
             configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
+    except DiscordAPIError as error:
+        raise _discord_activation_error(
+            error,
+            operation="setup_dedicated",
+            connection_id=None,
+        ) from error
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ValueError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(error),
+        raise _discord_activation_error(
+            error,
+            operation="setup_dedicated",
+            connection_id=None,
         ) from error
 
 
@@ -698,6 +739,18 @@ async def validate_connection(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(error),
+        ) from error
+    except DiscordAPIError as error:
+        raise _discord_activation_error(
+            error,
+            operation="validate_dedicated",
+            connection_id=connection_id,
+        ) from error
+    except ValueError as error:
+        raise _discord_activation_error(
+            error,
+            operation="validate_dedicated",
+            connection_id=connection_id,
         ) from error
 
 
@@ -740,14 +793,12 @@ async def update_slack_connection(
 async def update_discord_connection(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ExternalChannelManagementService, Depends()],
-    config: Annotated[Config, Depends(get_config)],
     *,
     agent_id: str,
     connection_id: str,
     request_body: DiscordConnectionSetupRequest,
 ) -> ExternalChannelConnectionStatusSnapshot:
     """Replace a dedicated Discord App and reactivate callback authority."""
-    _require_discord_enabled(config)
     try:
         return await service.update_discord(
             workspace_id=member.workspace_id,
@@ -758,6 +809,12 @@ async def update_discord_connection(
             configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
+    except DiscordAPIError as error:
+        raise _discord_activation_error(
+            error,
+            operation="update_dedicated",
+            connection_id=connection_id,
+        ) from error
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
     except ExternalChannelConnectionStateChanged as error:
@@ -766,7 +823,11 @@ async def update_discord_connection(
             detail=str(error),
         ) from error
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise _discord_activation_error(
+            error,
+            operation="update_dedicated",
+            connection_id=connection_id,
+        ) from error
 
 
 @router.delete(
@@ -983,12 +1044,46 @@ def _require_multi_app_enabled(config: Config) -> None:
         )
 
 
-def _require_discord_enabled(config: Config) -> None:
-    """Reject Discord mutations until the full provider rollout is ready."""
-    if not config.external_channel_discord_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Discord External Channel creation is not enabled for this deployment."
+def _discord_activation_error(
+    error: DiscordAPIError | ValueError,
+    *,
+    operation: str,
+    connection_id: str | None,
+) -> HTTPException:
+    """Log a sanitized Discord setup failure and return a safe client error."""
+    logger.exception(
+        "Discord External Channel activation failed",
+        extra={
+            "operation": operation,
+            "connection_id": connection_id,
+            "error_type": type(error).__name__,
+        },
+    )
+    if isinstance(error, DiscordAPICredentialsInvalid):
+        detail = {
+            "code": "discord_credentials_invalid",
+            "message": "Discord rejected the Bot Token.",
+            "action_hint": "Replace the Bot Token and try again.",
+        }
+    elif isinstance(error, DiscordAPIConfigurationInvalid):
+        detail = {
+            "code": "discord_callback_configuration_invalid",
+            "message": "Discord rejected the interaction endpoint.",
+            "action_hint": (
+                "Check the Application configuration and public callback URL, "
+                "then try again."
             ),
-        )
+        }
+    elif isinstance(error, DiscordAPIUnavailable):
+        detail = {
+            "code": "discord_api_unavailable",
+            "message": "Discord is temporarily unavailable.",
+            "action_hint": "Try again later.",
+        }
+    else:
+        detail = {
+            "code": "discord_configuration_invalid",
+            "message": "Discord connection configuration is invalid.",
+            "action_hint": "Check the App settings and try again.",
+        }
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)

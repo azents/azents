@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import ExternalChannelConnectionStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import ExternalChannelInteractionAdmission
@@ -92,6 +93,13 @@ class DiscordHTTPAdmissionService:
             )
         if envelope.interaction_type == 1:
             return DiscordHTTPAdmissionResult(envelope=envelope, admission=None)
+        if configuration.status not in (
+            ExternalChannelConnectionStatus.ACTIVE,
+            ExternalChannelConnectionStatus.DEGRADED,
+        ):
+            raise DiscordInteractionUnauthorized(
+                "Discord interaction callback is not active."
+            )
         if envelope.guild_id != configuration.provider_tenant_id:
             raise DiscordInteractionUnauthorized(
                 "Discord interaction could not be authenticated."

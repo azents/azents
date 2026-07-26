@@ -369,10 +369,21 @@ class TestExternalChannelRepository:
                 }
             ),
         )
+        prepared = await repo.prepare_discord_callback(
+            rdb_session,
+            connection_id=connection.id,
+            expected_encrypted_credentials="ciphertext-only",
+            expected_configuration_generation=connection.configuration_generation,
+            provider_app_id="discord-app-1",
+            interaction_public_key="a" * 64,
+            callback_selector_hash="selector-hash",
+        )
+        assert prepared is True
         activated = await repo.activate_discord_connection(
             rdb_session,
             connection_id=connection.id,
             expected_encrypted_credentials="ciphertext-only",
+            expected_configuration_generation=connection.configuration_generation,
             provider_app_id="discord-app-1",
             provider_tenant_id="guild-1",
             provider_bot_user_id=None,

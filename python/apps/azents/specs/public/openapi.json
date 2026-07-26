@@ -5260,7 +5260,7 @@
           "External Channel v1"
         ],
         "summary": "Validate Multi Slack Connection",
-        "description": "Validate one Workspace Slack Multi App.",
+        "description": "Validate one Workspace Multi App.",
         "operationId": "external_channel_v1_validate_multi_slack_connection",
         "security": [
           {

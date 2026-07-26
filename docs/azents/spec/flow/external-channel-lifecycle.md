@@ -22,7 +22,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-26
-spec_version: 11
+spec_version: 12
 ---
 
 # External Channel Lifecycle
@@ -59,8 +59,13 @@ Editing a visible Discord connection replaces the submitted Application identity
 target Guild configuration, and complete Bot credential set in one fenced operation.
 It invalidates stale callback selector, Application claim, Gateway lease/checkpoint,
 gap, identity, capability, and health projections before callback activation repeats.
-The Gateway Worker can claim only the newly activated configuration; a stale worker
-cannot continue mutation after replacement or disconnect.
+Callback activation first persists the new selector hash and Discord Application public
+key under the unchanged credential and configuration-generation fences, commits that
+provisional PING-only authority, then asks Discord to register the endpoint. A failed
+registration clears that provisional authority and moves the connection to
+`reconnect_required`; normal interactions are rejected until the final activation
+commit. The Gateway Worker can claim only the newly activated configuration; a stale
+worker cannot continue mutation after replacement or disconnect.
 
 Revoking a participant grant deletes the selected grant policy row after an ownership
 check. It does not delete canonical provider content, invocation history, projected
@@ -142,6 +147,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-26** (spec_version 12) — Defined Discord's provisional PING-only
+  callback activation order, fenced cleanup after registration failure, and removal of
+  the deployment-scoped Discord rollout gate.
 - **2026-07-26** (spec_version 11) — Added fenced Discord credential/callback
   replacement, Gateway lease/checkpoint invalidation, and provider-health repair
   behavior without rerouting retained bindings.

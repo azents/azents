@@ -787,7 +787,13 @@
           "$ref": "#/definitions/componentGate"
         },
         "discordGateway": {
-          "$ref": "#/definitions/componentGate"
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resources": {
+              "type": "object"
+            }
+          }
         },
         "scheduler": {
           "$ref": "#/definitions/componentGate"

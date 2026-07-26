@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-26
-spec_version: 17
+spec_version: 18
 ---
 
 # External Channel
@@ -209,11 +209,15 @@ handoff scope before reading or replacing that channel's default.
 
 Discord Single and Multi setup use separate Agent and Workspace flows. A connection
 validates that its Bot Token belongs to the submitted Discord Application, retains the
-target Guild identity, configures an opaque signed-interaction callback, and activates
-only after the fenced configuration commit. Replacing Discord credentials or App
-identity invalidates prior callback and Gateway authority before activation repeats.
-Discord creation remains rollout-gated until every API and Worker reader is
-provider-aware and the dedicated Gateway Worker is deployed.
+target Guild identity, durably prepares the opaque callback selector hash and
+Application public key behind the current credential and configuration-generation
+fences, then configures the signed-interaction callback. This preparation accepts only
+Discord PING verification; ordinary interactions remain unauthorized until the
+activation commit. A failed provider registration clears the provisional callback
+authority behind the same fences and requires reconnection. Replacing Discord
+credentials or App identity invalidates prior callback and Gateway authority before
+activation repeats. Discord is available without a deployment-scoped provider rollout
+flag; every enabled Server deployment includes the dedicated Gateway Worker.
 
 Slack validation first uses `auth.test` to resolve Team and Bot identity, then uses
 `bots.info` to verify that the Bot Token's actual App ID equals the configured App
@@ -246,6 +250,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-26** (spec_version 18) — Removed the Discord rollout gate, made the
+  Gateway Worker part of every Server deployment, and specified provisional fenced
+  callback authority so Discord's immediate PING verification can succeed without
+  authorizing ordinary interactions.
 - **2026-07-26** (spec_version 17) — Promoted Discord as a supported External
   Channel provider with customer-owned Single/Multi Apps, signed callback and
   Gateway authority, provider-safe attachment retrieval, rollout gating, and

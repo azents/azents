@@ -40,7 +40,7 @@ _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
 
 
 class _SessionDouble:
-    """Record the only durable activation transaction."""
+    """Record durable activation transactions."""
 
     def __init__(self, events: list[str]) -> None:
         self.events = events
@@ -63,6 +63,8 @@ class _RepositoryDouble:
         self.events = events
         self.activate_result = activate_result
         self.activation_kwargs: dict[str, object] | None = None
+        self.prepare_kwargs: dict[str, object] | None = None
+        self.clear_kwargs: dict[str, object] | None = None
 
     async def get_connection_configuration(
         self,
@@ -84,6 +86,28 @@ class _RepositoryDouble:
         self.events.append("activate")
         self.activation_kwargs = kwargs
         return self.activate_result
+
+    async def prepare_discord_callback(
+        self,
+        session: AsyncSession,
+        **kwargs: object,
+    ) -> bool:
+        """Record durable PING verification preparation."""
+        del session
+        self.events.append("prepare")
+        self.prepare_kwargs = kwargs
+        return True
+
+    async def clear_prepared_discord_callback(
+        self,
+        session: AsyncSession,
+        **kwargs: object,
+    ) -> bool:
+        """Record provisional callback cleanup without retaining its selector."""
+        del session
+        self.events.append("clear")
+        self.clear_kwargs = kwargs
+        return True
 
 
 class _DiscordClientDouble:
@@ -235,7 +259,7 @@ async def test_missing_callback_url_fails_before_repository_or_provider_io(
 
 
 @pytest.mark.asyncio
-async def test_activation_configures_provider_before_durable_activation(
+async def test_activation_prepares_callback_before_provider_validation(
     codec: ExternalChannelCredentialsCodec,
 ) -> None:
     """Only the selector hash reaches the durable activation mutation."""
@@ -257,7 +281,16 @@ async def test_activation_configures_provider_before_durable_activation(
 
     snapshot = await service.activate(connection_id=configuration.id)
 
-    assert events == ["load", "metadata", "bot", "endpoint", "activate", "commit"]
+    assert events == [
+        "load",
+        "metadata",
+        "bot",
+        "prepare",
+        "commit",
+        "endpoint",
+        "activate",
+        "commit",
+    ]
     assert snapshot.status is ExternalChannelConnectionStatus.ACTIVE
     assert snapshot.identity is not None
     assert snapshot.identity.app_id == "app-1"
@@ -270,6 +303,8 @@ async def test_activation_configures_provider_before_durable_activation(
     selector_hash = repository.activation_kwargs["callback_selector_hash"]
     assert isinstance(selector_hash, str)
     assert len(selector_hash) == 64
+    assert repository.prepare_kwargs is not None
+    assert repository.prepare_kwargs["callback_selector_hash"] == selector_hash
     assert client.endpoint_url.rsplit("/", maxsplit=1)[1] not in repr(
         repository.activation_kwargs
     )
@@ -298,8 +333,23 @@ async def test_provider_endpoint_failure_does_not_activate(
     with pytest.raises(DiscordAPIUnavailable):
         await service.activate(connection_id=configuration.id)
 
-    assert events == ["load", "metadata", "bot", "endpoint"]
+    assert events == [
+        "load",
+        "metadata",
+        "bot",
+        "prepare",
+        "commit",
+        "endpoint",
+        "clear",
+        "commit",
+    ]
     assert repository.activation_kwargs is None
+    assert repository.prepare_kwargs is not None
+    assert repository.clear_kwargs is not None
+    assert (
+        repository.clear_kwargs["callback_selector_hash"]
+        == repository.prepare_kwargs["callback_selector_hash"]
+    )
 
 
 @pytest.mark.asyncio
@@ -325,4 +375,14 @@ async def test_lost_activation_fence_is_reported_without_commit(
     with pytest.raises(ValueError, match="authority changed"):
         await service.activate(connection_id=configuration.id)
 
-    assert events == ["load", "metadata", "bot", "endpoint", "activate"]
+    assert events == [
+        "load",
+        "metadata",
+        "bot",
+        "prepare",
+        "commit",
+        "endpoint",
+        "activate",
+        "clear",
+        "commit",
+    ]

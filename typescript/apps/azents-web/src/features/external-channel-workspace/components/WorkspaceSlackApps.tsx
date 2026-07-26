@@ -8,6 +8,7 @@ import {
   Center,
   Divider,
   Group,
+  List,
   Loader,
   Paper,
   PasswordInput,
@@ -15,6 +16,7 @@ import {
   ScrollArea,
   SegmentedControl,
   Select,
+  SimpleGrid,
   Stack,
   Table,
   Text,
@@ -26,7 +28,8 @@ import {
   IconAlertTriangle,
   IconArrowLeft,
   IconArrowRight,
-  IconPlugConnected,
+  IconBrandDiscord,
+  IconBrandSlack,
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
@@ -75,6 +78,37 @@ function isDiscordDraftComplete(draft: DiscordMultiConnectionDraft): boolean {
     draft.appId.trim() !== "" &&
     draft.targetGuildId.trim() !== "" &&
     draft.botToken.trim() !== ""
+  );
+}
+
+function SlackMultiAppGuide(): ReactElement {
+  const t = useTranslations("workspace.slackApps");
+
+  return (
+    <Alert color="blue" title={t("slackGuideTitle")}>
+      <List size="sm" spacing="xs">
+        <List.Item>{t("slackGuideStep1")}</List.Item>
+        <List.Item>{t("slackGuideStep2")}</List.Item>
+        <List.Item>{t("slackGuideStep3")}</List.Item>
+        <List.Item>{t("slackGuideStep4")}</List.Item>
+      </List>
+    </Alert>
+  );
+}
+
+function DiscordMultiAppGuide(): ReactElement {
+  const t = useTranslations("workspace.slackApps");
+
+  return (
+    <Alert color="blue" title={t("discordGuideTitle")}>
+      <List size="sm" spacing="xs">
+        <List.Item>{t("discordGuideStep1")}</List.Item>
+        <List.Item>{t("discordGuideStep2")}</List.Item>
+        <List.Item>{t("discordGuideStep3")}</List.Item>
+        <List.Item>{t("discordGuideStep4")}</List.Item>
+        <List.Item>{t("discordGuideStep5")}</List.Item>
+      </List>
+    </Alert>
   );
 }
 
@@ -494,17 +528,18 @@ export function WorkspaceSlackApps(
       )}
 
       {props.canManage && (
-        <Stack gap="md">
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
           <Paper withBorder p="md" radius="md">
             <Stack gap="sm">
               <Text fw={700}>{t("createTitle")}</Text>
+              <SlackMultiAppGuide />
               <CredentialFields
                 draft={props.setupDraft}
                 onChange={props.onSetupDraftChange}
               />
               <Group justify="flex-end">
                 <Button
-                  leftSection={<IconPlugConnected size={16} />}
+                  leftSection={<IconBrandSlack size={16} />}
                   loading={props.busy}
                   disabled={!isDraftComplete(props.setupDraft)}
                   onClick={props.onCreate}
@@ -517,13 +552,14 @@ export function WorkspaceSlackApps(
           <Paper withBorder p="md" radius="md">
             <Stack gap="sm">
               <Text fw={700}>{t("discordCreateTitle")}</Text>
+              <DiscordMultiAppGuide />
               <DiscordCredentialFields
                 draft={props.discordSetupDraft}
                 onChange={props.onDiscordSetupDraftChange}
               />
               <Group justify="flex-end">
                 <Button
-                  leftSection={<IconPlugConnected size={16} />}
+                  leftSection={<IconBrandDiscord size={16} />}
                   loading={props.busy}
                   disabled={!isDiscordDraftComplete(props.discordSetupDraft)}
                   onClick={props.onCreateDiscord}
@@ -533,7 +569,7 @@ export function WorkspaceSlackApps(
               </Group>
             </Stack>
           </Paper>
-        </Stack>
+        </SimpleGrid>
       )}
 
       <Paper withBorder radius="md" p="md">

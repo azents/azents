@@ -18,6 +18,10 @@ class DiscordAPICredentialsInvalid(DiscordAPIError):
     """Discord rejected the configured Bot Token."""
 
 
+class DiscordAPIConfigurationInvalid(DiscordAPIError):
+    """Discord rejected the configured Application or interaction endpoint."""
+
+
 class DiscordAPIUnavailable(DiscordAPIError):
     """Discord cannot currently provide required authority metadata."""
 
@@ -120,7 +124,7 @@ class DiscordAPIClient:
         if response.status_code == 429 or response.status_code >= 500:
             raise DiscordAPIUnavailable
         if response.status_code >= 400:
-            raise DiscordAPIUnavailable
+            raise DiscordAPIConfigurationInvalid
 
 
 async def get_discord_api_http_client() -> AsyncIterator[httpx.AsyncClient]:

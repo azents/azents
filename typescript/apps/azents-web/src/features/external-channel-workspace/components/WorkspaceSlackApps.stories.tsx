@@ -170,7 +170,7 @@ const args: WorkspaceSlackAppsContainerOutput = {
 };
 
 const meta = {
-  title: "External channels/Workspace Slack Apps",
+  title: "External channels/Workspace Apps",
   component: WorkspaceSlackApps,
   decorators: [
     (Story: () => ReactElement): ReactElement => (
@@ -187,6 +187,32 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Active = {} satisfies Story;
+
+export const DiscordActive = {
+  args: {
+    selectedConnection: {
+      ...connection,
+      id: "multi_connection_discord_01",
+      provider: "discord",
+      transport: "http",
+      provider_app_id: "discord_app_01",
+      provider_tenant_id: "Discord Engineering Guild",
+    },
+    state: {
+      type: "LOADED",
+      connections: [
+        {
+          ...connection,
+          id: "multi_connection_discord_01",
+          provider: "discord",
+          transport: "http",
+          provider_app_id: "discord_app_01",
+          provider_tenant_id: "Discord Engineering Guild",
+        },
+      ],
+    },
+  },
+} satisfies Story;
 
 export const Loading = {
   args: { state: { type: "LOADING" } },
@@ -227,7 +253,7 @@ export const EmptyCatalog = {
 export const DetailError = {
   args: {
     selectedConnection: null,
-    detailError: "Unable to load the selected Slack App.",
+    detailError: "Unable to load the selected Workspace App.",
   },
 } satisfies Story;
 
