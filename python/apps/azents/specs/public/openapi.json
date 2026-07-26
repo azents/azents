@@ -4758,6 +4758,1067 @@
         }
       }
     },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "List Multi Slack Connections",
+        "description": "List Workspace-owned Slack Multi Apps.",
+        "operationId": "external_channel_v1_list_multi_slack_connections",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedMultiConnectionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Setup Multi Slack Connection",
+        "description": "Create a zero-Agent-capable Workspace Slack Multi App.",
+        "operationId": "external_channel_v1_setup_multi_slack_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackConnectionSetupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedMultiConnectionSetup"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Get Multi Slack Connection",
+        "description": "Load one redacted Workspace Slack Multi App.",
+        "operationId": "external_channel_v1_get_multi_slack_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedMultiConnection"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Update Multi Slack Connection",
+        "description": "Replace complete Slack Multi App setup and immediately validate it.",
+        "operationId": "external_channel_v1_update_multi_slack_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackConnectionSetupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelConnectionStatusSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Disconnect Multi Slack Connection",
+        "description": "Generation-fence terminal disconnect of one Workspace Slack Multi App.",
+        "operationId": "external_channel_v1_disconnect_multi_slack_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerationFenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedMultiConnectionDisconnect"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/impact": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Get Multi Slack Connection Impact",
+        "description": "Preview sanitized impact before disconnecting one whole Multi App.",
+        "operationId": "external_channel_v1_get_multi_slack_connection_impact",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelMultiConnectionImpact"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/validate": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Validate Multi Slack Connection",
+        "description": "Validate one Workspace Slack Multi App.",
+        "operationId": "external_channel_v1_validate_multi_slack_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelConnectionStatusSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "List Multi Slack Routes",
+        "description": "List a paged Multi App Agent catalog, including removed routes.",
+        "operationId": "external_channel_v1_list_multi_slack_routes",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedMultiRouteListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Add Multi Slack Route",
+        "description": "Add one active Workspace Agent to a Slack Multi App catalog.",
+        "operationId": "external_channel_v1_add_multi_slack_route",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultiRouteCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedMultiRoute"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}/impact": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Get Multi Slack Route Impact",
+        "description": "Preview sanitized impact before removing one Multi App Agent route.",
+        "operationId": "external_channel_v1_get_multi_slack_route_impact",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Route Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelMultiRouteImpact"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}": {
+      "delete": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Remove Multi Slack Route",
+        "description": "Generation-fence destructive removal of one Multi App Agent route.",
+        "operationId": "external_channel_v1_remove_multi_slack_route",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Route Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerationFenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelMultiRouteImpact"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}/reenable": {
+      "post": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Reenable Multi Slack Route",
+        "description": "Re-enable a previously removed Multi App Agent route.",
+        "operationId": "external_channel_v1_reenable_multi_slack_route",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Route Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedMultiRoute"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "List Multi Slack Channel Defaults",
+        "description": "List paged Multi App channel-default history.",
+        "operationId": "external_channel_v1_list_multi_slack_channel_defaults",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedChannelDefaultListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id}": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Replace Multi Slack Channel Default",
+        "description": "Generation-fence replacement of one Multi App channel default.",
+        "operationId": "external_channel_v1_replace_multi_slack_channel_default",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "provider_channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Channel Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultiChannelDefaultRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedChannelDefault"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Clear Multi Slack Channel Default",
+        "description": "Generation-fence clearing one active Multi App channel default.",
+        "operationId": "external_channel_v1_clear_multi_slack_channel_default",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "provider_channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Channel Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerationFenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{interaction_id}": {
+      "get": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Load Multi Slack Management Handoff",
+        "description": "Load opaque Slack management state after authenticated Workspace recheck.",
+        "operationId": "external_channel_v1_load_multi_slack_management_handoff",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Interaction Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedSlackManagementHandoff"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest": {
       "get": {
         "tags": [
@@ -13837,6 +14898,15 @@
         "title": "ExternalChannelAccessRequestStatus",
         "description": "External invocation access-request state."
       },
+      "ExternalChannelAppMode": {
+        "type": "string",
+        "enum": [
+          "single",
+          "multi"
+        ],
+        "title": "ExternalChannelAppMode",
+        "description": "Immutable product administration mode for an external connection."
+      },
       "ExternalChannelBindingActivationStatus": {
         "type": "string",
         "enum": [
@@ -13915,6 +14985,15 @@
         ],
         "title": "ExternalChannelCapabilitySnapshot",
         "description": "Redacted provider capabilities resolved for one connection."
+      },
+      "ExternalChannelChannelDefaultStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "invalidated"
+        ],
+        "title": "ExternalChannelChannelDefaultStatus",
+        "description": "Lifecycle state of a Multi App channel route default."
       },
       "ExternalChannelConnectionStatus": {
         "type": "string",
@@ -14104,6 +15183,237 @@
         "title": "ExternalChannelDeliveryStatus",
         "description": "Outcome state of one external provider delivery attempt."
       },
+      "ExternalChannelMultiConnectionImpact": {
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "title": "Connection Id"
+          },
+          "generation": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generation"
+          },
+          "active_route_count": {
+            "type": "integer",
+            "title": "Active Route Count"
+          },
+          "active_default_count": {
+            "type": "integer",
+            "title": "Active Default Count"
+          },
+          "active_binding_count": {
+            "type": "integer",
+            "title": "Active Binding Count"
+          },
+          "bound_resource_count": {
+            "type": "integer",
+            "title": "Bound Resource Count"
+          },
+          "open_admission_count": {
+            "type": "integer",
+            "title": "Open Admission Count"
+          },
+          "pending_access_request_count": {
+            "type": "integer",
+            "title": "Pending Access Request Count"
+          },
+          "pending_context_count": {
+            "type": "integer",
+            "title": "Pending Context Count"
+          },
+          "affected_defaults": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalChannelMultiImpactDefault"
+            },
+            "type": "array",
+            "title": "Affected Defaults"
+          },
+          "affected_bindings": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalChannelMultiImpactBinding"
+            },
+            "type": "array",
+            "title": "Affected Bindings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connection_id",
+          "generation",
+          "active_route_count",
+          "active_default_count",
+          "active_binding_count",
+          "bound_resource_count",
+          "open_admission_count",
+          "pending_access_request_count",
+          "pending_context_count",
+          "affected_defaults",
+          "affected_bindings"
+        ],
+        "title": "ExternalChannelMultiConnectionImpact",
+        "description": "Sanitized deterministic impact projection for one whole Multi App."
+      },
+      "ExternalChannelMultiImpactBinding": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "route_id": {
+            "type": "string",
+            "title": "Route Id"
+          },
+          "agent_session_id": {
+            "type": "string",
+            "title": "Agent Session Id"
+          },
+          "resource_id": {
+            "type": "string",
+            "title": "Resource Id"
+          },
+          "channel_label": {
+            "type": "string",
+            "title": "Channel Label"
+          },
+          "thread_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "route_id",
+          "agent_session_id",
+          "resource_id",
+          "channel_label",
+          "thread_label"
+        ],
+        "title": "ExternalChannelMultiImpactBinding",
+        "description": "Sanitized active binding and Agent Session affected by one Multi mutation."
+      },
+      "ExternalChannelMultiImpactDefault": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider_channel_id": {
+            "type": "string",
+            "title": "Provider Channel Id"
+          },
+          "route_id": {
+            "type": "string",
+            "title": "Route Id"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_channel_id",
+          "route_id",
+          "agent_id",
+          "agent_name"
+        ],
+        "title": "ExternalChannelMultiImpactDefault",
+        "description": "Sanitized active channel default affected by one Multi mutation."
+      },
+      "ExternalChannelMultiRouteImpact": {
+        "properties": {
+          "route_id": {
+            "type": "string",
+            "title": "Route Id"
+          },
+          "generation": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generation"
+          },
+          "active_default_count": {
+            "type": "integer",
+            "title": "Active Default Count"
+          },
+          "active_binding_count": {
+            "type": "integer",
+            "title": "Active Binding Count"
+          },
+          "bound_resource_count": {
+            "type": "integer",
+            "title": "Bound Resource Count"
+          },
+          "open_admission_count": {
+            "type": "integer",
+            "title": "Open Admission Count"
+          },
+          "pending_access_request_count": {
+            "type": "integer",
+            "title": "Pending Access Request Count"
+          },
+          "pending_context_count": {
+            "type": "integer",
+            "title": "Pending Context Count"
+          },
+          "affected_defaults": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalChannelMultiImpactDefault"
+            },
+            "type": "array",
+            "title": "Affected Defaults"
+          },
+          "affected_bindings": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalChannelMultiImpactBinding"
+            },
+            "type": "array",
+            "title": "Affected Bindings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "route_id",
+          "generation",
+          "active_default_count",
+          "active_binding_count",
+          "bound_resource_count",
+          "open_admission_count",
+          "pending_access_request_count",
+          "pending_context_count",
+          "affected_defaults",
+          "affected_bindings"
+        ],
+        "title": "ExternalChannelMultiRouteImpact",
+        "description": "Sanitized deterministic impact projection for one Multi App route."
+      },
       "ExternalChannelProvider": {
         "type": "string",
         "enum": [
@@ -14146,6 +15456,15 @@
         ],
         "title": "ExternalChannelProviderIdentity",
         "description": "Validated non-secret identity for one installed provider application."
+      },
+      "ExternalChannelRouteCatalogStatus": {
+        "type": "string",
+        "enum": [
+          "available",
+          "removed"
+        ],
+        "title": "ExternalChannelRouteCatalogStatus",
+        "description": "Catalog availability for one connection-to-Agent route."
       },
       "ExternalChannelTransport": {
         "type": "string",
@@ -14223,6 +15542,20 @@
         ],
         "title": "GcpSecrets",
         "description": "GCP service account based secrets for Google Vertex AI."
+      },
+      "GenerationFenceRequest": {
+        "properties": {
+          "expected_generation": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expected Generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_generation"
+        ],
+        "title": "GenerationFenceRequest"
       },
       "GetAuthMethodsResponse": {
         "properties": {
@@ -16125,6 +17458,116 @@
         ],
         "title": "ManagedBlock"
       },
+      "ManagedChannelDefault": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider_channel_id": {
+            "type": "string",
+            "title": "Provider Channel Id"
+          },
+          "route_id": {
+            "type": "string",
+            "title": "Route Id"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalChannelChannelDefaultStatus"
+          },
+          "configured_by_user_id": {
+            "type": "string",
+            "title": "Configured By User Id"
+          },
+          "invalidated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalidated At"
+          },
+          "invalidation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalidation Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_channel_id",
+          "route_id",
+          "agent_id",
+          "agent_name",
+          "status",
+          "configured_by_user_id",
+          "invalidated_at",
+          "invalidation_reason",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ManagedChannelDefault",
+        "description": "One redacted Multi App channel default."
+      },
+      "ManagedChannelDefaultListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedChannelDefault"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ManagedChannelDefaultListResponse"
+      },
       "ManagedConnection": {
         "properties": {
           "id": {
@@ -16286,11 +17729,19 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "associated_multi_apps": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedMultiConnection"
+            },
+            "type": "array",
+            "title": "Associated Multi Apps"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "associated_multi_apps"
         ],
         "title": "ManagedConnectionListResponse"
       },
@@ -16450,6 +17901,389 @@
           "revoked_at"
         ],
         "title": "ManagedGrant"
+      },
+      "ManagedMultiConnection": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalChannelTransport"
+          },
+          "app_mode": {
+            "$ref": "#/components/schemas/ExternalChannelAppMode"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalChannelConnectionStatus"
+          },
+          "provider_app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider App Id"
+          },
+          "provider_tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Tenant Id"
+          },
+          "provider_bot_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Bot User Id"
+          },
+          "credentials_configured": {
+            "type": "boolean",
+            "title": "Credentials Configured"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capabilities"
+          },
+          "last_verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Verified At"
+          },
+          "last_health_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Health At"
+          },
+          "socket_gap_detected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Socket Gap Detected At"
+          },
+          "socket_gap_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Socket Gap Reason"
+          },
+          "disconnected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disconnected At"
+          },
+          "generation": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generation"
+          },
+          "active_agent_count": {
+            "type": "integer",
+            "title": "Active Agent Count"
+          },
+          "configured_default_count": {
+            "type": "integer",
+            "title": "Configured Default Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "transport",
+          "app_mode",
+          "status",
+          "provider_app_id",
+          "provider_tenant_id",
+          "provider_bot_user_id",
+          "credentials_configured",
+          "capabilities",
+          "last_verified_at",
+          "last_health_at",
+          "socket_gap_detected_at",
+          "socket_gap_reason",
+          "disconnected_at",
+          "generation",
+          "active_agent_count",
+          "configured_default_count"
+        ],
+        "title": "ManagedMultiConnection",
+        "description": "Redacted Workspace-owned Multi App connection projection."
+      },
+      "ManagedMultiConnectionDisconnect": {
+        "properties": {
+          "disconnected_route_count": {
+            "type": "integer",
+            "title": "Disconnected Route Count"
+          },
+          "invalidated_default_count": {
+            "type": "integer",
+            "title": "Invalidated Default Count"
+          },
+          "expired_admission_count": {
+            "type": "integer",
+            "title": "Expired Admission Count"
+          },
+          "expired_access_request_count": {
+            "type": "integer",
+            "title": "Expired Access Request Count"
+          },
+          "unavailable_resource_count": {
+            "type": "integer",
+            "title": "Unavailable Resource Count"
+          },
+          "disconnected_binding_count": {
+            "type": "integer",
+            "title": "Disconnected Binding Count"
+          },
+          "deleted_pending_context_count": {
+            "type": "integer",
+            "title": "Deleted Pending Context Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "disconnected_route_count",
+          "invalidated_default_count",
+          "expired_admission_count",
+          "expired_access_request_count",
+          "unavailable_resource_count",
+          "disconnected_binding_count",
+          "deleted_pending_context_count"
+        ],
+        "title": "ManagedMultiConnectionDisconnect",
+        "description": "Sanitized terminal Multi App disconnect summary."
+      },
+      "ManagedMultiConnectionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedMultiConnection"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ManagedMultiConnectionListResponse"
+      },
+      "ManagedMultiConnectionSetup": {
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/ManagedMultiConnection"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connection"
+        ],
+        "title": "ManagedMultiConnectionSetup",
+        "description": "Created redacted Multi App connection."
+      },
+      "ManagedMultiRoute": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "agent_id_snapshot": {
+            "type": "string",
+            "title": "Agent Id Snapshot"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "catalog_status": {
+            "$ref": "#/components/schemas/ExternalChannelRouteCatalogStatus"
+          },
+          "catalog_removed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Removed At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "agent_id_snapshot",
+          "agent_name",
+          "catalog_status",
+          "catalog_removed_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ManagedMultiRoute",
+        "description": "One Multi App Agent catalog relationship."
+      },
+      "ManagedMultiRouteListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedMultiRoute"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ManagedMultiRouteListResponse"
+      },
+      "ManagedSlackManagementHandoff": {
+        "properties": {
+          "interaction_id": {
+            "type": "string",
+            "title": "Interaction Id"
+          },
+          "connection_id": {
+            "type": "string",
+            "title": "Connection Id"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "provider_app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider App Id"
+          },
+          "provider_channel_id": {
+            "type": "string",
+            "title": "Provider Channel Id"
+          },
+          "provider_thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Thread Id"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "interaction_id",
+          "connection_id",
+          "provider",
+          "provider_app_id",
+          "provider_channel_id",
+          "provider_thread_id",
+          "expires_at"
+        ],
+        "title": "ManagedSlackManagementHandoff",
+        "description": "Authenticated resolution of an opaque Slack management callback."
       },
       "ManagedWork": {
         "properties": {
@@ -17507,6 +19341,42 @@
         "type": "object",
         "title": "ModelToolCallingCapabilities",
         "description": "Represents tool calling capability."
+      },
+      "MultiChannelDefaultRequest": {
+        "properties": {
+          "expected_generation": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expected Generation"
+          },
+          "route_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Route Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_generation",
+          "route_id"
+        ],
+        "title": "MultiChannelDefaultRequest"
+      },
+      "MultiRouteCreateRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Agent Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id"
+        ],
+        "title": "MultiRouteCreateRequest"
       },
       "MyJoinRequestResponse": {
         "properties": {

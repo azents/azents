@@ -8,13 +8,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAppMode,
     ExternalChannelBindingStatus,
+    ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
+    ExternalChannelInteractionStatus,
+    ExternalChannelInteractionType,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -28,8 +33,10 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelBlock,
+    RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelInteraction,
     RDBExternalChannelMessage,
     RDBExternalChannelMessageRevision,
     RDBExternalChannelPendingContext,
@@ -41,9 +48,13 @@ from azents.repos.external_channel.management_data import (
     ManagedApprovalRequest,
     ManagedBinding,
     ManagedBlock,
+    ManagedChannelDefault,
     ManagedConnection,
     ManagedDelivery,
     ManagedGrant,
+    ManagedMultiConnection,
+    ManagedMultiRoute,
+    ManagedSlackManagementHandoff,
     ManagedWork,
     ManagedWorkSource,
     ManagedWorkTask,
@@ -98,6 +109,617 @@ class ExternalChannelManagementRepository:
             )
         ).all()
         return [_connection(connection, route) for connection, route in rows]
+
+    async def list_multi_connections(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        offset: int,
+        limit: int,
+    ) -> list[ManagedMultiConnection]:
+        """List Workspace-owned Multi Apps with redacted connection state."""
+        if offset < 0 or limit <= 0 or limit > 100:
+            raise ValueError("External Channel page is invalid.")
+        active_route_counts = (
+            sa.select(
+                RDBExternalChannelAgentRoute.connection_id,
+                sa.func.count().label("active_agent_count"),
+            )
+            .where(
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.MULTI,
+                RDBExternalChannelAgentRoute.catalog_status
+                == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                RDBExternalChannelAgentRoute.agent_id.is_not(None),
+            )
+            .group_by(RDBExternalChannelAgentRoute.connection_id)
+            .subquery()
+        )
+        configured_default_counts = (
+            sa.select(
+                RDBExternalChannelChannelDefault.connection_id,
+                sa.func.count().label("configured_default_count"),
+            )
+            .where(
+                RDBExternalChannelChannelDefault.status
+                == ExternalChannelChannelDefaultStatus.ACTIVE
+            )
+            .group_by(RDBExternalChannelChannelDefault.connection_id)
+            .subquery()
+        )
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelConnection,
+                    sa.func.coalesce(active_route_counts.c.active_agent_count, 0).label(
+                        "active_agent_count"
+                    ),
+                    sa.func.coalesce(
+                        configured_default_counts.c.configured_default_count, 0
+                    ).label("configured_default_count"),
+                )
+                .outerjoin(
+                    active_route_counts,
+                    active_route_counts.c.connection_id
+                    == RDBExternalChannelConnection.id,
+                )
+                .outerjoin(
+                    configured_default_counts,
+                    configured_default_counts.c.connection_id
+                    == RDBExternalChannelConnection.id,
+                )
+                .where(
+                    RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.MULTI,
+                )
+                .order_by(
+                    RDBExternalChannelConnection.created_at,
+                    RDBExternalChannelConnection.id,
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+        return [
+            _multi_connection(
+                connection,
+                active_agent_count=active_agent_count,
+                configured_default_count=configured_default_count,
+            )
+            for connection, active_agent_count, configured_default_count in rows
+        ]
+
+    async def list_agent_multi_connections(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+    ) -> list[ManagedMultiConnection]:
+        """List active Multi Apps associated with one visible Agent."""
+        active_route_counts = (
+            sa.select(
+                RDBExternalChannelAgentRoute.connection_id,
+                sa.func.count().label("active_agent_count"),
+            )
+            .where(
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.MULTI,
+                RDBExternalChannelAgentRoute.catalog_status
+                == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                RDBExternalChannelAgentRoute.agent_id.is_not(None),
+            )
+            .group_by(RDBExternalChannelAgentRoute.connection_id)
+            .subquery()
+        )
+        configured_default_counts = (
+            sa.select(
+                RDBExternalChannelChannelDefault.connection_id,
+                sa.func.count().label("configured_default_count"),
+            )
+            .where(
+                RDBExternalChannelChannelDefault.status
+                == ExternalChannelChannelDefaultStatus.ACTIVE
+            )
+            .group_by(RDBExternalChannelChannelDefault.connection_id)
+            .subquery()
+        )
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelConnection,
+                    sa.func.coalesce(active_route_counts.c.active_agent_count, 0).label(
+                        "active_agent_count"
+                    ),
+                    sa.func.coalesce(
+                        configured_default_counts.c.configured_default_count, 0
+                    ).label("configured_default_count"),
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.connection_id
+                    == RDBExternalChannelConnection.id,
+                )
+                .outerjoin(
+                    active_route_counts,
+                    active_route_counts.c.connection_id
+                    == RDBExternalChannelConnection.id,
+                )
+                .outerjoin(
+                    configured_default_counts,
+                    configured_default_counts.c.connection_id
+                    == RDBExternalChannelConnection.id,
+                )
+                .where(
+                    RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelConnection.status
+                    != ExternalChannelConnectionStatus.DISCONNECTED,
+                    RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    RDBExternalChannelAgentRoute.connection_app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelAgentRoute.catalog_status
+                    == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                )
+                .order_by(
+                    RDBExternalChannelConnection.created_at,
+                    RDBExternalChannelConnection.id,
+                )
+            )
+        ).all()
+        return [
+            _multi_connection(
+                connection,
+                active_agent_count=active_agent_count,
+                configured_default_count=configured_default_count,
+            )
+            for connection, active_agent_count, configured_default_count in rows
+        ]
+
+    async def get_multi_connection(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        lock: bool = False,
+        include_disconnected: bool = False,
+    ) -> RDBExternalChannelConnection | None:
+        """Fetch one Workspace-owned Multi App, optionally under a row lock."""
+        predicates: list[sa.ColumnElement[bool]] = [
+            RDBExternalChannelConnection.id == connection_id,
+            RDBExternalChannelConnection.workspace_id == workspace_id,
+            RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.MULTI,
+        ]
+        if not include_disconnected:
+            predicates.append(
+                RDBExternalChannelConnection.status
+                != ExternalChannelConnectionStatus.DISCONNECTED
+            )
+        statement = sa.select(RDBExternalChannelConnection).where(*predicates)
+        if lock:
+            statement = statement.with_for_update()
+        return await session.scalar(statement)
+
+    async def get_managed_multi_connection(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        include_disconnected: bool = False,
+    ) -> ManagedMultiConnection | None:
+        """Load a redacted Multi App projection."""
+        connection = await self.get_multi_connection(
+            session,
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            include_disconnected=include_disconnected,
+        )
+        if connection is None:
+            return None
+        active_agent_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.connection_id == connection.id,
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.MULTI,
+                RDBExternalChannelAgentRoute.catalog_status
+                == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                RDBExternalChannelAgentRoute.agent_id.is_not(None),
+            )
+        )
+        configured_default_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(RDBExternalChannelChannelDefault)
+            .where(
+                RDBExternalChannelChannelDefault.connection_id == connection.id,
+                RDBExternalChannelChannelDefault.status
+                == ExternalChannelChannelDefaultStatus.ACTIVE,
+            )
+        )
+        return _multi_connection(
+            connection,
+            active_agent_count=active_agent_count or 0,
+            configured_default_count=configured_default_count or 0,
+        )
+
+    async def replace_multi_slack_configuration(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        provider_app_id: str,
+        transport: ExternalChannelTransport,
+        encrypted_credentials: str,
+    ) -> ManagedMultiConnection | None:
+        """Replace complete Slack Multi App configuration without exposing secrets."""
+        connection = await self.get_multi_connection(
+            session,
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            lock=True,
+        )
+        if connection is None:
+            return None
+        connection.provider_app_id = provider_app_id
+        connection.provider_tenant_id = None
+        connection.provider_bot_user_id = None
+        connection.transport = transport
+        connection.http_callback_selector_hash = None
+        connection.encrypted_credentials = encrypted_credentials
+        connection.capabilities = None
+        connection.status = ExternalChannelConnectionStatus.CONFIGURING
+        connection.last_verified_at = None
+        connection.last_health_at = None
+        connection.disconnected_at = None
+        connection.socket_lease_owner = None
+        connection.socket_lease_until = None
+        connection.socket_heartbeat_at = None
+        connection.socket_gap_detected_at = None
+        connection.socket_gap_reason = None
+        await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
+        return await self.get_managed_multi_connection(
+            session,
+            workspace_id=workspace_id,
+            connection_id=connection.id,
+        )
+
+    async def list_multi_routes(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        offset: int,
+        limit: int,
+    ) -> list[ManagedMultiRoute] | None:
+        """List one Multi App catalog, including removed route history."""
+        if offset < 0 or limit <= 0 or limit > 100:
+            raise ValueError("External Channel page is invalid.")
+        connection = await self.get_multi_connection(
+            session,
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            include_disconnected=True,
+        )
+        if connection is None:
+            return None
+        rows = (
+            await session.execute(
+                sa.select(RDBExternalChannelAgentRoute, RDBAgent.name)
+                .outerjoin(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                )
+                .where(
+                    RDBExternalChannelAgentRoute.connection_id == connection.id,
+                    RDBExternalChannelAgentRoute.connection_app_mode
+                    == ExternalChannelAppMode.MULTI,
+                )
+                .order_by(
+                    RDBExternalChannelAgentRoute.created_at,
+                    RDBExternalChannelAgentRoute.id,
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+        return [_multi_route(route, agent_name) for route, agent_name in rows]
+
+    async def get_multi_route(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        route_id: str,
+    ) -> ManagedMultiRoute | None:
+        """Load one Multi App route under its Workspace owner."""
+        row = (
+            await session.execute(
+                sa.select(RDBExternalChannelAgentRoute, RDBAgent.name)
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .outerjoin(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                )
+                .where(
+                    RDBExternalChannelConnection.id == connection_id,
+                    RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelAgentRoute.id == route_id,
+                    RDBExternalChannelAgentRoute.connection_app_mode
+                    == ExternalChannelAppMode.MULTI,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else _multi_route(*row)
+
+    async def get_multi_route_by_agent(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        agent_id: str,
+    ) -> ManagedMultiRoute | None:
+        """Load the stable Multi App association for one Agent identity."""
+        row = (
+            await session.execute(
+                sa.select(RDBExternalChannelAgentRoute, RDBAgent.name)
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .outerjoin(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                )
+                .where(
+                    RDBExternalChannelConnection.id == connection_id,
+                    RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelAgentRoute.connection_app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelAgentRoute.agent_id_snapshot == agent_id,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else _multi_route(*row)
+
+    async def list_multi_channel_defaults(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        offset: int,
+        limit: int,
+    ) -> list[ManagedChannelDefault] | None:
+        """List current and historical defaults for one Workspace Multi App."""
+        if offset < 0 or limit <= 0 or limit > 100:
+            raise ValueError("External Channel page is invalid.")
+        connection = await self.get_multi_connection(
+            session,
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            include_disconnected=True,
+        )
+        if connection is None:
+            return None
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelChannelDefault,
+                    RDBExternalChannelAgentRoute,
+                    RDBAgent.name,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelChannelDefault.route_id,
+                )
+                .outerjoin(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                )
+                .where(RDBExternalChannelChannelDefault.connection_id == connection.id)
+                .order_by(
+                    RDBExternalChannelChannelDefault.created_at.desc(),
+                    RDBExternalChannelChannelDefault.id.desc(),
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+        return [
+            _channel_default(channel_default, route, agent_name)
+            for channel_default, route, agent_name in rows
+        ]
+
+    async def replace_multi_channel_default(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        provider_channel_id: str,
+        route_id: str,
+        configured_by_user_id: str,
+        now: datetime.datetime,
+    ) -> ManagedChannelDefault | None:
+        """Replace one active channel default after validating its Multi route."""
+        connection = await self.get_multi_connection(
+            session,
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            lock=True,
+        )
+        if connection is None:
+            return None
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == route_id,
+                RDBExternalChannelAgentRoute.connection_id == connection.id,
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.MULTI,
+                RDBExternalChannelAgentRoute.catalog_status
+                == ExternalChannelRouteCatalogStatus.AVAILABLE,
+            )
+            .with_for_update()
+        )
+        if route is None or route.agent_id is None:
+            return None
+        agent = await session.scalar(
+            sa.select(RDBAgent)
+            .where(
+                RDBAgent.id == route.agent_id,
+                RDBAgent.workspace_id == connection.workspace_id,
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        if agent is None:
+            return None
+        existing = await session.scalar(
+            sa.select(RDBExternalChannelChannelDefault)
+            .where(
+                RDBExternalChannelChannelDefault.connection_id == connection.id,
+                RDBExternalChannelChannelDefault.provider_channel_id
+                == provider_channel_id,
+                RDBExternalChannelChannelDefault.status
+                == ExternalChannelChannelDefaultStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        if existing is not None:
+            existing.status = ExternalChannelChannelDefaultStatus.INVALIDATED
+            existing.invalidated_at = now
+            existing.invalidation_reason = "replaced"
+        channel_default = RDBExternalChannelChannelDefault(
+            connection_id=connection.id,
+            provider_channel_id=provider_channel_id,
+            route_id=route.id,
+            status=ExternalChannelChannelDefaultStatus.ACTIVE,
+            configured_by_user_id=configured_by_user_id,
+            invalidated_at=None,
+            invalidation_reason=None,
+        )
+        session.add(channel_default)
+        await session.flush()
+        await session.refresh(
+            channel_default,
+            attribute_names=["created_at", "updated_at"],
+        )
+        return _channel_default(channel_default, route, agent.name)
+
+    async def clear_multi_channel_default(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        provider_channel_id: str,
+        now: datetime.datetime,
+    ) -> bool | None:
+        """Invalidate one active default; false means the channel had no default."""
+        connection = await self.get_multi_connection(
+            session,
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            lock=True,
+        )
+        if connection is None:
+            return None
+        channel_default = await session.scalar(
+            sa.select(RDBExternalChannelChannelDefault)
+            .where(
+                RDBExternalChannelChannelDefault.connection_id == connection.id,
+                RDBExternalChannelChannelDefault.provider_channel_id
+                == provider_channel_id,
+                RDBExternalChannelChannelDefault.status
+                == ExternalChannelChannelDefaultStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        if channel_default is None:
+            return False
+        channel_default.status = ExternalChannelChannelDefaultStatus.INVALIDATED
+        channel_default.invalidated_at = now
+        channel_default.invalidation_reason = "cleared"
+        await session.flush()
+        return True
+
+    async def load_multi_management_handoff(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        interaction_id: str,
+        now: datetime.datetime,
+    ) -> ManagedSlackManagementHandoff | None:
+        """Resolve opaque Slack management state under Workspace authority."""
+        row = (
+            await session.execute(
+                sa.select(RDBExternalChannelInteraction, RDBExternalChannelConnection)
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelInteraction.connection_id,
+                )
+                .where(
+                    RDBExternalChannelInteraction.id == interaction_id,
+                    RDBExternalChannelInteraction.interaction_type
+                    == ExternalChannelInteractionType.MANAGEMENT_ACTION,
+                    RDBExternalChannelInteraction.status
+                    == ExternalChannelInteractionStatus.COMPLETED,
+                    RDBExternalChannelInteraction.expires_at > now,
+                    RDBExternalChannelInteraction.resource_correlation_key.is_not(None),
+                    RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.MULTI,
+                    RDBExternalChannelConnection.status.in_(
+                        (
+                            ExternalChannelConnectionStatus.ACTIVE,
+                            ExternalChannelConnectionStatus.DEGRADED,
+                        )
+                    ),
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        interaction, connection = row
+        assert interaction.resource_correlation_key is not None
+        provider_channel_id, separator, provider_thread_id = (
+            interaction.resource_correlation_key.partition(":")
+        )
+        if not provider_channel_id:
+            return None
+        return ManagedSlackManagementHandoff(
+            interaction_id=interaction.id,
+            connection_id=connection.id,
+            provider=connection.provider,
+            provider_app_id=connection.provider_app_id,
+            provider_channel_id=provider_channel_id,
+            provider_thread_id=provider_thread_id if separator else None,
+            expires_at=interaction.expires_at,
+        )
 
     async def get_connection(
         self,
@@ -875,6 +1497,70 @@ def _connection(
         socket_gap_detected_at=connection.socket_gap_detected_at,
         socket_gap_reason=connection.socket_gap_reason,
         disconnected_at=connection.disconnected_at,
+    )
+
+
+def _multi_connection(
+    connection: RDBExternalChannelConnection,
+    *,
+    active_agent_count: int,
+    configured_default_count: int,
+) -> ManagedMultiConnection:
+    return ManagedMultiConnection(
+        id=connection.id,
+        provider=connection.provider,
+        transport=connection.transport,
+        app_mode=connection.app_mode,
+        status=connection.status,
+        provider_app_id=connection.provider_app_id,
+        provider_tenant_id=connection.provider_tenant_id,
+        provider_bot_user_id=connection.provider_bot_user_id,
+        credentials_configured=connection.encrypted_credentials is not None,
+        capabilities=connection.capabilities,
+        last_verified_at=connection.last_verified_at,
+        last_health_at=connection.last_health_at,
+        socket_gap_detected_at=connection.socket_gap_detected_at,
+        socket_gap_reason=connection.socket_gap_reason,
+        disconnected_at=connection.disconnected_at,
+        generation=connection.updated_at,
+        active_agent_count=active_agent_count,
+        configured_default_count=configured_default_count,
+    )
+
+
+def _multi_route(
+    route: RDBExternalChannelAgentRoute,
+    agent_name: str | None,
+) -> ManagedMultiRoute:
+    return ManagedMultiRoute(
+        id=route.id,
+        agent_id=route.agent_id,
+        agent_id_snapshot=route.agent_id_snapshot,
+        agent_name=agent_name,
+        catalog_status=route.catalog_status,
+        catalog_removed_at=route.catalog_removed_at,
+        created_at=route.created_at,
+        updated_at=route.updated_at,
+    )
+
+
+def _channel_default(
+    channel_default: RDBExternalChannelChannelDefault,
+    route: RDBExternalChannelAgentRoute,
+    agent_name: str | None,
+) -> ManagedChannelDefault:
+    return ManagedChannelDefault(
+        id=channel_default.id,
+        provider_channel_id=channel_default.provider_channel_id,
+        route_id=route.id,
+        agent_id=route.agent_id,
+        agent_name=agent_name,
+        status=channel_default.status,
+        configured_by_user_id=channel_default.configured_by_user_id,
+        invalidated_at=channel_default.invalidated_at,
+        invalidation_reason=channel_default.invalidation_reason,
+        created_at=channel_default.created_at,
+        updated_at=channel_default.updated_at,
     )
 
 

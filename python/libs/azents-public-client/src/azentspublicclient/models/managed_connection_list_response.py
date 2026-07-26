@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.managed_connection import ManagedConnection
+from azentspublicclient.models.managed_multi_connection import ManagedMultiConnection
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,8 +29,9 @@ class ManagedConnectionListResponse(BaseModel):
     ManagedConnectionListResponse
     """ # noqa: E501
     items: List[ManagedConnection]
+    associated_multi_apps: List[ManagedMultiConnection]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["items"]
+    __properties: ClassVar[List[str]] = ["items", "associated_multi_apps"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -79,6 +81,13 @@ class ManagedConnectionListResponse(BaseModel):
                 if _item_items:
                     _items.append(_item_items.to_dict())
             _dict['items'] = _items
+        # override the default output from pydantic by calling `to_dict()` of each item in associated_multi_apps (list)
+        _items = []
+        if self.associated_multi_apps:
+            for _item_associated_multi_apps in self.associated_multi_apps:
+                if _item_associated_multi_apps:
+                    _items.append(_item_associated_multi_apps.to_dict())
+            _dict['associated_multi_apps'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -96,7 +105,8 @@ class ManagedConnectionListResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "items": [ManagedConnection.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
+            "items": [ManagedConnection.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
+            "associated_multi_apps": [ManagedMultiConnection.from_dict(_item) for _item in obj["associated_multi_apps"]] if obj.get("associated_multi_apps") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

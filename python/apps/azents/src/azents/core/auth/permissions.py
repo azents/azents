@@ -18,6 +18,7 @@ class Resource(StrEnum):
     LLM_INTEGRATIONS = "llm_integrations"
     TOOLKITS = "toolkits"
     WORKSPACE_JOIN_REQUESTS = "workspace_join_requests"
+    EXTERNAL_CHANNELS = "external_channels"
 
 
 class Action(StrEnum):
@@ -132,6 +133,10 @@ class Permissions:
     WORKSPACE_JOIN_REQUESTS_WRITE = Permission(
         Resource.WORKSPACE_JOIN_REQUESTS, Action.WRITE
     )
+
+    # Workspace External Channels
+    EXTERNAL_CHANNELS_READ = Permission(Resource.EXTERNAL_CHANNELS, Action.READ)
+    EXTERNAL_CHANNELS_WRITE = Permission(Resource.EXTERNAL_CHANNELS, Action.WRITE)
 
 
 def has_permission(granted: set[Permission], required: Permission) -> bool:

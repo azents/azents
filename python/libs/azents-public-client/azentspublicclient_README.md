@@ -158,19 +158,35 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_update_session_goal**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal) | **PATCH** /chat/v1/sessions/{session_id}/goal | Update Session Goal
 *ChatV1Api* | [**chat_v1_update_session_goal_status**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal_status) | **PATCH** /chat/v1/sessions/{session_id}/goal/status | Update Session Goal Status
 *ChatV1Api* | [**chat_v1_upload_file_for_agent**](azentspublicclient/docs/ChatV1Api.md#chat_v1_upload_file_for_agent) | **POST** /chat/v1/agents/{agent_id}/upload | Upload File For Agent
+*ExternalChannelV1Api* | [**external_channel_v1_add_multi_slack_route**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_add_multi_slack_route) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents | Add Multi Slack Route
+*ExternalChannelV1Api* | [**external_channel_v1_clear_multi_slack_channel_default**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_clear_multi_slack_channel_default) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id} | Clear Multi Slack Channel Default
 *ExternalChannelV1Api* | [**external_channel_v1_decide_approval_request**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_decide_approval_request) | **POST** /external-channel/v1/approval-requests/{access_request_id}/decision | Decide Approval Request
 *ExternalChannelV1Api* | [**external_channel_v1_disconnect_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_disconnect_connection) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id} | Disconnect Connection
+*ExternalChannelV1Api* | [**external_channel_v1_disconnect_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_disconnect_multi_slack_connection) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Disconnect Multi Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_disconnect_session_channel**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_disconnect_session_channel) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id} | Disconnect Session Channel
 *ExternalChannelV1Api* | [**external_channel_v1_get_approval_request**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_approval_request) | **GET** /external-channel/v1/approval-requests/{access_request_id} | Get Approval Request
 *ExternalChannelV1Api* | [**external_channel_v1_get_manifest_guidance**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_manifest_guidance) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest | Get Manifest Guidance
+*ExternalChannelV1Api* | [**external_channel_v1_get_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_connection) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Get Multi Slack Connection
+*ExternalChannelV1Api* | [**external_channel_v1_get_multi_slack_connection_impact**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_connection_impact) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/impact | Get Multi Slack Connection Impact
+*ExternalChannelV1Api* | [**external_channel_v1_get_multi_slack_route_impact**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_route_impact) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}/impact | Get Multi Slack Route Impact
 *ExternalChannelV1Api* | [**external_channel_v1_list_agent_access**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_agent_access) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access | List Agent Access
 *ExternalChannelV1Api* | [**external_channel_v1_list_connections**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_connections) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels | List Connections
+*ExternalChannelV1Api* | [**external_channel_v1_list_multi_slack_channel_defaults**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_multi_slack_channel_defaults) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults | List Multi Slack Channel Defaults
+*ExternalChannelV1Api* | [**external_channel_v1_list_multi_slack_connections**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_multi_slack_connections) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | List Multi Slack Connections
+*ExternalChannelV1Api* | [**external_channel_v1_list_multi_slack_routes**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_multi_slack_routes) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents | List Multi Slack Routes
 *ExternalChannelV1Api* | [**external_channel_v1_list_session_channels**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_list_session_channels) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels | List Session Channels
+*ExternalChannelV1Api* | [**external_channel_v1_load_multi_slack_management_handoff**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_load_multi_slack_management_handoff) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{interaction_id} | Load Multi Slack Management Handoff
+*ExternalChannelV1Api* | [**external_channel_v1_reenable_multi_slack_route**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_reenable_multi_slack_route) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}/reenable | Reenable Multi Slack Route
 *ExternalChannelV1Api* | [**external_channel_v1_remove_access_block**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_remove_access_block) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/blocks/{block_id} | Remove Access Block
+*ExternalChannelV1Api* | [**external_channel_v1_remove_multi_slack_route**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_remove_multi_slack_route) | **DELETE** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id} | Remove Multi Slack Route
+*ExternalChannelV1Api* | [**external_channel_v1_replace_multi_slack_channel_default**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_replace_multi_slack_channel_default) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id} | Replace Multi Slack Channel Default
 *ExternalChannelV1Api* | [**external_channel_v1_revoke_access_grant**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_revoke_access_grant) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/grants/{grant_id} | Revoke Access Grant
+*ExternalChannelV1Api* | [**external_channel_v1_setup_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
+*ExternalChannelV1Api* | [**external_channel_v1_update_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_multi_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Update Multi Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_update_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack | Update Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_validate_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/validate | Validate Connection
+*ExternalChannelV1Api* | [**external_channel_v1_validate_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/validate | Validate Multi Slack Connection
 *HealthV1Api* | [**health_v1_liveness**](azentspublicclient/docs/HealthV1Api.md#health_v1_liveness) | **GET** /health/v1/liveness | Liveness
 *HealthV1Api* | [**health_v1_readiness**](azentspublicclient/docs/HealthV1Api.md#health_v1_readiness) | **GET** /health/v1/readiness | Readiness
 *InvitationV1Api* | [**invitation_v1_accept_invitation**](azentspublicclient/docs/InvitationV1Api.md#invitation_v1_accept_invitation) | **POST** /invitation/v1/invitations/{invitation_id}/accept | Accept Invitation
@@ -368,22 +384,30 @@ Class | Method | HTTP request | Description
  - [ExistingProjectWorkspaceItemResponse](azentspublicclient/docs/ExistingProjectWorkspaceItemResponse.md)
  - [ExternalChannelAccessGrantScope](azentspublicclient/docs/ExternalChannelAccessGrantScope.md)
  - [ExternalChannelAccessRequestStatus](azentspublicclient/docs/ExternalChannelAccessRequestStatus.md)
+ - [ExternalChannelAppMode](azentspublicclient/docs/ExternalChannelAppMode.md)
  - [ExternalChannelBindingActivationStatus](azentspublicclient/docs/ExternalChannelBindingActivationStatus.md)
  - [ExternalChannelBindingStatus](azentspublicclient/docs/ExternalChannelBindingStatus.md)
  - [ExternalChannelCapabilitySnapshot](azentspublicclient/docs/ExternalChannelCapabilitySnapshot.md)
+ - [ExternalChannelChannelDefaultStatus](azentspublicclient/docs/ExternalChannelChannelDefaultStatus.md)
  - [ExternalChannelConnectionStatus](azentspublicclient/docs/ExternalChannelConnectionStatus.md)
  - [ExternalChannelConnectionStatusSnapshot](azentspublicclient/docs/ExternalChannelConnectionStatusSnapshot.md)
  - [ExternalChannelCredentialSnapshot](azentspublicclient/docs/ExternalChannelCredentialSnapshot.md)
  - [ExternalChannelDecisionInput](azentspublicclient/docs/ExternalChannelDecisionInput.md)
  - [ExternalChannelDeliveryOperation](azentspublicclient/docs/ExternalChannelDeliveryOperation.md)
  - [ExternalChannelDeliveryStatus](azentspublicclient/docs/ExternalChannelDeliveryStatus.md)
+ - [ExternalChannelMultiConnectionImpact](azentspublicclient/docs/ExternalChannelMultiConnectionImpact.md)
+ - [ExternalChannelMultiImpactBinding](azentspublicclient/docs/ExternalChannelMultiImpactBinding.md)
+ - [ExternalChannelMultiImpactDefault](azentspublicclient/docs/ExternalChannelMultiImpactDefault.md)
+ - [ExternalChannelMultiRouteImpact](azentspublicclient/docs/ExternalChannelMultiRouteImpact.md)
  - [ExternalChannelProvider](azentspublicclient/docs/ExternalChannelProvider.md)
  - [ExternalChannelProviderIdentity](azentspublicclient/docs/ExternalChannelProviderIdentity.md)
+ - [ExternalChannelRouteCatalogStatus](azentspublicclient/docs/ExternalChannelRouteCatalogStatus.md)
  - [ExternalChannelTransport](azentspublicclient/docs/ExternalChannelTransport.md)
  - [ExternalChannelWorkStatus](azentspublicclient/docs/ExternalChannelWorkStatus.md)
  - [ExternalChannelWorkTaskStatus](azentspublicclient/docs/ExternalChannelWorkTaskStatus.md)
  - [GcpConfig](azentspublicclient/docs/GcpConfig.md)
  - [GcpSecrets](azentspublicclient/docs/GcpSecrets.md)
+ - [GenerationFenceRequest](azentspublicclient/docs/GenerationFenceRequest.md)
  - [GetAuthMethodsResponse](azentspublicclient/docs/GetAuthMethodsResponse.md)
  - [GitHubInstallationItem](azentspublicclient/docs/GitHubInstallationItem.md)
  - [GitHubPlatformAuthorizationStateResponse](azentspublicclient/docs/GitHubPlatformAuthorizationStateResponse.md)
@@ -437,11 +461,20 @@ Class | Method | HTTP request | Description
  - [ManagedBinding](azentspublicclient/docs/ManagedBinding.md)
  - [ManagedBindingListResponse](azentspublicclient/docs/ManagedBindingListResponse.md)
  - [ManagedBlock](azentspublicclient/docs/ManagedBlock.md)
+ - [ManagedChannelDefault](azentspublicclient/docs/ManagedChannelDefault.md)
+ - [ManagedChannelDefaultListResponse](azentspublicclient/docs/ManagedChannelDefaultListResponse.md)
  - [ManagedConnection](azentspublicclient/docs/ManagedConnection.md)
  - [ManagedConnectionListResponse](azentspublicclient/docs/ManagedConnectionListResponse.md)
  - [ManagedConnectionSetup](azentspublicclient/docs/ManagedConnectionSetup.md)
  - [ManagedDelivery](azentspublicclient/docs/ManagedDelivery.md)
  - [ManagedGrant](azentspublicclient/docs/ManagedGrant.md)
+ - [ManagedMultiConnection](azentspublicclient/docs/ManagedMultiConnection.md)
+ - [ManagedMultiConnectionDisconnect](azentspublicclient/docs/ManagedMultiConnectionDisconnect.md)
+ - [ManagedMultiConnectionListResponse](azentspublicclient/docs/ManagedMultiConnectionListResponse.md)
+ - [ManagedMultiConnectionSetup](azentspublicclient/docs/ManagedMultiConnectionSetup.md)
+ - [ManagedMultiRoute](azentspublicclient/docs/ManagedMultiRoute.md)
+ - [ManagedMultiRouteListResponse](azentspublicclient/docs/ManagedMultiRouteListResponse.md)
+ - [ManagedSlackManagementHandoff](azentspublicclient/docs/ManagedSlackManagementHandoff.md)
  - [ManagedWork](azentspublicclient/docs/ManagedWork.md)
  - [ManagedWorkSource](azentspublicclient/docs/ManagedWorkSource.md)
  - [ManagedWorkTask](azentspublicclient/docs/ManagedWorkTask.md)
@@ -466,6 +499,8 @@ Class | Method | HTTP request | Description
  - [ModelReasoningCapabilities](azentspublicclient/docs/ModelReasoningCapabilities.md)
  - [ModelReasoningEffort](azentspublicclient/docs/ModelReasoningEffort.md)
  - [ModelToolCallingCapabilities](azentspublicclient/docs/ModelToolCallingCapabilities.md)
+ - [MultiChannelDefaultRequest](azentspublicclient/docs/MultiChannelDefaultRequest.md)
+ - [MultiRouteCreateRequest](azentspublicclient/docs/MultiRouteCreateRequest.md)
  - [MyJoinRequestResponse](azentspublicclient/docs/MyJoinRequestResponse.md)
  - [MySystemRolesResponse](azentspublicclient/docs/MySystemRolesResponse.md)
  - [OAuthAuthorizeResponse](azentspublicclient/docs/OAuthAuthorizeResponse.md)

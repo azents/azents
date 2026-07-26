@@ -53,6 +53,27 @@ class TestManagedConnectionListResponse(unittest.TestCase):
                         socket_gap_detected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         socket_gap_reason = '', 
                         disconnected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                    ],
+                associated_multi_apps = [
+                    azentspublicclient.models.managed_multi_connection.ManagedMultiConnection(
+                        id = '', 
+                        provider = 'slack', 
+                        transport = 'http', 
+                        app_mode = 'single', 
+                        status = 'configuring', 
+                        provider_app_id = '', 
+                        provider_tenant_id = '', 
+                        provider_bot_user_id = '', 
+                        credentials_configured = True, 
+                        capabilities = { }, 
+                        last_verified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        last_health_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        socket_gap_detected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        socket_gap_reason = '', 
+                        disconnected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        generation = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        active_agent_count = 56, 
+                        configured_default_count = 56, )
                     ]
             )
         else:
@@ -75,6 +96,27 @@ class TestManagedConnectionListResponse(unittest.TestCase):
                         socket_gap_detected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         socket_gap_reason = '', 
                         disconnected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                    ],
+                associated_multi_apps = [
+                    azentspublicclient.models.managed_multi_connection.ManagedMultiConnection(
+                        id = '', 
+                        provider = 'slack', 
+                        transport = 'http', 
+                        app_mode = 'single', 
+                        status = 'configuring', 
+                        provider_app_id = '', 
+                        provider_tenant_id = '', 
+                        provider_bot_user_id = '', 
+                        credentials_configured = True, 
+                        capabilities = { }, 
+                        last_verified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        last_health_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        socket_gap_detected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        socket_gap_reason = '', 
+                        disconnected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        generation = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        active_agent_count = 56, 
+                        configured_default_count = 56, )
                     ],
         )
         """

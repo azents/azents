@@ -41,6 +41,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
     RDBExternalChannelConversationAdmission,
+    RDBExternalChannelResource,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_session import AgentSessionRepository
@@ -1410,6 +1411,15 @@ async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
         rdb_session,
         _route_create(multi.id, agent.id, mode=ExternalChannelAppMode.MULTI),
     )
+    associated_multi_apps = await management.list_agent_multi_connections(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+    )
+    assert len(associated_multi_apps) == 1
+    assert associated_multi_apps[0].id == multi.id
+    assert associated_multi_apps[0].active_agent_count == 1
+    assert associated_multi_apps[0].configured_default_count == 0
 
     corrupt_single = await repo.create_connection(
         rdb_session,
@@ -1592,6 +1602,42 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
         connection_id=connection.id,
         key="removal-resource",
     )
+    stored_resource = await rdb_session.get(RDBExternalChannelResource, resource.id)
+    assert stored_resource is not None
+    stored_resource.labels = {
+        "channel_id": "C-removal",
+        "channel_name": "incident-room",
+        "thread_ts": "123.456",
+    }
+    agent_session = await AgentSessionRepository().create(
+        rdb_session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=first_agent.id,
+            title=None,
+        ),
+    )
+    binding = await repo.create_binding_idempotent(
+        rdb_session,
+        ExternalChannelBindingCreate(
+            resource_id=resource.id,
+            route_id=first_route.id,
+            agent_session_id=agent_session.id,
+            status=ExternalChannelBindingStatus.ACTIVE,
+            activation_status=(
+                ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+            ),
+            activation_trigger_message_id=None,
+            activated_at=None,
+            projected_through_position=None,
+            truncated_message_count=0,
+            truncated_size=0,
+            disconnected_at=None,
+            disconnect_reason=None,
+        ),
+        expected_admission_id=None,
+        expected_access_request_id=None,
+    )
     message = await _message(
         rdb_session,
         repo,
@@ -1637,7 +1683,29 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
         ),
     )
 
-    result = await ExternalChannelLifecycleRepository().remove_multi_route(
+    lifecycle = ExternalChannelLifecycleRepository()
+    connection_impact = await lifecycle.project_multi_connection_impact(
+        rdb_session,
+        connection_id=connection.id,
+    )
+    assert connection_impact is not None
+    assert connection_impact.generation == connection.updated_at
+    assert connection_impact.active_route_count == 2
+    assert connection_impact.active_default_count == 1
+    assert connection_impact.active_binding_count == 1
+    assert connection_impact.bound_resource_count == 1
+    assert connection_impact.open_admission_count == 1
+    assert connection_impact.pending_access_request_count == 1
+    assert [
+        item.provider_channel_id for item in connection_impact.affected_defaults
+    ] == ["C-removal"]
+    assert len(connection_impact.affected_bindings) == 1
+    assert connection_impact.affected_bindings[0].id == binding.id
+    assert connection_impact.affected_bindings[0].agent_session_id == agent_session.id
+    assert connection_impact.affected_bindings[0].channel_label == "incident-room"
+    assert connection_impact.affected_bindings[0].thread_label == "123.456"
+
+    result = await lifecycle.remove_multi_route(
         rdb_session,
         connection_id=connection.id,
         route_id=first_route.id,
@@ -1647,7 +1715,15 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
 
     assert result is not None
     assert result.impact.active_default_count == 1
+    assert result.impact.active_binding_count == 1
     assert result.impact.open_admission_count == 1
+    assert result.impact.generation == connection.updated_at
+    assert [item.provider_channel_id for item in result.impact.affected_defaults] == [
+        "C-removal"
+    ]
+    assert [item.agent_session_id for item in result.impact.affected_bindings] == [
+        agent_session.id
+    ]
     route = await rdb_session.get(RDBExternalChannelAgentRoute, first_route.id)
     default = await rdb_session.scalar(
         sa.select(RDBExternalChannelChannelDefault).where(
@@ -1689,6 +1765,86 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
     assert default.status is ExternalChannelChannelDefaultStatus.INVALIDATED
     assert (
         persisted_admission.status is ExternalChannelConversationAdmissionStatus.EXPIRED
+    )
+
+
+async def test_multi_management_handoff_requires_completed_unexpired_channel_scope(
+    rdb_session: AsyncSession,
+) -> None:
+    """Authenticated handoffs expose only completed live channel-bound state."""
+    workspace_id = await _workspace(rdb_session, "multi-management-handoff")
+    repo = ExternalChannelRepository()
+    management = ExternalChannelManagementRepository()
+    connection = await repo.create_connection(
+        rdb_session,
+        _connection_create(
+            workspace_id,
+            provider_app_id="A-handoff",
+            provider_tenant_id="T-handoff",
+        ).model_copy(
+            update={
+                "app_mode": ExternalChannelAppMode.MULTI,
+                "status": ExternalChannelConnectionStatus.ACTIVE,
+            }
+        ),
+    )
+    admission = await repo.admit_interaction(
+        rdb_session,
+        _interaction_create(connection.id, key="management-handoff").model_copy(
+            update={
+                "interaction_type": ExternalChannelInteractionType.MANAGEMENT_ACTION,
+                "resource_correlation_key": "C-handoff:123.456",
+            }
+        ),
+    )
+    assert (
+        await management.load_multi_management_handoff(
+            rdb_session,
+            workspace_id=workspace_id,
+            interaction_id=admission.interaction.id,
+            now=_at(5),
+        )
+        is None
+    )
+    processing = await repo.transition_interaction(
+        rdb_session,
+        interaction_id=admission.interaction.id,
+        status=ExternalChannelInteractionStatus.PROCESSING,
+        error_kind=None,
+        error_summary=None,
+        transitioned_at=_at(1),
+    )
+    assert processing is not None
+    completed = await repo.transition_interaction(
+        rdb_session,
+        interaction_id=admission.interaction.id,
+        status=ExternalChannelInteractionStatus.COMPLETED,
+        error_kind=None,
+        error_summary=None,
+        transitioned_at=_at(2),
+    )
+    assert completed is not None
+
+    handoff = await management.load_multi_management_handoff(
+        rdb_session,
+        workspace_id=workspace_id,
+        interaction_id=admission.interaction.id,
+        now=_at(5),
+    )
+
+    assert handoff is not None
+    assert handoff.connection_id == connection.id
+    assert handoff.provider_channel_id == "C-handoff"
+    assert handoff.provider_thread_id == "123.456"
+    assert handoff.expires_at == _at(10)
+    assert (
+        await management.load_multi_management_handoff(
+            rdb_session,
+            workspace_id=workspace_id,
+            interaction_id=admission.interaction.id,
+            now=_at(10),
+        )
+        is None
     )
 
 

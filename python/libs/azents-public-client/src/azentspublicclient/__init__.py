@@ -166,22 +166,30 @@ __all__ = [
     "ExistingProjectWorkspaceItemResponse",
     "ExternalChannelAccessGrantScope",
     "ExternalChannelAccessRequestStatus",
+    "ExternalChannelAppMode",
     "ExternalChannelBindingActivationStatus",
     "ExternalChannelBindingStatus",
     "ExternalChannelCapabilitySnapshot",
+    "ExternalChannelChannelDefaultStatus",
     "ExternalChannelConnectionStatus",
     "ExternalChannelConnectionStatusSnapshot",
     "ExternalChannelCredentialSnapshot",
     "ExternalChannelDecisionInput",
     "ExternalChannelDeliveryOperation",
     "ExternalChannelDeliveryStatus",
+    "ExternalChannelMultiConnectionImpact",
+    "ExternalChannelMultiImpactBinding",
+    "ExternalChannelMultiImpactDefault",
+    "ExternalChannelMultiRouteImpact",
     "ExternalChannelProvider",
     "ExternalChannelProviderIdentity",
+    "ExternalChannelRouteCatalogStatus",
     "ExternalChannelTransport",
     "ExternalChannelWorkStatus",
     "ExternalChannelWorkTaskStatus",
     "GcpConfig",
     "GcpSecrets",
+    "GenerationFenceRequest",
     "GetAuthMethodsResponse",
     "GitHubInstallationItem",
     "GitHubPlatformAuthorizationStateResponse",
@@ -235,11 +243,20 @@ __all__ = [
     "ManagedBinding",
     "ManagedBindingListResponse",
     "ManagedBlock",
+    "ManagedChannelDefault",
+    "ManagedChannelDefaultListResponse",
     "ManagedConnection",
     "ManagedConnectionListResponse",
     "ManagedConnectionSetup",
     "ManagedDelivery",
     "ManagedGrant",
+    "ManagedMultiConnection",
+    "ManagedMultiConnectionDisconnect",
+    "ManagedMultiConnectionListResponse",
+    "ManagedMultiConnectionSetup",
+    "ManagedMultiRoute",
+    "ManagedMultiRouteListResponse",
+    "ManagedSlackManagementHandoff",
     "ManagedWork",
     "ManagedWorkSource",
     "ManagedWorkTask",
@@ -264,6 +281,8 @@ __all__ = [
     "ModelReasoningCapabilities",
     "ModelReasoningEffort",
     "ModelToolCallingCapabilities",
+    "MultiChannelDefaultRequest",
+    "MultiRouteCreateRequest",
     "MyJoinRequestResponse",
     "MySystemRolesResponse",
     "OAuthAuthorizeResponse",
@@ -536,22 +555,30 @@ from azentspublicclient.models.event_kind import EventKind as EventKind
 from azentspublicclient.models.existing_project_workspace_item_response import ExistingProjectWorkspaceItemResponse as ExistingProjectWorkspaceItemResponse
 from azentspublicclient.models.external_channel_access_grant_scope import ExternalChannelAccessGrantScope as ExternalChannelAccessGrantScope
 from azentspublicclient.models.external_channel_access_request_status import ExternalChannelAccessRequestStatus as ExternalChannelAccessRequestStatus
+from azentspublicclient.models.external_channel_app_mode import ExternalChannelAppMode as ExternalChannelAppMode
 from azentspublicclient.models.external_channel_binding_activation_status import ExternalChannelBindingActivationStatus as ExternalChannelBindingActivationStatus
 from azentspublicclient.models.external_channel_binding_status import ExternalChannelBindingStatus as ExternalChannelBindingStatus
 from azentspublicclient.models.external_channel_capability_snapshot import ExternalChannelCapabilitySnapshot as ExternalChannelCapabilitySnapshot
+from azentspublicclient.models.external_channel_channel_default_status import ExternalChannelChannelDefaultStatus as ExternalChannelChannelDefaultStatus
 from azentspublicclient.models.external_channel_connection_status import ExternalChannelConnectionStatus as ExternalChannelConnectionStatus
 from azentspublicclient.models.external_channel_connection_status_snapshot import ExternalChannelConnectionStatusSnapshot as ExternalChannelConnectionStatusSnapshot
 from azentspublicclient.models.external_channel_credential_snapshot import ExternalChannelCredentialSnapshot as ExternalChannelCredentialSnapshot
 from azentspublicclient.models.external_channel_decision_input import ExternalChannelDecisionInput as ExternalChannelDecisionInput
 from azentspublicclient.models.external_channel_delivery_operation import ExternalChannelDeliveryOperation as ExternalChannelDeliveryOperation
 from azentspublicclient.models.external_channel_delivery_status import ExternalChannelDeliveryStatus as ExternalChannelDeliveryStatus
+from azentspublicclient.models.external_channel_multi_connection_impact import ExternalChannelMultiConnectionImpact as ExternalChannelMultiConnectionImpact
+from azentspublicclient.models.external_channel_multi_impact_binding import ExternalChannelMultiImpactBinding as ExternalChannelMultiImpactBinding
+from azentspublicclient.models.external_channel_multi_impact_default import ExternalChannelMultiImpactDefault as ExternalChannelMultiImpactDefault
+from azentspublicclient.models.external_channel_multi_route_impact import ExternalChannelMultiRouteImpact as ExternalChannelMultiRouteImpact
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider as ExternalChannelProvider
 from azentspublicclient.models.external_channel_provider_identity import ExternalChannelProviderIdentity as ExternalChannelProviderIdentity
+from azentspublicclient.models.external_channel_route_catalog_status import ExternalChannelRouteCatalogStatus as ExternalChannelRouteCatalogStatus
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport as ExternalChannelTransport
 from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus as ExternalChannelWorkStatus
 from azentspublicclient.models.external_channel_work_task_status import ExternalChannelWorkTaskStatus as ExternalChannelWorkTaskStatus
 from azentspublicclient.models.gcp_config import GcpConfig as GcpConfig
 from azentspublicclient.models.gcp_secrets import GcpSecrets as GcpSecrets
+from azentspublicclient.models.generation_fence_request import GenerationFenceRequest as GenerationFenceRequest
 from azentspublicclient.models.get_auth_methods_response import GetAuthMethodsResponse as GetAuthMethodsResponse
 from azentspublicclient.models.git_hub_installation_item import GitHubInstallationItem as GitHubInstallationItem
 from azentspublicclient.models.git_hub_platform_authorization_state_response import GitHubPlatformAuthorizationStateResponse as GitHubPlatformAuthorizationStateResponse
@@ -605,11 +632,20 @@ from azentspublicclient.models.managed_approval_request import ManagedApprovalRe
 from azentspublicclient.models.managed_binding import ManagedBinding as ManagedBinding
 from azentspublicclient.models.managed_binding_list_response import ManagedBindingListResponse as ManagedBindingListResponse
 from azentspublicclient.models.managed_block import ManagedBlock as ManagedBlock
+from azentspublicclient.models.managed_channel_default import ManagedChannelDefault as ManagedChannelDefault
+from azentspublicclient.models.managed_channel_default_list_response import ManagedChannelDefaultListResponse as ManagedChannelDefaultListResponse
 from azentspublicclient.models.managed_connection import ManagedConnection as ManagedConnection
 from azentspublicclient.models.managed_connection_list_response import ManagedConnectionListResponse as ManagedConnectionListResponse
 from azentspublicclient.models.managed_connection_setup import ManagedConnectionSetup as ManagedConnectionSetup
 from azentspublicclient.models.managed_delivery import ManagedDelivery as ManagedDelivery
 from azentspublicclient.models.managed_grant import ManagedGrant as ManagedGrant
+from azentspublicclient.models.managed_multi_connection import ManagedMultiConnection as ManagedMultiConnection
+from azentspublicclient.models.managed_multi_connection_disconnect import ManagedMultiConnectionDisconnect as ManagedMultiConnectionDisconnect
+from azentspublicclient.models.managed_multi_connection_list_response import ManagedMultiConnectionListResponse as ManagedMultiConnectionListResponse
+from azentspublicclient.models.managed_multi_connection_setup import ManagedMultiConnectionSetup as ManagedMultiConnectionSetup
+from azentspublicclient.models.managed_multi_route import ManagedMultiRoute as ManagedMultiRoute
+from azentspublicclient.models.managed_multi_route_list_response import ManagedMultiRouteListResponse as ManagedMultiRouteListResponse
+from azentspublicclient.models.managed_slack_management_handoff import ManagedSlackManagementHandoff as ManagedSlackManagementHandoff
 from azentspublicclient.models.managed_work import ManagedWork as ManagedWork
 from azentspublicclient.models.managed_work_source import ManagedWorkSource as ManagedWorkSource
 from azentspublicclient.models.managed_work_task import ManagedWorkTask as ManagedWorkTask
@@ -634,6 +670,8 @@ from azentspublicclient.models.model_parameters import ModelParameters as ModelP
 from azentspublicclient.models.model_reasoning_capabilities import ModelReasoningCapabilities as ModelReasoningCapabilities
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort as ModelReasoningEffort
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities as ModelToolCallingCapabilities
+from azentspublicclient.models.multi_channel_default_request import MultiChannelDefaultRequest as MultiChannelDefaultRequest
+from azentspublicclient.models.multi_route_create_request import MultiRouteCreateRequest as MultiRouteCreateRequest
 from azentspublicclient.models.my_join_request_response import MyJoinRequestResponse as MyJoinRequestResponse
 from azentspublicclient.models.my_system_roles_response import MySystemRolesResponse as MySystemRolesResponse
 from azentspublicclient.models.o_auth_authorize_response import OAuthAuthorizeResponse as OAuthAuthorizeResponse

@@ -8,12 +8,15 @@ from pydantic import BaseModel, ConfigDict
 from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
+    ExternalChannelAppMode,
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
+    ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
@@ -41,6 +44,82 @@ class ManagedConnection(_Projection):
     socket_gap_detected_at: datetime.datetime | None
     socket_gap_reason: str | None
     disconnected_at: datetime.datetime | None
+
+
+class ManagedMultiConnection(_Projection):
+    """Redacted Workspace-owned Multi App connection projection."""
+
+    id: str
+    provider: ExternalChannelProvider
+    transport: ExternalChannelTransport
+    app_mode: ExternalChannelAppMode
+    status: ExternalChannelConnectionStatus
+    provider_app_id: str | None
+    provider_tenant_id: str | None
+    provider_bot_user_id: str | None
+    credentials_configured: bool
+    capabilities: dict[str, Any] | None
+    last_verified_at: datetime.datetime | None
+    last_health_at: datetime.datetime | None
+    socket_gap_detected_at: datetime.datetime | None
+    socket_gap_reason: str | None
+    disconnected_at: datetime.datetime | None
+    generation: datetime.datetime
+    active_agent_count: int
+    configured_default_count: int
+
+
+class ManagedMultiRoute(_Projection):
+    """One Multi App Agent catalog relationship."""
+
+    id: str
+    agent_id: str | None
+    agent_id_snapshot: str
+    agent_name: str | None
+    catalog_status: ExternalChannelRouteCatalogStatus
+    catalog_removed_at: datetime.datetime | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ManagedChannelDefault(_Projection):
+    """One redacted Multi App channel default."""
+
+    id: str
+    provider_channel_id: str
+    route_id: str
+    agent_id: str | None
+    agent_name: str | None
+    status: ExternalChannelChannelDefaultStatus
+    configured_by_user_id: str
+    invalidated_at: datetime.datetime | None
+    invalidation_reason: str | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ManagedSlackManagementHandoff(_Projection):
+    """Authenticated resolution of an opaque Slack management callback."""
+
+    interaction_id: str
+    connection_id: str
+    provider: ExternalChannelProvider
+    provider_app_id: str | None
+    provider_channel_id: str
+    provider_thread_id: str | None
+    expires_at: datetime.datetime
+
+
+class ManagedMultiConnectionDisconnect(_Projection):
+    """Sanitized terminal Multi App disconnect summary."""
+
+    disconnected_route_count: int
+    invalidated_default_count: int
+    expired_admission_count: int
+    expired_access_request_count: int
+    unavailable_resource_count: int
+    disconnected_binding_count: int
+    deleted_pending_context_count: int
 
 
 class ManagedDelivery(_Projection):

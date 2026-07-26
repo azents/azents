@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     # Browser-copyable Slack Events API callback URL. Production may expose this
     # through a different public hostname than the authenticated API.
     external_channel_slack_callback_url: str | None = None
+    # Rollout gate: enable only after every API and worker is mode-aware.
+    external_channel_multi_app_enabled: bool = False
 
     # LLM credential encryption key; Fernet key, base64-encoded 32 bytes
     credential_encryption_key: str
@@ -373,6 +375,7 @@ class Config(BaseModel):
     web_url: str = ""
     api_url: str = ""
     external_channel_slack_callback_url: str = ""
+    external_channel_multi_app_enabled: bool = False
     oauth_secret_key: str = ""
     mcp_proxy_url: str | None = None
     workspace_s3: WorkspaceS3Config
@@ -461,6 +464,9 @@ class Config(BaseModel):
             api_url=settings.api_url or "",
             external_channel_slack_callback_url=(
                 settings.external_channel_slack_callback_url or ""
+            ),
+            external_channel_multi_app_enabled=(
+                settings.external_channel_multi_app_enabled
             ),
             oauth_secret_key=settings.oauth_secret_key,
             mcp_proxy_url=settings.mcp_proxy_url,

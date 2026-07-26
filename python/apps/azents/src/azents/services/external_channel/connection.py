@@ -107,6 +107,7 @@ class ExternalChannelConnectionService:
         app_id: str,
         transport: ExternalChannelTransport,
         credentials: SlackConnectionCredentials,
+        app_mode: ExternalChannelAppMode = ExternalChannelAppMode.SINGLE,
     ) -> ExternalChannelConnectionSetup:
         """Persist one configuring Slack connection."""
         if not app_id.strip():
@@ -122,7 +123,7 @@ class ExternalChannelConnectionService:
             workspace_id=workspace_id,
             provider=ExternalChannelProvider.SLACK,
             transport=transport,
-            app_mode=ExternalChannelAppMode.SINGLE,
+            app_mode=app_mode,
             status=ExternalChannelConnectionStatus.CONFIGURING,
             provider_app_id=app_id,
             provider_tenant_id=None,

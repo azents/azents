@@ -26,6 +26,20 @@ class TestExternalChannelV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_external_channel_v1_add_multi_slack_route(self) -> None:
+        """Test case for external_channel_v1_add_multi_slack_route
+
+        Add Multi Slack Route
+        """
+        pass
+
+    def test_external_channel_v1_clear_multi_slack_channel_default(self) -> None:
+        """Test case for external_channel_v1_clear_multi_slack_channel_default
+
+        Clear Multi Slack Channel Default
+        """
+        pass
+
     def test_external_channel_v1_decide_approval_request(self) -> None:
         """Test case for external_channel_v1_decide_approval_request
 
@@ -37,6 +51,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_disconnect_connection
 
         Disconnect Connection
+        """
+        pass
+
+    def test_external_channel_v1_disconnect_multi_slack_connection(self) -> None:
+        """Test case for external_channel_v1_disconnect_multi_slack_connection
+
+        Disconnect Multi Slack Connection
         """
         pass
 
@@ -61,6 +82,27 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_get_multi_slack_connection(self) -> None:
+        """Test case for external_channel_v1_get_multi_slack_connection
+
+        Get Multi Slack Connection
+        """
+        pass
+
+    def test_external_channel_v1_get_multi_slack_connection_impact(self) -> None:
+        """Test case for external_channel_v1_get_multi_slack_connection_impact
+
+        Get Multi Slack Connection Impact
+        """
+        pass
+
+    def test_external_channel_v1_get_multi_slack_route_impact(self) -> None:
+        """Test case for external_channel_v1_get_multi_slack_route_impact
+
+        Get Multi Slack Route Impact
+        """
+        pass
+
     def test_external_channel_v1_list_agent_access(self) -> None:
         """Test case for external_channel_v1_list_agent_access
 
@@ -75,10 +117,45 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_list_multi_slack_channel_defaults(self) -> None:
+        """Test case for external_channel_v1_list_multi_slack_channel_defaults
+
+        List Multi Slack Channel Defaults
+        """
+        pass
+
+    def test_external_channel_v1_list_multi_slack_connections(self) -> None:
+        """Test case for external_channel_v1_list_multi_slack_connections
+
+        List Multi Slack Connections
+        """
+        pass
+
+    def test_external_channel_v1_list_multi_slack_routes(self) -> None:
+        """Test case for external_channel_v1_list_multi_slack_routes
+
+        List Multi Slack Routes
+        """
+        pass
+
     def test_external_channel_v1_list_session_channels(self) -> None:
         """Test case for external_channel_v1_list_session_channels
 
         List Session Channels
+        """
+        pass
+
+    def test_external_channel_v1_load_multi_slack_management_handoff(self) -> None:
+        """Test case for external_channel_v1_load_multi_slack_management_handoff
+
+        Load Multi Slack Management Handoff
+        """
+        pass
+
+    def test_external_channel_v1_reenable_multi_slack_route(self) -> None:
+        """Test case for external_channel_v1_reenable_multi_slack_route
+
+        Reenable Multi Slack Route
         """
         pass
 
@@ -89,6 +166,20 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_remove_multi_slack_route(self) -> None:
+        """Test case for external_channel_v1_remove_multi_slack_route
+
+        Remove Multi Slack Route
+        """
+        pass
+
+    def test_external_channel_v1_replace_multi_slack_channel_default(self) -> None:
+        """Test case for external_channel_v1_replace_multi_slack_channel_default
+
+        Replace Multi Slack Channel Default
+        """
+        pass
+
     def test_external_channel_v1_revoke_access_grant(self) -> None:
         """Test case for external_channel_v1_revoke_access_grant
 
@@ -96,10 +187,24 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_setup_multi_slack_connection(self) -> None:
+        """Test case for external_channel_v1_setup_multi_slack_connection
+
+        Setup Multi Slack Connection
+        """
+        pass
+
     def test_external_channel_v1_setup_slack_connection(self) -> None:
         """Test case for external_channel_v1_setup_slack_connection
 
         Setup Slack Connection
+        """
+        pass
+
+    def test_external_channel_v1_update_multi_slack_connection(self) -> None:
+        """Test case for external_channel_v1_update_multi_slack_connection
+
+        Update Multi Slack Connection
         """
         pass
 
@@ -114,6 +219,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_validate_connection
 
         Validate Connection
+        """
+        pass
+
+    def test_external_channel_v1_validate_multi_slack_connection(self) -> None:
+        """Test case for external_channel_v1_validate_multi_slack_connection
+
+        Validate Multi Slack Connection
         """
         pass
 

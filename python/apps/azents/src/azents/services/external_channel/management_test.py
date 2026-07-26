@@ -18,17 +18,24 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
 )
 from azents.rdb.models.external_channel import (
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelWork,
 )
+from azents.repos.external_channel.data import (
+    ExternalChannelMultiConnectionDisconnect,
+)
 from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
     progress_projection_state,
 )
-from azents.repos.external_channel.management_data import ManagedConnection
+from azents.repos.external_channel.management_data import (
+    ManagedConnection,
+    ManagedMultiRoute,
+)
 from azents.services.external_channel.management import (
     ExternalChannelManagementService,
     slack_manifest_guidance,
@@ -56,6 +63,25 @@ def _connection() -> ManagedConnection:
     )
 
 
+def _multi_route(
+    *,
+    status: ExternalChannelRouteCatalogStatus = (
+        ExternalChannelRouteCatalogStatus.AVAILABLE
+    ),
+) -> ManagedMultiRoute:
+    now = datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC)
+    return ManagedMultiRoute(
+        id="route-1",
+        agent_id="agent-1",
+        agent_id_snapshot="agent-1",
+        agent_name="Agent One",
+        catalog_status=status,
+        catalog_removed_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     """Socket Mode manifests still contain every subscribed Bot Event."""
     guidance = slack_manifest_guidance(
@@ -76,6 +102,53 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     assert "request_url" not in subscriptions
     assert guidance.callback_url is None
     assert "signing_secret" not in guidance.manifest_json
+
+
+async def test_add_multi_route_returns_existing_available_association() -> None:
+    """Repeated catalog addition is idempotent under the connection lock."""
+    session = AsyncMock(spec=AsyncSession)
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    repository = AsyncMock()
+    repository.get_multi_connection.return_value = SimpleNamespace(id="connection-1")
+    existing = _multi_route()
+    repository.get_multi_route_by_agent.return_value = existing
+    domain_repository = AsyncMock()
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1"
+    )
+    service = ExternalChannelManagementService(
+        session_manager=session_manager,
+        repository=repository,
+        domain_repository=domain_repository,
+        lifecycle_repository=AsyncMock(),
+        agent_repository=agent_repository,
+        agent_admin_repository=AsyncMock(),
+        workspace_user_repository=AsyncMock(),
+        connection_service=AsyncMock(),
+        action_service=AsyncMock(),
+        access_service=AsyncMock(),
+    )
+
+    result = await service.add_multi_route(
+        workspace_id="workspace-1",
+        connection_id="connection-1",
+        agent_id="agent-1",
+    )
+
+    assert result == existing
+    repository.get_multi_route_by_agent.assert_awaited_once_with(
+        session,
+        workspace_id="workspace-1",
+        connection_id="connection-1",
+        agent_id="agent-1",
+    )
+    domain_repository.create_agent_route.assert_not_awaited()
+    session.commit.assert_not_awaited()
 
 
 async def test_repeated_disconnect_reterminalizes_connection() -> None:
@@ -236,6 +309,85 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
         "commit",
         "delivery",
     ]
+
+
+async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -> None:
+    """Multi disconnect captures cleanup before it purges provider state."""
+    events: list[str] = []
+    session = AsyncMock(spec=AsyncSession)
+
+    async def commit() -> None:
+        events.append("commit")
+
+    session.commit.side_effect = commit
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    now = datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC)
+    connection = SimpleNamespace(id="connection-1", updated_at=now)
+    disconnected = ExternalChannelMultiConnectionDisconnect(
+        disconnected_route_count=1,
+        invalidated_default_count=0,
+        expired_admission_count=0,
+        expired_access_request_count=0,
+        unavailable_resource_count=0,
+        disconnected_binding_count=1,
+        deleted_pending_context_count=0,
+        progress_delete_intent_ids=("cleanup-1",),
+    )
+    repository = AsyncMock()
+    repository.get_multi_connection.return_value = connection
+    lifecycle_repository = AsyncMock()
+
+    async def disconnect_multi(*args: object, **kwargs: object) -> object:
+        events.append("disconnect")
+        assert kwargs["defer_provider_state_purge"] is True
+        return disconnected
+
+    async def purge(*args: object, **kwargs: object) -> int:
+        events.append("purge")
+        return 1
+
+    lifecycle_repository.disconnect_multi_connection.side_effect = disconnect_multi
+    lifecycle_repository.purge_disconnected_connection_provider_state.side_effect = (
+        purge
+    )
+    action_service = AsyncMock()
+    target = object()
+
+    async def prepare(*args: object, **kwargs: object) -> object:
+        events.append("prepare")
+        return target
+
+    async def deliver(value: object) -> None:
+        assert value is target
+        events.append("delivery")
+
+    action_service.prepare_delivery_in_session.side_effect = prepare
+    action_service.attempt_prepared_delivery.side_effect = deliver
+    service = ExternalChannelManagementService(
+        session_manager=session_manager,
+        repository=repository,
+        domain_repository=AsyncMock(),
+        lifecycle_repository=lifecycle_repository,
+        agent_repository=AsyncMock(),
+        agent_admin_repository=AsyncMock(),
+        workspace_user_repository=AsyncMock(),
+        connection_service=AsyncMock(),
+        action_service=action_service,
+        access_service=AsyncMock(),
+    )
+
+    result = await service.disconnect_multi_connection(
+        workspace_id="workspace-1",
+        connection_id=connection.id,
+        expected_generation=now,
+    )
+
+    assert result.disconnected_binding_count == 1
+    assert events == ["disconnect", "prepare", "purge", "commit", "delivery"]
 
 
 @pytest.mark.parametrize(

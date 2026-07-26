@@ -196,6 +196,7 @@ class ExternalChannelLifecycleService:
         connection_id: str,
         now: datetime.datetime,
         reason: str,
+        defer_provider_state_purge: bool = False,
     ) -> ExternalChannelMultiConnectionDisconnect | None:
         """Disconnect an internal Multi App inside the caller transaction."""
         return await self.repository.disconnect_multi_connection(
@@ -203,6 +204,7 @@ class ExternalChannelLifecycleService:
             connection_id=connection_id,
             now=now,
             reason=reason,
+            defer_provider_state_purge=defer_provider_state_purge,
         )
 
     async def consume_archive_cleanup(
