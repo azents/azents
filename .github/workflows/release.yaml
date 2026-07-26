@@ -124,6 +124,14 @@ jobs:
             package: azents-runtime-runner
             dockerfile: python/apps/azents-runtime-runner/Dockerfile
             extra_context: ""
+          - component: container-policy-gateway
+            package: azents-container-policy-gateway
+            dockerfile: python/apps/azents-container-policy-gateway/Dockerfile
+            extra_context: ""
+          - component: runtime-engine
+            package: azents-runtime-engine
+            dockerfile: images/azents-runtime-engine/Dockerfile
+            extra_context: ""
           - component: runtime-provider-kubernetes
             package: azents-runtime-provider-kubernetes
             dockerfile: python/apps/azents-runtime-provider-kubernetes/Dockerfile

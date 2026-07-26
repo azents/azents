@@ -287,6 +287,19 @@ Return a Docker image reference with optional digest pinning.
 {{- end -}}
 
 {{/*
+Return a Docker image reference that requires immutable digest pinning.
+*/}}
+{{- define "azents.immutableImageReference" -}}
+{{- $repository := required .repositoryRequiredMessage .image.repository -}}
+{{- $tag := required .tagRequiredMessage .image.tag -}}
+{{- $digest := required .digestRequiredMessage .image.digest -}}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" $digest) -}}
+{{- fail .digestInvalidMessage -}}
+{{- end -}}
+{{- printf "%s:%s@%s" $repository $tag $digest -}}
+{{- end -}}
+
+{{/*
 Return the server image.
 */}}
 {{- define "azents.serverImage" -}}
@@ -325,28 +338,28 @@ Return the Kubernetes Runtime Provider image.
 Return the Runtime Runner image for the Kubernetes Runtime Provider.
 */}}
 {{- define "azents.runtimeRunnerImage" -}}
-{{- include "azents.imageReference" (dict "image" .Values.runtimeProviderKubernetes.runnerImage "repositoryRequiredMessage" "runtimeProviderKubernetes.runnerImage.repository is required" "tagRequiredMessage" "runtimeProviderKubernetes.runnerImage.tag is required") -}}
+{{- include "azents.immutableImageReference" (dict "image" .Values.runtimeProviderKubernetes.runnerImage "repositoryRequiredMessage" "runtimeProviderKubernetes.runnerImage.repository is required" "tagRequiredMessage" "runtimeProviderKubernetes.runnerImage.tag is required" "digestRequiredMessage" "runtimeProviderKubernetes.runnerImage.digest is required" "digestInvalidMessage" "runtimeProviderKubernetes.runnerImage.digest must be a sha256 digest") -}}
 {{- end -}}
 
 {{/*
 Return the fixed policy gateway image for Kubernetes Runtime Pods.
 */}}
 {{- define "azents.runtimeGatewayImage" -}}
-{{- include "azents.imageReference" (dict "image" .Values.runtimeProviderKubernetes.gatewayImage "repositoryRequiredMessage" "runtimeProviderKubernetes.gatewayImage.repository is required" "tagRequiredMessage" "runtimeProviderKubernetes.gatewayImage.tag is required") -}}
+{{- include "azents.immutableImageReference" (dict "image" .Values.runtimeProviderKubernetes.gatewayImage "repositoryRequiredMessage" "runtimeProviderKubernetes.gatewayImage.repository is required" "tagRequiredMessage" "runtimeProviderKubernetes.gatewayImage.tag is required" "digestRequiredMessage" "runtimeProviderKubernetes.gatewayImage.digest is required" "digestInvalidMessage" "runtimeProviderKubernetes.gatewayImage.digest must be a sha256 digest") -}}
 {{- end -}}
 
 {{/*
 Return the fixed nested engine image for Kubernetes Runtime Pods.
 */}}
 {{- define "azents.runtimeEngineImage" -}}
-{{- include "azents.imageReference" (dict "image" .Values.runtimeProviderKubernetes.engineImage "repositoryRequiredMessage" "runtimeProviderKubernetes.engineImage.repository is required" "tagRequiredMessage" "runtimeProviderKubernetes.engineImage.tag is required") -}}
+{{- include "azents.immutableImageReference" (dict "image" .Values.runtimeProviderKubernetes.engineImage "repositoryRequiredMessage" "runtimeProviderKubernetes.engineImage.repository is required" "tagRequiredMessage" "runtimeProviderKubernetes.engineImage.tag is required" "digestRequiredMessage" "runtimeProviderKubernetes.engineImage.digest is required" "digestInvalidMessage" "runtimeProviderKubernetes.engineImage.digest must be a sha256 digest") -}}
 {{- end -}}
 
 {{/*
 Return the Runtime Runner image for server-side Runtime Control.
 */}}
 {{- define "azents.serverRuntimeRunnerImage" -}}
-{{- include "azents.imageReference" (dict "image" .Values.server.runtimeControl.runnerImage "repositoryRequiredMessage" "server.runtimeControl.runnerImage.repository is required" "tagRequiredMessage" "server.runtimeControl.runnerImage.tag is required") -}}
+{{- include "azents.immutableImageReference" (dict "image" .Values.server.runtimeControl.runnerImage "repositoryRequiredMessage" "server.runtimeControl.runnerImage.repository is required" "tagRequiredMessage" "server.runtimeControl.runnerImage.tag is required" "digestRequiredMessage" "server.runtimeControl.runnerImage.digest is required" "digestInvalidMessage" "server.runtimeControl.runnerImage.digest must be a sha256 digest") -}}
 {{- end -}}
 
 {{/*

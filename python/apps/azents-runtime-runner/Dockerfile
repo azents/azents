@@ -1,6 +1,14 @@
-FROM public.ecr.aws/docker/library/python:3.14-slim
+FROM docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS docker-cli
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.1 /uv /uvx /bin/
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.1@sha256:fc93e9ecd7218e9ec8fba117af89348eef8fd2463c50c13347478769aaedd0ce /uv /uvx /bin/
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
+
+ENV DOCKER_API_VERSION=1.51
+ENV DOCKER_BUILDKIT=0
+ENV COMPOSE_DOCKER_CLI_BUILD=0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -101,6 +109,10 @@ RUN pip install --no-cache-dir --break-system-packages \
         playwright
 
 RUN playwright install-deps chromium
+
+RUN docker --version | grep -F "Docker version 28.5.2" \
+    && docker compose version | grep -F "Docker Compose version v2.40.3" \
+    && test ! -e /var/run/azents-engine/docker.sock
 
 WORKDIR /workspace/python/apps/azents-runtime-runner
 

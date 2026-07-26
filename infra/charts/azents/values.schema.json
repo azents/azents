@@ -529,7 +529,8 @@
           "type": "string"
         },
         "digest": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^$|^sha256:[0-9a-f]{64}$"
         },
         "pullPolicy": {
           "type": "string"

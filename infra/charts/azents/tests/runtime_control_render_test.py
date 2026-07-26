@@ -7,6 +7,12 @@ from pathlib import Path
 import pytest
 
 CHART_DIR = Path(__file__).resolve().parents[1]
+_RUNNER_DIGEST = f"sha256:{'a' * 64}"
+_GATEWAY_DIGEST = f"sha256:{'b' * 64}"
+_ENGINE_DIGEST = f"sha256:{'c' * 64}"
+_SERVER_DIGEST = f"sha256:{'d' * 64}"
+_WEB_DIGEST = f"sha256:{'e' * 64}"
+_ADMIN_WEB_DIGEST = f"sha256:{'f' * 64}"
 
 
 def _helm_template(*values: str) -> str:
@@ -24,8 +30,10 @@ def _helm_template(*values: str) -> str:
         "adminWeb.image.tag=sha",
         "runtimeProviderKubernetes.gatewayImage.repository=repo/gateway",
         "runtimeProviderKubernetes.gatewayImage.tag=sha",
+        f"runtimeProviderKubernetes.gatewayImage.digest={_GATEWAY_DIGEST}",
         "runtimeProviderKubernetes.engineImage.repository=repo/engine",
         "runtimeProviderKubernetes.engineImage.tag=sha",
+        f"runtimeProviderKubernetes.engineImage.digest={_ENGINE_DIGEST}",
         "secrets.existingSecrets.redis=azents-redis",
         "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
     )
@@ -51,14 +59,14 @@ def test_runtime_control_default_off_render_contract() -> None:
 def test_server_component_digest_pinning_render_contract() -> None:
     """Server, web, and admin web images render tag plus digest when configured."""
     rendered = _helm_template(
-        "server.image.digest=sha256:serverdigest",
-        "web.image.digest=sha256:webdigest",
-        "adminWeb.image.digest=sha256:admindigest",
+        f"server.image.digest={_SERVER_DIGEST}",
+        f"web.image.digest={_WEB_DIGEST}",
+        f"adminWeb.image.digest={_ADMIN_WEB_DIGEST}",
     )
 
-    assert "repo/server:sha@sha256:serverdigest" in rendered
-    assert "repo/web:sha@sha256:webdigest" in rendered
-    assert "repo/admin-web:sha@sha256:admindigest" in rendered
+    assert f"repo/server:sha@{_SERVER_DIGEST}" in rendered
+    assert f"repo/web:sha@{_WEB_DIGEST}" in rendered
+    assert f"repo/admin-web:sha@{_ADMIN_WEB_DIGEST}" in rendered
 
 
 def test_runtime_control_enabled_render_contract() -> None:
@@ -69,7 +77,7 @@ def test_runtime_control_enabled_render_contract() -> None:
         "server.image.tag=sha",
         "server.runtimeControl.runnerImage.repository=repo/runner",
         "server.runtimeControl.runnerImage.tag=sha",
-        "server.runtimeControl.runnerImage.digest=sha256:runnerdigest",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
         "secrets.existingSecrets.auth=azents-auth",
     )
 
@@ -83,7 +91,7 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_RUNNER_IMAGE" in rendered
     assert "AZ_CREDENTIAL_ENCRYPTION_KEY" in rendered
     assert "azents-auth" in rendered
-    assert "repo/runner:sha@sha256:runnerdigest" in rendered
+    assert f"repo/runner:sha@{_RUNNER_DIGEST}" in rendered
     assert "kind: ClusterRole" in rendered
     assert 'resources: ["tokenreviews"]' in rendered
     assert 'verbs: ["create"]' in rendered
@@ -101,11 +109,13 @@ def test_runtime_control_enables_token_review_for_kubernetes_provider() -> None:
         "server.runtimeControl.enabled=true",
         "server.runtimeControl.runnerImage.repository=repo/runner",
         "server.runtimeControl.runnerImage.tag=sha",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
         "runtimeProviderKubernetes.enabled=true",
         "runtimeProviderKubernetes.image.repository=repo/provider",
         "runtimeProviderKubernetes.image.tag=sha",
         "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
         "runtimeProviderKubernetes.runnerImage.tag=sha",
+        f"runtimeProviderKubernetes.runnerImage.digest={_RUNNER_DIGEST}",
     )
 
     runtime_control = rendered[rendered.index("name: runtime-control") :]
@@ -123,10 +133,24 @@ def test_runtime_control_allows_single_replica_configuration() -> None:
         "server.runtimeControl.autoscaling.enabled=false",
         "server.runtimeControl.runnerImage.repository=repo/runner",
         "server.runtimeControl.runnerImage.tag=sha",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
     )
 
     assert "replicas: 1" in rendered
     assert "maxUnavailable: 1" in rendered
+
+
+def test_runtime_control_runner_requires_immutable_digest() -> None:
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+        )
+
+    assert "server.runtimecontrol.runnerimage.digest is required" in (
+        raised.value.stderr.lower()
+    )
 
 
 def test_runtime_control_rejects_removed_shared_auth_values() -> None:
@@ -138,6 +162,7 @@ def test_runtime_control_rejects_removed_shared_auth_values() -> None:
             "server.runtimeControl.auth.existingSecret=azents-runtime-control-auth",
             "server.runtimeControl.runnerImage.repository=repo/runner",
             "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
         )
 
     error = raised.value.stderr.lower()
