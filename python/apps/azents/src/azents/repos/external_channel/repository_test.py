@@ -5,6 +5,7 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
@@ -23,6 +25,10 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.external_channel import (
+    RDBExternalChannelConnection,
+    RDBExternalChannelIngressLease,
+)
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
@@ -338,6 +344,138 @@ class TestExternalChannelRepository:
         assert second.created is False
         assert second.event.id == first.event.id
         assert second.event.provider_event_id == "provider-event-1"
+
+    async def test_discord_gateway_admission_atomically_fences_checkpoint(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Gateway event identity and resume state converge under one current lease."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "discord-gateway-admission",
+        )
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id).model_copy(
+                update={
+                    "provider": ExternalChannelProvider.DISCORD,
+                    "ingress_profile": (
+                        ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+                    ),
+                    "provider_app_id": "discord-app-1",
+                    "provider_tenant_id": None,
+                    "provider_config": {"target_guild_id": "guild-1"},
+                }
+            ),
+        )
+        activated = await repo.activate_discord_connection(
+            rdb_session,
+            connection_id=connection.id,
+            expected_encrypted_credentials="ciphertext-only",
+            provider_app_id="discord-app-1",
+            provider_tenant_id="guild-1",
+            provider_bot_user_id=None,
+            interaction_public_key="a" * 64,
+            callback_selector_hash="selector-hash",
+            checked_at=_at(1),
+        )
+        assert activated is not None
+        claim = await repo.claim_discord_gateway_lease(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            now=_at(2),
+            lease_until=_at(10),
+        )
+        assert claim is not None
+        create = _event_create(connection.id).model_copy(
+            update={
+                "provider_event_id": "discord-gateway:session-1:5",
+                "transport_envelope_id": "discord-gateway:session-1:5",
+                "event_type": "discord_message_create",
+                "provider_app_id": "discord-app-1",
+                "provider_tenant_id": "guild-1",
+                "resource_correlation_key": "guild-1:channel-1",
+                "envelope": {
+                    "message": {
+                        "id": "message-1",
+                        "channel_id": "channel-1",
+                        "guild_id": "guild-1",
+                    }
+                },
+            }
+        )
+
+        first = await repo.admit_discord_gateway_event(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(3),
+            create=create,
+            encrypted_checkpoint="checkpoint-5",
+            checkpoint_version=1,
+            sequence=5,
+        )
+        duplicate = await repo.admit_discord_gateway_event(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(4),
+            create=create,
+            encrypted_checkpoint="checkpoint-5",
+            checkpoint_version=1,
+            sequence=5,
+        )
+        lease = await rdb_session.scalar(
+            sa.select(RDBExternalChannelIngressLease).where(
+                RDBExternalChannelIngressLease.connection_id == connection.id
+            )
+        )
+
+        assert first is not None
+        assert first.created is True
+        assert duplicate is not None
+        assert duplicate.created is False
+        assert lease is not None
+        assert lease.last_handled_dispatch_sequence == 5
+        assert lease.encrypted_checkpoint == "checkpoint-5"
+
+        rdb_connection = await rdb_session.get(
+            RDBExternalChannelConnection,
+            connection.id,
+        )
+        assert rdb_connection is not None
+        rdb_connection.configuration_generation += 1
+        await rdb_session.flush()
+        fenced = await repo.admit_discord_gateway_event(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(5),
+            create=create.model_copy(
+                update={
+                    "provider_event_id": "discord-gateway:session-1:6",
+                    "transport_envelope_id": "discord-gateway:session-1:6",
+                }
+            ),
+            encrypted_checkpoint="checkpoint-6",
+            checkpoint_version=1,
+            sequence=6,
+        )
+
+        assert fenced is None
+        assert (
+            await repo.get_event_by_provider_identity(
+                rdb_session,
+                connection_id=connection.id,
+                provider_event_id="discord-gateway:session-1:6",
+            )
+            is None
+        )
 
     async def test_event_claim_is_fenced_and_completion_is_idempotent(
         self,

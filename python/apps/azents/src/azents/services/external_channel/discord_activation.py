@@ -73,6 +73,9 @@ class DiscordConnectionActivationService:
         )
         if connection.provider_app_id != metadata.application_id:
             raise ValueError("Discord Application ID does not match the Bot Token.")
+        bot_user_id = await self.discord_client.get_current_bot_user_id(
+            bot_token=credentials.bot_token
+        )
         selector = secrets.token_urlsafe(32)
         endpoint_url = urljoin(
             self.config.external_channel_discord_callback_url.rstrip("/") + "/",
@@ -90,7 +93,7 @@ class DiscordConnectionActivationService:
                 expected_encrypted_credentials=connection.encrypted_credentials,
                 provider_app_id=metadata.application_id,
                 provider_tenant_id=target_guild_id,
-                provider_bot_user_id=None,
+                provider_bot_user_id=bot_user_id,
                 interaction_public_key=metadata.verify_key,
                 callback_selector_hash=hashlib.sha256(selector.encode()).hexdigest(),
                 checked_at=datetime.datetime.now(datetime.UTC),
@@ -110,7 +113,7 @@ class DiscordConnectionActivationService:
                 provider=activated.provider,
                 app_id=metadata.application_id,
                 tenant_id=target_guild_id,
-                bot_user_id=activated.provider_bot_user_id,
+                bot_user_id=bot_user_id,
             ),
             credentials=self.credentials_codec.snapshot(credentials),
             capabilities=None,

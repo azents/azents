@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Annotated, assert_never
+from typing import Annotated, TypeGuard, assert_never
 
 import httpx
 from fastapi import Depends
@@ -38,6 +38,15 @@ from azents.services.external_channel.connection import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import ExternalChannelCapabilitySnapshot
+from azents.services.external_channel.discord_files import (
+    DiscordChannelClient,
+    DiscordFileCredentialsInvalid,
+    DiscordFileNotFound,
+    DiscordFilePermissionDenied,
+    DiscordFileProviderError,
+    DiscordFileTemporaryError,
+    DiscordFileTooLarge,
+)
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackProviderCredentialsInvalid,
@@ -85,6 +94,22 @@ def get_slack_file_client(
     return SlackConversationClient(http_client)
 
 
+async def get_discord_file_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Provide the bounded Discord source-message and attachment transport."""
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
+        yield client
+
+
+def get_discord_file_client(
+    http_client: Annotated[
+        httpx.AsyncClient,
+        Depends(get_discord_file_http_client),
+    ],
+) -> DiscordChannelClient:
+    """Provide the Discord file-read adapter."""
+    return DiscordChannelClient(http_client)
+
+
 @dataclass
 class ExternalChannelFileTransferService:
     """Authorize and materialize one selected provider file into the Runtime."""
@@ -104,6 +129,10 @@ class ExternalChannelFileTransferService:
     slack_client: Annotated[
         SlackConversationClient,
         Depends(get_slack_file_client),
+    ]
+    discord_client: Annotated[
+        DiscordChannelClient,
+        Depends(get_discord_file_client),
     ]
     exchange_file_service: Annotated[
         ExchangeFileService,
@@ -180,8 +209,20 @@ class ExternalChannelFileTransferService:
                     file_storage=file_storage,
                 )
             case ExternalChannelProvider.DISCORD:
-                raise ExternalChannelFileTransferError(
-                    "Discord file download is not enabled."
+                source = await self._discord_file_source(
+                    resource_id=target.resource_id,
+                    provider_tenant_id=target.provider_tenant_id,
+                    resource_labels=target.resource_labels,
+                    provider_file_id=locator.provider_file_id,
+                )
+                return await self._download_discord(
+                    bot_token=credentials.bot_token,
+                    source=source,
+                    provider_file_id=locator.provider_file_id,
+                    path=path,
+                    limit=limit,
+                    agent_id=agent_id,
+                    file_storage=file_storage,
                 )
             case _ as unreachable:
                 assert_never(unreachable)
@@ -263,6 +304,176 @@ class ExternalChannelFileTransferService:
         if filename is None:
             raise ExternalChannelFileTransferError(
                 "Slack file metadata does not include a filename."
+            )
+        try:
+            attachment = await file_storage.put(
+                path,
+                body,
+                metadata.media_type or "",
+                agent_id=agent_id,
+            )
+        except PermissionError:
+            raise ExternalChannelFileTransferError(
+                f"Runtime destination is not writable: {path}."
+            ) from None
+        except RuntimeStorageError as error:
+            raise ExternalChannelFileTransferError(
+                f"Failed to write the Runtime file: {error.detail}"
+            ) from None
+        except ValueError as error:
+            raise ExternalChannelFileTransferError(str(error)) from None
+        except OSError:
+            raise ExternalChannelFileTransferError(
+                f"Failed to write the Runtime file: {path}."
+            ) from None
+        if attachment.size != len(body):
+            raise ExternalChannelFileTransferError(
+                "Runtime reported an incomplete file write."
+            )
+        return ExternalChannelFileDownloadResult(
+            path=path,
+            filename=filename,
+            media_type=metadata.media_type,
+            bytes_written=len(body),
+        )
+
+    async def _discord_file_source(
+        self,
+        *,
+        resource_id: str,
+        provider_tenant_id: str | None,
+        resource_labels: dict[str, object] | None,
+        provider_file_id: str,
+    ) -> tuple[str, str]:
+        """Resolve a locator only to its retained source message and channel."""
+        if not _discord_snowflake(provider_tenant_id) or not _discord_snowflake(
+            provider_file_id
+        ):
+            raise ExternalChannelFileTransferError(
+                "Discord attachment identity is unavailable."
+            )
+        async with self.session_manager() as session:
+            source = await self.repository.get_file_source(
+                session,
+                resource_id=resource_id,
+                provider_file_id=provider_file_id,
+            )
+        if source is None:
+            raise ExternalChannelFileTransferError(
+                "Discord attachment is not retained by the active conversation."
+            )
+        channel_id = source.provider_channel_id
+        if not _discord_snowflake(channel_id):
+            raise ExternalChannelFileTransferError(
+                "Discord attachment source channel is unavailable."
+            )
+        identity = _discord_message_identity(source.provider_message_key)
+        if identity is None:
+            raise ExternalChannelFileTransferError(
+                "Discord attachment source message is unavailable."
+            )
+        source_tenant_id, message_id = identity
+        if source_tenant_id != provider_tenant_id:
+            raise ExternalChannelFileTransferError(
+                "Discord attachment source does not match the active Guild."
+            )
+        if (
+            source.metadata.get("provider") != ExternalChannelProvider.DISCORD.value
+            or source.metadata.get("provider_file_id") != provider_file_id
+            or source.metadata.get("source_channel_id") != channel_id
+        ):
+            raise ExternalChannelFileTransferError(
+                "Discord attachment source identity is unavailable."
+            )
+        if not _discord_resource_source_allowed(
+            resource_labels=resource_labels,
+            provider_tenant_id=provider_tenant_id,
+            channel_id=channel_id,
+        ):
+            raise ExternalChannelFileTransferError(
+                "Discord attachment source does not match the active conversation."
+            )
+        return channel_id, message_id
+
+    async def _download_discord(
+        self,
+        *,
+        bot_token: str,
+        source: tuple[str, str],
+        provider_file_id: str,
+        path: str,
+        limit: int,
+        agent_id: str,
+        file_storage: FileStorage,
+    ) -> ExternalChannelFileDownloadResult:
+        """Materialize a current Discord attachment without retaining its URL."""
+        channel_id, message_id = source
+        try:
+            info = await self.discord_client.fetch_attachment_download_info(
+                bot_token=bot_token,
+                channel_id=channel_id,
+                message_id=message_id,
+                attachment_id=provider_file_id,
+            )
+            metadata = info.metadata
+            if not metadata.supported:
+                reason = metadata.unsupported_reason
+                raise ExternalChannelFileTransferError(
+                    "Discord attachment metadata is unsupported"
+                    + (f": {reason.value}." if reason is not None else ".")
+                )
+            if metadata.declared_size is None:
+                raise ExternalChannelFileTransferError(
+                    "Discord attachment metadata does not include a valid size."
+                )
+            if metadata.declared_size > limit:
+                raise ExternalChannelFileTransferError(
+                    "Discord attachment exceeds the configured inbound limit of "
+                    f"{limit} bytes."
+                )
+            if info.download_url is None:
+                raise ExternalChannelFileTransferError(
+                    "Discord attachment does not include a current download target."
+                )
+            body = await self.discord_client.download_attachment(
+                download_url=info.download_url,
+                max_bytes=limit,
+            )
+            if len(body) != metadata.declared_size:
+                raise ExternalChannelFileTransferError(
+                    "Discord attachment size does not match current provider metadata."
+                )
+        except ExternalChannelFileTransferError:
+            raise
+        except DiscordFileTooLarge:
+            raise ExternalChannelFileTransferError(
+                "Discord attachment exceeds the configured inbound limit of "
+                f"{limit} bytes."
+            ) from None
+        except DiscordFileNotFound:
+            raise ExternalChannelFileTransferError(
+                "Discord no longer exposes the requested attachment."
+            ) from None
+        except DiscordFilePermissionDenied:
+            raise ExternalChannelFileTransferError(
+                "Discord denied access to the requested attachment."
+            ) from None
+        except DiscordFileCredentialsInvalid:
+            raise ExternalChannelFileTransferError(
+                "Discord rejected the active External Channel credential."
+            ) from None
+        except DiscordFileTemporaryError:
+            raise ExternalChannelFileTransferError(
+                "Discord attachment download is temporarily unavailable."
+            ) from None
+        except DiscordFileProviderError:
+            raise ExternalChannelFileTransferError(
+                "Discord rejected the requested attachment."
+            ) from None
+        filename = metadata.name
+        if filename is None:
+            raise ExternalChannelFileTransferError(
+                "Discord attachment metadata does not include a filename."
             )
         try:
             attachment = await file_storage.put(
@@ -476,6 +687,48 @@ class ExternalChannelFileTransferService:
             raise ExternalChannelFileTransferError(
                 f"Failed to inspect the outbound Runtime file: {path}."
             ) from None
+
+
+def _discord_message_identity(provider_message_key: str) -> tuple[str, str] | None:
+    """Extract Guild and message snowflakes from a canonical Discord message key."""
+    provider, separator, remainder = provider_message_key.partition(":")
+    if provider != "discord" or not separator:
+        return None
+    tenant_id, separator, message_id = remainder.partition(":")
+    if (
+        not separator
+        or not _discord_snowflake(tenant_id)
+        or not _discord_snowflake(message_id)
+    ):
+        return None
+    return tenant_id, message_id
+
+
+def _discord_snowflake(value: object) -> TypeGuard[str]:
+    """Return whether a provider identifier is a non-blank Discord snowflake."""
+    return isinstance(value, str) and value.isdigit()
+
+
+def _discord_resource_source_allowed(
+    *,
+    resource_labels: dict[str, object] | None,
+    provider_tenant_id: str,
+    channel_id: str,
+) -> bool:
+    """Bind the retained source channel to the active Discord conversation."""
+    if not isinstance(resource_labels, dict):
+        return False
+    if (
+        resource_labels.get("provider") != ExternalChannelProvider.DISCORD.value
+        or resource_labels.get("guild_id") != provider_tenant_id
+    ):
+        return False
+    allowed_channels = {
+        value
+        for key in ("thread_id", "parent_channel_id")
+        if isinstance((value := resource_labels.get(key)), str)
+    }
+    return channel_id in allowed_channels
 
 
 async def iter_external_channel_outbound_file_chunks(

@@ -85,6 +85,17 @@ class ExternalChannelFileAccessTarget(_Record):
 
     binding_id: str
     connection_id: str
+    resource_id: str
     provider: ExternalChannelProvider
     encrypted_credentials: str | None
+    provider_tenant_id: str | None
     capabilities: dict[str, Any] | None
+    resource_labels: dict[str, Any] | None
+
+
+class ExternalChannelFileSource(_Record):
+    """Retained source message identity for one binding-authorized provider file."""
+
+    provider_message_key: str
+    provider_channel_id: str | None
+    metadata: dict[str, Any]

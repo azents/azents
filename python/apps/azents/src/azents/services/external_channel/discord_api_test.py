@@ -64,6 +64,24 @@ async def test_rejects_malformed_verify_key() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reads_current_bot_user_identity() -> None:
+    """The Bot identity is stored separately from the Discord Application ID."""
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"id": "123456789012345678"},
+            request=request,
+        )
+    )
+    client = _client(transport)
+
+    bot_user_id = await client.get_current_bot_user_id(bot_token="redacted-token")
+
+    assert bot_user_id == "123456789012345678"
+    await client.http_client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_configures_interaction_endpoint_without_persisting_selector() -> None:
     """The provider call receives the opaque selector only in its endpoint URL."""
     requests: list[httpx.Request] = []

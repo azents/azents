@@ -103,6 +103,11 @@ class _DiscordClientDouble:
         self.events.append("metadata")
         return DiscordApplicationMetadata(application_id="app-1", verify_key="ab" * 32)
 
+    async def get_current_bot_user_id(self, *, bot_token: str) -> str:
+        assert bot_token == "discord-bot-token"
+        self.events.append("bot")
+        return "bot-1"
+
     async def configure_interactions_endpoint(
         self,
         *,
@@ -160,6 +165,7 @@ def _active_connection(
         | {
             "status": ExternalChannelConnectionStatus.ACTIVE,
             "provider_tenant_id": "guild-1",
+            "provider_bot_user_id": "bot-1",
             "http_callback_selector_hash": "selector-hash",
             "capabilities": {"interaction_public_key": "ab" * 32},
             "last_verified_at": _NOW,
@@ -251,7 +257,7 @@ async def test_activation_configures_provider_before_durable_activation(
 
     snapshot = await service.activate(connection_id=configuration.id)
 
-    assert events == ["load", "metadata", "endpoint", "activate", "commit"]
+    assert events == ["load", "metadata", "bot", "endpoint", "activate", "commit"]
     assert snapshot.status is ExternalChannelConnectionStatus.ACTIVE
     assert snapshot.identity is not None
     assert snapshot.identity.app_id == "app-1"
@@ -260,6 +266,7 @@ async def test_activation_configures_provider_before_durable_activation(
         "https://callbacks.example/external-channel/v1/discord/interactions/"
     )
     assert repository.activation_kwargs is not None
+    assert repository.activation_kwargs["provider_bot_user_id"] == "bot-1"
     selector_hash = repository.activation_kwargs["callback_selector_hash"]
     assert isinstance(selector_hash, str)
     assert len(selector_hash) == 64
@@ -291,7 +298,7 @@ async def test_provider_endpoint_failure_does_not_activate(
     with pytest.raises(DiscordAPIUnavailable):
         await service.activate(connection_id=configuration.id)
 
-    assert events == ["load", "metadata", "endpoint"]
+    assert events == ["load", "metadata", "bot", "endpoint"]
     assert repository.activation_kwargs is None
 
 
@@ -318,4 +325,4 @@ async def test_lost_activation_fence_is_reported_without_commit(
     with pytest.raises(ValueError, match="authority changed"):
         await service.activate(connection_id=configuration.id)
 
-    assert events == ["load", "metadata", "endpoint", "activate"]
+    assert events == ["load", "metadata", "bot", "endpoint", "activate"]

@@ -22,6 +22,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
+    ExternalChannelEventCreate,
     ExternalChannelIngressLease,
     ExternalChannelIngressLeaseClaim,
 )
@@ -31,10 +32,14 @@ from azents.services.external_channel.connection import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import DiscordConnectionCredentials
+from azents.services.external_channel.discord_events import (
+    project_discord_gateway_dispatch,
+)
 from azents.services.external_channel.discord_gateway import (
     DiscordGatewayCheckpoint,
     DiscordGatewayClient,
     DiscordGatewayConnectionResult,
+    DiscordGatewayDispatch,
     DiscordGatewayError,
 )
 
@@ -156,6 +161,8 @@ class DiscordGatewayManagerService:
             if configuration is None:
                 return
             credentials = self._credentials(configuration.encrypted_credentials)
+            if configuration.provider_tenant_id is None:
+                raise DiscordGatewayCredentialError
             checkpoint = _decode_checkpoint(
                 cipher=self.cipher,
                 ciphertext=lease.encrypted_checkpoint,
@@ -172,6 +179,8 @@ class DiscordGatewayManagerService:
                     lease=lease,
                     endpoint_url=endpoint_url,
                     bot_token=credentials.bot_token,
+                    provider_app_id=configuration.provider_app_id,
+                    target_guild_id=configuration.provider_tenant_id,
                     checkpoint=checkpoint,
                     shutdown_event=shutdown_event,
                 )
@@ -215,6 +224,8 @@ class DiscordGatewayManagerService:
         lease: ExternalChannelIngressLease,
         endpoint_url: str,
         bot_token: str,
+        provider_app_id: str | None,
+        target_guild_id: str,
         checkpoint: DiscordGatewayCheckpoint | None,
         shutdown_event: asyncio.Event,
     ) -> DiscordGatewayConnectionResult | None:
@@ -233,6 +244,13 @@ class DiscordGatewayManagerService:
                 bot_token=bot_token,
                 checkpoint=checkpoint,
                 persist_checkpoint=persist_checkpoint,
+                handle_dispatch=lambda dispatch: self._admit_dispatch(
+                    connection_id=connection_id,
+                    lease=lease,
+                    provider_app_id=provider_app_id,
+                    target_guild_id=target_guild_id,
+                    dispatch=dispatch,
+                ),
             )
         )
         shutdown_task = asyncio.create_task(shutdown_event.wait())
@@ -366,6 +384,71 @@ class DiscordGatewayManagerService:
             )
             await session.commit()
             return persisted
+
+    async def _admit_dispatch(
+        self,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+        provider_app_id: str | None,
+        target_guild_id: str,
+        dispatch: DiscordGatewayDispatch,
+    ) -> bool:
+        """Durably admit one supported message dispatch under the lease fence."""
+        create = project_discord_gateway_dispatch(
+            connection_id=connection_id,
+            provider_app_id=provider_app_id,
+            target_guild_id=target_guild_id,
+            dispatch=dispatch,
+            received_at=_utc_now(),
+        )
+        if create is None:
+            return False
+        admitted = await self._admit_event(
+            connection_id=connection_id,
+            lease=lease,
+            create=create,
+            dispatch=dispatch,
+        )
+        if not admitted:
+            raise DiscordGatewayLeaseLost
+        return True
+
+    async def _admit_event(
+        self,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+        create: ExternalChannelEventCreate,
+        dispatch: DiscordGatewayDispatch,
+    ) -> bool:
+        """Commit canonical admission only while current authority remains fenced."""
+        encrypted_checkpoint = self.cipher.encrypt(
+            json.dumps(
+                {
+                    "session_id": dispatch.session_id,
+                    "resume_gateway_url": dispatch.resume_gateway_url,
+                    "sequence": dispatch.sequence,
+                },
+                separators=(",", ":"),
+            )
+        )
+        async with self.session_manager() as session:
+            admission = await self.repository.admit_discord_gateway_event(
+                session,
+                connection_id=connection_id,
+                lease_owner=self.manager_id,
+                lease_generation=lease.lease_generation,
+                now=_utc_now(),
+                create=create,
+                encrypted_checkpoint=encrypted_checkpoint,
+                checkpoint_version=_CHECKPOINT_VERSION,
+                sequence=dispatch.sequence,
+            )
+            if admission is None:
+                return False
+            await session.commit()
+            return True
 
     async def _discover_gateway_url(self, bot_token: str) -> str:
         response = await self.http_client.get(
