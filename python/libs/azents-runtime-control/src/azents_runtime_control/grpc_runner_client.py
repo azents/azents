@@ -595,6 +595,17 @@ def _operation_payload(
             "worktree_path": payload.worktree_path,
             "branch_name": payload.branch_name,
         }
+    if payload_kind == "git_discover_managed_worktrees":
+        return {}
+    if payload_kind == "git_remove_discovered_worktree":
+        payload = operation.git_remove_discovered_worktree
+        return {
+            "worktree_path": payload.worktree_path,
+            "repository_anchor_path": payload.repository_anchor_path,
+            "branch_name": payload.branch_name,
+            "fingerprint": payload.fingerprint,
+            "force": payload.force,
+        }
     if payload_kind == "git_remove_worktree":
         payload = operation.git_remove_worktree
         return {
@@ -763,6 +774,21 @@ def _copy_final_success(
         dirty = payload.get("dirty")
         if isinstance(dirty, bool):
             worktree.dirty = dirty
+        return
+    if "discovered_worktrees" in payload:
+        message.git_discover_managed_worktrees.entries.extend(
+            _discovered_worktree_entries(payload)
+        )
+        return
+    if "removed_discovered_worktree_path" in payload:
+        message.git_remove_discovered_worktree.worktree_path = _str_payload(
+            payload,
+            "removed_discovered_worktree_path",
+        )
+        message.git_remove_discovered_worktree.outcome = _str_payload(
+            payload,
+            "outcome",
+        )
         return
     if "removed_worktree_path" in payload:
         message.git_remove_worktree.worktree_path = _str_payload(
@@ -942,6 +968,27 @@ def _final_success_payload(
         if message.git_inspect_worktree.HasField("dirty"):
             payload["dirty"] = message.git_inspect_worktree.dirty
         return payload
+    if result_kind == "git_discover_managed_worktrees":
+        return {
+            "discovered_worktrees": [
+                {
+                    "worktree_path": entry.worktree_path,
+                    "registered": entry.registered,
+                    "repository_anchor_path": entry.repository_anchor_path,
+                    "branch_name": entry.branch_name,
+                    "fingerprint": entry.fingerprint,
+                    "failure_code": entry.failure_code,
+                }
+                for entry in message.git_discover_managed_worktrees.entries
+            ]
+        }
+    if result_kind == "git_remove_discovered_worktree":
+        return {
+            "removed_discovered_worktree_path": (
+                message.git_remove_discovered_worktree.worktree_path
+            ),
+            "outcome": message.git_remove_discovered_worktree.outcome,
+        }
     if result_kind == "git_remove_worktree":
         return {
             "removed_worktree_path": message.git_remove_worktree.worktree_path,
@@ -1112,6 +1159,45 @@ def _move_entries(
                     destination_path=destination_path,
                 )
             )
+    return entries
+
+
+def _discovered_worktree_entries(
+    payload: Mapping[str, JsonValue],
+) -> list[runtime_runner_control_pb2.RuntimeDiscoveredGitWorktree]:
+    raw_entries = payload.get("discovered_worktrees")
+    if not isinstance(raw_entries, list):
+        return []
+    entries: list[runtime_runner_control_pb2.RuntimeDiscoveredGitWorktree] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        worktree_path = raw_entry.get("worktree_path")
+        repository_anchor_path = raw_entry.get("repository_anchor_path")
+        branch_name = raw_entry.get("branch_name")
+        fingerprint = raw_entry.get("fingerprint")
+        failure_code = raw_entry.get("failure_code")
+        if not all(
+            isinstance(value, str)
+            for value in (
+                worktree_path,
+                repository_anchor_path,
+                branch_name,
+                fingerprint,
+                failure_code,
+            )
+        ):
+            continue
+        entries.append(
+            runtime_runner_control_pb2.RuntimeDiscoveredGitWorktree(
+                worktree_path=worktree_path,
+                registered=_bool_payload(raw_entry, "registered"),
+                repository_anchor_path=repository_anchor_path,
+                branch_name=branch_name,
+                fingerprint=fingerprint,
+                failure_code=failure_code,
+            )
+        )
     return entries
 
 

@@ -4,6 +4,7 @@ import asyncio
 import base64
 import contextlib
 import fnmatch
+import hashlib
 import logging
 import os
 import re
@@ -63,6 +64,8 @@ _PROCESS_TERMINATE_TIMEOUT_SECONDS = 2.0
 _PROCESS_KILL_TIMEOUT_SECONDS = 2.0
 _PROCESS_CLOSE_TIMEOUT_SECONDS = 5.0
 _MAX_MISSING_PROCESS_RECORDS = 128
+_MANAGED_WORKTREE_ROOT = ".azents/worktrees"
+_MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES = 512
 
 _T = TypeVar("_T")
 
@@ -308,6 +311,12 @@ class RunnerOperations:
                 return
             if operation.operation_type == "inspect_git_worktree":
                 await self._git_inspect_worktree(operation)
+                return
+            if operation.operation_type == "discover_managed_git_worktrees":
+                await self._git_discover_managed_worktrees(operation)
+                return
+            if operation.operation_type == "remove_discovered_git_worktree":
+                await self._git_remove_discovered_worktree(operation)
                 return
             if operation.operation_type == "remove_git_worktree":
                 await self._git_remove_worktree(operation)
@@ -1128,6 +1137,243 @@ class RunnerOperations:
         if inspection.dirty is not None:
             payload["dirty"] = inspection.dirty
         await self._final_success(operation, payload)
+
+    async def _git_discover_managed_worktrees(
+        self,
+        operation: RunnerOperationEnvelope,
+    ) -> None:
+        """Discover Git worktrees below the fixed Agent Workspace managed root."""
+        root = self._workspace.root / _MANAGED_WORKTREE_ROOT
+        if root.is_symlink() or (root.exists() and not root.is_dir()):
+            await self._final_error(
+                operation,
+                "managed_worktree_root_invalid",
+                "Managed worktree root is not a directory.",
+            )
+            return
+        if not root.exists():
+            await self._final_success(operation, {"discovered_worktrees": []})
+            return
+        entries: list[JsonValue] = []
+        for session_directory in sorted(root.iterdir(), key=lambda path: path.name):
+            if session_directory.is_symlink() or not session_directory.is_dir():
+                continue
+            for candidate in sorted(
+                session_directory.iterdir(),
+                key=lambda path: path.name,
+            ):
+                if len(entries) >= _MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES:
+                    await self._final_error(
+                        operation,
+                        "managed_worktree_inventory_overflow",
+                        "Managed worktree inventory exceeds the operation limit.",
+                    )
+                    return
+                entries.append(
+                    await self._discover_managed_worktree_entry(operation, candidate)
+                )
+        await self._final_success(operation, {"discovered_worktrees": entries})
+
+    async def _discover_managed_worktree_entry(
+        self,
+        operation: RunnerOperationEnvelope,
+        candidate: Path,
+    ) -> dict[str, JsonValue]:
+        """Return a content-free managed worktree identity or bounded failure."""
+        if candidate.is_symlink() or not candidate.is_dir():
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                failure_code="worktree_ownership_ambiguous",
+            )
+        result = await self._run_git_capture(
+            operation,
+            ("worktree", "list", "--porcelain", "-z"),
+            cwd=candidate,
+        )
+        if result is None or result.exit_code != 0:
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                failure_code="not_git_worktree",
+            )
+        registration = _registered_worktree(result.stdout, worktree_path=candidate)
+        if not registration.registered:
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                failure_code="worktree_ownership_ambiguous",
+            )
+        anchor_result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "--path-format=absolute", "--git-common-dir"),
+            cwd=candidate,
+        )
+        head_result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "HEAD"),
+            cwd=candidate,
+        )
+        if (
+            anchor_result is None
+            or anchor_result.exit_code != 0
+            or head_result is None
+            or head_result.exit_code != 0
+        ):
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                head_commit="",
+                failure_code="worktree_ownership_ambiguous",
+            )
+        repository_anchor_path = Path(anchor_result.stdout.strip())
+        if not _path_is_within(repository_anchor_path, self._workspace.root):
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                head_commit="",
+                failure_code="worktree_ownership_ambiguous",
+            )
+        return _discovered_worktree_payload(
+            candidate,
+            registered=True,
+            repository_anchor_path=str(repository_anchor_path),
+            branch_name=registration.branch_name or "",
+            head_commit=head_result.stdout.strip(),
+            failure_code="",
+        )
+
+    async def _git_remove_discovered_worktree(
+        self,
+        operation: RunnerOperationEnvelope,
+    ) -> None:
+        """Force-remove a previously discovered managed worktree after revalidation."""
+        try:
+            worktree_path = _resolve_lexical_path(
+                operation.payload.get("worktree_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_worktree_path", str(exc))
+            return
+        managed_root = self._workspace.root / _MANAGED_WORKTREE_ROOT
+        if not _path_is_within(worktree_path, managed_root):
+            await self._final_error(
+                operation,
+                "worktree_ownership_ambiguous",
+                "Worktree path is outside the managed root.",
+            )
+            return
+        if not worktree_path.exists():
+            try:
+                repository_anchor_path = _resolve_lexical_path(
+                    operation.payload.get("repository_anchor_path"),
+                    workspace=self._workspace,
+                )
+            except ValueError as exc:
+                await self._final_error(
+                    operation,
+                    "worktree_ownership_ambiguous",
+                    str(exc),
+                )
+                return
+            if not _path_is_within(repository_anchor_path, self._workspace.root):
+                await self._final_error(
+                    operation,
+                    "worktree_ownership_ambiguous",
+                    "Worktree repository metadata is outside the Agent Workspace.",
+                )
+                return
+            result = await self._run_git_streaming(
+                operation,
+                (
+                    "--git-dir",
+                    str(repository_anchor_path),
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(worktree_path),
+                ),
+                cwd=self._workspace.root,
+            )
+            if result is None:
+                return
+            if result.exit_code != 0:
+                await self._final_error(
+                    operation,
+                    "git_command_failed",
+                    _git_command_error_message(result),
+                )
+                return
+            await self._final_success(
+                operation,
+                {
+                    "removed_discovered_worktree_path": str(worktree_path),
+                    "outcome": "already_absent",
+                },
+            )
+            return
+        observed = await self._discover_managed_worktree_entry(operation, worktree_path)
+        if not _bool_payload(observed, "registered", default=False):
+            await self._final_error(
+                operation,
+                _str_payload(observed, "failure_code")
+                or "worktree_ownership_ambiguous",
+                "Managed worktree identity could not be revalidated.",
+            )
+            return
+        expected = (
+            _str_payload(operation.payload, "repository_anchor_path"),
+            _str_payload(operation.payload, "branch_name"),
+            _str_payload(operation.payload, "fingerprint"),
+        )
+        actual = (
+            _str_payload(observed, "repository_anchor_path"),
+            _str_payload(observed, "branch_name"),
+            _str_payload(observed, "fingerprint"),
+        )
+        if expected != actual or not _bool_payload(
+            operation.payload,
+            "force",
+            default=False,
+        ):
+            await self._final_error(
+                operation,
+                "identity_changed",
+                "Managed worktree identity changed after discovery.",
+            )
+            return
+        result = await self._run_git_streaming(
+            operation,
+            ("worktree", "remove", "--force", str(worktree_path)),
+            cwd=worktree_path,
+        )
+        if result is None:
+            return
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return
+        await self._final_success(
+            operation,
+            {
+                "removed_discovered_worktree_path": str(worktree_path),
+                "outcome": "removed",
+            },
+        )
 
     async def _git_remove_worktree(self, operation: RunnerOperationEnvelope) -> None:
         source_path = await self._git_source_path(operation)
@@ -2286,6 +2532,47 @@ def _registered_worktree(
         registered=False,
         branch_name=None,
     )
+
+
+def _discovered_worktree_payload(
+    worktree_path: Path,
+    *,
+    registered: bool,
+    repository_anchor_path: str,
+    branch_name: str,
+    failure_code: str,
+    head_commit: str = "",
+) -> dict[str, JsonValue]:
+    """Build one content-free managed worktree discovery result."""
+    fingerprint = hashlib.sha256(
+        "\0".join(
+            (
+                str(worktree_path),
+                repository_anchor_path,
+                branch_name,
+                head_commit,
+                failure_code,
+                str(registered),
+            )
+        ).encode()
+    ).hexdigest()
+    return {
+        "worktree_path": str(worktree_path),
+        "registered": registered,
+        "repository_anchor_path": repository_anchor_path,
+        "branch_name": branch_name,
+        "fingerprint": fingerprint,
+        "failure_code": failure_code,
+    }
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    """Return whether the lexical target is inside the fixed managed root."""
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _git_ref_display_name(ref: str, short_name: str) -> str:

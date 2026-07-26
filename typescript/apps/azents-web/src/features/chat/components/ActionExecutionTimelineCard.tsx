@@ -19,6 +19,24 @@ type ActionExecutionEvent = ActionExecutionProjection["events"][number];
 
 const GIT_WORKTREE_STEP_KEY = "create_git_worktree";
 
+interface CleanupCandidate {
+  path: string;
+  outcome: string;
+  reason_code: string | null;
+  summary: string | null;
+}
+
+interface CleanupResult {
+  phase: string;
+  examined_count: number;
+  protected_count: number;
+  removed_count: number;
+  already_absent_count: number;
+  failed_count: number;
+  unresolved_count: number;
+  candidates: CleanupCandidate[];
+}
+
 function statusColor(status: string): string {
   switch (status) {
     case "completed":
@@ -153,6 +171,196 @@ function isFailedStatus(status: string): boolean {
   return status === "failed";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function numberField(value: Record<string, unknown>, key: string): number {
+  const field = value[key];
+  return typeof field === "number" ? field : 0;
+}
+
+function cleanupResult(value: unknown): CleanupResult | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const candidates = Array.isArray(value.candidates)
+    ? value.candidates.flatMap((candidate) => {
+        if (
+          !isRecord(candidate) ||
+          typeof candidate.path !== "string" ||
+          typeof candidate.outcome !== "string"
+        ) {
+          return [];
+        }
+        return [
+          {
+            path: candidate.path,
+            outcome: candidate.outcome,
+            reason_code:
+              typeof candidate.reason_code === "string"
+                ? candidate.reason_code
+                : null,
+            summary:
+              typeof candidate.summary === "string" ? candidate.summary : null,
+          },
+        ];
+      })
+    : [];
+  return {
+    phase: typeof value.phase === "string" ? value.phase : "pending",
+    examined_count: numberField(value, "examined_count"),
+    protected_count: numberField(value, "protected_count"),
+    removed_count: numberField(value, "removed_count"),
+    already_absent_count: numberField(value, "already_absent_count"),
+    failed_count: numberField(value, "failed_count"),
+    unresolved_count: numberField(value, "unresolved_count"),
+    candidates,
+  };
+}
+
+function cleanupOutcomeColor(outcome: string): string {
+  switch (outcome) {
+    case "removed":
+      return "green";
+    case "already_absent":
+    case "protected":
+      return "blue";
+    case "failed":
+      return "red";
+    default:
+      return "yellow";
+  }
+}
+
+function CleanupActionExecutionTimelineCard({
+  actionExecution,
+  t,
+}: {
+  actionExecution: ActionExecutionProjection;
+  t: ReturnType<typeof useTranslations<"chat.actionExecution">>;
+}): React.ReactElement {
+  const { execution, events } = actionExecution;
+  const result = cleanupResult(execution.result);
+  const color = statusColor(execution.status);
+  const latestEvent = events.at(-1);
+
+  return (
+    <Box
+      my={rem(3)}
+      pl="sm"
+      py={rem(5)}
+      style={{
+        borderLeft: `${rem(2)} solid var(--mantine-color-${color}-6)`,
+      }}
+    >
+      <Stack gap="xs">
+        <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
+          <Text size="xs" fw={700} c="dimmed" truncate>
+            {t("cleanup.title")}
+          </Text>
+          <Badge
+            size="xs"
+            color={color}
+            variant="light"
+            leftSection={statusIcon(execution.status)}
+          >
+            {statusLabel(execution.status, t)}
+          </Badge>
+        </Group>
+
+        <Text size="xs" c="dimmed">
+          {t("cleanup.phase", { phase: result?.phase ?? "pending" })}
+        </Text>
+
+        {result !== null ? (
+          <Group gap="xs">
+            <Badge size="xs" variant="light">
+              {t("cleanup.examined", { count: result.examined_count })}
+            </Badge>
+            <Badge size="xs" color="green" variant="light">
+              {t("cleanup.removed", { count: result.removed_count })}
+            </Badge>
+            <Badge size="xs" color="blue" variant="light">
+              {t("cleanup.protected", { count: result.protected_count })}
+            </Badge>
+            {result.already_absent_count > 0 ? (
+              <Badge size="xs" color="blue" variant="light">
+                {t("cleanup.alreadyAbsent", {
+                  count: result.already_absent_count,
+                })}
+              </Badge>
+            ) : null}
+            {result.failed_count > 0 || result.unresolved_count > 0 ? (
+              <Badge size="xs" color="red" variant="light">
+                {t("cleanup.attention", {
+                  count: result.failed_count + result.unresolved_count,
+                })}
+              </Badge>
+            ) : null}
+          </Group>
+        ) : null}
+
+        {latestEvent?.content ? (
+          <Text size="xs" c="dimmed">
+            {latestEvent.content}
+          </Text>
+        ) : null}
+
+        {result?.candidates.map((candidate) => (
+          <Box
+            key={`${candidate.path}:${candidate.outcome}`}
+            px="xs"
+            py={rem(5)}
+            style={{
+              borderRadius: rem(6),
+              background: "var(--mantine-color-default-hover)",
+            }}
+          >
+            <Group
+              justify="space-between"
+              align="flex-start"
+              gap="xs"
+              wrap="nowrap"
+            >
+              <Text
+                size="xs"
+                c="dimmed"
+                style={{ wordBreak: "break-all", minWidth: 0 }}
+              >
+                {candidate.path}
+              </Text>
+              <Badge
+                size="xs"
+                color={cleanupOutcomeColor(candidate.outcome)}
+                variant="light"
+              >
+                {candidate.outcome}
+              </Badge>
+            </Group>
+            {(candidate.summary ?? candidate.reason_code) ? (
+              <Text size="xs" c="dimmed" mt={rem(3)}>
+                {candidate.summary ?? candidate.reason_code}
+              </Text>
+            ) : null}
+          </Box>
+        ))}
+
+        {execution.failure_summary && isFailedStatus(execution.status) ? (
+          <Text size="xs" c="red" style={{ whiteSpace: "pre-wrap" }}>
+            {execution.failure_summary}
+          </Text>
+        ) : null}
+        {execution.cancellation_summary && execution.status === "cancelled" ? (
+          <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+            {execution.cancellation_summary}
+          </Text>
+        ) : null}
+      </Stack>
+    </Box>
+  );
+}
+
 function resultLabel(
   actionExecution: ActionExecutionProjection,
   commandCompleted: ActionExecutionEvent | null,
@@ -208,6 +416,14 @@ export function ActionExecutionTimelineCard({
 }: ActionExecutionTimelineCardProps): React.ReactElement {
   const t = useTranslations("chat.actionExecution");
   const { execution, events } = actionExecution;
+  if (execution.action_type === "cleanup_orphan_git_worktrees") {
+    return (
+      <CleanupActionExecutionTimelineCard
+        actionExecution={actionExecution}
+        t={t}
+      />
+    );
+  }
   const color = statusColor(execution.status);
   const commandEvent = commandStartedEvent(events);
   const commandArgv = commandEvent?.command_argv ?? null;

@@ -19,6 +19,10 @@ class ActionExecution(BaseModel):
     )
     action_type: str = Field(description="Action discriminator")
     action: dict[str, JSONValue] = Field(description="Durable action payload")
+    result: dict[str, JSONValue] | None = Field(
+        default=None,
+        description="Action-specific durable result projection",
+    )
     status: ActionExecutionStatus = Field(description="Execution status")
     owner_generation: int = Field(description="Admitting Session owner generation")
     failure_summary: str | None = Field(description="User-safe failure summary")

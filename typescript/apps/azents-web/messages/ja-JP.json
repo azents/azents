@@ -1550,6 +1550,15 @@
       "projectRegistered": "Project 登録済み: {path}",
       "branch": "ブランチ: {branch}",
       "baseRef": "基準 ref: {ref}",
+      "cleanup": {
+        "title": "孤立 worktree のクリーンアップ",
+        "phase": "フェーズ: {phase}",
+        "examined": "{count} 件を確認",
+        "removed": "{count} 件を削除",
+        "protected": "{count} 件を保護",
+        "alreadyAbsent": "{count} 件はすでに存在しません",
+        "attention": "{count} 件は要確認"
+      },
       "result": {
         "pending": "Worktree の作成を待機中…",
         "running": "Worktree を作成中…",

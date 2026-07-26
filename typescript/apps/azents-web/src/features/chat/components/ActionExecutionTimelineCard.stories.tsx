@@ -1,4 +1,5 @@
 import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
+import type { JsonValue } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
@@ -8,6 +9,175 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
+
+function cleanupStory({
+  id,
+  status,
+  result,
+  cancellationSummary = null,
+}: {
+  id: string;
+  status: "completed" | "failed" | "cancelled" | "running";
+  result: Record<string, JsonValue>;
+  cancellationSummary?: string | null;
+}): Story {
+  return {
+    args: {
+      actionExecution: {
+        provenance: status === "running" ? "live" : "durable",
+        ...(status === "running"
+          ? {}
+          : {
+              historyEventId: `history-cleanup-${id}`,
+              historyCreatedAt: "2026-07-26T00:00:05Z",
+            }),
+        execution: {
+          id: `cleanup-${id}`,
+          input_buffer_id: `buffer-cleanup-${id}`,
+          sender_user_id: null,
+          action_type: "cleanup_orphan_git_worktrees",
+          action: { type: "cleanup_orphan_git_worktrees" },
+          result,
+          status,
+          owner_generation: 1,
+          failure_summary:
+            status === "failed"
+              ? "One or more managed worktrees could not be removed."
+              : null,
+          cancellation_summary: cancellationSummary,
+          started_at: "2026-07-26T00:00:00Z",
+          completed_at: status === "completed" ? "2026-07-26T00:00:05Z" : null,
+          failed_at: status === "failed" ? "2026-07-26T00:00:05Z" : null,
+          cancelled_at: status === "cancelled" ? "2026-07-26T00:00:05Z" : null,
+          updated_at: "2026-07-26T00:00:05Z",
+        },
+        events: [],
+      },
+    },
+  };
+}
+
+export const CleanupZeroCandidates = cleanupStory({
+  id: "zero",
+  status: "completed",
+  result: {
+    phase: "completed",
+    examined_count: 0,
+    protected_count: 0,
+    removed_count: 0,
+    already_absent_count: 0,
+    failed_count: 0,
+    unresolved_count: 0,
+    candidates: [],
+  },
+});
+
+export const CleanupMixedResult = cleanupStory({
+  id: "mixed",
+  status: "failed",
+  result: {
+    phase: "failed",
+    examined_count: 3,
+    protected_count: 0,
+    removed_count: 1,
+    already_absent_count: 1,
+    failed_count: 1,
+    unresolved_count: 0,
+    candidates: [
+      {
+        path: "/workspace/agent/.azents/worktrees/a/repo",
+        outcome: "removed",
+        reason_code: null,
+        summary: null,
+      },
+      {
+        path: "/workspace/agent/.azents/worktrees/b/repo",
+        outcome: "already_absent",
+        reason_code: null,
+        summary: null,
+      },
+      {
+        path: "/workspace/agent/.azents/worktrees/c/repo",
+        outcome: "failed",
+        reason_code: "git_command_failed",
+        summary: "Git worktree removal failed.",
+      },
+    ],
+  },
+});
+
+export const CleanupProtectedCandidate = cleanupStory({
+  id: "protected",
+  status: "completed",
+  result: {
+    phase: "completed",
+    examined_count: 1,
+    protected_count: 1,
+    removed_count: 0,
+    already_absent_count: 0,
+    failed_count: 0,
+    unresolved_count: 0,
+    candidates: [
+      {
+        path: "/workspace/agent/.azents/worktrees/active/repo",
+        outcome: "protected",
+        reason_code: "active_connection",
+        summary: "Connected to active Session work.",
+      },
+    ],
+  },
+});
+
+export const CleanupLiveRemoval = cleanupStory({
+  id: "live",
+  status: "running",
+  result: {
+    phase: "processing",
+    examined_count: 1,
+    protected_count: 0,
+    removed_count: 0,
+    already_absent_count: 0,
+    failed_count: 0,
+    unresolved_count: 1,
+    candidates: [
+      {
+        path: "/workspace/agent/.azents/worktrees/live/repo",
+        outcome: "unresolved",
+        reason_code: null,
+        summary: null,
+      },
+    ],
+  },
+});
+
+export const CleanupCancelledPartial = cleanupStory({
+  id: "cancelled",
+  status: "cancelled",
+  cancellationSummary: "Operation cancelled by user stop.",
+  result: {
+    phase: "cancelled",
+    examined_count: 2,
+    protected_count: 0,
+    removed_count: 1,
+    already_absent_count: 0,
+    failed_count: 0,
+    unresolved_count: 1,
+    candidates: [
+      {
+        path: "/workspace/agent/.azents/worktrees/done/repo",
+        outcome: "removed",
+        reason_code: null,
+        summary: null,
+      },
+      {
+        path: "/workspace/agent/.azents/worktrees/interrupted/repo",
+        outcome: "unresolved",
+        reason_code: "cancelled",
+        summary: "Operation cancelled by user stop.",
+      },
+    ],
+  },
+});
 
 export const FailedWorktreeAction = {
   args: {

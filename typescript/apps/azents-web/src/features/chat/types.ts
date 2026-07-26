@@ -121,7 +121,8 @@ export type ChatAction =
       type: "create_git_worktree";
       source_project_path: string;
       starting_ref: string;
-    };
+    }
+  | { type: "cleanup_orphan_git_worktrees" };
 
 export interface ActionMessagePayload {
   sender_user_id: string | null;

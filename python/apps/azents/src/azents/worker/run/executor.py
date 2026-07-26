@@ -6,7 +6,7 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Annotated, Any
+from typing import Annotated, Any, assert_never
 
 from azcommon.datetime import tznow
 from azcommon.logging import bind_extra
@@ -40,7 +40,11 @@ from azents.core.tools import (
     ToolkitProvider,
 )
 from azents.engine.context.window import compute_auto_compaction_threshold_tokens
-from azents.engine.events.action_messages import ChatAction, CreateGitWorktreeAction
+from azents.engine.events.action_messages import (
+    ChatAction,
+    CleanupOrphanGitWorktreesAction,
+    CreateGitWorktreeAction,
+)
 from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_adapter import AgentEngineAdapter
 from azents.engine.events.engine_events import (
@@ -150,9 +154,9 @@ from azents.services.input_buffer import (
     InputBufferOwnerGenerationStaleError,
     InputBufferPreparationStaleError,
     InputBufferService,
+    OperationActionInput,
     PromotedInputBuffers,
     TurnEffect,
-    WorktreeActionInput,
     fold_turn_eligibility,
 )
 from azents.services.model_file import ModelFileService
@@ -2286,7 +2290,7 @@ class RunExecutor:
                     session_id=session_id,
                     owner_generation=owner_generation,
                     tool_admission_barrier=tool_admission_barrier,
-                    worktree_action=promoted.worktree_action,
+                    operation_action=promoted.operation_action,
                 )
                 if process_actions
                 else OperationActionProcessResult(context_invalidated=False)
@@ -2332,23 +2336,23 @@ class RunExecutor:
         session_id: str,
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
-        worktree_action: WorktreeActionInput | None,
+        operation_action: OperationActionInput | None,
     ) -> OperationActionProcessResult:
         """Execute atomically claimed operation TurnActions before model dispatch."""
         context_invalidated = False
         processed_input_buffer_ids: set[str] = set()
-        if worktree_action is not None:
-            if worktree_action.execution is None:
-                raise RuntimeError("Worktree action has no live execution claim")
+        if operation_action is not None:
+            if operation_action.execution is None:
+                raise RuntimeError("Operation action has no live execution claim")
             result = await self._process_operation_action(
                 agent_id=agent_id,
                 session_id=session_id,
-                execution=worktree_action.execution,
-                action=worktree_action.action,
+                execution=operation_action.execution,
+                action=operation_action.action,
                 owner_generation=owner_generation,
                 tool_admission_barrier=tool_admission_barrier,
             )
-            processed_input_buffer_ids.add(worktree_action.buffer.id)
+            processed_input_buffer_ids.add(operation_action.buffer.id)
             context_invalidated = result.context_invalidated
 
         if context_invalidated:
@@ -2381,8 +2385,17 @@ class RunExecutor:
                         owner_generation=owner_generation,
                         tool_admission_barrier=tool_admission_barrier,
                     )
+                case CleanupOrphanGitWorktreesAction():
+                    result = await self._process_operation_action(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        execution=execution,
+                        action=action,
+                        owner_generation=owner_generation,
+                        tool_admission_barrier=tool_admission_barrier,
+                    )
                 case _:
-                    continue
+                    assert_never(action)
             context_invalidated = context_invalidated or result.context_invalidated
             if context_invalidated:
                 break
@@ -2396,7 +2409,7 @@ class RunExecutor:
         agent_id: str,
         session_id: str,
         execution: ActionExecution,
-        action: CreateGitWorktreeAction,
+        action: CreateGitWorktreeAction | CleanupOrphanGitWorktreesAction,
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
     ) -> GitWorktreeActionExecutionResult:
@@ -2470,15 +2483,30 @@ class RunExecutor:
                 context_invalidated=False,
             )
 
-        return await self.session_git_worktree_service.run_git_worktree_action(
-            agent_id=agent_id,
-            session_id=session_id,
-            execution=execution,
-            action=action,
-            owner_generation=owner_generation,
-            on_projection_updated=publish_projection,
-            on_history_event_appended=publish_history_event,
-        )
+        match action:
+            case CreateGitWorktreeAction():
+                return await self.session_git_worktree_service.run_git_worktree_action(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    execution=execution,
+                    action=action,
+                    owner_generation=owner_generation,
+                    on_projection_updated=publish_projection,
+                    on_history_event_appended=publish_history_event,
+                )
+            case CleanupOrphanGitWorktreesAction():
+                worktree_service = self.session_git_worktree_service
+                return await worktree_service.run_cleanup_orphan_git_worktrees_action(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    execution=execution,
+                    action=action,
+                    owner_generation=owner_generation,
+                    on_projection_updated=publish_projection,
+                    on_history_event_appended=publish_history_event,
+                )
+            case _:
+                assert_never(action)
 
     async def _promote_input_buffers(
         self,

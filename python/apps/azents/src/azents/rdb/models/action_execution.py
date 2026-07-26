@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
 from azents.rdb.models.base import RDBModel
+from azents.rdb.models.event import JSONValue
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 
@@ -74,8 +75,13 @@ class RDBActionExecution(RDBModel):
         nullable=True,
     )
     action_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    action: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    action: Mapped[dict[str, JSONValue]] = mapped_column(JSONB, nullable=False)
     owner_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    result: Mapped[dict[str, JSONValue] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
     status: Mapped[ActionExecutionStatus] = mapped_column(
         action_execution_status_enum,
         nullable=False,

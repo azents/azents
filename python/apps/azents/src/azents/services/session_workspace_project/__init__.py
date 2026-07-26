@@ -24,7 +24,10 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.session_workspace_project import (
+    SessionWorkspaceProjectCleanupInProgress,
+    SessionWorkspaceProjectRepository,
+)
 from azents.repos.session_workspace_project.data import (
     SessionWorkspaceProject,
     SessionWorkspaceProjectCreate,
@@ -62,6 +65,13 @@ class ProjectPathConflict:
 
 
 @dataclasses.dataclass(frozen=True)
+class ProjectPathCleanupInProgress:
+    """A manual cleanup currently owns this Project path."""
+
+    path: str
+
+
+@dataclasses.dataclass(frozen=True)
 class ProjectNotFound:
     """Project not found."""
 
@@ -84,7 +94,9 @@ class AccessibleProjectContext:
     session_id: str
 
 
-ProjectCreateError = InvalidProjectPath | ProjectPathConflict
+ProjectCreateError = (
+    InvalidProjectPath | ProjectPathConflict | ProjectPathCleanupInProgress
+)
 ProjectAccessError = AgentNotFound | ProjectAccessDenied
 ProjectFolderRegistrationError = ProjectAccessError | ProjectCreateError
 
@@ -188,13 +200,16 @@ class SessionWorkspaceProjectService:
             case Failure(error):
                 return Failure(error)
         async with self.session_manager() as session:
-            project = await self.repository.create_project(
-                session,
-                SessionWorkspaceProjectCreate(
-                    session_id=session_id,
-                    path=normalized_path,
-                ),
-            )
+            try:
+                project = await self.repository.create_project(
+                    session,
+                    SessionWorkspaceProjectCreate(
+                        session_id=session_id,
+                        path=normalized_path,
+                    ),
+                )
+            except SessionWorkspaceProjectCleanupInProgress:
+                return Failure(ProjectPathCleanupInProgress(path=normalized_path))
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -288,13 +303,16 @@ class SessionWorkspaceProjectService:
                             assert_never(error)
                 case _:
                     assert_never(exists_result)
-            project = await self.repository.create_project(
-                session,
-                SessionWorkspaceProjectCreate(
-                    session_id=context.session_id,
-                    path=normalized_path,
-                ),
-            )
+            try:
+                project = await self.repository.create_project(
+                    session,
+                    SessionWorkspaceProjectCreate(
+                        session_id=context.session_id,
+                        path=normalized_path,
+                    ),
+                )
+            except SessionWorkspaceProjectCleanupInProgress:
+                return Failure(ProjectPathCleanupInProgress(path=normalized_path))
             await self.agent_project_preset_repository.upsert_preset(
                 session,
                 agent_id=context.agent_id,

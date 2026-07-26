@@ -32,6 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_project_catalog.py
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
+  - python/apps/azents/src/azents/rdb/models/git_worktree_cleanup_claim.py
   - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/services/agent_automatic_project/**
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
@@ -78,7 +79,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-26
-spec_version: 48
+spec_version: 49
 ---
 
 # Workspace & Membership
@@ -254,6 +255,17 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - Project browser manifest reads do not call runtime runner file stat/list operations before responding. Missing or unchecked catalog projection is represented as stored/unchecked status and may be refreshed by separate boundary-triggered sync work.
 - `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected Session's shared context registry row. Filesystem folder deletion is destructive and not included. Azents-owned worktree cleanup is a separate explicit cleanup or archive-time best-effort lifecycle based on `session_agent_context_git_worktrees` ownership metadata, not on the Project registry row alone. Retention purge deletes only the allocation row and never accesses Runtime or Git state.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` requests destructive cleanup for Azents-owned worktree allocations. When `project_id` is supplied, cleanup is scoped to the allocation linked to that session Project; otherwise cleanup covers all non-cleaned allocations for the session. Cleanup validates session ownership, Azents worktree-root containment, branch name presence, and Azents-created branch ownership before calling Runner Git cleanup. Successful cleanup removes the Git worktree without force, deletes the Azents-created branch, removes the catalog entry, deletes the linked session Project row, and best-effort removes the empty session-scoped worktree parent directory. Failure or cancellation of that final empty-parent removal does not revert otherwise confirmed Git cleanup.
+- `cleanup_orphan_git_worktrees` is a parameterless, explicit chat TurnAction rather than a direct
+  destructive REST route. It is scoped to the invoking Session's current Runtime and may force-remove
+  dirty or untracked Azents-managed worktrees that are not connected to any active root Session while
+  preserving their local branches. A Runtime-scoped coordination lock and path-overlap cleanup claims
+  serialize Project attachment, worktree target allocation, and cleanup admission; an exact,
+  ancestor, or descendant active Project connection wins protection. Database transactions and
+  advisory locks do not span Runner I/O; expired claims are reclaimable only after owner validation,
+  and archive cleanup remains a
+  best-effort non-blocking competitor. The action's live and durable result is bounded and
+  content-free, with per-candidate `removed`, `already_absent`, `protected`, `failed`, or
+  `unresolved` outcome.
 - Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, exact duplicate Project path per session forbidden. Nested Project paths are allowed.
 New-session azents-web UI shows a compact additive workspace item list above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, lets users add repository folders to the list, and lets each selected folder switch between repository and new worktree modes from the row-level type selector. The runtime-backed folder picker can select the current folder so a Git repository directory itself can be added without relying on an existing preset. Worktree branch selection in this draft UI uses the Git ref preview endpoint but exposes only local branches by default; remote branches and tags are not shown in the base branch selector. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project browser root rows display the folder basename as the primary label and render the full absolute path as dimmed, truncated secondary text after the name. The secondary path truncates before the primary label; the primary label truncates only when it exceeds the available row width. Git-backed Project root rows use a Git folder icon; non-Git Project roots keep the normal folder icon.
 
@@ -533,6 +545,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-26 (spec_version=49)** — Added the manual orphan Git-worktree cleanup TurnAction,
+  Runtime/path claim coordination with Project attachment and allocation, active-root protection,
+  force removal with branch preservation, and bounded durable candidate results.
 - **2026-07-26 (spec_version=48)** — Added Workspace Owner/Manager authority for
   zero-or-more-Agent Slack Multi Apps, many-to-many catalogs, channel defaults,
   generation-fenced lifecycle, and authenticated Slack management handoffs.
