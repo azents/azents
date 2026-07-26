@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import json
 import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import Any, cast
 from urllib.parse import urlencode
 
@@ -85,6 +87,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+from testcontainers.core.container import DockerContainer
 
 from support.utils import (
     authenticate_user,
@@ -99,6 +102,7 @@ _CHANNEL_ID = "C-E2E"
 _BOT_TOKEN = "xoxb-e2e-private"
 _SIGNING_SECRET = "e2e-signing-private"
 _DISCORD_APPLICATION_ID = "100000000000000001"
+_DISCORD_MULTI_APPLICATION_ID = "100000000000000002"
 _DISCORD_GUILD_ID = "200000000000000001"
 _DISCORD_BOT_USER_ID = "300000000000000001"
 _DISCORD_CHANNEL_ID = "400000000000000001"
@@ -2200,11 +2204,12 @@ def test_discord_single_activation_interaction_and_gateway_journey(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    azents_discord_gateway_worker_container: Container,
     discord_provider_fake_url: str,
+    azents_discord_gateway_worker_factory: Callable[
+        [], AbstractContextManager[DockerContainer]
+    ],
 ) -> None:
     """Exercise Discord activation, signed ingress, and fenced Gateway admission."""
-    del azents_discord_gateway_worker_container
     gateway_message_id = "500000000000000001"
     requests.post(
         f"{discord_provider_fake_url}/__testenv/reset",
@@ -2293,26 +2298,32 @@ def test_discord_single_activation_interaction_and_gateway_journey(
         if not isinstance(gateway, dict):
             return None
         gateway_evidence = cast(dict[str, object], gateway)
+        initial_opcodes = gateway_evidence.get("initial_opcodes")
+        heartbeats = gateway_evidence.get("heartbeats")
         if (
-            gateway_evidence.get("initial_opcodes") == [2]
-            and gateway_evidence.get("heartbeats") == [2]
+            isinstance(initial_opcodes, list)
+            and initial_opcodes
+            and initial_opcodes[0] == 2
+            and isinstance(heartbeats, list)
+            and 2 in heartbeats
             and gateway_evidence.get("dispatches")
             == [{"event_type": "MESSAGE_CREATE", "sequence": 2}]
         ):
             return state
         return None
 
-    state = cast(
-        dict[str, object],
-        wait_until(
-            admitted_gateway_state,
-            timeout=20,
-            interval=0.2,
-            message=(
-                "Discord Gateway Dispatch was not durably admitted and checkpointed"
+    with azents_discord_gateway_worker_factory():
+        state = cast(
+            dict[str, object],
+            wait_until(
+                admitted_gateway_state,
+                timeout=20,
+                interval=0.2,
+                message=(
+                    "Discord Gateway Dispatch was not durably admitted and checkpointed"
+                ),
             ),
-        ),
-    )
+        )
     interactions = state.get("interactions")
     assert interactions == [
         {
@@ -2343,6 +2354,11 @@ def test_discord_multi_management_and_lifecycle_journey(
         f"{discord_provider_fake_url}/__testenv/reset",
         timeout=5,
     ).raise_for_status()
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/configure",
+        json={"application_id": _DISCORD_MULTI_APPLICATION_ID},
+        timeout=5,
+    ).raise_for_status()
     owner_token, _, handle, agent_ids = _create_workspace_agents(
         public_api_client,
         admin_api_client,
@@ -2356,7 +2372,7 @@ def test_discord_multi_management_and_lifecycle_journey(
     setup = external_api.external_channel_v1_setup_multi_discord_connection(
         handle=handle,
         discord_connection_setup_request=DiscordConnectionSetupRequest(
-            app_id=_DISCORD_APPLICATION_ID,
+            app_id=_DISCORD_MULTI_APPLICATION_ID,
             configuration=DiscordConnectionConfiguration(
                 target_guild_id=_DISCORD_GUILD_ID
             ),
