@@ -370,6 +370,7 @@ interface ChatViewProps {
   defaultInferenceProfile: RequestedInferenceProfile;
   sessionId?: string | null;
   isResponsePending: boolean;
+  isModelResponsePending: boolean;
   isWritePending: boolean;
   /** browser timestamp for the most recently received chat event */
   lastEventReceivedAt: string | null;
@@ -457,6 +458,7 @@ export function ChatView({
   defaultInferenceProfile,
   sessionId = null,
   isResponsePending,
+  isModelResponsePending,
   isWritePending,
   lastEventReceivedAt,
   liveRun,
@@ -1563,7 +1565,7 @@ export function ChatView({
                   />
                 ))}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
-                  isResponsePending && (
+                  isModelResponsePending && (
                     <AgentRunIndicator
                       lastEventReceivedAt={lastEventReceivedAt}
                     />

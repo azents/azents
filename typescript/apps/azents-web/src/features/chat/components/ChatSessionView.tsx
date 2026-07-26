@@ -319,6 +319,7 @@ export function ChatSessionView({
           activeAgent={agent}
           sessionId={output.sessionId}
           isResponsePending={output.isResponsePending}
+          isModelResponsePending={output.isModelResponsePending}
           isWritePending={output.isWritePending}
           lastEventReceivedAt={output.lastEventReceivedAt}
           liveRun={output.liveRun}

@@ -1,4 +1,4 @@
-import { expect, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { PendingMailboxBubble } from "./PendingMailboxBubble";
 import type { PendingMailboxEntry } from "../hooks/pendingMailboxState";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -57,6 +57,19 @@ export const AgentMessage: Story = {
       message_kind: "send_message",
       content: "A collaborating agent supplied additional context.",
     }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const trigger = canvas.getByRole("button", {
+      name: "Agent · send_message",
+    });
+    await expect(
+      canvas.queryByText("A collaborating agent supplied additional context."),
+    ).toBeNull();
+    await userEvent.click(trigger);
+    await expect(
+      canvas.getByText("A collaborating agent supplied additional context."),
+    ).toBeVisible();
   },
 };
 
