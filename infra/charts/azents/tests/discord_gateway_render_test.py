@@ -1,6 +1,6 @@
 """Discord Gateway Helm render contract tests."""
 
-from .scheduler_render_test import _helm_template
+from scheduler_render_test import _helm_template
 
 
 def test_discord_gateway_is_opt_in() -> None:
