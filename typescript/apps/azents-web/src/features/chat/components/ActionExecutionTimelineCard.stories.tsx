@@ -35,7 +35,7 @@ function cleanupStory({
             }),
         execution: {
           id: `cleanup-${id}`,
-          input_buffer_id: `buffer-cleanup-${id}`,
+          source_mailbox_item_id: `buffer-cleanup-${id}`,
           sender_user_id: null,
           action_type: "cleanup_orphan_git_worktrees",
           action: { type: "cleanup_orphan_git_worktrees" },

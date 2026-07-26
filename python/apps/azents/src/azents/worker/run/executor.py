@@ -2653,14 +2653,14 @@ class RunExecutor:
                     chat_history_event_appended_dump(event),
                 )
             if (
-                promoted.worktree_action is not None
-                and promoted.worktree_action.execution is not None
+                promoted.operation_action is not None
+                and promoted.operation_action.execution is not None
             ):
                 await self.broadcast.publish(
                     session_id,
                     chat_action_execution_updated_dump(
                         ActionExecutionProjection(
-                            execution=promoted.worktree_action.execution,
+                            execution=promoted.operation_action.execution,
                             events=[],
                         )
                     ),
