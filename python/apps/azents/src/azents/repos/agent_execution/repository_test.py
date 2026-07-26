@@ -127,6 +127,13 @@ def _agent_session_repository() -> AgentSessionRepository:
     return AgentSessionRepository()
 
 
+async def _noop_terminal_finalization(
+    _session: AsyncSession,
+    _run_ids: list[str],
+) -> None:
+    """Satisfy the atomic replacement finalization boundary in fixture tests."""
+
+
 def test_validate_event_payload_accepts_action_message() -> None:
     """Action message is a first-class persisted event payload."""
     payload = ActionMessagePayload(
@@ -1469,6 +1476,7 @@ class TestEventExecutionRepositories:
                 session_id=event_session.id,
                 parent_agent_run_id=None,
             ),
+            terminal_finalization=_noop_terminal_finalization,
         )
 
         closed = await repo.get_by_id(rdb_session, stale.id)
@@ -1669,6 +1677,7 @@ class TestEventExecutionRepositories:
                 session_id=first_session.id,
                 parent_agent_run_id=None,
             ),
+            terminal_finalization=_noop_terminal_finalization,
         )
         other = await repo.create(
             rdb_session,

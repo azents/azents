@@ -718,7 +718,7 @@ class AgentRunRepository:
             .order_by(RDBAgentRun.run_index.asc())
             .with_for_update()
         )
-        transitioned_runs: list[AgentRunState] = []
+        transitioned_rdbs: list[RDBAgentRun] = []
         for rdb in result.scalars():
             self._apply_terminal_values(
                 rdb,
@@ -729,8 +729,11 @@ class AgentRunRepository:
                 terminal_result_message=None,
             )
             await self._upsert_unread_terminal_run(session, rdb)
-            transitioned_runs.append(self._build(rdb))
+            transitioned_rdbs.append(rdb)
         await session.flush()
+        for rdb in transitioned_rdbs:
+            await session.refresh(rdb)
+        transitioned_runs = [self._build(rdb) for rdb in transitioned_rdbs]
         return transitioned_runs
 
     async def next_run_index(

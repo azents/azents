@@ -28,6 +28,13 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
 
+async def _noop_terminal_finalization(
+    _session: AsyncSession,
+    _run_ids: list[str],
+) -> None:
+    """Satisfy the atomic replacement finalization boundary in fixture tests."""
+
+
 async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str, str]:
     """Create AgentSession for tests."""
     await WorkspaceRepository().create(
@@ -265,6 +272,7 @@ async def test_release_terminal_run_pins_preserves_pending(
             session_id=session_id,
             parent_agent_run_id=None,
         ),
+        terminal_finalization=_noop_terminal_finalization,
     )
     await run_repo.mark_terminal(
         rdb_session,
