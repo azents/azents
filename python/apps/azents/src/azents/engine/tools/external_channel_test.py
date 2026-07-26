@@ -188,7 +188,13 @@ def _toolkit(
     )
     if file_storage is not None:
         store = RuntimeInstructionContextStore()
-        store.set(RuntimeInstructionContext(file_storage=file_storage, projects=()))
+        store.set(
+            RuntimeInstructionContext(
+                file_storage=file_storage,
+                projects=(),
+                transfer_capability=None,
+            )
+        )
         toolkit.set_runtime_context_store(store)
     return toolkit
 

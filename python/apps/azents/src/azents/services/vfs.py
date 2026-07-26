@@ -253,6 +253,32 @@ class VfsProjectionService:
         uri: str,
     ) -> VfsResolvedFile:
         """Resolve one exact authorized file from a persisted run projection."""
+        resolved = await self.resolve_transfer_file(
+            run_id=run_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            workspace_id=workspace_id,
+            uri=uri,
+        )
+        try:
+            resolved.entry.decode_body()
+        except ValueError as exc:
+            raise VfsFileResolutionError(
+                "storage_unavailable",
+                f"VFS file content is unavailable: {resolved.entry.canonical_uri}",
+            ) from exc
+        return resolved
+
+    async def resolve_transfer_file(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        uri: str,
+    ) -> VfsResolvedFile:
+        """Resolve one authorized VFS entry without decoding its body."""
         try:
             canonical_uri = canonicalize_vfs_uri(uri)
         except VfsUriError as exc:
@@ -275,13 +301,6 @@ class VfsProjectionService:
                 "not_found",
                 f"VFS file not found in the current run projection: {canonical_uri}",
             )
-        try:
-            entry.decode_body()
-        except ValueError as exc:
-            raise VfsFileResolutionError(
-                "storage_unavailable",
-                f"VFS file content is unavailable: {canonical_uri}",
-            ) from exc
         return VfsResolvedFile(
             projection_revision_id=projection.revision_id,
             projection_hash=projection.projection_hash,

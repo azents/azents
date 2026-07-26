@@ -51,6 +51,9 @@ from azents.engine.tools.builtin import (
 )
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
 from azents.engine.tools.read_text import make_read_text_tool
+from azents.engine.tools.runtime_instruction_context import (
+    ServerToRuntimeTransferExecutor,
+)
 from azents.engine.tools.runtime_io import (
     RuntimeBashResult,
     RuntimeFileEditResult,
@@ -617,6 +620,7 @@ def _make_toolkit(
     storage_files: dict[str, bytes] | None = None,
     projects: list[SessionWorkspaceProject] | None = None,
     agents_store: _FakeAgentsAppendixDedupeStateStore | None = None,
+    server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None = None,
 ) -> RuntimeToolkit:
     """Create RuntimeToolkit for tests."""
     runner_operations = _FakeRunnerOperations(storage_files)
@@ -649,6 +653,8 @@ def _make_toolkit(
         execution_policy_application_service=execution_policy_application_service,
         project_repo=project_repo,
         agents_store=cast(Any, agents_store),
+        server_to_runtime_transfer_service=server_to_runtime_transfer_service,
+        import_file_staging_configuration=None,
     )
     toolkit.set_session_id(session_id)
     cast(Any, toolkit)._test_runner_operations = runner_operations
@@ -737,6 +743,8 @@ class TestBuiltinToolkitProviderResolve:
                 ),
             ),
             project_repo=project_repo,
+            server_to_runtime_transfer_service=None,
+            import_file_staging_configuration=None,
         )
         toolkit = await provider.resolve(
             ShellToolkitConfig(),
@@ -844,6 +852,29 @@ class TestRuntimeToolkitUpdateContext:
             "/workspace/agent/zeta",
         ]
         assert hasattr(instruction_context.file_storage, "get")
+        assert instruction_context.transfer_capability is None
+
+    @pytest.mark.asyncio
+    async def test_update_context_exposes_transfer_capability_for_current_runtime(
+        self,
+    ) -> None:
+        """Runtime transfer capability carries only the selected Runtime target."""
+        transfer_service = AsyncMock()
+        toolkit = _make_toolkit(
+            server_to_runtime_transfer_service=cast(
+                ServerToRuntimeTransferExecutor,
+                transfer_service,
+            ),
+        )
+
+        await toolkit.update_context(_make_context())
+
+        instruction_context = cast(Any, toolkit)._agents_context
+        capability = instruction_context.transfer_capability
+        assert capability is not None
+        assert capability.service is transfer_service
+        assert capability.target.runtime_id == "runtime-1"
+        assert capability.target.desired_generation == 1
 
     @pytest.mark.asyncio
     async def test_file_storage_propagates_owner_and_reuses_runtime_snapshot(
