@@ -579,7 +579,7 @@ void test("covers every remaining source-less builtin with a validated adapter",
     },
     {
       name: "wait",
-      arguments: '{"timeout_seconds":30}',
+      arguments: '{"timeout_seconds":900}',
       action: "wait",
     },
     {
@@ -611,6 +611,19 @@ void test("covers every remaining source-less builtin with a validated adapter",
     assert.equal(result.type, "specialized", item.name);
     assert.equal(result.presentation.action, item.action, item.name);
   }
+});
+
+void test("rejects a runtime wait timeout over fifteen minutes", () => {
+  assert.deepEqual(
+    knownToolPresentation(
+      toolCall({
+        name: "wait",
+        arguments: '{"timeout_seconds":901}',
+        status: "running",
+      }),
+    ),
+    { type: "generic", reason: "invalid-arguments" },
+  );
 });
 
 void test("renders a completed runtime wait result", () => {

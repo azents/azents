@@ -262,7 +262,7 @@ const followupTaskInputSchema = z.object({
   task: z.string().min(1),
 });
 const waitAgentInputSchema = z.object({
-  timeout_seconds: z.number().int().min(0).max(600).optional(),
+  timeout_seconds: z.number().int().min(0).max(900).optional(),
 });
 const runtimeWaitResultSchema = z.object({
   outcome: z.enum(["activity", "not_waitable", "timed_out"]),

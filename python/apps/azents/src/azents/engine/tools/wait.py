@@ -97,7 +97,7 @@ class WaitToolkit(Toolkit[WaitToolkitConfig]):
 class _WaitInput(BaseModel):
     """Validated wait input."""
 
-    timeout_seconds: int = Field(default=30, ge=0, le=600)
+    timeout_seconds: int = Field(default=30, ge=0, le=900)
 
 
 def _outcome(observation: WaitObservation) -> str | None:
