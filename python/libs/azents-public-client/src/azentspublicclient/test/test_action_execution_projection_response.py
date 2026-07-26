@@ -37,7 +37,7 @@ class TestActionExecutionProjectionResponse(unittest.TestCase):
             return ActionExecutionProjectionResponse(
                 execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
                     id = '', 
-                    input_buffer_id = '', 
+                    source_mailbox_item_id = '', 
                     sender_user_id = '', 
                     action_type = '', 
                     action = null, 
@@ -72,7 +72,7 @@ class TestActionExecutionProjectionResponse(unittest.TestCase):
             return ActionExecutionProjectionResponse(
                 execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
                     id = '', 
-                    input_buffer_id = '', 
+                    source_mailbox_item_id = '', 
                     sender_user_id = '', 
                     action_type = '', 
                     action = null, 

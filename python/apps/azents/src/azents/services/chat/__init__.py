@@ -126,7 +126,7 @@ from .data import (
 from .live_events import (
     LiveEventStore,
     active_tool_call_to_live_event,
-    mailbox_item_to_live_event,
+    mailbox_item_to_pending_projection,
 )
 
 logger = logging.getLogger(__name__)
@@ -1380,10 +1380,9 @@ class ChatSessionService:
             mailbox_items = await self.mailbox_item_service.list_by_session_id(
                 session, session_id
             )
-            mailbox_item_events = [
-                event
+            mailbox_items_projection = [
+                mailbox_item_to_pending_projection(mailbox_item)
                 for mailbox_item in mailbox_items
-                if (event := mailbox_item_to_live_event(mailbox_item)) is not None
             ]
             run = await self.agent_run_repository.get_running_by_session_id(
                 session,
@@ -1493,7 +1492,7 @@ class ChatSessionService:
         return Success(
             ChatLiveStateSnapshot(
                 partial_history_events=partial_history_events,
-                mailbox_item_events=mailbox_item_events,
+                mailbox_items=mailbox_items_projection,
                 run=live_run,
                 session_run_state=session_run_state,
                 todo=todo,

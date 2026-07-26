@@ -4061,14 +4061,14 @@
         }
       }
     },
-    "/chat/v1/sessions/{session_id}/input-buffers/{buffer_id}": {
+    "/chat/v1/sessions/{session_id}/mailbox-items/{mailbox_item_id}": {
       "delete": {
         "tags": [
           "Chat v1"
         ],
-        "summary": "Delete Input Buffer",
-        "description": "Idempotently delete the pending input buffer.",
-        "operationId": "chat_v1_delete_input_buffer",
+        "summary": "Delete Mailbox Item",
+        "description": "Idempotently delete the pending mailbox item.",
+        "operationId": "chat_v1_delete_mailbox_item",
         "security": [
           {
             "HTTPBearer": []
@@ -4085,12 +4085,12 @@
             }
           },
           {
-            "name": "buffer_id",
+            "name": "mailbox_item_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Buffer Id"
+              "title": "Mailbox Item Id"
             }
           }
         ],
@@ -10770,10 +10770,10 @@
             "title": "Id",
             "description": "Action execution ID"
           },
-          "input_buffer_id": {
+          "source_mailbox_item_id": {
             "type": "string",
-            "title": "Input Buffer Id",
-            "description": "Durable source input buffer ID"
+            "title": "Source Mailbox Item Id",
+            "description": "Durable source mailbox item ID"
           },
           "sender_user_id": {
             "anyOf": [
@@ -10934,7 +10934,7 @@
         "type": "object",
         "required": [
           "id",
-          "input_buffer_id",
+          "source_mailbox_item_id",
           "sender_user_id",
           "action_type",
           "action",
@@ -14754,7 +14754,7 @@
           "type": {
             "type": "string",
             "enum": [
-              "input_buffer",
+              "mailbox_item",
               "edit_message",
               "command",
               "failed_run_retry"
@@ -14823,13 +14823,13 @@
             "title": "Partial History Events",
             "description": "Partial history projection list to compose into Chat timeline"
           },
-          "input_buffer_events": {
+          "mailbox_items": {
             "items": {
-              "$ref": "#/components/schemas/ChatEventResponse"
+              "$ref": "#/components/schemas/PendingMailboxEnvelope"
             },
             "type": "array",
-            "title": "Input Buffer Events",
-            "description": "Pending input buffer projection list"
+            "title": "Mailbox Items",
+            "description": "Pending mailbox envelope projection list"
           },
           "run": {
             "anyOf": [
@@ -14880,7 +14880,7 @@
         "type": "object",
         "required": [
           "partial_history_events",
-          "input_buffer_events",
+          "mailbox_items",
           "session_run_state"
         ],
         "title": "ChatWriteSnapshotResponse",
@@ -15865,6 +15865,118 @@
         ],
         "title": "ExternalChannelWorkTaskStatus",
         "description": "Status of one ordered Channel Work task."
+      },
+      "FileOutputPart": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "file",
+            "title": "Type",
+            "default": "file"
+          },
+          "model_file_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Model File Id",
+            "description": "ModelFile ID"
+          },
+          "media_type": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Media Type",
+            "description": "MIME type"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Display name"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size",
+            "description": "Size in bytes"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "document",
+                  "text",
+                  "binary"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind",
+            "description": "Broad file kind"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption"
+          },
+          "alt_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alt Text"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_file_id",
+          "media_type"
+        ],
+        "title": "FileOutputPart",
+        "description": "File part lowerable to LLM rich input."
       },
       "GcpConfig": {
         "properties": {
@@ -17377,13 +17489,13 @@
             "$ref": "#/components/schemas/PartialHistoryResponse",
             "description": "Partial history projection list to compose into Chat timeline"
           },
-          "input_buffers": {
+          "mailbox_items": {
             "items": {
-              "$ref": "#/components/schemas/ChatEventResponse"
+              "$ref": "#/components/schemas/PendingMailboxEnvelope"
             },
             "type": "array",
-            "title": "Input Buffers",
-            "description": "Pending input buffer projection list"
+            "title": "Mailbox Items",
+            "description": "Pending mailbox envelope projection list"
           },
           "run": {
             "anyOf": [
@@ -17434,7 +17546,7 @@
         "type": "object",
         "required": [
           "partial_history",
-          "input_buffers",
+          "mailbox_items",
           "session_run_state"
         ],
         "title": "LiveEventListResponse",
@@ -20038,6 +20150,388 @@
         ],
         "title": "PasswordLoginResponse",
         "description": "Password login response."
+      },
+      "PendingMailboxActionPresentation": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "action_message",
+            "title": "Type"
+          },
+          "action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CommandAction"
+              },
+              {
+                "$ref": "#/components/schemas/GoalAction"
+              },
+              {
+                "$ref": "#/components/schemas/SkillAction"
+              },
+              {
+                "$ref": "#/components/schemas/CreateGitWorktreeAction"
+              },
+              {
+                "$ref": "#/components/schemas/CleanupOrphanGitWorktreesAction"
+              }
+            ],
+            "title": "Action",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "cleanup_orphan_git_worktrees": "#/components/schemas/CleanupOrphanGitWorktreesAction",
+                "command": "#/components/schemas/CommandAction",
+                "create_git_worktree": "#/components/schemas/CreateGitWorktreeAction",
+                "goal": "#/components/schemas/GoalAction",
+                "skill": "#/components/schemas/SkillAction"
+              }
+            }
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "requested_inference_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequestedInferenceProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "action",
+          "message"
+        ],
+        "title": "PendingMailboxActionPresentation",
+        "description": "Safe pending Turn Action presentation."
+      },
+      "PendingMailboxAgentMessagePresentation": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "agent_message",
+            "title": "Type"
+          },
+          "message_kind": {
+            "type": "string",
+            "enum": [
+              "spawn_agent",
+              "send_message",
+              "followup_task",
+              "agent_result"
+            ],
+            "title": "Message Kind"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "message_kind",
+          "content"
+        ],
+        "title": "PendingMailboxAgentMessagePresentation",
+        "description": "Safe pending Agent-to-Agent message presentation."
+      },
+      "PendingMailboxEnvelope": {
+        "properties": {
+          "mailbox_item_id": {
+            "type": "string",
+            "title": "Mailbox Item Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "scheduling_mode": {
+            "type": "string",
+            "title": "Scheduling Mode"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PendingMailboxItem"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mailbox_item_id",
+          "session_id",
+          "kind",
+          "scheduling_mode",
+          "created_at",
+          "items"
+        ],
+        "title": "PendingMailboxEnvelope",
+        "description": "Stable pending mailbox envelope projection."
+      },
+      "PendingMailboxExternalChannelPresentation": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "external_channel_message",
+            "title": "Type"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "resource_label": {
+            "type": "string",
+            "title": "Resource Label"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "external_message_id": {
+            "type": "string",
+            "title": "External Message Id"
+          },
+          "revision_id": {
+            "type": "string",
+            "title": "Revision Id"
+          },
+          "revision_kind": {
+            "type": "string",
+            "title": "Revision Kind"
+          },
+          "sender_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Display Name"
+          },
+          "author_type": {
+            "type": "string",
+            "title": "Author Type"
+          },
+          "authorization": {
+            "type": "string",
+            "enum": [
+              "context_only",
+              "authorized_invocation"
+            ],
+            "title": "Authorization"
+          },
+          "lifecycle": {
+            "type": "string",
+            "title": "Lifecycle"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "original_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "provider",
+          "resource_label",
+          "resource_type",
+          "external_message_id",
+          "revision_id",
+          "revision_kind",
+          "sender_display_name",
+          "author_type",
+          "authorization",
+          "lifecycle",
+          "body",
+          "original_url"
+        ],
+        "title": "PendingMailboxExternalChannelPresentation",
+        "description": "Safe pending External Channel message presentation."
+      },
+      "PendingMailboxGoalContinuationPresentation": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "goal_continuation",
+            "title": "Type"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "requested_inference_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequestedInferenceProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "content"
+        ],
+        "title": "PendingMailboxGoalContinuationPresentation",
+        "description": "Safe pending Goal continuation presentation."
+      },
+      "PendingMailboxItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "mailbox_item_id": {
+            "type": "string",
+            "title": "Mailbox Item Id"
+          },
+          "item_key": {
+            "type": "string",
+            "title": "Item Key"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "const": "pending",
+            "title": "State",
+            "default": "pending"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "presentation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PendingMailboxUserMessagePresentation"
+              },
+              {
+                "$ref": "#/components/schemas/PendingMailboxGoalContinuationPresentation"
+              },
+              {
+                "$ref": "#/components/schemas/PendingMailboxAgentMessagePresentation"
+              },
+              {
+                "$ref": "#/components/schemas/PendingMailboxExternalChannelPresentation"
+              },
+              {
+                "$ref": "#/components/schemas/PendingMailboxActionPresentation"
+              }
+            ],
+            "title": "Presentation",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "action_message": "#/components/schemas/PendingMailboxActionPresentation",
+                "agent_message": "#/components/schemas/PendingMailboxAgentMessagePresentation",
+                "external_channel_message": "#/components/schemas/PendingMailboxExternalChannelPresentation",
+                "goal_continuation": "#/components/schemas/PendingMailboxGoalContinuationPresentation",
+                "user_message": "#/components/schemas/PendingMailboxUserMessagePresentation"
+              }
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "mailbox_item_id",
+          "item_key",
+          "kind",
+          "created_at",
+          "presentation"
+        ],
+        "title": "PendingMailboxItem",
+        "description": "One stable pending mailbox presentation item."
+      },
+      "PendingMailboxUserMessagePresentation": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "user_message",
+            "title": "Type"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "attachments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Attachments"
+          },
+          "file_parts": {
+            "items": {
+              "$ref": "#/components/schemas/FileOutputPart"
+            },
+            "type": "array",
+            "title": "File Parts"
+          },
+          "requested_inference_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequestedInferenceProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "content"
+        ],
+        "title": "PendingMailboxUserMessagePresentation",
+        "description": "Safe pending user-message presentation."
       },
       "PlatformGitHubAppAuthorizationReason": {
         "type": "string",

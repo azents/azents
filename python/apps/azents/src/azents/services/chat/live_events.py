@@ -3,7 +3,7 @@
 import datetime
 import hashlib
 from collections.abc import AsyncIterator, Sequence
-from typing import Annotated, Any, Literal, Protocol, cast
+from typing import Annotated, Any, Literal, Protocol, assert_never, cast
 
 from fastapi import Depends
 from pydantic import TypeAdapter
@@ -26,6 +26,7 @@ from azents.engine.events.types import (
     AssistantMessagePayload,
     ClientToolCallPayload,
     Event,
+    ExternalChannelMessagePayload,
     InputTextPart,
     NativeArtifact,
     OutputTextPart,
@@ -36,6 +37,15 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.repos.mailbox.data import MailboxItem
+from azents.services.chat.data import (
+    PendingMailboxActionPresentation,
+    PendingMailboxAgentMessagePresentation,
+    PendingMailboxEnvelope,
+    PendingMailboxExternalChannelPresentation,
+    PendingMailboxGoalContinuationPresentation,
+    PendingMailboxItem,
+    PendingMailboxUserMessagePresentation,
+)
 from azents.utils.appctx import AppContext
 
 _LIVE_EVENT_TTL_SECONDS = 300
@@ -284,6 +294,107 @@ def _mailbox_item_requested_profile(
     return RequestedInferenceProfile(
         model_target_label=mailbox_item.requested_model_target_label,
         reasoning_effort=mailbox_item.requested_reasoning_effort,
+    )
+
+
+def mailbox_item_to_pending_projection(
+    mailbox_item: MailboxItem,
+) -> PendingMailboxEnvelope:
+    """Project a durable typed MailboxItem into a safe public envelope."""
+    if mailbox_item.payload is None:
+        raise ValueError("Mailbox item payload is required for pending projection")
+    projected_items: list[PendingMailboxItem] = []
+    for item in mailbox_item.payload.items:
+        if mailbox_item.kind is MailboxItemKind.USER_MESSAGE:
+            presentation = PendingMailboxUserMessagePresentation(
+                type="user_message",
+                content=item.content,
+                attachments=list(item.attachments),
+                file_parts=list(item.file_parts),
+                requested_inference_profile=_mailbox_item_requested_profile(
+                    mailbox_item
+                ),
+            )
+        elif mailbox_item.kind is MailboxItemKind.GOAL_CONTINUATION:
+            presentation = PendingMailboxGoalContinuationPresentation(
+                type="goal_continuation",
+                content=item.content,
+                requested_inference_profile=_mailbox_item_requested_profile(
+                    mailbox_item
+                ),
+            )
+        elif mailbox_item.kind is MailboxItemKind.AGENT_MESSAGE:
+            message_kind = item.metadata.get("message_kind")
+            if message_kind not in {
+                "spawn_agent",
+                "send_message",
+                "followup_task",
+                "agent_result",
+            }:
+                raise ValueError("Agent mailbox item has an invalid message kind")
+            presentation = PendingMailboxAgentMessagePresentation(
+                type="agent_message",
+                message_kind=cast(
+                    Literal[
+                        "spawn_agent",
+                        "send_message",
+                        "followup_task",
+                        "agent_result",
+                    ],
+                    message_kind,
+                ),
+                content=item.content,
+            )
+        elif mailbox_item.kind is MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
+            raw_payload = item.metadata.get("external_channel_message")
+            if not isinstance(raw_payload, dict):
+                raise ValueError("External mailbox item payload is malformed")
+            external = ExternalChannelMessagePayload.model_validate(raw_payload)
+            presentation = PendingMailboxExternalChannelPresentation(
+                type="external_channel_message",
+                provider=external.provider.value,
+                resource_label=external.resource_label,
+                resource_type=external.resource_type.value,
+                external_message_id=external.external_message_id,
+                revision_id=external.revision_id,
+                revision_kind=external.revision_kind.value,
+                sender_display_name=external.sender_display_name,
+                author_type=external.author_type.value,
+                authorization=external.authorization,
+                lifecycle=external.lifecycle.value,
+                body=external.body,
+                original_url=external.original_url,
+            )
+        elif mailbox_item.kind is MailboxItemKind.ACTION_MESSAGE:
+            if item.action is None:
+                raise ValueError("Action mailbox item payload is missing action")
+            presentation = PendingMailboxActionPresentation(
+                type="action_message",
+                action=_chat_action_adapter.validate_python(item.action),
+                message=item.content,
+                requested_inference_profile=_mailbox_item_requested_profile(
+                    mailbox_item
+                ),
+            )
+        else:
+            assert_never(mailbox_item.kind)
+        projected_items.append(
+            PendingMailboxItem(
+                id=f"{mailbox_item.id}:{item.item_key}",
+                mailbox_item_id=mailbox_item.id,
+                item_key=item.item_key,
+                kind=item.presentation_kind,
+                created_at=mailbox_item.created_at,
+                presentation=presentation,
+            )
+        )
+    return PendingMailboxEnvelope(
+        mailbox_item_id=mailbox_item.id,
+        session_id=mailbox_item.session_id,
+        kind=mailbox_item.kind.value,
+        scheduling_mode=mailbox_item.scheduling_mode.value,
+        created_at=mailbox_item.created_at,
+        items=projected_items,
     )
 
 

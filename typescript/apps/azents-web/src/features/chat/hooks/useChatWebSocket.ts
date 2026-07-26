@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatEvent, ConnectionStatus } from "../types";
+import type { PendingMailboxEnvelope } from "@azents/public-client";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -38,6 +39,45 @@ function isEventResponse(value: unknown, sessionId: string): boolean {
   );
 }
 
+function isPendingMailboxEnvelope(
+  value: unknown,
+  sessionId: string,
+): value is PendingMailboxEnvelope {
+  if (
+    !isRecord(value) ||
+    value.session_id !== sessionId ||
+    !hasStringField(value, "mailbox_item_id") ||
+    !hasStringField(value, "kind") ||
+    !hasStringField(value, "scheduling_mode") ||
+    !hasStringField(value, "created_at") ||
+    !Array.isArray(value.items)
+  ) {
+    return false;
+  }
+  return value.items.every((item) => {
+    if (
+      !isRecord(item) ||
+      !hasStringField(item, "id") ||
+      !hasStringField(item, "mailbox_item_id") ||
+      !hasStringField(item, "item_key") ||
+      !hasStringField(item, "kind") ||
+      !hasStringField(item, "created_at") ||
+      !isRecord(item.presentation) ||
+      !hasStringField(item.presentation, "type")
+    ) {
+      return false;
+    }
+    const presentationType = item.presentation.type;
+    return [
+      "user_message",
+      "goal_continuation",
+      "agent_message",
+      "external_channel_message",
+      "action_message",
+    ].includes(typeof presentationType === "string" ? presentationType : "");
+  });
+}
+
 function isChatEventWire(
   value: unknown,
   sessionId: string,
@@ -64,6 +104,16 @@ function isChatEventWire(
     case "live_event_removed":
       return (
         isSessionFrame(value, sessionId) && hasStringField(value, "event_id")
+      );
+    case "mailbox_item_upserted":
+      return (
+        isSessionFrame(value, sessionId) &&
+        isPendingMailboxEnvelope(value.mailbox_item, sessionId)
+      );
+    case "mailbox_item_removed":
+      return (
+        isSessionFrame(value, sessionId) &&
+        hasStringField(value, "mailbox_item_id")
       );
     case "live_run_updated":
       return isSessionFrame(value, sessionId) && isRecord(value.run);

@@ -35,12 +35,12 @@ class TestChatWriteAcceptedResponse(unittest.TestCase):
         model = ChatWriteAcceptedResponse()
         if include_optional:
             return ChatWriteAcceptedResponse(
-                type = 'input_buffer',
+                type = 'mailbox_item',
                 id = ''
             )
         else:
             return ChatWriteAcceptedResponse(
-                type = 'input_buffer',
+                type = 'mailbox_item',
                 id = '',
         )
         """

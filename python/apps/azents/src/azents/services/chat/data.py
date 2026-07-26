@@ -2,11 +2,17 @@
 
 import dataclasses
 import datetime
-from typing import Literal
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
-from azents.core.inference_profile import AppliedInferenceProfile
-from azents.engine.events.types import Event
+from azents.core.inference_profile import (
+    AppliedInferenceProfile,
+    RequestedInferenceProfile,
+)
+from azents.engine.events.action_messages import ChatAction
+from azents.engine.events.types import Event, FileOutputPart
 from azents.engine.run.failure import (
     FailedRunAttemptSource,
     FailedRunErrorKind,
@@ -15,6 +21,98 @@ from azents.engine.run.failure import (
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
 from azents.engine.tools.todo import TodoStateSnapshot
 from azents.repos.action_execution.data import ActionExecutionProjection
+
+
+class PendingMailboxUserMessagePresentation(BaseModel):
+    """Safe pending user-message presentation."""
+
+    type: Literal["user_message"]
+    content: str
+    attachments: list[str] = Field(default_factory=list)
+    file_parts: list[FileOutputPart] = Field(default_factory=list)
+    requested_inference_profile: RequestedInferenceProfile | None = None
+
+
+class PendingMailboxGoalContinuationPresentation(BaseModel):
+    """Safe pending Goal continuation presentation."""
+
+    type: Literal["goal_continuation"]
+    content: str
+    requested_inference_profile: RequestedInferenceProfile | None = None
+
+
+class PendingMailboxAgentMessagePresentation(BaseModel):
+    """Safe pending Agent-to-Agent message presentation."""
+
+    type: Literal["agent_message"]
+    message_kind: Literal[
+        "spawn_agent",
+        "send_message",
+        "followup_task",
+        "agent_result",
+    ]
+    content: str
+
+
+class PendingMailboxExternalChannelPresentation(BaseModel):
+    """Safe pending External Channel message presentation."""
+
+    type: Literal["external_channel_message"]
+    provider: str
+    resource_label: str
+    resource_type: str
+    external_message_id: str
+    revision_id: str
+    revision_kind: str
+    sender_display_name: str | None
+    author_type: str
+    authorization: Literal["context_only", "authorized_invocation"]
+    lifecycle: str
+    body: str | None
+    original_url: str | None
+
+
+class PendingMailboxActionPresentation(BaseModel):
+    """Safe pending Turn Action presentation."""
+
+    type: Literal["action_message"]
+    action: ChatAction
+    message: str
+    requested_inference_profile: RequestedInferenceProfile | None = None
+
+
+PendingMailboxPresentation = Annotated[
+    PendingMailboxUserMessagePresentation
+    | PendingMailboxGoalContinuationPresentation
+    | PendingMailboxAgentMessagePresentation
+    | PendingMailboxExternalChannelPresentation
+    | PendingMailboxActionPresentation,
+    Field(discriminator="type"),
+]
+
+
+class PendingMailboxItem(BaseModel):
+    """One stable pending mailbox presentation item."""
+
+    id: str
+    mailbox_item_id: str
+    item_key: str
+    kind: str
+    state: Literal["pending"] = "pending"
+    created_at: datetime.datetime
+    presentation: PendingMailboxPresentation
+
+
+class PendingMailboxEnvelope(BaseModel):
+    """Stable pending mailbox envelope projection."""
+
+    mailbox_item_id: str
+    session_id: str
+    kind: str
+    scheduling_mode: str
+    created_at: datetime.datetime
+    items: list[PendingMailboxItem] = Field(min_length=1)
+
 
 # ---------------------------------------------------------------------------
 # Output
@@ -87,7 +185,7 @@ class ChatLiveStateSnapshot:
     """Current chat live state taxonomy snapshot."""
 
     partial_history_events: list[Event]
-    mailbox_item_events: list[Event]
+    mailbox_items: list[PendingMailboxEnvelope]
     run: ChatLiveRunState | None = None
     session_run_state: AgentSessionRunState = AgentSessionRunState.IDLE
     todo: TodoStateSnapshot | None = None

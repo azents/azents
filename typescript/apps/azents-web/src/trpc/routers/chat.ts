@@ -19,7 +19,7 @@ import {
   chatV1CreateTeamAgentSessionMessage,
   chatV1DeleteAgentProject,
   chatV1DeleteAgentWorkspacePath,
-  chatV1DeleteInputBuffer,
+  chatV1DeleteMailboxItem,
   chatV1EditMessage,
   chatV1GetAgentSession,
   chatV1GetAgentSessionContext,
@@ -663,11 +663,11 @@ export const chatRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await chatV1DeleteInputBuffer({
+      await chatV1DeleteMailboxItem({
         client: ctx.apiClient,
         path: {
           session_id: input.sessionId,
-          buffer_id: input.bufferId,
+          mailbox_item_id: input.bufferId,
         },
         throwOnError: true,
       });

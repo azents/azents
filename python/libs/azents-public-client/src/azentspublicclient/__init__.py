@@ -51,6 +51,7 @@ __all__ = [
     "AcceptDeclineResponse",
     "Action",
     "Action1",
+    "Action2",
     "ActionExecutionEventResponse",
     "ActionExecutionProjectionResponse",
     "ActionExecutionResponse",
@@ -191,6 +192,7 @@ __all__ = [
     "ExternalChannelTransport",
     "ExternalChannelWorkStatus",
     "ExternalChannelWorkTaskStatus",
+    "FileOutputPart",
     "GcpConfig",
     "GcpSecrets",
     "GenerationFenceRequest",
@@ -297,7 +299,15 @@ __all__ = [
     "PartialHistoryResponse",
     "PasswordLoginRequest",
     "PasswordLoginResponse",
+    "PendingMailboxActionPresentation",
+    "PendingMailboxAgentMessagePresentation",
+    "PendingMailboxEnvelope",
+    "PendingMailboxExternalChannelPresentation",
+    "PendingMailboxGoalContinuationPresentation",
+    "PendingMailboxItem",
+    "PendingMailboxUserMessagePresentation",
     "PlatformGitHubAppAuthorizationReason",
+    "Presentation",
     "PreviewPasswordResetTokenRequest",
     "PreviewPasswordResetTokenResponse",
     "PreviewSignupTokenRequest",
@@ -446,6 +456,7 @@ from azentspublicclient.exceptions import ApiException as ApiException
 from azentspublicclient.models.accept_decline_response import AcceptDeclineResponse as AcceptDeclineResponse
 from azentspublicclient.models.action import Action as Action
 from azentspublicclient.models.action1 import Action1 as Action1
+from azentspublicclient.models.action2 import Action2 as Action2
 from azentspublicclient.models.action_execution_event_response import ActionExecutionEventResponse as ActionExecutionEventResponse
 from azentspublicclient.models.action_execution_projection_response import ActionExecutionProjectionResponse as ActionExecutionProjectionResponse
 from azentspublicclient.models.action_execution_response import ActionExecutionResponse as ActionExecutionResponse
@@ -586,6 +597,7 @@ from azentspublicclient.models.external_channel_route_catalog_status import Exte
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport as ExternalChannelTransport
 from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus as ExternalChannelWorkStatus
 from azentspublicclient.models.external_channel_work_task_status import ExternalChannelWorkTaskStatus as ExternalChannelWorkTaskStatus
+from azentspublicclient.models.file_output_part import FileOutputPart as FileOutputPart
 from azentspublicclient.models.gcp_config import GcpConfig as GcpConfig
 from azentspublicclient.models.gcp_secrets import GcpSecrets as GcpSecrets
 from azentspublicclient.models.generation_fence_request import GenerationFenceRequest as GenerationFenceRequest
@@ -692,7 +704,15 @@ from azentspublicclient.models.open_router_subscription_financial_details_respon
 from azentspublicclient.models.partial_history_response import PartialHistoryResponse as PartialHistoryResponse
 from azentspublicclient.models.password_login_request import PasswordLoginRequest as PasswordLoginRequest
 from azentspublicclient.models.password_login_response import PasswordLoginResponse as PasswordLoginResponse
+from azentspublicclient.models.pending_mailbox_action_presentation import PendingMailboxActionPresentation as PendingMailboxActionPresentation
+from azentspublicclient.models.pending_mailbox_agent_message_presentation import PendingMailboxAgentMessagePresentation as PendingMailboxAgentMessagePresentation
+from azentspublicclient.models.pending_mailbox_envelope import PendingMailboxEnvelope as PendingMailboxEnvelope
+from azentspublicclient.models.pending_mailbox_external_channel_presentation import PendingMailboxExternalChannelPresentation as PendingMailboxExternalChannelPresentation
+from azentspublicclient.models.pending_mailbox_goal_continuation_presentation import PendingMailboxGoalContinuationPresentation as PendingMailboxGoalContinuationPresentation
+from azentspublicclient.models.pending_mailbox_item import PendingMailboxItem as PendingMailboxItem
+from azentspublicclient.models.pending_mailbox_user_message_presentation import PendingMailboxUserMessagePresentation as PendingMailboxUserMessagePresentation
 from azentspublicclient.models.platform_git_hub_app_authorization_reason import PlatformGitHubAppAuthorizationReason as PlatformGitHubAppAuthorizationReason
+from azentspublicclient.models.presentation import Presentation as Presentation
 from azentspublicclient.models.preview_password_reset_token_request import PreviewPasswordResetTokenRequest as PreviewPasswordResetTokenRequest
 from azentspublicclient.models.preview_password_reset_token_response import PreviewPasswordResetTokenResponse as PreviewPasswordResetTokenResponse
 from azentspublicclient.models.preview_signup_token_request import PreviewSignupTokenRequest as PreviewSignupTokenRequest

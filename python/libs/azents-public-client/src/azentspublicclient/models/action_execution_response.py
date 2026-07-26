@@ -30,7 +30,7 @@ class ActionExecutionResponse(BaseModel):
     Action execution live projection response.
     """ # noqa: E501
     id: StrictStr = Field(description="Action execution ID")
-    input_buffer_id: StrictStr = Field(description="Durable source input buffer ID")
+    source_mailbox_item_id: StrictStr = Field(description="Durable source mailbox item ID")
     sender_user_id: Optional[StrictStr]
     action_type: StrictStr = Field(description="Action discriminator")
     action: Action
@@ -45,7 +45,7 @@ class ActionExecutionResponse(BaseModel):
     cancelled_at: Optional[datetime] = None
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "input_buffer_id", "sender_user_id", "action_type", "action", "result", "status", "owner_generation", "failure_summary", "cancellation_summary", "started_at", "completed_at", "failed_at", "cancelled_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "source_mailbox_item_id", "sender_user_id", "action_type", "action", "result", "status", "owner_generation", "failure_summary", "cancellation_summary", "started_at", "completed_at", "failed_at", "cancelled_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -156,7 +156,7 @@ class ActionExecutionResponse(BaseModel):
 
         _obj = cls.model_validate({
             "id": obj.get("id"),
-            "input_buffer_id": obj.get("input_buffer_id"),
+            "source_mailbox_item_id": obj.get("source_mailbox_item_id"),
             "sender_user_id": obj.get("sender_user_id"),
             "action_type": obj.get("action_type"),
             "action": Action.from_dict(obj["action"]) if obj.get("action") is not None else None,

@@ -36,7 +36,7 @@ class TestActionExecutionResponse(unittest.TestCase):
         if include_optional:
             return ActionExecutionResponse(
                 id = '',
-                input_buffer_id = '',
+                source_mailbox_item_id = '',
                 sender_user_id = '',
                 action_type = '',
                 action = None,
@@ -56,7 +56,7 @@ class TestActionExecutionResponse(unittest.TestCase):
         else:
             return ActionExecutionResponse(
                 id = '',
-                input_buffer_id = '',
+                source_mailbox_item_id = '',
                 sender_user_id = '',
                 action_type = '',
                 action = None,

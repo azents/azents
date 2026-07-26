@@ -228,7 +228,7 @@ export const FailedWorktreeAction = {
       historyCreatedAt: "2026-05-19T00:00:05Z",
       execution: {
         id: "action-execution-1",
-        input_buffer_id: "buffer-action-1",
+        source_mailbox_item_id: "buffer-action-1",
         sender_user_id: null,
         action_type: "create_git_worktree",
         action: {
@@ -278,7 +278,7 @@ export const CompletedWorktreeAction = {
       historyCreatedAt: "2026-05-19T00:00:04Z",
       execution: {
         id: "action-execution-2",
-        input_buffer_id: "buffer-action-2",
+        source_mailbox_item_id: "buffer-action-2",
         sender_user_id: null,
         action_type: "create_git_worktree",
         action: {
@@ -316,7 +316,7 @@ export const RunningWorktreeAction = {
       provenance: "live",
       execution: {
         id: "action-execution-3",
-        input_buffer_id: "buffer-action-3",
+        source_mailbox_item_id: "buffer-action-3",
         sender_user_id: null,
         action_type: "create_git_worktree",
         action: {
@@ -355,7 +355,7 @@ export const CancelledWorktreeAction = {
       historyCreatedAt: "2026-05-19T00:00:03Z",
       execution: {
         id: "action-execution-4",
-        input_buffer_id: "buffer-action-4",
+        source_mailbox_item_id: "buffer-action-4",
         sender_user_id: null,
         action_type: "create_git_worktree",
         action: {

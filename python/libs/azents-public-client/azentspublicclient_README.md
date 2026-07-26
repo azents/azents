@@ -125,7 +125,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_delete_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_project) | **DELETE** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id} | Delete Agent Project
 *ChatV1Api* | [**chat_v1_delete_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_workspace_path) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files | Delete Agent Workspace Path
 *ChatV1Api* | [**chat_v1_delete_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
-*ChatV1Api* | [**chat_v1_delete_input_buffer**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
+*ChatV1Api* | [**chat_v1_delete_mailbox_item**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_mailbox_item) | **DELETE** /chat/v1/sessions/{session_id}/mailbox-items/{mailbox_item_id} | Delete Mailbox Item
 *ChatV1Api* | [**chat_v1_download_agent_workspace_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_agent_workspace_file) | **GET** /chat/v1/agents/{agent_id}/workspace/download | Download Agent Workspace File
 *ChatV1Api* | [**chat_v1_download_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 *ChatV1Api* | [**chat_v1_edit_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
@@ -273,6 +273,7 @@ Class | Method | HTTP request | Description
  - [AcceptDeclineResponse](azentspublicclient/docs/AcceptDeclineResponse.md)
  - [Action](azentspublicclient/docs/Action.md)
  - [Action1](azentspublicclient/docs/Action1.md)
+ - [Action2](azentspublicclient/docs/Action2.md)
  - [ActionExecutionEventResponse](azentspublicclient/docs/ActionExecutionEventResponse.md)
  - [ActionExecutionProjectionResponse](azentspublicclient/docs/ActionExecutionProjectionResponse.md)
  - [ActionExecutionResponse](azentspublicclient/docs/ActionExecutionResponse.md)
@@ -413,6 +414,7 @@ Class | Method | HTTP request | Description
  - [ExternalChannelTransport](azentspublicclient/docs/ExternalChannelTransport.md)
  - [ExternalChannelWorkStatus](azentspublicclient/docs/ExternalChannelWorkStatus.md)
  - [ExternalChannelWorkTaskStatus](azentspublicclient/docs/ExternalChannelWorkTaskStatus.md)
+ - [FileOutputPart](azentspublicclient/docs/FileOutputPart.md)
  - [GcpConfig](azentspublicclient/docs/GcpConfig.md)
  - [GcpSecrets](azentspublicclient/docs/GcpSecrets.md)
  - [GenerationFenceRequest](azentspublicclient/docs/GenerationFenceRequest.md)
@@ -519,7 +521,15 @@ Class | Method | HTTP request | Description
  - [PartialHistoryResponse](azentspublicclient/docs/PartialHistoryResponse.md)
  - [PasswordLoginRequest](azentspublicclient/docs/PasswordLoginRequest.md)
  - [PasswordLoginResponse](azentspublicclient/docs/PasswordLoginResponse.md)
+ - [PendingMailboxActionPresentation](azentspublicclient/docs/PendingMailboxActionPresentation.md)
+ - [PendingMailboxAgentMessagePresentation](azentspublicclient/docs/PendingMailboxAgentMessagePresentation.md)
+ - [PendingMailboxEnvelope](azentspublicclient/docs/PendingMailboxEnvelope.md)
+ - [PendingMailboxExternalChannelPresentation](azentspublicclient/docs/PendingMailboxExternalChannelPresentation.md)
+ - [PendingMailboxGoalContinuationPresentation](azentspublicclient/docs/PendingMailboxGoalContinuationPresentation.md)
+ - [PendingMailboxItem](azentspublicclient/docs/PendingMailboxItem.md)
+ - [PendingMailboxUserMessagePresentation](azentspublicclient/docs/PendingMailboxUserMessagePresentation.md)
  - [PlatformGitHubAppAuthorizationReason](azentspublicclient/docs/PlatformGitHubAppAuthorizationReason.md)
+ - [Presentation](azentspublicclient/docs/Presentation.md)
  - [PreviewPasswordResetTokenRequest](azentspublicclient/docs/PreviewPasswordResetTokenRequest.md)
  - [PreviewPasswordResetTokenResponse](azentspublicclient/docs/PreviewPasswordResetTokenResponse.md)
  - [PreviewSignupTokenRequest](azentspublicclient/docs/PreviewSignupTokenRequest.md)

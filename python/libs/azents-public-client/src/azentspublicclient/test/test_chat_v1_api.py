@@ -110,10 +110,10 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
-    def test_chat_v1_delete_input_buffer(self) -> None:
-        """Test case for chat_v1_delete_input_buffer
+    def test_chat_v1_delete_mailbox_item(self) -> None:
+        """Test case for chat_v1_delete_mailbox_item
 
-        Delete Input Buffer
+        Delete Mailbox Item
         """
         pass
 

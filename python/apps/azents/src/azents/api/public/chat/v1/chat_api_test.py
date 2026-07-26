@@ -22,7 +22,7 @@ from azents.api.public.chat.v1 import (
     archive_agent_session,
     cleanup_session_git_worktree,
     create_team_agent_session,
-    delete_input_buffer,
+    delete_mailbox_item,
     get_agent_session,
     get_subagent_tree,
     get_team_primary_agent_session,
@@ -112,7 +112,11 @@ from azents.services.chat.data import (
     UpdateGoalResult,
     UpdateGoalStatusInput,
 )
-from azents.services.chat.live_events import InMemoryLiveEventStore, LiveEventStore
+from azents.services.chat.live_events import (
+    InMemoryLiveEventStore,
+    LiveEventStore,
+    mailbox_item_to_pending_projection,
+)
 from azents.services.chat_write import (
     AcceptedChatWriteRequest,
     AcceptedEditInput,
@@ -425,7 +429,7 @@ class _RestWriteChatService:
                 metadata={
                     "source": "chat",
                     "live_projection": "input_buffer",
-                    "input_buffer_id": "0123456789abcdef0123456789abcdef",
+                    "source_mailbox_item_id": "0123456789abcdef0123456789abcdef",
                 },
             ),
             model_order=0,
@@ -437,6 +441,22 @@ class _RestWriteChatService:
             schema_version="1",
             created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
         )
+        self.mailbox_item = MailboxItem(
+            id="0123456789abcdef0123456789abcdef",
+            session_id=session_id,
+            kind=MailboxItemKind.USER_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            sender_user_id="user-1",
+            content="hello",
+            idempotency_key="client-1",
+            metadata={"source": "chat"},
+            attachments=[],
+            file_parts=[],
+            created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+        )
+        self.mailbox_projection = mailbox_item_to_pending_projection(self.mailbox_item)
 
     async def get_agent_session(
         self,
@@ -482,7 +502,7 @@ class _RestWriteChatService:
         return Success(
             ChatLiveStateSnapshot(
                 partial_history_events=[],
-                mailbox_item_events=[self.event],
+                mailbox_items=[self.mailbox_projection],
                 run=None,
             )
         )
@@ -881,7 +901,7 @@ class _EventService:
         return Success(
             ChatLiveStateSnapshot(
                 partial_history_events=[self.event],
-                mailbox_item_events=[],
+                mailbox_items=[],
                 run=ChatLiveRunState(
                     run_id="2123456789abcdef0123456789abcdef",
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
@@ -1714,7 +1734,7 @@ class TestEventRoutes:
         dump = response.model_dump(mode="json")
         assert "items" not in dump
         assert dump["partial_history"]["items"][0]["kind"] == "user_message"
-        assert dump["input_buffers"] == []
+        assert dump["mailbox_items"] == []
         assert dump["run"] == {
             "run_id": "2123456789abcdef0123456789abcdef",
             "phase": "waiting_for_model",
@@ -1789,11 +1809,17 @@ class TestRestMessageWriteContract:
         assert response.session_id == "0123456789abcdef0123456789abcdef"
         assert response.client_request_id == "client-1"
         assert response.accepted.id == "0123456789abcdef0123456789abcdef"
-        assert response.snapshot.input_buffer_events[0].kind == EventKind.USER_MESSAGE
+        assert response.snapshot.mailbox_items[0].kind == (
+            MailboxItemKind.USER_MESSAGE.value
+        )
+        assert (
+            response.snapshot.mailbox_items[0].items[0].presentation.type
+            == "user_message"
+        )
         assert response.snapshot.partial_history_events == []
         assert response.snapshot.session_run_state == AgentSessionRunState.IDLE
         assert response.history_reload_required is False
-        assert broadcast.events[0][1]["type"] == "live_event_upserted"
+        assert broadcast.events[0][1]["type"] == "mailbox_item_upserted"
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 
@@ -1824,7 +1850,7 @@ class TestRestMessageWriteContract:
             tz=ZoneInfo("UTC"),
         )
 
-        assert response.accepted.type == "input_buffer"
+        assert response.accepted.type == "mailbox_item"
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 
@@ -1934,8 +1960,11 @@ class TestRestMessageWriteContract:
         assert input_service.kwargs[0]["setup_actions"] == []
         assert response.session_id == "4123456789abcdef0123456789abcdef"
         assert response.accepted.id == "0123456789abcdef0123456789abcdef"
-        snapshot_buffer = response.snapshot.input_buffer_events[0]
+        snapshot_buffer = response.snapshot.mailbox_items[0]
         assert snapshot_buffer.session_id == response.session_id
+        assert (
+            snapshot_buffer.items[0].mailbox_item_id == snapshot_buffer.mailbox_item_id
+        )
         assert response.history_reload_required is False
         assert broadcast.events[0][0] == response.session_id
         assert len(broker.messages) == 1
@@ -2151,7 +2180,7 @@ class TestRestMessageWriteContract:
             "source_project_path": "/workspace/agent/source",
             "starting_ref": "refs/heads/main",
         }
-        assert response.accepted.type == "input_buffer"
+        assert response.accepted.type == "mailbox_item"
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 
@@ -2195,7 +2224,7 @@ class TestRestMessageWriteContract:
             "type": "skill",
             "skill_path": "/workspace/agent/app/.claude/skills/review/SKILL.md",
         }
-        assert response.accepted.type == "input_buffer"
+        assert response.accepted.type == "mailbox_item"
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 
@@ -2364,11 +2393,11 @@ class TestChatInferenceProfileRequestContract:
 class TestChatInputBufferContract:
     """Chat input buffer route contract tests."""
 
-    async def test_delete_input_buffer_publishes_deleted_notification(self) -> None:
+    async def test_delete_mailbox_item_publishes_deleted_notification(self) -> None:
         """DELETE endpoint returns idempotent 204 and publishes delete notification."""
         broadcast = _MemoryBroadcast()
 
-        await delete_input_buffer(
+        await delete_mailbox_item(
             "0123456789abcdef0123456789abcdef",
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
@@ -2380,16 +2409,16 @@ class TestChatInputBufferContract:
             (
                 "0123456789abcdef0123456789abcdef",
                 {
-                    "type": "live_event_removed",
+                    "type": "mailbox_item_removed",
                     "session_id": "0123456789abcdef0123456789abcdef",
-                    "event_id": "1123456789abcdef0123456789abcdef",
+                    "mailbox_item_id": "1123456789abcdef0123456789abcdef",
                 },
             ),
         ]
 
-    async def test_delete_input_buffer_succeeds_when_broadcast_fails(self) -> None:
+    async def test_delete_mailbox_item_succeeds_when_broadcast_fails(self) -> None:
         """A committed buffer deletion is not failed by UI publication."""
-        await delete_input_buffer(
+        await delete_mailbox_item(
             "0123456789abcdef0123456789abcdef",
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),

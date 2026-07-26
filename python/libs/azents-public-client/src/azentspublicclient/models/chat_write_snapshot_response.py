@@ -24,6 +24,7 @@ from azentspublicclient.models.agent_session_run_state import AgentSessionRunSta
 from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunStateResponse
 from azentspublicclient.models.goal_state_response import GoalStateResponse
+from azentspublicclient.models.pending_mailbox_envelope import PendingMailboxEnvelope
 from azentspublicclient.models.todo_state_response import TodoStateResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -33,14 +34,14 @@ class ChatWriteSnapshotResponse(BaseModel):
     Authoritative live snapshot after REST write.
     """ # noqa: E501
     partial_history_events: List[ChatEventResponse] = Field(description="Partial history projection list to compose into Chat timeline")
-    input_buffer_events: List[ChatEventResponse] = Field(description="Pending input buffer projection list")
+    mailbox_items: List[PendingMailboxEnvelope] = Field(description="Pending mailbox envelope projection list")
     run: Optional[ChatLiveRunStateResponse] = None
     session_run_state: AgentSessionRunState = Field(description="Authoritative run_state for the current session")
     todo: Optional[TodoStateResponse] = None
     goal: Optional[GoalStateResponse] = None
     action_executions: Optional[List[ActionExecutionProjectionResponse]] = Field(default=None, description="Current action execution projections")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["partial_history_events", "input_buffer_events", "run", "session_run_state", "todo", "goal", "action_executions"]
+    __properties: ClassVar[List[str]] = ["partial_history_events", "mailbox_items", "run", "session_run_state", "todo", "goal", "action_executions"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -90,13 +91,13 @@ class ChatWriteSnapshotResponse(BaseModel):
                 if _item_partial_history_events:
                     _items.append(_item_partial_history_events.to_dict())
             _dict['partial_history_events'] = _items
-        # override the default output from pydantic by calling `to_dict()` of each item in input_buffer_events (list)
+        # override the default output from pydantic by calling `to_dict()` of each item in mailbox_items (list)
         _items = []
-        if self.input_buffer_events:
-            for _item_input_buffer_events in self.input_buffer_events:
-                if _item_input_buffer_events:
-                    _items.append(_item_input_buffer_events.to_dict())
-            _dict['input_buffer_events'] = _items
+        if self.mailbox_items:
+            for _item_mailbox_items in self.mailbox_items:
+                if _item_mailbox_items:
+                    _items.append(_item_mailbox_items.to_dict())
+            _dict['mailbox_items'] = _items
         # override the default output from pydantic by calling `to_dict()` of run
         if self.run:
             _dict['run'] = self.run.to_dict()
@@ -146,7 +147,7 @@ class ChatWriteSnapshotResponse(BaseModel):
 
         _obj = cls.model_validate({
             "partial_history_events": [ChatEventResponse.from_dict(_item) for _item in obj["partial_history_events"]] if obj.get("partial_history_events") is not None else None,
-            "input_buffer_events": [ChatEventResponse.from_dict(_item) for _item in obj["input_buffer_events"]] if obj.get("input_buffer_events") is not None else None,
+            "mailbox_items": [PendingMailboxEnvelope.from_dict(_item) for _item in obj["mailbox_items"]] if obj.get("mailbox_items") is not None else None,
             "run": ChatLiveRunStateResponse.from_dict(obj["run"]) if obj.get("run") is not None else None,
             "session_run_state": obj.get("session_run_state"),
             "todo": TodoStateResponse.from_dict(obj["todo"]) if obj.get("todo") is not None else None,

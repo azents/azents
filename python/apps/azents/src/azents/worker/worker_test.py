@@ -1664,11 +1664,11 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
     ]
     assert scheduled_title_events == ["session-1:1123456789abcdef0123456789abcdeb"]
     event_types = [event.get("type") for _, event in broadcast.events]
-    assert event_types == ["history_event_appended", "live_event_removed"]
+    assert event_types == ["history_event_appended", "mailbox_item_removed"]
     appended = cast(dict[str, object], broadcast.events[0][1]["event"])
     assert appended["id"] == "1123456789abcdef0123456789abcdeb"
     assert appended["external_id"] == "buffer-1"
-    assert broadcast.events[1][1]["event_id"] == "buffer-1"
+    assert broadcast.events[1][1]["mailbox_item_id"] == "buffer-1"
 
 
 @pytest.mark.asyncio
