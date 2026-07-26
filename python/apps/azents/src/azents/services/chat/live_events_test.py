@@ -10,6 +10,11 @@ from redis.asyncio import Redis
 from azents.core.enums import (
     AgentRunStatus,
     EventKind,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -20,12 +25,17 @@ from azents.engine.events.types import (
     AgentMessagePayload,
     AssistantMessagePayload,
     ClientToolCallPayload,
+    ExternalChannelMessagePayload,
     ProviderToolCallPayload,
     ReasoningPayload,
     ToolkitSourceSnapshot,
     UserMessagePayload,
 )
-from azents.repos.mailbox.data import MailboxItem
+from azents.repos.mailbox.data import (
+    ExternalChannelInvocationMailboxPayload,
+    MailboxItem,
+    MailboxPresentationItem,
+)
 
 from .live_events import (
     InMemoryLiveEventStore,
@@ -33,6 +43,7 @@ from .live_events import (
     RedisLiveEventStore,
     active_tool_call_to_live_event,
     mailbox_item_to_live_event,
+    mailbox_item_to_pending_projection,
 )
 
 
@@ -161,6 +172,81 @@ def test_external_invocation_live_projection_defers_to_durable_event() -> None:
     )
 
     assert event is None
+
+
+def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
+    """Pending External Channel projection uses only admitted safe fields."""
+    external_payload = ExternalChannelMessagePayload(
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="tenant-1",
+        resource_id="resource-1",
+        resource_label="#general",
+        resource_type=ExternalChannelResourceType.THREAD,
+        binding_id="binding-1",
+        invocation_batch_id="batch-1",
+        external_message_id="message-1",
+        revision_id="revision-1",
+        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+        projection_root_id="external-channel:binding-1:message-1",
+        provider_message_key="provider-message-1",
+        provider_position="1",
+        principal_id="principal-1",
+        provider_user_id="provider-user-1",
+        sender_display_name="Ada",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        authorization="authorized_invocation",
+        lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+        body="Deploy is ready.",
+        attachment_metadata={},
+        reference_mappings={},
+        provider_created_at=None,
+        provider_updated_at=None,
+        original_url="https://example.test/message-1",
+        truncated_context_message_count=0,
+        truncated_context_size=0,
+        correction_of_revision_id=None,
+    )
+    mailbox_item = MailboxItem(
+        id="0423456789abcdef0123456789abcdef",
+        session_id="1123456789abcdef0123456789abcdef",
+        kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
+        sender_user_id=None,
+        content="",
+        idempotency_key="batch-1",
+        metadata={"source": "external_channel"},
+        action=None,
+        attachments=[],
+        file_parts=[],
+        payload=ExternalChannelInvocationMailboxPayload(
+            type="external_channel_invocation",
+            items=[
+                MailboxPresentationItem(
+                    item_key="external_channel:0",
+                    presentation_kind="external_channel_message",
+                    content="Deploy is ready.",
+                    metadata={
+                        "external_channel_message": external_payload.model_dump(
+                            mode="json"
+                        )
+                    },
+                )
+            ],
+        ),
+        created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
+    )
+
+    projection = mailbox_item_to_pending_projection(mailbox_item)
+
+    assert projection.mailbox_item_id == mailbox_item.id
+    assert projection.items[0].id == f"{mailbox_item.id}:external_channel:0"
+    presentation = projection.items[0].presentation
+    assert presentation.type == "external_channel_message"
+    assert presentation.body == "Deploy is ready."
+    assert not hasattr(presentation, "provider_tenant_id")
+    assert not hasattr(presentation, "binding_id")
 
 
 @pytest_asyncio.fixture

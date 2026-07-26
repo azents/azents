@@ -16,7 +16,7 @@ from azents.engine.events.types import Event
 from azents.repos.action_execution.data import ActionExecutionProjection
 
 if TYPE_CHECKING:
-    from azents.services.chat.data import ChatLiveRunState
+    from azents.services.chat.data import ChatLiveRunState, PendingMailboxEnvelope
 
 
 class ChatAttachmentSnapshot(BaseModel):
@@ -98,8 +98,31 @@ def chat_history_event_appended_dump(event: Event) -> dict[str, object]:
     }
 
 
+def chat_mailbox_item_upserted_dump(
+    envelope: "PendingMailboxEnvelope",
+) -> dict[str, object]:
+    """Convert pending mailbox admission to a typed chat WS action."""
+    return {
+        "type": "mailbox_item_upserted",
+        "session_id": envelope.session_id,
+        "mailbox_item": envelope.model_dump(mode="json"),
+    }
+
+
+def chat_mailbox_item_removed_dump(
+    session_id: str,
+    mailbox_item_id: str,
+) -> dict[str, object]:
+    """Convert pending mailbox removal to a typed chat WS action."""
+    return {
+        "type": "mailbox_item_removed",
+        "session_id": session_id,
+        "mailbox_item_id": mailbox_item_id,
+    }
+
+
 def chat_live_event_upserted_dump(event: Event) -> dict[str, object]:
-    """Convert live event upsert action to chat WS wire dict."""
+    """Convert a runtime partial live event upsert to a chat WS action."""
     return {
         "type": "live_event_upserted",
         "session_id": event.session_id,
@@ -108,7 +131,7 @@ def chat_live_event_upserted_dump(event: Event) -> dict[str, object]:
 
 
 def chat_live_event_removed_dump(session_id: str, event_id: str) -> dict[str, object]:
-    """Convert live event removal action to chat WS wire dict."""
+    """Convert a runtime partial live event removal to a chat WS action."""
     return {
         "type": "live_event_removed",
         "session_id": session_id,
@@ -187,10 +210,14 @@ def chat_action_execution_updated_dump(
     projection: ActionExecutionProjection,
 ) -> dict[str, object]:
     """Convert action execution projection update to chat WS wire dict."""
+    dumped = projection.model_dump(mode="json")
+    execution = dumped.get("execution")
+    if isinstance(execution, dict):
+        execution["source_mailbox_item_id"] = execution.pop("mailbox_item_id")
     return {
         "type": "action_execution_updated",
         "session_id": projection.execution.session_id,
-        "action_execution": projection.model_dump(mode="json"),
+        "action_execution": dumped,
     }
 
 

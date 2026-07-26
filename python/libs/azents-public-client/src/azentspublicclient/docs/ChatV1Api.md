@@ -16,7 +16,7 @@ Method | HTTP request | Description
 [**chat_v1_delete_agent_project**](ChatV1Api.md#chat_v1_delete_agent_project) | **DELETE** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id} | Delete Agent Project
 [**chat_v1_delete_agent_workspace_path**](ChatV1Api.md#chat_v1_delete_agent_workspace_path) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files | Delete Agent Workspace Path
 [**chat_v1_delete_exchange_file**](ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
-[**chat_v1_delete_input_buffer**](ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
+[**chat_v1_delete_mailbox_item**](ChatV1Api.md#chat_v1_delete_mailbox_item) | **DELETE** /chat/v1/sessions/{session_id}/mailbox-items/{mailbox_item_id} | Delete Mailbox Item
 [**chat_v1_download_agent_workspace_file**](ChatV1Api.md#chat_v1_download_agent_workspace_file) | **GET** /chat/v1/agents/{agent_id}/workspace/download | Download Agent Workspace File
 [**chat_v1_download_exchange_file**](ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 [**chat_v1_edit_message**](ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
@@ -1025,12 +1025,12 @@ void (empty response body)
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **chat_v1_delete_input_buffer**
-> chat_v1_delete_input_buffer(session_id, buffer_id)
+# **chat_v1_delete_mailbox_item**
+> chat_v1_delete_mailbox_item(session_id, mailbox_item_id)
 
-Delete Input Buffer
+Delete Mailbox Item
 
-Idempotently delete the pending input buffer.
+Idempotently delete the pending mailbox item.
 
 ### Example
 
@@ -1062,13 +1062,13 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
     session_id = 'session_id_example' # str | 
-    buffer_id = 'buffer_id_example' # str | 
+    mailbox_item_id = 'mailbox_item_id_example' # str | 
 
     try:
-        # Delete Input Buffer
-        api_instance.chat_v1_delete_input_buffer(session_id, buffer_id)
+        # Delete Mailbox Item
+        api_instance.chat_v1_delete_mailbox_item(session_id, mailbox_item_id)
     except Exception as e:
-        print("Exception when calling ChatV1Api->chat_v1_delete_input_buffer: %s\n" % e)
+        print("Exception when calling ChatV1Api->chat_v1_delete_mailbox_item: %s\n" % e)
 ```
 
 
@@ -1079,7 +1079,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **session_id** | **str**|  | 
- **buffer_id** | **str**|  | 
+ **mailbox_item_id** | **str**|  | 
 
 ### Return type
 

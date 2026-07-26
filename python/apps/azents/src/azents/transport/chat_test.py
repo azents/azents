@@ -4,8 +4,18 @@ import datetime
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
-from azents.services.chat.data import ChatLiveRunOperation, ChatLiveRunState
-from azents.transport.chat import chat_live_run_updated_dump
+from azents.services.chat.data import (
+    ChatLiveRunOperation,
+    ChatLiveRunState,
+    PendingMailboxEnvelope,
+    PendingMailboxItem,
+    PendingMailboxUserMessagePresentation,
+)
+from azents.transport.chat import (
+    chat_live_run_updated_dump,
+    chat_mailbox_item_removed_dump,
+    chat_mailbox_item_upserted_dump,
+)
 
 
 def test_live_run_dump_exposes_minimal_operation() -> None:
@@ -44,3 +54,38 @@ def test_live_run_dump_exposes_minimal_operation() -> None:
         "status": "running",
     }
     assert "recovery" not in run
+
+
+def test_mailbox_actions_use_typed_envelope_and_mailbox_identity() -> None:
+    """Pending mailbox actions never use generic live-event vocabulary."""
+    envelope = PendingMailboxEnvelope(
+        mailbox_item_id="mailbox-1",
+        session_id="session-1",
+        kind="user_message",
+        scheduling_mode="wake_session",
+        created_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+        items=[
+            PendingMailboxItem(
+                id="mailbox-1:user_message:0",
+                mailbox_item_id="mailbox-1",
+                item_key="user_message:0",
+                kind="user_message",
+                created_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+                presentation=PendingMailboxUserMessagePresentation(
+                    type="user_message",
+                    content="hello",
+                ),
+            )
+        ],
+    )
+
+    upserted = chat_mailbox_item_upserted_dump(envelope)
+    removed = chat_mailbox_item_removed_dump("session-1", "mailbox-1")
+
+    assert upserted["type"] == "mailbox_item_upserted"
+    assert upserted["mailbox_item"] == envelope.model_dump(mode="json")
+    assert removed == {
+        "type": "mailbox_item_removed",
+        "session_id": "session-1",
+        "mailbox_item_id": "mailbox-1",
+    }

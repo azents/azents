@@ -6,6 +6,7 @@ import type {
   AppliedInferenceProfile,
   ChatEventResponse,
   InputActionDefinitionResponse,
+  PendingMailboxEnvelope,
   RequestedInferenceProfile,
 } from "@azents/public-client";
 
@@ -581,6 +582,18 @@ export interface LiveEventRemovedEvent {
   event_id: string;
 }
 
+export interface MailboxItemUpsertedEvent {
+  type: "mailbox_item_upserted";
+  session_id: string;
+  mailbox_item: PendingMailboxEnvelope;
+}
+
+export interface MailboxItemRemovedEvent {
+  type: "mailbox_item_removed";
+  session_id: string;
+  mailbox_item_id: string;
+}
+
 export interface SubscribedEvent {
   type: "subscribed";
   session_id: string;
@@ -688,6 +701,8 @@ export type ChatEvent =
   | HistoryEventAppendedEvent
   | LiveEventUpsertedEvent
   | LiveEventRemovedEvent
+  | MailboxItemUpsertedEvent
+  | MailboxItemRemovedEvent
   | SubscribedEvent
   | InputActionsUpdatedEvent
   | ActionExecutionUpdatedEvent

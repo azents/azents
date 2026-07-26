@@ -7,7 +7,7 @@ Action execution live projection response.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **str** | Action execution ID | 
-**input_buffer_id** | **str** | Durable source input buffer ID | 
+**source_mailbox_item_id** | **str** | Durable source mailbox item ID | 
 **sender_user_id** | **str** |  | 
 **action_type** | **str** | Action discriminator | 
 **action** | [**Action**](Action.md) |  | 

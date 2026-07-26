@@ -61,6 +61,7 @@ from azents.services.chat.data import (
     NewSessionProjectDefaults,
     NewSessionProjectDefaultsSource,
     NewSessionProjectDefaultWorkspaceItem,
+    PendingMailboxEnvelope,
     SubagentTreeNode,
     SubagentTreeProjection,
 )
@@ -360,7 +361,7 @@ class ChatWriteAcceptedResponse(BaseModel):
     """REST write accepted target."""
 
     type: Literal[
-        "input_buffer",
+        "mailbox_item",
         "edit_message",
         "command",
         "failed_run_retry",
@@ -485,7 +486,7 @@ class ActionExecutionResponse(BaseModel):
     """Action execution live projection response."""
 
     id: str = Field(description="Action execution ID")
-    input_buffer_id: str = Field(description="Durable source input buffer ID")
+    source_mailbox_item_id: str = Field(description="Durable source mailbox item ID")
     sender_user_id: str | None = Field(
         description="Human sender User ID, or null when unavailable",
     )
@@ -521,7 +522,7 @@ class ActionExecutionResponse(BaseModel):
         """Convert from domain model."""
         return cls(
             id=execution.id,
-            input_buffer_id=execution.mailbox_item_id,
+            source_mailbox_item_id=execution.mailbox_item_id,
             sender_user_id=execution.sender_user_id,
             action_type=execution.action_type,
             action=_CHAT_ACTION_ADAPTER.validate_python(execution.action),
@@ -564,8 +565,8 @@ class ChatWriteSnapshotResponse(BaseModel):
     partial_history_events: list[ChatEventResponse] = Field(
         description="Partial history projection list to compose into Chat timeline",
     )
-    input_buffer_events: list[ChatEventResponse] = Field(
-        description="Pending input buffer projection list",
+    mailbox_items: list[PendingMailboxEnvelope] = Field(
+        description="Pending mailbox envelope projection list",
     )
     run: ChatLiveRunStateResponse | None = Field(
         default=None,
@@ -1901,8 +1902,8 @@ class LiveEventListResponse(BaseModel):
     partial_history: PartialHistoryResponse = Field(
         description="Partial history projection list to compose into Chat timeline",
     )
-    input_buffers: list[ChatEventResponse] = Field(
-        description="Pending input buffer projection list",
+    mailbox_items: list[PendingMailboxEnvelope] = Field(
+        description="Pending mailbox envelope projection list",
     )
     run: ChatLiveRunStateResponse | None = Field(
         default=None,

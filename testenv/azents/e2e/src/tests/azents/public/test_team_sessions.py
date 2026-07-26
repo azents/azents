@@ -185,23 +185,28 @@ def _write_first_session_message(
     )
 
 
-def _event_contents(events: list[dict[str, object]]) -> list[str]:
-    """Return event payload contents."""
+def _mailbox_item_contents(raw_items: object, *, label: str) -> list[str]:
+    """Return content strings from pending mailbox item presentations."""
     contents: list[str] = []
-    for event in events:
-        raw_payload = event.get("payload")
-        event_payload = _response_payload(raw_payload)
-        content = event_payload.get("content")
-        if isinstance(content, str):
-            contents.append(content)
+    for envelope in _object_items(raw_items, label=label):
+        items = _object_items(envelope.get("items"), label=f"{label} items")
+        for item in items:
+            presentation = _response_payload(item.get("presentation"))
+            if presentation.get("type") != "user_message":
+                continue
+            content = presentation.get("content")
+            if isinstance(content, str):
+                contents.append(content)
     return contents
 
 
 def _snapshot_input_contents(write_response: dict[str, object]) -> list[str]:
     """Return input contents from the write response snapshot."""
     snapshot = _response_payload(write_response.get("snapshot"))
-    events = _object_items(snapshot.get("input_buffer_events"), label="snapshot inputs")
-    return _event_contents(events)
+    return _mailbox_item_contents(
+        snapshot.get("mailbox_items"),
+        label="snapshot mailbox items",
+    )
 
 
 def _history_user_message_payload(
@@ -239,8 +244,10 @@ def _live_input_contents(
         token=token,
         path=f"/chat/v1/sessions/{session_id}/live",
     )
-    events = _object_items(payload.get("input_buffers"), label="live inputs")
-    return _event_contents(events)
+    return _mailbox_item_contents(
+        payload.get("mailbox_items"),
+        label="live mailbox items",
+    )
 
 
 def _setup_team_sessions(

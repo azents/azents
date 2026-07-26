@@ -286,13 +286,14 @@ class TestChatSessionMailboxItem:
         )
 
         assert isinstance(result, Success)
-        assert [event.id for event in result.value.mailbox_item_events] == [buffer_id]
-        payload = result.value.mailbox_item_events[0].payload
-        assert isinstance(payload, UserMessagePayload)
-        assert payload.applied_inference_profile is not None
-        assert payload.applied_inference_profile.model_target_label == "main"
-        assert payload.applied_inference_profile.model_display_name is None
-        assert payload.applied_inference_profile.reasoning_effort == (
+        envelope = result.value.mailbox_items[0]
+        assert envelope.mailbox_item_id == buffer_id
+        assert envelope.items[0].mailbox_item_id == buffer_id
+        presentation = envelope.items[0].presentation
+        assert presentation.type == "user_message"
+        assert presentation.requested_inference_profile is not None
+        assert presentation.requested_inference_profile.model_target_label == "main"
+        assert presentation.requested_inference_profile.reasoning_effort == (
             ModelReasoningEffort.HIGH
         )
         assert result.value.partial_history_events == []

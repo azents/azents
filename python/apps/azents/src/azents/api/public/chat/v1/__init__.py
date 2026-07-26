@@ -109,7 +109,7 @@ from azents.services.chat.data import (
 from azents.services.chat.live_events import (
     LiveEventStore,
     get_live_event_store,
-    mailbox_item_to_live_event,
+    mailbox_item_to_pending_projection,
 )
 from azents.services.chat.workspace import (
     AgentWorkspaceDirectory,
@@ -171,8 +171,8 @@ from azents.services.session_workspace_project import (
 from azents.services.vfs import VfsProjectionService
 from azents.transport.chat import (
     chat_history_event_appended_dump,
-    chat_live_event_removed_dump,
-    chat_live_event_upserted_dump,
+    chat_mailbox_item_removed_dump,
+    chat_mailbox_item_upserted_dump,
     chat_subscription_ack_dump,
     chat_subscription_health_check_ack_dump,
 )
@@ -568,13 +568,9 @@ async def _build_chat_write_snapshot(
                 ChatEventResponse.from_domain(event)
                 for event in live.partial_history_events
             ]
-            input_buffer_events = [
-                ChatEventResponse.from_domain(event)
-                for event in live.mailbox_item_events
-            ]
             return ChatWriteSnapshotResponse(
                 partial_history_events=partial_history_events,
-                input_buffer_events=input_buffer_events,
+                mailbox_items=live.mailbox_items,
                 run=(
                     ChatLiveRunStateResponse.from_domain(live.run)
                     if live.run is not None
@@ -658,8 +654,8 @@ async def _write_message_via_rest(
         session_id=result.agent_session_id,
         user_id=user_id,
         client_request_id=request.client_request_id,
-        accepted_input_buffer_id=result.accepted_mailbox_item_id,
-        input_buffer=result.mailbox_item,
+        accepted_mailbox_item_id=result.accepted_mailbox_item_id,
+        mailbox_item=result.mailbox_item,
         created=result.created,
     )
 
@@ -695,25 +691,23 @@ async def _finalize_message_write_response(
     session_id: str,
     user_id: str,
     client_request_id: str,
-    accepted_input_buffer_id: str,
-    input_buffer: MailboxItem | None,
+    accepted_mailbox_item_id: str,
+    mailbox_item: MailboxItem | None,
     created: bool,
 ) -> ChatWriteResponse:
     """Publish live state, wake the worker, and return a snapshot."""
-    live_event = (
-        mailbox_item_to_live_event(input_buffer) if input_buffer is not None else None
+    pending_projection = (
+        mailbox_item_to_pending_projection(mailbox_item)
+        if mailbox_item is not None
+        else None
     )
-    live_event_upserted = (
-        chat_live_event_upserted_dump(live_event) if live_event is not None else None
-    )
-    if input_buffer is not None:
-        broker_message = SessionWakeUp(session_id=session_id)
-        await broker.send_message(broker_message)
-    if created and live_event_upserted is not None:
+    if mailbox_item is not None:
+        await broker.send_message(SessionWakeUp(session_id=session_id))
+    if created and pending_projection is not None:
         await _publish_chat_event_best_effort(
             broadcast,
             session_id=session_id,
-            event=live_event_upserted,
+            event=chat_mailbox_item_upserted_dump(pending_projection),
         )
     snapshot = await _build_chat_write_snapshot(
         chat_service,
@@ -725,11 +719,11 @@ async def _finalize_message_write_response(
         session_id=session_id,
         client_request_id=client_request_id,
         accepted=ChatWriteAcceptedResponse(
-            type="input_buffer",
-            id=accepted_input_buffer_id,
+            type="mailbox_item",
+            id=accepted_mailbox_item_id,
         ),
         snapshot=snapshot,
-        history_reload_required=input_buffer is None,
+        history_reload_required=mailbox_item is None,
     )
 
 
@@ -1123,8 +1117,8 @@ async def _write_new_session_message_via_rest(
         session_id=result.agent_session.id,
         user_id=user_id,
         client_request_id=request.client_request_id,
-        accepted_input_buffer_id=result.accepted_mailbox_item_id,
-        input_buffer=result.mailbox_item,
+        accepted_mailbox_item_id=result.accepted_mailbox_item_id,
+        mailbox_item=result.mailbox_item,
         created=result.created,
     )
 
@@ -1359,8 +1353,8 @@ async def _write_turn_action_via_rest(
         session_id=result.agent_session_id,
         user_id=user_id,
         client_request_id=request.client_request_id,
-        accepted_input_buffer_id=result.accepted_mailbox_item_id,
-        input_buffer=result.mailbox_item,
+        accepted_mailbox_item_id=result.accepted_mailbox_item_id,
+        mailbox_item=result.mailbox_item,
         created=result.created,
     )
 
@@ -2446,15 +2440,12 @@ async def list_live_events(
                 ChatEventResponse.from_domain(event)
                 for event in value.partial_history_events
             ]
-            input_buffers = [
-                ChatEventResponse.from_domain(event)
-                for event in value.mailbox_item_events
-            ]
+            mailbox_items = value.mailbox_items
             return LiveEventListResponse(
                 partial_history=PartialHistoryResponse(
                     items=partial_history,
                 ),
-                input_buffers=input_buffers,
+                mailbox_items=mailbox_items,
                 run=None
                 if value.run is None
                 else ChatLiveRunStateResponse.from_domain(value.run),
@@ -2511,22 +2502,24 @@ async def get_agent_workspace(
             assert_never(result)
 
 
-@router.delete("/sessions/{session_id}/input-buffers/{buffer_id}", status_code=204)
-async def delete_input_buffer(
+@router.delete(
+    "/sessions/{session_id}/mailbox-items/{mailbox_item_id}", status_code=204
+)
+async def delete_mailbox_item(
     session_id: str,
-    buffer_id: str,
+    mailbox_item_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
     broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> None:
-    """Idempotently delete the pending input buffer."""
+    """Idempotently delete the pending mailbox item."""
     _validate_session_id(session_id)
-    _validate_uuid7_hex(buffer_id, label="buffer ID")
+    _validate_uuid7_hex(mailbox_item_id, label="mailbox item ID")
     result: Result[
         None, DeleteMailboxItemError
     ] = await chat_service.delete_mailbox_item(
         session_id,
-        buffer_id,
+        mailbox_item_id,
         user_id=current_user.user_id,
     )
     match result:
@@ -2534,7 +2527,7 @@ async def delete_input_buffer(
             await _publish_chat_event_best_effort(
                 broadcast,
                 session_id=session_id,
-                event=chat_live_event_removed_dump(session_id, buffer_id),
+                event=chat_mailbox_item_removed_dump(session_id, mailbox_item_id),
             )
             return
         case Failure(error):

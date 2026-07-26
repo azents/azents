@@ -71,7 +71,6 @@ _INTERRUPT_SPAWN_MESSAGE = "Subagent E2E spawn interrupt child"
 _INTERRUPT_SPAWN_RESPONSE = "Subagent interrupt child was spawned."
 _INTERRUPT_MESSAGE = "Subagent E2E interrupt child"
 _INTERRUPT_CALL_ID = "call_subagent_interrupt_child"
-_INTERRUPT_RESPONSE = "Subagent interrupt request completed."
 _INTERRUPT_OBSERVE_MESSAGE = "Subagent E2E observe interrupted result"
 _INTERRUPT_OBSERVE_RESPONSE = "Subagent interrupted result was observed."
 _FAILED_SPAWN_MESSAGE = "Subagent E2E spawn failed child"
@@ -101,6 +100,8 @@ class _TreeNode:
     name: str
     status: str
     unread_result: bool
+    latest_run_status: str | None
+    terminal_result_event_id: str | None
     terminal_result_message: str | None
     children: list["_TreeNode"]
 
@@ -625,6 +626,12 @@ def _tree_node(raw: dict[str, object]) -> _TreeNode:
         raise AssertionError(f"tree node missing status: {raw!r}")
     if not isinstance(unread_result, bool):
         raise AssertionError(f"tree node missing unread_result: {raw!r}")
+    latest_run_status = raw.get("latest_run_status")
+    if latest_run_status is not None and not isinstance(latest_run_status, str):
+        raise AssertionError(f"tree node has invalid latest run status: {raw!r}")
+    terminal_event_id = raw.get("terminal_result_event_id")
+    if terminal_event_id is not None and not isinstance(terminal_event_id, str):
+        raise AssertionError(f"tree node has invalid terminal event ID: {raw!r}")
     terminal = raw.get("terminal_result_message")
     if terminal is not None and not isinstance(terminal, str):
         raise AssertionError(f"tree node has invalid terminal result: {raw!r}")
@@ -634,6 +641,8 @@ def _tree_node(raw: dict[str, object]) -> _TreeNode:
         name=name,
         status=status,
         unread_result=unread_result,
+        latest_run_status=latest_run_status,
+        terminal_result_event_id=terminal_event_id,
         terminal_result_message=terminal,
         children=[
             _tree_node(child)
@@ -689,6 +698,7 @@ def _wait_for_child_node(
     name: str,
     expected_status: str | None,
     expected_unread: bool | None,
+    expected_latest_run_status: str | None = None,
     timeout: float = 120,
 ) -> tuple[dict[str, object], _TreeNode]:
     """Wait until a named child appears with the expected projected state."""
@@ -708,7 +718,11 @@ def _wait_for_child_node(
             unread_ok = (
                 expected_unread is None or child.unread_result is expected_unread
             )
-            if status_ok and unread_ok:
+            latest_run_status_ok = (
+                expected_latest_run_status is None
+                or child.latest_run_status == expected_latest_run_status
+            )
+            if status_ok and unread_ok and latest_run_status_ok:
                 return tree, child
         time.sleep(0.5)
     raise TimeoutError(f"child node state was not observed: {last_tree!r}")
@@ -1409,13 +1423,7 @@ class TestSubagents:
             call_id=_INTERRUPT_CALL_ID,
             expected="running",
         )
-        _wait_for_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=root_session_id,
-            expected=_INTERRUPT_RESPONSE,
-        )
-        _wait_for_child_node(
+        _, interrupted_child = _wait_for_child_node(
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
@@ -1423,7 +1431,10 @@ class TestSubagents:
             name="interrupt_child",
             expected_status="interrupted",
             expected_unread=True,
+            expected_latest_run_status="stopped",
         )
+        assert interrupted_child.terminal_result_event_id is None
+        assert interrupted_child.terminal_result_message is None
         _wait_for_session_run_state(
             public_url=azents_public_server_url,
             token=workspace.token,

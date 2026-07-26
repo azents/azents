@@ -3610,10 +3610,10 @@ class ChatV1Api:
 
 
     @validate_call
-    def chat_v1_delete_input_buffer(
+    def chat_v1_delete_mailbox_item(
         self,
         session_id: StrictStr,
-        buffer_id: StrictStr,
+        mailbox_item_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3627,14 +3627,14 @@ class ChatV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> None:
-        """Delete Input Buffer
+        """Delete Mailbox Item
 
-        Idempotently delete the pending input buffer.
+        Idempotently delete the pending mailbox item.
 
         :param session_id: (required)
         :type session_id: str
-        :param buffer_id: (required)
-        :type buffer_id: str
+        :param mailbox_item_id: (required)
+        :type mailbox_item_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3657,9 +3657,9 @@ class ChatV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._chat_v1_delete_input_buffer_serialize(
+        _param = self._chat_v1_delete_mailbox_item_serialize(
             session_id=session_id,
-            buffer_id=buffer_id,
+            mailbox_item_id=mailbox_item_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3682,10 +3682,10 @@ class ChatV1Api:
 
 
     @validate_call
-    def chat_v1_delete_input_buffer_with_http_info(
+    def chat_v1_delete_mailbox_item_with_http_info(
         self,
         session_id: StrictStr,
-        buffer_id: StrictStr,
+        mailbox_item_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3699,14 +3699,14 @@ class ChatV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[None]:
-        """Delete Input Buffer
+        """Delete Mailbox Item
 
-        Idempotently delete the pending input buffer.
+        Idempotently delete the pending mailbox item.
 
         :param session_id: (required)
         :type session_id: str
-        :param buffer_id: (required)
-        :type buffer_id: str
+        :param mailbox_item_id: (required)
+        :type mailbox_item_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3729,9 +3729,9 @@ class ChatV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._chat_v1_delete_input_buffer_serialize(
+        _param = self._chat_v1_delete_mailbox_item_serialize(
             session_id=session_id,
-            buffer_id=buffer_id,
+            mailbox_item_id=mailbox_item_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3754,10 +3754,10 @@ class ChatV1Api:
 
 
     @validate_call
-    def chat_v1_delete_input_buffer_without_preload_content(
+    def chat_v1_delete_mailbox_item_without_preload_content(
         self,
         session_id: StrictStr,
-        buffer_id: StrictStr,
+        mailbox_item_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3771,14 +3771,14 @@ class ChatV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Delete Input Buffer
+        """Delete Mailbox Item
 
-        Idempotently delete the pending input buffer.
+        Idempotently delete the pending mailbox item.
 
         :param session_id: (required)
         :type session_id: str
-        :param buffer_id: (required)
-        :type buffer_id: str
+        :param mailbox_item_id: (required)
+        :type mailbox_item_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3801,9 +3801,9 @@ class ChatV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._chat_v1_delete_input_buffer_serialize(
+        _param = self._chat_v1_delete_mailbox_item_serialize(
             session_id=session_id,
-            buffer_id=buffer_id,
+            mailbox_item_id=mailbox_item_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3821,10 +3821,10 @@ class ChatV1Api:
         return response_data.response
 
 
-    def _chat_v1_delete_input_buffer_serialize(
+    def _chat_v1_delete_mailbox_item_serialize(
         self,
         session_id,
-        buffer_id,
+        mailbox_item_id,
         _request_auth,
         _content_type,
         _headers,
@@ -3848,8 +3848,8 @@ class ChatV1Api:
         # process the path parameters
         if session_id is not None:
             _path_params['session_id'] = session_id
-        if buffer_id is not None:
-            _path_params['buffer_id'] = buffer_id
+        if mailbox_item_id is not None:
+            _path_params['mailbox_item_id'] = mailbox_item_id
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -3872,7 +3872,7 @@ class ChatV1Api:
 
         return self.api_client.param_serialize(
             method='DELETE',
-            resource_path='/chat/v1/sessions/{session_id}/input-buffers/{buffer_id}',
+            resource_path='/chat/v1/sessions/{session_id}/mailbox-items/{mailbox_item_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

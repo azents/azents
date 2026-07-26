@@ -173,7 +173,7 @@ from azents.transport.chat import (
     chat_action_execution_removed_dump,
     chat_action_execution_updated_dump,
     chat_history_event_appended_dump,
-    chat_live_event_removed_dump,
+    chat_mailbox_item_removed_dump,
 )
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.deps import (
@@ -2652,10 +2652,23 @@ class RunExecutor:
                     session_id,
                     chat_history_event_appended_dump(event),
                 )
+            if (
+                promoted.operation_action is not None
+                and promoted.operation_action.execution is not None
+            ):
+                await self.broadcast.publish(
+                    session_id,
+                    chat_action_execution_updated_dump(
+                        ActionExecutionProjection(
+                            execution=promoted.operation_action.execution,
+                            events=[],
+                        )
+                    ),
+                )
             for buffer_id in promoted.deleted_buffer_ids:
                 await self.broadcast.publish(
                     session_id,
-                    chat_live_event_removed_dump(session_id, buffer_id),
+                    chat_mailbox_item_removed_dump(session_id, buffer_id),
                 )
         except Exception:
             logger.exception(

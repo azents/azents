@@ -50,20 +50,23 @@ class TestChatWriteSnapshotResponse(unittest.TestCase):
                         schema_version = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
-                input_buffer_events = [
-                    azentspublicclient.models.chat_event_response.ChatEventResponse(
-                        id = '', 
+                mailbox_items = [
+                    azentspublicclient.models.pending_mailbox_envelope.PendingMailboxEnvelope(
+                        mailbox_item_id = '', 
                         session_id = '', 
-                        kind = 'user_message', 
-                        payload = { }, 
-                        model_order = 56, 
-                        external_id = '', 
-                        adapter = '', 
-                        provider = '', 
-                        model = '', 
-                        native_format = '', 
-                        schema_version = '', 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                        kind = '', 
+                        scheduling_mode = '', 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        items = [
+                            azentspublicclient.models.pending_mailbox_item.PendingMailboxItem(
+                                id = '', 
+                                mailbox_item_id = '', 
+                                item_key = '', 
+                                kind = '', 
+                                state = 'pending', 
+                                created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                presentation = null, )
+                            ], )
                     ],
                 run = azentspublicclient.models.chat_live_run_state_response.ChatLiveRunStateResponse(
                     run_id = '', 
@@ -112,7 +115,7 @@ class TestChatWriteSnapshotResponse(unittest.TestCase):
                     azentspublicclient.models.action_execution_projection_response.ActionExecutionProjectionResponse(
                         execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
                             id = '', 
-                            input_buffer_id = '', 
+                            source_mailbox_item_id = '', 
                             sender_user_id = '', 
                             action_type = '', 
                             action = null, 
@@ -161,20 +164,23 @@ class TestChatWriteSnapshotResponse(unittest.TestCase):
                         schema_version = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
-                input_buffer_events = [
-                    azentspublicclient.models.chat_event_response.ChatEventResponse(
-                        id = '', 
+                mailbox_items = [
+                    azentspublicclient.models.pending_mailbox_envelope.PendingMailboxEnvelope(
+                        mailbox_item_id = '', 
                         session_id = '', 
-                        kind = 'user_message', 
-                        payload = { }, 
-                        model_order = 56, 
-                        external_id = '', 
-                        adapter = '', 
-                        provider = '', 
-                        model = '', 
-                        native_format = '', 
-                        schema_version = '', 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                        kind = '', 
+                        scheduling_mode = '', 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        items = [
+                            azentspublicclient.models.pending_mailbox_item.PendingMailboxItem(
+                                id = '', 
+                                mailbox_item_id = '', 
+                                item_key = '', 
+                                kind = '', 
+                                state = 'pending', 
+                                created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                presentation = null, )
+                            ], )
                     ],
                 session_run_state = 'idle',
         )

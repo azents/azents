@@ -1241,7 +1241,7 @@ export const WithActionExecutionFailure = {
         provenance: "durable",
         execution: {
           id: "action-execution-1",
-          input_buffer_id: "buffer-action-1",
+          source_mailbox_item_id: "buffer-action-1",
           sender_user_id: null,
           action_type: "create_git_worktree",
           action: {
@@ -1348,7 +1348,7 @@ export const LiveOperationRendersAbovePendingInput = {
         provenance: "live",
         execution: {
           id: "action-execution-live",
-          input_buffer_id: "consumed-action-buffer",
+          source_mailbox_item_id: "consumed-action-buffer",
           sender_user_id: null,
           action_type: "create_git_worktree",
           action: {
@@ -1390,7 +1390,7 @@ export const DetachedHistoryHidesLiveOperation = {
         provenance: "live",
         execution: {
           id: "detached-action-execution-live",
-          input_buffer_id: "detached-consumed-action-buffer",
+          source_mailbox_item_id: "detached-consumed-action-buffer",
           sender_user_id: null,
           action_type: "create_git_worktree",
           action: {
