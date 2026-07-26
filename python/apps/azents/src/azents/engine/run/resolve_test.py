@@ -146,6 +146,7 @@ def _make_agent(
         memory_enabled=True,
         tool_search_enabled=tool_search_enabled,
         max_turns=None,
+        auto_archive_ttl_days=30,
         avatar=None,
         created_at=_NOW,
         updated_at=_NOW,

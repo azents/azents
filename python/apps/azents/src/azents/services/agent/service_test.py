@@ -56,6 +56,7 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         memory_enabled=True,
         tool_search_enabled=False,
         max_turns=None,
+        auto_archive_ttl_days=30,
         avatar=None,
         created_at=_NOW,
         updated_at=_NOW,

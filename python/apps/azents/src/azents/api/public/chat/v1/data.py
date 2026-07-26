@@ -1937,6 +1937,17 @@ class AgentSessionTitleUpdateRequest(BaseModel):
     )
 
 
+class AgentSessionPinUpdateRequest(BaseModel):
+    """AgentSession automatic-archive protection update request."""
+
+    pinned: bool = Field(
+        description=(
+            "Whether automatic archive is disabled for this active non-primary "
+            "root Session"
+        ),
+    )
+
+
 class AgentSessionUnreadTerminalRunAcknowledgeRequest(BaseModel):
     """Observed terminal Run boundary acknowledged as reviewed."""
 
@@ -1965,6 +1976,9 @@ class AgentSessionResponse(BaseModel):
     )
     run_state: AgentSessionRunState = Field(
         description="Session execution state",
+    )
+    pinned: bool = Field(
+        description="Whether automatic archive is disabled for this Session",
     )
     unread_terminal_run_id: str | None = Field(
         description="Shared terminal AgentRun boundary awaiting review, or null",
@@ -2007,6 +2021,7 @@ class AgentSessionResponse(BaseModel):
             status=session.status,
             primary_kind=session.primary_kind,
             run_state=session.run_state,
+            pinned=session.pinned,
             unread_terminal_run_id=unread_terminal_run_id,
             archived_at=session.archived_at,
             purge_after=session.purge_after,

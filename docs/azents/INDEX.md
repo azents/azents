@@ -15,7 +15,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-26 | 55 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-26 | 56 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-26 | 133 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-26 | 18 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-26 | 12 |
@@ -45,7 +45,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-24 | 10 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-26 | 10 |
@@ -322,6 +322,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Service Toolkit Design Discussion Historical Requirements Reconstruction](requirements/service-260311-service-toolkit.md) | service-260311 | 2026-03-11 | - |
 | [Extensible Session Lifecycle Requirements](requirements/session-260721-lifecycle-extensibility.md) | session-260721 | 2026-07-21 | - |
 | [Team Session Execution Boundaries Requirements](requirements/session-260724-team-session-execution-boundaries.md) | session-260724 | 2026-07-24 | - |
+| [Session Auto-Archive Requirements](requirements/session-260726-auto-archive.md) | session-260726 | 2026-07-26 | 2026-07-26 |
 | [Agent Settings Pages and Memory UI Historical Requirements Reconstruction](requirements/settings-260702-settings-pages-and-memory-ui.md) | settings-260702 | 2026-07-02 | - |
 | [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/settings-260716-selectable-settings.md) | settings-260716 | 2026-07-16 | - |
 | [Model Unread Run Results as Session-Shared State Historical Requirements Reconstruction](requirements/shared-260720-shared-unread-result.md) | shared-260720 | 2026-07-20 | - |
@@ -658,6 +659,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Service Toolkit Design Discussion](adr/service-260311-service-toolkit.md)
 - [Extensible Session Lifecycle](adr/session-260721-lifecycle-extensibility.md)
 - [Team Session Execution Boundaries](adr/session-260724-team-session-execution-boundaries.md)
+- [Session Auto-Archive](adr/session-260726-auto-archive.md)
 - [Agent Settings Pages and Memory UI](adr/settings-260702-settings-pages-and-memory-ui.md)
 - [Model-Scoped Selectable Model Settings Historical Decision Reconstruction](adr/settings-260716-selectable-settings.md)
 - [Model Unread Run Results as Session-Shared State](adr/shared-260720-shared-unread-result.md)

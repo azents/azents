@@ -53,6 +53,10 @@ class Agent(BaseModel):
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     tool_search_enabled: bool = Field(description="Tool Search enabled flag")
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
+    auto_archive_ttl_days: int = Field(
+        gt=0,
+        description="Inactivity period before automatic Session archive",
+    )
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings,
         description="Subagent execution settings",
@@ -104,6 +108,11 @@ class AgentCreate(BaseModel):
         default=True, description="Tool Search enabled flag"
     )
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
+    auto_archive_ttl_days: int = Field(
+        default=30,
+        gt=0,
+        description="Inactivity period before automatic Session archive",
+    )
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
     )
@@ -142,6 +151,10 @@ class AgentUpdate(TypedDict, total=False):
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
     tool_search_enabled: Annotated[bool, Field(description="Tool Search enabled flag")]
     max_turns: Annotated[int | None, Field(description="Maximum agent turn count")]
+    auto_archive_ttl_days: Annotated[
+        int,
+        Field(gt=0, description="Inactivity period before automatic Session archive"),
+    ]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")
     ]

@@ -108,12 +108,14 @@ from .data import (
     NotWorkspaceMember,
     PaginatedEvents,
     PrimarySessionArchiveBlocked,
+    PrimarySessionPinBlocked,
     PurgeStartedRestoreBlocked,
     RestoreSessionError,
     RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionAccessError,
     SessionNotFound,
+    SetSessionPinnedError,
     SubagentSessionReadOnly,
     SubagentTreeNode,
     SubagentTreeProjection,
@@ -980,7 +982,7 @@ class ChatSessionService:
         *,
         agent_id: str,
         session_id: str,
-        user_id: str,
+        user_id: str | None,
     ) -> Result[ArchiveSessionResult, ArchiveSessionError]:
         """Archive an active non-primary AgentSession after access validation."""
         archive_cleanup_ids: tuple[str, ...] = ()
@@ -995,15 +997,16 @@ class ChatSessionService:
                 or agent_session.status != AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
+            if user_id is not None:
+                workspace_user = (
+                    await self.workspace_user_repository.get_by_workspace_and_user(
+                        session,
+                        workspace_id=agent_session.workspace_id,
+                        user_id=user_id,
+                    )
                 )
-            )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
+                if workspace_user is None:
+                    return Failure(SessionAccessDenied())
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(SubagentSessionReadOnly())
             if agent_session.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY:
@@ -1019,15 +1022,31 @@ class ChatSessionService:
                 for item in tree
             ):
                 return Failure(RunningSessionArchiveBlocked())
+            root = next((item for item in tree if item.id == session_id), None)
+            if root is None:
+                return Failure(SessionNotFound())
+            if root.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY:
+                return Failure(PrimarySessionArchiveBlocked())
             if await self.agent_run_repository.has_active_for_session_ids(
                 session,
                 session_ids=session_ids,
             ):
                 return Failure(RunningSessionArchiveBlocked())
+            archived_at = datetime.datetime.now(datetime.UTC)
+            if user_id is None:
+                agent = await self.agent_repository.get_by_id(session, agent_id)
+                latest_activity = max(item.last_activity_at for item in tree)
+                if (
+                    agent is None
+                    or root.pinned
+                    or latest_activity
+                    + datetime.timedelta(days=agent.auto_archive_ttl_days)
+                    > archived_at
+                ):
+                    return Failure(SessionNotFound())
             settings = await self.archived_session_retention_repository.lock_settings(
                 session
             )
-            archived_at = datetime.datetime.now(datetime.UTC)
             purge_after = (
                 None
                 if settings.archived_session_retention_days is None
@@ -1110,6 +1129,78 @@ class ChatSessionService:
                     cleanup_requested=cleanup_requested,
                 )
             )
+
+    async def auto_archive_once(self, *, limit: int = 100) -> dict[str, int]:
+        """Archive one bounded batch of inactive, non-pinned root Sessions."""
+        async with self.session_manager() as session:
+            candidates = (
+                await self.agent_session_repository.list_auto_archive_candidates(
+                    session,
+                    limit=limit,
+                )
+            )
+        archived = 0
+        skipped = 0
+        for candidate in candidates:
+            result = await self.archive_agent_session(
+                agent_id=candidate.agent_id,
+                session_id=candidate.id,
+                user_id=None,
+            )
+            match result:
+                case Success():
+                    archived += 1
+                case Failure():
+                    skipped += 1
+                case _:
+                    assert_never(result)
+        return {"scanned": len(candidates), "archived": archived, "skipped": skipped}
+
+    async def set_session_pinned(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        pinned: bool,
+    ) -> Result[
+        AgentSession,
+        SetSessionPinnedError,
+    ]:
+        """Set automatic-archive protection for one accessible active root Session."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if (
+                agent_session is None
+                or agent_session.agent_id != agent_id
+                or agent_session.status is not AgentSessionStatus.ACTIVE
+            ):
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent_session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionAccessDenied())
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(SubagentSessionReadOnly())
+            if agent_session.primary_kind is AgentSessionPrimaryKind.TEAM_PRIMARY:
+                return Failure(PrimarySessionPinBlocked())
+            updated = await self.agent_session_repository.set_pinned(
+                session,
+                session_id=session_id,
+                pinned=pinned,
+            )
+            if updated is None:
+                return Failure(SessionNotFound())
+            await session.commit()
+            return Success(updated)
 
     async def list_archived_agent_sessions(
         self,

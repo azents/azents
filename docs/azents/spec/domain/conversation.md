@@ -90,6 +90,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/messages
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/archive
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/pin
   - /chat/v1/agents/{agent_id}/sessions/archived
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/restore
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup
@@ -292,6 +293,23 @@ endpoint. The Web document title mirrors the displayed session title as `{sessio
 sessions in stable order and rejects the request while any subtree session or `AgentRun` is active.
 Team-primary roots cannot be archived because they remain the stable default conversation anchor for
 an Agent.
+
+Every Session has a non-null `last_activity_at` baseline and a root-level `pinned` flag. Durable user,
+Agent, and tool transcript events advance `last_activity_at` monotonically; list ordering remains
+based on the separate user-input projection. An Agent's positive `auto_archive_ttl_days` configuration
+defaults to 30 days. The `session_auto_archive` scheduler task considers only active, non-primary,
+unpinned root Sessions, locks each complete tree, and rechecks the current Agent TTL, root pin,
+maximum `last_activity_at` across all tree Sessions, subtree run state, and active runs. A tree is
+eligible only when its maximum activity is at least the configured TTL in the past. It then invokes
+the same archive lifecycle as manual archive, including retention snapshot, lifecycle participants,
+external-channel cleanup, and post-commit worktree cleanup. Pinning is preserved through archive and
+restore and only excludes automatic archive; it never changes manual archive eligibility.
+
+`PATCH /chat/v1/agents/{agent_id}/sessions/{session_id}/pin` accepts `{ "pinned": boolean }` for an
+accessible active non-primary root Session and returns the updated Session projection. Subagent
+Sessions are read-only, while inactive and team-primary roots are not found or rejected,
+respectively. The Agent rail shows a pin icon on protected Sessions and offers Pin or Unpin from the
+non-primary root Session action menu.
 
 Archive snapshots the current instance retention revision, whole-day value, `archived_at`, and finite
 `purge_after` deadline on the root. Unlimited retention stores a null deadline and snapshot value.
@@ -1056,6 +1074,7 @@ participant.
 - **2026-07-20** — v120. Added frontend-only continuous tool activity grouping, validated semantic phases with Generic fallback, compact authorization placement, and standalone generated-image deliverables without duplicate nested attachments.
 - **2026-07-20** — v119. Swapped the context-window and subscription-usage affordance locations, restored automatic context-detail scrolling, and kept subagent pickers context-only.
 - **2026-07-20** — v118. Moved context-window usage details from the session header into the model picker, made subscription usage an independent composer popover, and removed model/effort picker exposure from read-only subagent composers.
+- **2026-07-26** — v133. Added dynamic per-Agent automatic archive TTLs, monotonic Session activity, root pin protection, the automatic archive scheduler path, and the public pin mutation/UI.
 - **2026-07-20** — v117. Replaced policy-aware archive confirmation with concise delete-style session-removal copy while preserving archive-backed retention behavior.
 - **2026-07-19** — v115. Added explicit input scheduling intent, queue-only terminal `agent_result` delivery with durable Run idempotency, and promotion-time direct-parent observation acknowledgment.
 - **2026-07-19** — v114. Added root-session archive and restore, immutable retention snapshots, scheduled durable purge state, archived-session listing, and public archived-session UI behavior.

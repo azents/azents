@@ -646,6 +646,28 @@ class AgentSessionRepository:
         ).scalars()
         return [self._build(row) for row in rows]
 
+    async def list_auto_archive_candidates(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[AgentSession]:
+        """List oldest active non-primary root Sessions not protected by a pin."""
+        rows = (
+            await session.execute(
+                sa.select(RDBAgentSession)
+                .where(
+                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgentSession.primary_kind.is_(None),
+                    RDBAgentSession.pinned.is_(False),
+                )
+                .order_by(RDBAgentSession.last_activity_at, RDBAgentSession.id)
+                .limit(limit)
+            )
+        ).scalars()
+        return [self._build(row) for row in rows]
+
     async def get_latest_active_non_primary(
         self,
         session: AsyncSession,
@@ -683,6 +705,30 @@ class AgentSessionRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
+        return self._build(rdb)
+
+    async def set_pinned(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        pinned: bool,
+    ) -> AgentSession | None:
+        """Set automatic-archive protection for one active root Session."""
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == session_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
+            .values(pinned=pinned)
+            .returning(RDBAgentSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
         return self._build(rdb)
 
     async def claim_owner_generation(
@@ -1661,6 +1707,8 @@ class AgentSessionRepository:
             title_generated_at=rdb.title_generated_at,
             title_generation_event_id=rdb.title_generation_event_id,
             last_user_input_at=rdb.last_user_input_at,
+            last_activity_at=rdb.last_activity_at,
+            pinned=rdb.pinned,
             end_reason=rdb.end_reason,
             model_input_head_event_id=rdb.model_input_head_event_id,
             model_input_head_model_order=rdb.model_input_head_model_order,

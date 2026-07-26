@@ -98,6 +98,7 @@ from azents.services.chat.data import (
     InvalidSessionTitle,
     NotWorkspaceMember,
     PrimarySessionArchiveBlocked,
+    PrimarySessionPinBlocked,
     PurgeStartedRestoreBlocked,
     RunningSessionArchiveBlocked,
     SessionAccessDenied,
@@ -185,6 +186,7 @@ from .data import (
     AgentProjectPresetResponse,
     AgentSessionCreateRequest,
     AgentSessionListResponse,
+    AgentSessionPinUpdateRequest,
     AgentSessionProjectDefaultsResponse,
     AgentSessionResponse,
     AgentSessionTitleUpdateRequest,
@@ -1771,6 +1773,48 @@ async def archive_agent_session(
                     raise HTTPException(
                         status_code=409,
                         detail="Running session cannot be archived.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.patch("/agents/{agent_id}/sessions/{session_id}/pin")
+async def update_agent_session_pin(
+    agent_id: str,
+    session_id: str,
+    request: AgentSessionPinUpdateRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentSessionResponse:
+    """Pin or unpin an active non-primary root Session."""
+    _validate_session_id(session_id)
+    result = await chat_service.set_session_pinned(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+        pinned=request.pinned,
+    )
+    match result:
+        case Success(session):
+            return AgentSessionResponse.from_domain(
+                session,
+                unread_terminal_run_id=None,
+            )
+        case Failure(error):
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case SubagentSessionReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
+                    )
+                case PrimarySessionPinBlocked():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Team primary session cannot be pinned.",
                     )
                 case _:
                     assert_never(error)

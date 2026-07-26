@@ -188,6 +188,14 @@ class RDBAgentSession(RDBModel):
             "status = 'archived' AND session_kind = 'root' AND purge_after IS NOT NULL"
         ),
     )
+    IX_ACTIVE_AUTO_ARCHIVE = sa.Index(
+        "ix_agent_sessions_active_auto_archive",
+        "last_activity_at",
+        "agent_id",
+        postgresql_where=sa.text(
+            "status = 'active' AND session_kind = 'root' AND pinned = false"
+        ),
+    )
     UQ_AGENT_ACTIVE_TEAM_PRIMARY = sa.Index(
         "uq_agent_sessions_agent_active_team_primary",
         "agent_id",
@@ -286,6 +294,19 @@ class RDBAgentSession(RDBModel):
         TimeZoneDateTime,
         init=False,
         server_default=sa.func.now(),
+        nullable=False,
+    )
+    last_activity_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        server_default=sa.func.now(),
+        nullable=False,
+    )
+    pinned: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        init=False,
+        default=False,
+        server_default=sa.false(),
         nullable=False,
     )
 
@@ -465,5 +486,6 @@ class RDBAgentSession(RDBModel):
         IX_STOP_REQUESTED_AT,
         IX_RUN_STATE_RUNNING,
         IX_ARCHIVED_PURGE_AFTER,
+        IX_ACTIVE_AUTO_ARCHIVE,
         UQ_AGENT_ACTIVE_TEAM_PRIMARY,
     )

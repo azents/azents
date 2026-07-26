@@ -47,6 +47,7 @@ export const agentFormSchema = z
     memory_enabled: z.boolean().optional(),
     tool_search_enabled: z.boolean(),
     max_turns: z.number().int().positive().nullable().optional(),
+    auto_archive_ttl_days: z.number().int().positive(),
     subagent_max_subagents: z.number().int().min(0),
     subagent_max_depth: z.number().int().min(0),
   })

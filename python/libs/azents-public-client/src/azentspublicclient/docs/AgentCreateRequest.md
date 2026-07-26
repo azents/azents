@@ -22,6 +22,7 @@ Name | Type | Description | Notes
 **memory_enabled** | **bool** | Memory enabled state | [optional] [default to True]
 **tool_search_enabled** | **bool** | Tool Search enabled state | [optional] [default to True]
 **max_turns** | **int** |  | [optional] 
+**auto_archive_ttl_days** | **int** | Inactivity period before automatic Session archive | [optional] [default to 30]
 **subagent_settings** | [**SubagentSettings**](SubagentSettings.md) | Subagent execution settings | [optional] 
 
 ## Example

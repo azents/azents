@@ -15,6 +15,7 @@ from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
 )
+from azents.services.chat import ChatSessionService
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.llm_catalog import SystemCatalogProjectionService
 
@@ -84,6 +85,20 @@ async def archived_session_purge_handler(context: TaskContext) -> TaskResult:
             "attempt_started_at": context.attempt_started_at.isoformat(),
             "manual_triggered": context.manual_triggered,
             **dataclasses.asdict(summary),
+        }
+    )
+
+
+async def session_auto_archive_handler(context: TaskContext) -> TaskResult:
+    """Archive one bounded batch of inactive unpinned Sessions."""
+    service = await context.container.solve(ChatSessionService)
+    summary = await service.auto_archive_once()
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **summary,
         }
     )
 
@@ -179,6 +194,21 @@ ARCHIVED_SESSION_PURGE_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+SESSION_AUTO_ARCHIVE_TASK = ScheduledTaskDefinition(
+    key="session_auto_archive",
+    description="Archive inactive unpinned non-primary SessionAgent trees.",
+    interval=datetime.timedelta(minutes=5),
+    timeout=datetime.timedelta(minutes=10),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=1),
+        max_delay=datetime.timedelta(minutes=30),
+    ),
+    handler=session_auto_archive_handler,
+    enabled_by_default=True,
+)
+
+
 AGENT_DECOMMISSION_TASK = ScheduledTaskDefinition(
     key="agent_decommission",
     description="Retire Agent roots and finalize decommissioned Agents.",
@@ -212,6 +242,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     SYSTEM_CATALOG_PROJECTION_TASK,
     ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK,
     ARCHIVED_SESSION_PURGE_TASK,
+    SESSION_AUTO_ARCHIVE_TASK,
     AGENT_DECOMMISSION_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
 )

@@ -3124,6 +3124,73 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/pin": {
+      "patch": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Update Agent Session Pin",
+        "description": "Pin or unpin an active non-primary root Session.",
+        "operationId": "chat_v1_update_agent_session_pin",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSessionPinUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup": {
       "post": {
         "tags": [
@@ -11164,6 +11231,13 @@
             "title": "Max Turns",
             "description": "Maximum agent turn count"
           },
+          "auto_archive_ttl_days": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Auto Archive Ttl Days",
+            "description": "Inactivity period before automatic Session archive",
+            "default": 30
+          },
           "subagent_settings": {
             "$ref": "#/components/schemas/SubagentSettings",
             "description": "Subagent execution settings"
@@ -11521,6 +11595,12 @@
             ],
             "title": "Max Turns"
           },
+          "auto_archive_ttl_days": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Auto Archive Ttl Days",
+            "description": "Inactivity period before automatic Session archive"
+          },
           "subagent_settings": {
             "$ref": "#/components/schemas/SubagentSettings"
           },
@@ -11566,6 +11646,7 @@
           "memory_enabled",
           "tool_search_enabled",
           "max_turns",
+          "auto_archive_ttl_days",
           "subagent_settings",
           "created_at",
           "updated_at"
@@ -11965,6 +12046,21 @@
         "title": "AgentSessionListResponse",
         "description": "Conversation session list response."
       },
+      "AgentSessionPinUpdateRequest": {
+        "properties": {
+          "pinned": {
+            "type": "boolean",
+            "title": "Pinned",
+            "description": "Whether automatic archive is disabled for this active non-primary root Session"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pinned"
+        ],
+        "title": "AgentSessionPinUpdateRequest",
+        "description": "AgentSession automatic-archive protection update request."
+      },
       "AgentSessionPrimaryKind": {
         "type": "string",
         "enum": [
@@ -12120,6 +12216,11 @@
             "$ref": "#/components/schemas/AgentSessionRunState",
             "description": "Session execution state"
           },
+          "pinned": {
+            "type": "boolean",
+            "title": "Pinned",
+            "description": "Whether automatic archive is disabled for this Session"
+          },
           "unread_terminal_run_id": {
             "anyOf": [
               {
@@ -12193,6 +12294,7 @@
           "title_source",
           "status",
           "run_state",
+          "pinned",
           "unread_terminal_run_id",
           "archived_at",
           "purge_after",
@@ -12495,6 +12597,12 @@
             ],
             "title": "Max Turns",
             "description": "Maximum agent turn count"
+          },
+          "auto_archive_ttl_days": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Auto Archive Ttl Days",
+            "description": "Inactivity period before automatic Session archive"
           },
           "subagent_settings": {
             "$ref": "#/components/schemas/SubagentSettings",

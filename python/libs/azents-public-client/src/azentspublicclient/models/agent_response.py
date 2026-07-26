@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_model_selection import AgentModelSelection
 from azentspublicclient.models.agent_type import AgentType
@@ -52,12 +52,13 @@ class AgentResponse(BaseModel):
     memory_enabled: StrictBool
     tool_search_enabled: StrictBool
     max_turns: Optional[StrictInt]
+    auto_archive_ttl_days: StrictInt = Field(description="Inactivity period before automatic Session archive")
     subagent_settings: SubagentSettings
     avatar: Optional[UploadedImage] = None
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "subagent_settings", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -208,6 +209,7 @@ class AgentResponse(BaseModel):
             "memory_enabled": obj.get("memory_enabled"),
             "tool_search_enabled": obj.get("tool_search_enabled"),
             "max_turns": obj.get("max_turns"),
+            "auto_archive_ttl_days": obj.get("auto_archive_ttl_days"),
             "subagent_settings": SubagentSettings.from_dict(obj["subagent_settings"]) if obj.get("subagent_settings") is not None else None,
             "avatar": UploadedImage.from_dict(obj["avatar"]) if obj.get("avatar") is not None else None,
             "created_at": obj.get("created_at"),

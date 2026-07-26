@@ -371,6 +371,7 @@ class AgentService:
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,
             max_turns=create.max_turns,
+            auto_archive_ttl_days=create.auto_archive_ttl_days,
             subagent_settings=create.subagent_settings,
         )
         async with self.session_manager() as session:
@@ -587,6 +588,7 @@ class AgentService:
             "memory_enabled",
             "tool_search_enabled",
             "max_turns",
+            "auto_archive_ttl_days",
             "subagent_settings",
         ):
             if key in update:

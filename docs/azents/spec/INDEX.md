@@ -12,7 +12,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-26 | 55 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-26 | 56 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-26 | 133 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-26 | 18 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-26 | 12 |
@@ -42,7 +42,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
-| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-24 | 10 |
+| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-26 | 10 |

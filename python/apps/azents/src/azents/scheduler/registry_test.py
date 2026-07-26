@@ -8,6 +8,7 @@ import pytest
 
 from azents.scheduler import registry
 from azents.scheduler.types import TaskContext
+from azents.services.chat import ChatSessionService
 from azents.services.file_lifecycle_cleanup import (
     FileLifecycleCleanupService,
     FileLifecycleCleanupSummary,
@@ -24,6 +25,48 @@ class _Container:
         """Return the configured lifecycle cleanup service."""
         assert target is FileLifecycleCleanupService
         return self.service
+
+
+class _AutoArchiveContainer:
+    """Container test double that resolves the chat session service."""
+
+    def __init__(self, service: ChatSessionService) -> None:
+        self.service = service
+
+    async def solve(self, target: type[object]) -> object:
+        """Return the configured chat session service."""
+        assert target is ChatSessionService
+        return self.service
+
+
+@pytest.mark.asyncio
+async def test_session_auto_archive_handler_returns_batch_summary() -> None:
+    """Auto-archive task delegates one bounded pass to the chat service."""
+    service = cast(Any, Mock())
+    service.auto_archive_once = AsyncMock(
+        return_value={"scanned": 5, "archived": 2, "skipped": 3}
+    )
+    now = datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC)
+    context = TaskContext(
+        task_key="session_auto_archive",
+        attempt_started_at=now,
+        lease_owner="scheduler-1",
+        deadline=now + datetime.timedelta(minutes=10),
+        manual_triggered=False,
+        container=cast(Any, _AutoArchiveContainer(service)),
+    )
+
+    result = await registry.session_auto_archive_handler(context)
+
+    assert result.summary == {
+        "task_key": "session_auto_archive",
+        "attempt_started_at": now.isoformat(),
+        "manual_triggered": False,
+        "scanned": 5,
+        "archived": 2,
+        "skipped": 3,
+    }
+    service.auto_archive_once.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

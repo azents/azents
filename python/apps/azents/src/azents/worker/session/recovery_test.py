@@ -108,6 +108,8 @@ def _agent_session(
         title_generated_at=None,
         title_generation_event_id=None,
         last_user_input_at=now,
+        last_activity_at=now,
+        pinned=False,
         end_reason=None,
         started_at=now,
         lifecycle_started_at=None,

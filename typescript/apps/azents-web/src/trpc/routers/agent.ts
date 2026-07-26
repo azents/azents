@@ -151,6 +151,7 @@ export const agentRouter = router({
         memory_enabled: z.boolean().optional(),
         tool_search_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
+        auto_archive_ttl_days: z.number().int().positive().optional(),
         subagent_settings: subagentSettingsSchema.optional(),
       }),
     )
@@ -176,6 +177,7 @@ export const agentRouter = router({
             memory_enabled: input.memory_enabled,
             tool_search_enabled: input.tool_search_enabled,
             max_turns: input.max_turns,
+            auto_archive_ttl_days: input.auto_archive_ttl_days,
             subagent_settings: input.subagent_settings,
           },
           throwOnError: true,
@@ -214,6 +216,7 @@ export const agentRouter = router({
         memory_enabled: z.boolean().optional(),
         tool_search_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
+        auto_archive_ttl_days: z.number().int().positive().optional(),
         subagent_settings: subagentSettingsSchema.optional(),
       }),
     )
@@ -251,6 +254,7 @@ export const agentRouter = router({
             memory_enabled: input.memory_enabled,
             tool_search_enabled: input.tool_search_enabled,
             max_turns: input.max_turns,
+            auto_archive_ttl_days: input.auto_archive_ttl_days,
             subagent_settings: input.subagent_settings,
           },
           throwOnError: true,

@@ -49,6 +49,10 @@ class AgentResponse(BaseModel):
     memory_enabled: bool
     tool_search_enabled: bool
     max_turns: int | None
+    auto_archive_ttl_days: int = Field(
+        gt=0,
+        description="Inactivity period before automatic Session archive",
+    )
     subagent_settings: SubagentSettings
     avatar: UploadedImage | None = None
     created_at: datetime.datetime
@@ -79,6 +83,7 @@ class AgentResponse(BaseModel):
             memory_enabled=data.memory_enabled,
             tool_search_enabled=data.tool_search_enabled,
             max_turns=data.max_turns,
+            auto_archive_ttl_days=data.auto_archive_ttl_days,
             subagent_settings=data.subagent_settings,
             avatar=data.avatar,
             created_at=data.created_at,
@@ -225,6 +230,11 @@ class AgentCreateRequest(BaseModel):
     max_turns: int | None = Field(
         default=None, gt=0, description="Maximum agent turn count"
     )
+    auto_archive_ttl_days: int = Field(
+        default=30,
+        gt=0,
+        description="Inactivity period before automatic Session archive",
+    )
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
     )
@@ -267,6 +277,10 @@ class AgentUpdateRequest(TypedDict, total=False):
     tool_search_enabled: Annotated[bool, Field(description="Tool Search enabled state")]
     max_turns: Annotated[
         int | None, Field(gt=0, description="Maximum agent turn count")
+    ]
+    auto_archive_ttl_days: Annotated[
+        int,
+        Field(gt=0, description="Inactivity period before automatic Session archive"),
     ]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")

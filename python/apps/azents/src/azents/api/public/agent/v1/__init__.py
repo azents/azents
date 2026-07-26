@@ -245,6 +245,7 @@ async def create_agent(
         memory_enabled=request_body.memory_enabled,
         tool_search_enabled=request_body.tool_search_enabled,
         max_turns=request_body.max_turns,
+        auto_archive_ttl_days=request_body.auto_archive_ttl_days,
         subagent_settings=request_body.subagent_settings,
     )
     result = await service.create(
@@ -392,6 +393,8 @@ def _build_agent_update_input(
         result["tool_search_enabled"] = request_body["tool_search_enabled"]
     if "max_turns" in request_body:
         result["max_turns"] = request_body["max_turns"]
+    if "auto_archive_ttl_days" in request_body:
+        result["auto_archive_ttl_days"] = request_body["auto_archive_ttl_days"]
     if "subagent_settings" in request_body:
         result["subagent_settings"] = request_body["subagent_settings"]
 

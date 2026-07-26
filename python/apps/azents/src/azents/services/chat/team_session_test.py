@@ -19,6 +19,9 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_automatic_project_setting import (
+    RDBAgentAutomaticProjectSetting,
+)
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
@@ -64,7 +67,11 @@ from azents.services.session_lifecycle.registry import (
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import ChatSessionService
-from .data import PrimarySessionArchiveBlocked, RunningSessionArchiveBlocked
+from .data import (
+    PrimarySessionArchiveBlocked,
+    PrimarySessionPinBlocked,
+    RunningSessionArchiveBlocked,
+)
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -133,6 +140,7 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     )
     session.add(agent)
     await session.flush()
+    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
     return agent.id
 
 
@@ -1117,6 +1125,46 @@ class TestChatSessionTeamSessions:
         assert isinstance(archive_result, Failure)
         assert isinstance(archive_result.error, PrimarySessionArchiveBlocked)
 
+    async def test_pin_team_primary_session_is_blocked(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Team-primary sessions cannot be pinned for automatic archive."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-primary-pin")
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-primary-pin@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-primary-pin-agent",
+        )
+        primary = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
+        await rdb_session.commit()
+
+        pin_result = await _service(rdb_session_manager).set_session_pinned(
+            agent_id=agent_id,
+            session_id=primary.id,
+            user_id=user_id,
+            pinned=True,
+        )
+
+        assert isinstance(pin_result, Failure)
+        assert isinstance(pin_result.error, PrimarySessionPinBlocked)
+
     async def test_archive_running_session_is_blocked(
         self,
         rdb_session: AsyncSession,
@@ -1158,3 +1206,209 @@ class TestChatSessionTeamSessions:
 
         assert isinstance(archive_result, Failure)
         assert isinstance(archive_result.error, RunningSessionArchiveBlocked)
+
+    async def test_auto_archive_uses_current_agent_ttl(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Current Agent TTL changes determine existing Session eligibility."""
+        workspace_id = await _create_workspace(rdb_session, "auto-archive-ttl")
+        user_id = await _create_user(rdb_session, "auto-archive-ttl@example.com")
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(rdb_session, workspace_id, "auto-archive-ttl")
+        await rdb_session.commit()
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        assert isinstance(create_result, Success)
+        stale_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=60)
+        async with rdb_session_manager() as update_session:
+            agent = await update_session.get(RDBAgent, agent_id)
+            root = await update_session.get(RDBAgentSession, create_result.value.id)
+            assert agent is not None
+            assert root is not None
+            agent.auto_archive_ttl_days = 90
+            root.last_activity_at = stale_at
+            await update_session.commit()
+
+        service = _service(rdb_session_manager)
+        await service.auto_archive_once()
+        async with rdb_session_manager() as verify_session:
+            active = await AgentSessionRepository().get_by_id(
+                verify_session,
+                create_result.value.id,
+            )
+        assert active is not None
+        assert active.status is AgentSessionStatus.ACTIVE
+
+        async with rdb_session_manager() as update_session:
+            agent = await update_session.get(RDBAgent, agent_id)
+            assert agent is not None
+            agent.auto_archive_ttl_days = 30
+            await update_session.commit()
+
+        await service.auto_archive_once()
+        async with rdb_session_manager() as verify_session:
+            archived = await AgentSessionRepository().get_by_id(
+                verify_session,
+                create_result.value.id,
+            )
+        assert archived is not None
+        assert archived.status is AgentSessionStatus.ARCHIVED
+
+    async def test_auto_archive_excludes_pinned_and_running_sessions(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Pins exclude candidates while running roots are rechecked and skipped."""
+        workspace_id = await _create_workspace(rdb_session, "auto-archive-guards")
+        user_id = await _create_user(
+            rdb_session,
+            "auto-archive-guards@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "auto-archive-guards",
+        )
+        primary = (
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
+        await rdb_session.commit()
+        service = _service(rdb_session_manager)
+        pinned_result = await service.create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        running_result = await service.create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        assert isinstance(pinned_result, Success)
+        assert isinstance(running_result, Success)
+        pin_result = await service.set_session_pinned(
+            agent_id=agent_id,
+            session_id=pinned_result.value.id,
+            user_id=user_id,
+            pinned=True,
+        )
+        assert isinstance(pin_result, Success)
+        assert pin_result.value.pinned is True
+        stale_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=31)
+        async with rdb_session_manager() as update_session:
+            pinned = await update_session.get(RDBAgentSession, pinned_result.value.id)
+            running = await update_session.get(
+                RDBAgentSession,
+                running_result.value.id,
+            )
+            assert pinned is not None
+            assert running is not None
+            primary_rdb = await update_session.get(RDBAgentSession, primary.id)
+            assert primary_rdb is not None
+            pinned.last_activity_at = stale_at
+            running.last_activity_at = stale_at
+            primary_rdb.last_activity_at = stale_at
+            running.run_state = AgentSessionRunState.RUNNING
+            await update_session.commit()
+
+        await service.auto_archive_once()
+        async with rdb_session_manager() as verify_session:
+            pinned = await AgentSessionRepository().get_by_id(
+                verify_session,
+                pinned_result.value.id,
+            )
+            running = await AgentSessionRepository().get_by_id(
+                verify_session,
+                running_result.value.id,
+            )
+            primary_after = await AgentSessionRepository().get_by_id(
+                verify_session,
+                primary.id,
+            )
+        assert pinned is not None
+        assert pinned.status is AgentSessionStatus.ACTIVE
+        assert pinned.pinned is True
+        assert running is not None
+        assert running.status is AgentSessionStatus.ACTIVE
+        assert primary_after is not None
+        assert primary_after.status is AgentSessionStatus.ACTIVE
+
+    async def test_auto_archive_uses_latest_activity_across_child_tree(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Recent child activity protects an otherwise stale root tree."""
+        workspace_id = await _create_workspace(rdb_session, "auto-archive-tree")
+        user_id = await _create_user(rdb_session, "auto-archive-tree@example.com")
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(rdb_session, workspace_id, "auto-archive-tree")
+        await rdb_session.commit()
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        assert isinstance(create_result, Success)
+        stale_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=31)
+        async with rdb_session_manager() as update_session:
+            repository = AgentSessionRepository()
+            root_agent = await repository.get_session_agent_by_session_id(
+                update_session,
+                create_result.value.id,
+            )
+            assert root_agent is not None
+            child = await repository.create_child_session_agent(
+                update_session,
+                parent_session_agent_id=root_agent.id,
+                name="fresh-child",
+                agent_type="default",
+                title=None,
+                last_task_message=None,
+            )
+            root = await update_session.get(RDBAgentSession, create_result.value.id)
+            child_session = await update_session.get(
+                RDBAgentSession,
+                child.agent_session_id,
+            )
+            assert root is not None
+            assert child_session is not None
+            root.last_activity_at = stale_at
+            child_session.last_activity_at = datetime.datetime.now(datetime.UTC)
+            await update_session.commit()
+
+        await _service(rdb_session_manager).auto_archive_once()
+        async with rdb_session_manager() as verify_session:
+            root = await AgentSessionRepository().get_by_id(
+                verify_session,
+                create_result.value.id,
+            )
+        assert root is not None
+        assert root.status is AgentSessionStatus.ACTIVE
