@@ -96,7 +96,29 @@ _RUNNER_GID = 1000
 _ENGINE_SOCKET_GROUP = "azents-runner"
 _FS_GROUP_CHANGE_POLICY = "OnRootMismatch"
 _TRANSFER_STAGING_MOUNT_PATH = "/var/run/azents-transfer"
-_TRANSFER_STAGING_DIRECTORY = "/workspace/agent/.azents-transfer-staging"
+_TRANSFER_STAGING_DIRECTORY = _TRANSFER_STAGING_MOUNT_PATH
+_PVC_ROOT_MOUNT_PATH = "/var/run/azents-workspace-volume"
+_WORKSPACE_SUB_PATH = "workspace"
+_TRANSFER_STAGING_SUB_PATH = "transfer-staging"
+_STAGING_INIT_CONTAINER_NAME = "initialize-transfer-staging"
+_STAGING_INIT_COMMAND = (
+    "sh",
+    "-ec",
+    (
+        "for path in workspace transfer-staging; do "
+        "if [ -L /var/run/azents-workspace-volume/$path ] || "
+        "{ [ -e /var/run/azents-workspace-volume/$path ] && "
+        "[ ! -d /var/run/azents-workspace-volume/$path ]; }; then "
+        "exit 1; fi; "
+        "done\n"
+        "mkdir -p /var/run/azents-workspace-volume/workspace "
+        "/var/run/azents-workspace-volume/transfer-staging\n"
+        "chown 1000:1000 /var/run/azents-workspace-volume/workspace\n"
+        "chmod 0755 /var/run/azents-workspace-volume/workspace\n"
+        "chown 0:0 /var/run/azents-workspace-volume/transfer-staging\n"
+        "chmod 0700 /var/run/azents-workspace-volume/transfer-staging"
+    ),
+)
 
 _LABEL_MANAGED_BY = "azents/managed-by"
 _LABEL_PROVIDER_ID = "azents/runtime-provider-id"
@@ -605,6 +627,11 @@ class KubernetesRuntimeProvider:
             return False
         if pod.spec.automount_service_account_token:
             return False
+        if not _container_specs_equal(
+            pod.spec.init_containers,
+            expected.spec.init_containers,
+        ):
+            return False
         if dict(pod.spec.node_selector) != dict(expected.spec.node_selector):
             return False
         if not set(self._config.pod_tolerations).issubset(set(pod.spec.tolerations)):
@@ -692,6 +719,7 @@ class KubernetesRuntimeProvider:
                         else ()
                     ),
                 ),
+                init_containers=self._init_containers(command),
             ),
         )
 
@@ -700,18 +728,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
         policy: RuntimeExecutionPolicy,
     ) -> tuple[ContainerSpec, ...]:
-        runner_mounts = [
-            VolumeMount(
-                name=_WORKSPACE_VOLUME_NAME,
-                mount_path=self._workspace_mount_path,
-                read_only=False,
-            ),
-            VolumeMount(
-                name=_WORKSPACE_VOLUME_NAME,
-                mount_path=_TRANSFER_STAGING_MOUNT_PATH,
-                read_only=False,
-            ),
-        ]
+        runner_mounts = list(self._runner_volume_mounts())
         docker_enabled = policy.docker.enabled
         runner_env = self._env(command)
         docker_resources = _docker_resources(policy) if docker_enabled else None
@@ -771,6 +788,7 @@ class KubernetesRuntimeProvider:
                     name=_WORKSPACE_VOLUME_NAME,
                     mount_path=self._workspace_mount_path,
                     read_only=False,
+                    sub_path=_WORKSPACE_SUB_PATH,
                 ),
                 VolumeMount(
                     name=_ENGINE_SOCKET_VOLUME_NAME,
@@ -819,6 +837,49 @@ class KubernetesRuntimeProvider:
                     _runtime_control_egress_rule(self._config),
                     *_permitted_egress_rules(self._config),
                 ),
+            ),
+        )
+
+    def _init_containers(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> tuple[ContainerSpec, ...]:
+        """Create the provider-owned filesystem boundary before Runner startup."""
+        return (
+            ContainerSpec(
+                name=_STAGING_INIT_CONTAINER_NAME,
+                image=command.runner_image,
+                command=_STAGING_INIT_COMMAND,
+                args=(),
+                working_dir=_PVC_ROOT_MOUNT_PATH,
+                resources=None,
+                security_context=_runner_supervisor_security_context(),
+                readiness_probe=None,
+                env=(),
+                volume_mounts=(
+                    VolumeMount(
+                        name=_WORKSPACE_VOLUME_NAME,
+                        mount_path=_PVC_ROOT_MOUNT_PATH,
+                        read_only=False,
+                    ),
+                ),
+            ),
+        )
+
+    def _runner_volume_mounts(self) -> tuple[VolumeMount, ...]:
+        """Return the only workspace and protected staging paths visible to Runner."""
+        return (
+            VolumeMount(
+                name=_WORKSPACE_VOLUME_NAME,
+                mount_path=self._workspace_mount_path,
+                read_only=False,
+                sub_path=_WORKSPACE_SUB_PATH,
+            ),
+            VolumeMount(
+                name=_WORKSPACE_VOLUME_NAME,
+                mount_path=_TRANSFER_STAGING_MOUNT_PATH,
+                read_only=False,
+                sub_path=_TRANSFER_STAGING_SUB_PATH,
             ),
         )
 

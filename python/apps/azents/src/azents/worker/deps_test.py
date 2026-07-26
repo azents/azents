@@ -17,11 +17,18 @@ from azents.worker.deps import (
 )
 
 
-def _config(*, bucket: str = "workspace-bucket") -> Config:
+def _config(
+    *,
+    bucket: str = "workspace-bucket",
+    transfer_object_prefix: str = "runtime-transfer",
+) -> Config:
     return cast(
         Config,
         SimpleNamespace(
             workspace_s3=SimpleNamespace(bucket=bucket, prefix="v1"),
+            runtime_transfer_coordinator=SimpleNamespace(
+                object_prefix=transfer_object_prefix
+            ),
         ),
     )
 
@@ -90,3 +97,16 @@ def test_external_channel_staging_uses_the_bounded_transfer_namespace() -> None:
     assert configuration.transfer_object_prefix == "v1/runtime-transfer"
     assert configuration.stream_chunk_size == 256 * 1024
     assert configuration.multipart_part_size == 5 * 1024 * 1024
+
+
+def test_worker_transfer_services_use_the_configured_transfer_object_prefix() -> None:
+    """Worker and Runtime Control can select one shared internal namespace."""
+    services = create_worker_transfer_services(
+        config=_config(transfer_object_prefix="runtime-transfer-v2"),
+        coordinator=cast(GrpcRuntimeTransferCoordinatorClient, object()),
+        s3_service=cast(S3Service, object()),
+        exchange_file_service=cast(ExchangeFileService, object()),
+    )
+
+    assert services.import_staging is not None
+    assert services.import_staging.transfer_object_prefix == "v1/runtime-transfer-v2"

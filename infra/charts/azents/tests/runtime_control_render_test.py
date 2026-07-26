@@ -111,6 +111,31 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert rendered.count("mountPath: /var/run/secrets/azents/runtime-control-tls") == 3
 
 
+def test_runtime_control_renders_dedicated_workspace_s3_credential_aliases() -> None:
+    """Only Runtime Control receives the aliases consumed by its transfer S3 client."""
+    rendered = _helm_template(
+        "server.runtimeControl.enabled=true",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "server.runtimeControl.runnerImage.tag=sha",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        "objectStorage.external.endpoint=https://s3.internal",
+        "objectStorage.external.bucket=workspace-bucket",
+        "secrets.existingSecrets.objectStorage=workspace-s3-credentials",
+    )
+    start = rendered.index("kind: Deployment\nmetadata:\n  name: runtime-control")
+    runtime_control = rendered[start : rendered.index("\n---\n", start)]
+
+    assert "AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL" in rendered
+    assert "AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET" in rendered
+    assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL") == 1
+    assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET") == 1
+    assert "name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID" in runtime_control
+    assert "name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY" in runtime_control
+    assert 'name: "workspace-s3-credentials"' in runtime_control
+    assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID") == 1
+    assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY") == 1
+
+
 def test_runtime_control_enables_token_review_for_kubernetes_provider() -> None:
     """Kubernetes Provider enables TokenReview on Runtime Control."""
     rendered = _helm_template(

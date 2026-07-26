@@ -7,6 +7,7 @@ import errno
 import hashlib
 import logging
 import os
+import re
 import stat
 import tempfile
 from collections.abc import AsyncIterator, Callable
@@ -41,6 +42,11 @@ from azents_runtime_control.transfer import (
 _BUFFER_BYTES = MAX_TRANSFER_CHUNK_BYTES
 _DEFAULT_MAX_ACTIVE_TRANSFERS = 4
 _DEFAULT_MAX_TOMBSTONES = 256
+_WORKLOAD_UID = 1000
+_WORKLOAD_GID = 1000
+_PROTECTED_STAGE_MAX_AGE_SECONDS = 60 * 60
+_PROTECTED_STAGE_CLEANUP_LIMIT = 256
+_PROTECTED_STAGE_NAME = re.compile(r"\.transfer-attempt-[a-z0-9_]{8,}")
 _LOGGER = logging.getLogger(__name__)
 _AT_EMPTY_PATH = 0x1000
 _LIBC = ctypes.CDLL(None, use_errno=True)
@@ -147,6 +153,11 @@ class RunnerTransferManager:
 
     async def start(self) -> None:
         """Provide a lifecycle hook without pathname-backed transfer state."""
+        if self._protected_staging_directory is not None:
+            await asyncio.to_thread(
+                _cleanup_protected_staging_directory,
+                self._protected_staging_directory,
+            )
         self._ensure_result_task()
 
     async def handle_intent(self, intent: RunnerTransferIntent) -> None:
@@ -320,7 +331,10 @@ class RunnerTransferManager:
                         destination_name,
                         dst_dir_fd=parent_fd,
                     )
-                elif overwrite:
+                else:
+                    os.fchown(stage_fd, _WORKLOAD_UID, _WORKLOAD_GID)
+                    os.fchmod(stage_fd, 0o600)
+                if stage_dir_fd is not None and stage_name is not None and overwrite:
                     os.replace(
                         stage_name,
                         destination_name,
@@ -328,7 +342,7 @@ class RunnerTransferManager:
                         dst_dir_fd=parent_fd,
                     )
                     stage_name = None
-                else:
+                elif stage_dir_fd is not None and stage_name is not None:
                     _assert_empty_destination(parent_fd, destination_name)
                     os.link(
                         stage_name,
@@ -744,6 +758,30 @@ def _open_protected_staging_directory(path: Path) -> int:
         os.close(descriptor)
         raise _TransferFailure(RunnerTransferFailure.DESTINATION_FAILED)
     return descriptor
+
+
+def _cleanup_protected_staging_directory(path: Path) -> None:
+    """Remove bounded stale attempt files from one verified runtime staging boundary."""
+    descriptor = _open_protected_staging_directory(path)
+    try:
+        cutoff = datetime.now(UTC).timestamp() - _PROTECTED_STAGE_MAX_AGE_SECONDS
+        deleted = 0
+        for name in sorted(os.listdir(descriptor)):
+            if deleted >= _PROTECTED_STAGE_CLEANUP_LIMIT:
+                break
+            if _PROTECTED_STAGE_NAME.fullmatch(name) is None:
+                continue
+            metadata = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_mtime > cutoff
+            ):
+                continue
+            os.unlink(name, dir_fd=descriptor)
+            deleted += 1
+    finally:
+        os.close(descriptor)
 
 
 def _link_from_file_descriptor(

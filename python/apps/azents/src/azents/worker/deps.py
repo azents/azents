@@ -106,7 +106,6 @@ from .config import AgentWorkerConfig
 from .health import HealthServer
 
 _DEFAULT_HEALTH_PORT = 8012
-_TRANSFER_OBJECT_PREFIX = "runtime-transfer"
 _TRANSFER_MAXIMUM_FILE_BYTES = 8 * 1024 * 1024
 _TRANSFER_CHUNK_BYTES = 256 * 1024
 _TRANSFER_MULTIPART_PART_BYTES = 5 * 1024 * 1024
@@ -414,10 +413,13 @@ def create_worker_external_channel_inbound_staging_configuration(
 
 
 def _transfer_object_prefix(config: Config) -> str:
-    """Derive the fixed transfer namespace beneath the existing workspace prefix."""
+    """Derive the configured transfer namespace beneath the workspace prefix."""
     return "/".join(
         part.strip("/")
-        for part in (config.workspace_s3.prefix, _TRANSFER_OBJECT_PREFIX)
+        for part in (
+            config.workspace_s3.prefix,
+            config.runtime_transfer_coordinator.object_prefix,
+        )
         if part.strip("/")
     )
 

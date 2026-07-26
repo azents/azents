@@ -1,5 +1,7 @@
 {{- if and .Values.server.enabled .Values.server.runtimeControl.enabled }}
 {{- $transfer := .Values.server.runtimeControl.transfer }}
+{{- $objectStorageEndpoint := include "azents.objectStorageEndpoint" . }}
+{{- $objectStorageBucket := include "azents.objectStorageBucket" . }}
 {{- if and (eq $transfer.stateBackend "memory") (or (ne (int .Values.server.runtimeControl.replicas) 1) .Values.server.runtimeControl.autoscaling.enabled) }}
 {{- fail "memory Runtime Transfer state requires exactly one runtime-control replica and disabled autoscaling" }}
 {{- end }}
@@ -90,6 +92,16 @@ spec:
               value: {{ $transfer.repairIntervalSeconds | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_OBJECT_PREFIX
               value: {{ $transfer.objectPrefix | quote }}
+            - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_PREFIX
+              value: {{ default "v1" (index .Values.server.env "AZ_WORKSPACE_S3_PREFIX") | quote }}
+            {{- if $objectStorageEndpoint }}
+            - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL
+              value: {{ $objectStorageEndpoint | quote }}
+            {{- end }}
+            {{- if $objectStorageBucket }}
+            - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET
+              value: {{ $objectStorageBucket | quote }}
+            {{- end }}
             - name: AZ_RUNTIME_CONTROL_ALLOW_INSECURE
               value: "false"
             - name: AZ_RUNTIME_CONTROL_KUBERNETES_TOKEN_REVIEW_ENABLED
@@ -108,6 +120,7 @@ spec:
               value: {{ include "azents.runtimeControlEndpoint" . | quote }}
             {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}
+            {{- include "azents.runtimeControlWorkspaceS3SecretEnv" . | nindent 12 }}
           volumeMounts:
             - name: runtime-control-tls
               mountPath: /var/run/secrets/azents/runtime-control-tls

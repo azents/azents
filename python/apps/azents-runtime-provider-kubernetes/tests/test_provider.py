@@ -341,10 +341,7 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     env = {item.name: item.value for item in container.env}
     assert container.image == _RUNNER_IMAGE
     assert env["AZ_RUNTIME_TRANSFER_ENDPOINT"] == "runtime-transfer:8030"
-    assert (
-        env["AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"]
-        == "/workspace/agent/.azents-transfer-staging"
-    )
+    assert env["AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"] == "/var/run/azents-transfer"
     assert container.working_dir == "/workspace/agent"
     assert container.resources == ContainerResources(
         requests={"cpu": "500m", "memory": "1Gi"},
@@ -380,9 +377,24 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
             name="agent-workspace",
             mount_path="/var/run/azents-transfer",
             read_only=False,
+            sub_path="transfer-staging",
         )
         in container.volume_mounts
     )
+    assert (
+        VolumeMount(
+            name="agent-workspace",
+            mount_path="/workspace/agent",
+            read_only=False,
+            sub_path="workspace",
+        )
+        in container.volume_mounts
+    )
+    initializer = pod.spec.init_containers[0]
+    assert initializer.name == "initialize-transfer-staging"
+    assert initializer.image == _RUNNER_IMAGE
+    assert initializer.command is not None
+    assert "transfer-staging" in initializer.command[-1]
     assert pvc.spec.storage_class_name == "gp3"
     assert pvc.spec.storage_request == "20Gi"
     assert "azents/workspace-path" not in pod.metadata.labels

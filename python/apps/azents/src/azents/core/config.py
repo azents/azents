@@ -98,6 +98,7 @@ class Settings(BaseSettings):
     runtime_transfer_coordinator_tls_ca_file: Path | None = None
     runtime_transfer_coordinator_allow_insecure: bool = False
     runtime_transfer_coordinator_credential_lifetime_seconds: float = 30.0
+    runtime_transfer_object_prefix: str = "runtime-transfer"
 
     # Streaming model transport and watchdog
     openai_responses_websocket_enabled: bool = True
@@ -326,6 +327,7 @@ class RuntimeTransferCoordinatorConfig(BaseModel):
         le=60,
         allow_inf_nan=False,
     )
+    object_prefix: str = "runtime-transfer"
 
     @property
     def enabled(self) -> bool:
@@ -483,6 +485,7 @@ class Config(BaseModel):
                 credential_lifetime_seconds=(
                     settings.runtime_transfer_coordinator_credential_lifetime_seconds
                 ),
+                object_prefix=settings.runtime_transfer_object_prefix,
             ),
             model_stream_timeout=ModelStreamTimeoutConfig(
                 connect_timeout_seconds=(settings.model_stream_connect_timeout_seconds),

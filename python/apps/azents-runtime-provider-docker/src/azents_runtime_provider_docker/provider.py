@@ -565,10 +565,28 @@ def _ensure_writable_dir(path: Path) -> None:
 
 
 def _ensure_protected_staging_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    if os.geteuid() == 0:
-        os.chown(path, 0, 0)
-    path.chmod(0o700)  # noqa: S103
+    if os.geteuid() != 0:
+        raise PermissionError(
+            "protected Runtime transfer staging requires a root Docker provider"
+        )
+    try:
+        path.mkdir(parents=True)
+    except FileExistsError:
+        pass
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise OSError("transfer staging path is not a directory")
+        os.fchown(descriptor, 0, 0)
+        os.fchmod(descriptor, 0o700)
+        metadata = os.fstat(descriptor)
+        if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
+            raise PermissionError(
+                "transfer staging directory protection was not applied"
+            )
+    finally:
+        os.close(descriptor)
 
 
 def _observed_state(

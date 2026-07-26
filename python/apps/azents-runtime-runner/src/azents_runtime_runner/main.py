@@ -373,9 +373,17 @@ def _protected_staging_directory_from_env() -> Path:
     path = Path(_required_env("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"))
     if not path.is_absolute() or os.geteuid() != 0:
         raise SystemExit("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY is not protected")
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    metadata = path.stat()
-    if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise SystemExit(
+            "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY is not protected"
+        ) from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
         raise SystemExit("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY is not protected")
     return path
 

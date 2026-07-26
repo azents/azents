@@ -30,6 +30,7 @@ from azents_runtime_control.provider import (
     RuntimeProviderObservedState as ControlRuntimeProviderObservedState,
 )
 
+import azents_runtime_provider_docker.provider as docker_provider
 from azents_runtime_provider_docker.docker_api import (
     DockerApi,
     DockerContainerInfo,
@@ -50,8 +51,27 @@ from azents_runtime_provider_docker.provider import (
     DockerRuntimeProviderConfig,
     InvalidResetFinalDesiredState,
     InvalidWorkspacePath,
+    _ensure_protected_staging_dir,  # pyright: ignore[reportPrivateUsage] -- Verify the Provider fails closed without root ownership authority.
 )
 from azents_runtime_provider_docker.runtime_control import DockerRuntimeControlAdapter
+
+
+@pytest.fixture(autouse=True)
+def _fake_docker_lifecycle_staging(  # pyright: ignore[reportUnusedFunction] -- Pytest discovers autouse fixtures.
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep Docker API lifecycle tests independent from host root ownership."""
+    if os.geteuid() == 0:
+        return
+
+    def create_staging_for_fake_docker(path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        docker_provider,
+        "_ensure_protected_staging_dir",
+        create_staging_for_fake_docker,
+    )
 
 
 @dataclasses.dataclass
@@ -240,6 +260,20 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
         assert workspace_stat.st_mode & 0o777 == 0o755
     else:
         assert workspace_stat.st_mode & 0o777 == 0o777
+
+
+def test_protected_staging_requires_root_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-root Provider cannot accidentally expose a writable staging directory."""
+    staging = tmp_path / "transfer-staging"
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+
+    with pytest.raises(PermissionError, match="requires a root Docker provider"):
+        _ensure_protected_staging_dir(staging)
+
+    assert not staging.exists()
 
 
 @pytest.mark.asyncio
