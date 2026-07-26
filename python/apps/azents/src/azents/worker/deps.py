@@ -182,6 +182,7 @@ def get_builtin_toolkit_provider(
         runner_operations=runner_operations,
         project_repo=SessionWorkspaceProjectRepository(),
         server_to_runtime_transfer_service=None,
+        runtime_to_server_publication_service=None,
         import_file_staging_configuration=None,
     )
 

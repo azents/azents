@@ -28,6 +28,14 @@ class RuntimeToServerTransferExecutor(Protocol):
         ...
 
 
+class PresentFilePublicationError(RuntimeError):
+    """Raised when a verified Runtime upload cannot publish to Exchange."""
+
+
+class PresentFilePublicationAccessDenied(PresentFilePublicationError):
+    """Raised when Exchange authority validation denies publication."""
+
+
 class OpaqueTransferObjectResolver(Protocol):
     """Resolve opaque transfer handles only inside trusted server code."""
 
@@ -99,9 +107,9 @@ class _ExchangePublicationCallback(RuntimeToServerPublicationCallback):
             media_type=self.request.media_type,
         )
         if isinstance(result, Failure):
-            raise RuntimeError("Exchange publication was denied")
+            raise PresentFilePublicationAccessDenied("Exchange publication was denied")
         if not isinstance(result, Success):
-            raise RuntimeError("Unexpected Exchange publication result")
+            raise PresentFilePublicationError("Unexpected Exchange publication result")
         self.published = result.value
 
 
@@ -150,5 +158,7 @@ class PresentFilePublicationService:
             )
         )
         if callback.published is None:
-            raise RuntimeError("Runtime upload completed without Exchange publication")
+            raise PresentFilePublicationError(
+                "Runtime upload completed without Exchange publication"
+            )
         return callback.published

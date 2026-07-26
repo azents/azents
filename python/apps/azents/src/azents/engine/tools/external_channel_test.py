@@ -193,6 +193,7 @@ def _toolkit(
                 file_storage=file_storage,
                 projects=(),
                 transfer_capability=None,
+                publication_capability=None,
             )
         )
         toolkit.set_runtime_context_store(store)
