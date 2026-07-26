@@ -69,6 +69,9 @@ class RuntimeRunnerControlStreamClosed(RuntimeError):
     """Runner Control gRPC stream closed before the requested operation finished."""
 
 
+_MAX_OUTBOUND_MESSAGES = 256
+
+
 class GrpcRunnerControlClient(RunnerControlClient):
     """RunnerControlClient implementation backed by a bidirectional gRPC stream."""
 
@@ -86,7 +89,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
         self._metadata = _auth_metadata(runner_auth_token)
         self._outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerMessage] = (
-            asyncio.Queue()
+            asyncio.Queue(maxsize=_MAX_OUTBOUND_MESSAGES)
         )
         self._operation_handler: RunnerOperationHandler | None = None
         self._operation_cancel_handler: RunnerOperationCancelHandler | None = None

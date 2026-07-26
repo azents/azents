@@ -766,6 +766,7 @@ class InMemoryRuntimeTransferStateStore:
                 or record.revision != expected_revision
                 or record.phase is not RuntimeTransferPhase.VERIFYING
                 or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+                or (transfer_id, attempt_id) in self.released
                 or record.admission.runtime_id != runtime_id
                 or record.admission.desired_generation != desired_generation
                 or record.accepted_runner_generation != accepted_runner_generation

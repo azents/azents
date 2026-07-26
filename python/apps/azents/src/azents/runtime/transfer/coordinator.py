@@ -225,7 +225,9 @@ class RuntimeTransferCoordinator:
             await self._append_terminal_reply(cancelled)
             return cancelled
         await self._deliver_cancellation(cancelled, reason)
-        if cancelled.phase.value != "streaming":
+        if cancelled.phase.value != "streaming" and not self._in_download_commit_grace(
+            cancelled
+        ):
             settlement = cancellation_settlement(reason)
             return await self.settle_terminal(
                 cancelled,
@@ -266,7 +268,9 @@ class RuntimeTransferCoordinator:
             expired,
             RuntimeTransferCancellationReason.DEADLINE,
         )
-        if expired.phase.value != "streaming":
+        if expired.phase.value != "streaming" and not self._in_download_commit_grace(
+            expired
+        ):
             settlement = cancellation_settlement(
                 RuntimeTransferCancellationReason.DEADLINE
             )
@@ -299,6 +303,18 @@ class RuntimeTransferCoordinator:
             or current.admission.attempt_id != record.admission.attempt_id
         ):
             return None
+        if (
+            current.phase.value == "terminal"
+            and current.terminal_outcome is RuntimeTransferOutcome.SUCCEEDED
+        ):
+            current = await self._cleanup_before_terminal(current)
+            await self._state_store.release_admission(
+                current.admission.transfer_id,
+                attempt_id=current.admission.attempt_id,
+                lease_id=current.lease_id,
+            )
+            await self._append_terminal_reply(current)
+            return current
         if current.cancellation_reason is not None:
             settlement = cancellation_settlement(current.cancellation_reason)
             outcome = settlement.outcome
@@ -927,6 +943,14 @@ class RuntimeTransferCoordinator:
                 "Runtime transfer coordinator clock must be timezone-aware"
             )
         return now
+
+    def _in_download_commit_grace(self, record: RuntimeTransferRecord) -> bool:
+        return bool(
+            record.admission.direction.value == "download"
+            and record.phase.value == "verifying"
+            and record.runner_commit_expires_at is not None
+            and self._now() < record.runner_commit_expires_at
+        )
 
 
 def object_handle_for(record: RuntimeTransferRecord) -> str:

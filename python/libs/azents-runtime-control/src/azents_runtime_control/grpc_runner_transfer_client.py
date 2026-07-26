@@ -99,12 +99,20 @@ class GrpcRunnerTransferClient:
     async def download(
         self,
         identity: RunnerTransferIdentity,
+        *,
+        timeout: float,
     ) -> AsyncIterator[RunnerDownloadChunk | RunnerDownloadComplete]:
         """Yield bounded ordered data and one terminal download manifest."""
+        if timeout <= 0:
+            raise ValueError("Runner Transfer download timeout must be positive")
         request = runtime_runner_transfer_pb2.DownloadTransferRequest(
             identity=_identity_message(identity)
         )
-        call = self._stub.DownloadTransfer(request, metadata=self._metadata)
+        call = self._stub.DownloadTransfer(
+            request,
+            metadata=self._metadata,
+            timeout=timeout,
+        )
         async for frame in call:
             payload = frame.WhichOneof("payload")
             if payload == "chunk":
@@ -129,8 +137,12 @@ class GrpcRunnerTransferClient:
         self,
         identity: RunnerTransferIdentity,
         frames: AsyncIterator[RunnerDownloadChunk | RunnerUploadComplete],
+        *,
+        timeout: float,
     ) -> RunnerUploadResult:
         """Stream bounded upload frames and return the authoritative manifest."""
+        if timeout <= 0:
+            raise ValueError("Runner Transfer upload timeout must be positive")
 
         async def request_frames() -> AsyncIterator[
             runtime_runner_transfer_pb2.UploadTransferFrame
@@ -163,6 +175,7 @@ class GrpcRunnerTransferClient:
         result = await self._stub.UploadTransfer(
             request_frames(),
             metadata=self._metadata,
+            timeout=timeout,
         )
         if (
             result.status

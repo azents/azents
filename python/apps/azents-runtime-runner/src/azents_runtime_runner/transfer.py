@@ -14,16 +14,17 @@ from typing import Protocol
 
 import grpc
 from azents_runtime_control.grpc_runner_transfer_client import (
-    GrpcRunnerTransferClient,
     RunnerDownloadChunk,
     RunnerDownloadComplete,
     RunnerUploadComplete,
+    RunnerUploadResult,
     runner_transfer_failure_from_grpc,
 )
 from azents_runtime_control.runner_transfer import (
     RunnerTransferCancel,
     RunnerTransferDirection,
     RunnerTransferFailure,
+    RunnerTransferIdentity,
     RunnerTransferIntent,
     RunnerTransferOutcome,
     RunnerTransferResult,
@@ -50,6 +51,29 @@ class RunnerTransferResultSink(Protocol):
         ...
 
 
+class RunnerTransferClient(Protocol):
+    """Dedicated data-channel operations required by local transfer tasks."""
+
+    def download(
+        self,
+        identity: RunnerTransferIdentity,
+        *,
+        timeout: float,
+    ) -> AsyncIterator[RunnerDownloadChunk | RunnerDownloadComplete]:
+        """Open one bounded server-streaming download."""
+        ...
+
+    async def upload(
+        self,
+        identity: RunnerTransferIdentity,
+        frames: AsyncIterator[RunnerDownloadChunk | RunnerUploadComplete],
+        *,
+        timeout: float,
+    ) -> RunnerUploadResult:
+        """Open one bounded client-streaming upload."""
+        ...
+
+
 @dataclass(frozen=True)
 class _FileIdentity:
     device: int
@@ -66,6 +90,12 @@ class _ActiveTransfer:
     task: asyncio.Task[None]
 
 
+@dataclass(frozen=True)
+class _TransferTombstone:
+    intent: RunnerTransferIntent
+    result: RunnerTransferResult
+
+
 class RunnerTransferManager:
     """Isolate bounded transfer tasks from ordinary Runner operation scheduling."""
 
@@ -73,7 +103,7 @@ class RunnerTransferManager:
         self,
         *,
         control: RunnerTransferResultSink,
-        transfer: GrpcRunnerTransferClient,
+        transfer: RunnerTransferClient,
         accepted_generation: Callable[[], int | None],
         max_active_transfers: int = _DEFAULT_MAX_ACTIVE_TRANSFERS,
         max_tombstones: int = _DEFAULT_MAX_TOMBSTONES,
@@ -87,7 +117,10 @@ class RunnerTransferManager:
         self._max_active_transfers = max_active_transfers
         self._max_tombstones = max_tombstones
         self._active: dict[_TransferKey, _ActiveTransfer] = {}
-        self._tombstones: dict[_TransferKey, RunnerTransferResult] = {}
+        self._active_by_identity: dict[_TransferIdentityKey, _TransferKey] = {}
+        self._tombstones: dict[_TransferKey, _TransferTombstone] = {}
+        self._completed_by_identity: dict[_TransferIdentityKey, _TransferKey] = {}
+        self._pending_emits: set[asyncio.Task[None]] = set()
         self._lock = asyncio.Lock()
         self._commit_lock = asyncio.Lock()
         self._closed = False
@@ -95,33 +128,36 @@ class RunnerTransferManager:
     async def handle_intent(self, intent: RunnerTransferIntent) -> None:
         """Validate and admit one intent without awaiting its transfer task."""
         key = _key(intent)
+        identity_key = _identity_key(intent)
         invalid = _validate_intent(intent, self._accepted_generation())
+        result: RunnerTransferResult | None = None
         async with self._lock:
-            prior = self._tombstones.get(key)
-            if prior is not None:
-                await self._emit(prior)
-                return
-            active = self._active.get(key)
-            if active is not None:
-                if active.intent != intent:
-                    await self._emit(
-                        _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
-                    )
-                return
-            if invalid is not None:
+            active_key = self._active_by_identity.get(identity_key)
+            completed_key = self._completed_by_identity.get(identity_key)
+            if active_key is not None:
+                active = self._active[active_key]
+                if active_key != key or active.intent != intent:
+                    result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
+            elif completed_key is not None:
+                prior = self._tombstones[completed_key]
+                if completed_key == key and prior.intent == intent:
+                    result = prior.result
+                else:
+                    result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
+            elif invalid is not None:
                 result = _failed(intent, invalid)
-                self._remember(key, result)
-                await self._emit(result)
-                return
-            if self._closed or len(self._active) >= self._max_active_transfers:
+                self._remember(intent, result)
+            elif self._closed or len(self._active) >= self._max_active_transfers:
                 result = _failed(intent, RunnerTransferFailure.RESOURCE_EXHAUSTED)
-                self._remember(key, result)
-                await self._emit(result)
-                return
-            cancelled = asyncio.Event()
-            task = asyncio.create_task(self._run(intent, cancelled))
-            self._active[key] = _ActiveTransfer(intent, cancelled, task)
-            task.add_done_callback(lambda _: asyncio.create_task(self._reap(key)))
+                self._remember(intent, result)
+            else:
+                cancelled = asyncio.Event()
+                task = asyncio.create_task(self._run(intent, cancelled))
+                self._active[key] = _ActiveTransfer(intent, cancelled, task)
+                self._active_by_identity[identity_key] = key
+                task.add_done_callback(lambda _: asyncio.create_task(self._reap(key)))
+        if result is not None:
+            self._emit_later(result)
 
     async def handle_cancel(self, cancel: RunnerTransferCancel) -> None:
         """Cancel only the exact active transfer identity and dispatch."""
@@ -141,16 +177,24 @@ class RunnerTransferManager:
         async with self._lock:
             self._closed = True
             active = tuple(self._active.values())
+            pending_emits = tuple(self._pending_emits)
             for item in active:
                 item.cancelled.set()
                 item.task.cancel()
+            for task in pending_emits:
+                task.cancel()
         for item in active:
             with contextlib.suppress(asyncio.CancelledError):
                 await item.task
+        for task in pending_emits:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     async def _reap(self, key: "_TransferKey") -> None:
         async with self._lock:
-            self._active.pop(key, None)
+            active = self._active.pop(key, None)
+            if active is not None:
+                self._active_by_identity.pop(_identity_key(active.intent), None)
 
     async def _run(
         self, intent: RunnerTransferIntent, cancelled: asyncio.Event
@@ -163,17 +207,17 @@ class RunnerTransferManager:
         except asyncio.CancelledError:
             result = _cancelled(intent)
             await asyncio.shield(self._emit(result))
-            self._remember(_key(intent), result)
+            self._remember(intent, result)
             raise
         except grpc.aio.AioRpcError as exc:
             result = _failed(intent, runner_transfer_failure_from_grpc(exc))
         except _TransferFailure as exc:
             result = _failed(intent, exc.failure)
         except OSError:
-            result = _failed(intent, RunnerTransferFailure.DESTINATION_FAILED)
+            result = _failed(intent, _local_io_failure(intent))
         except ValueError:
             result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
-        self._remember(_key(intent), result)
+        self._remember(intent, result)
         await self._emit(result)
 
     async def _download(
@@ -189,7 +233,7 @@ class RunnerTransferManager:
         parent_fd, destination_name = _open_parent(intent.runtime_path, create=True)
         stage_name = _temporary_name(intent, "download")
         stage_fd: int | None = None
-        published = False
+        stage_exists = False
         try:
             stage_fd = os.open(
                 stage_name,
@@ -197,10 +241,14 @@ class RunnerTransferManager:
                 0o600,
                 dir_fd=parent_fd,
             )
+            stage_exists = True
             offset = 0
             digest = hashlib.sha256()
             complete: RunnerDownloadComplete | None = None
-            async for frame in self._transfer.download(intent.identity):
+            async for frame in self._transfer.download(
+                intent.identity,
+                timeout=_remaining_timeout(intent),
+            ):
                 _check_stop(intent, cancelled)
                 if isinstance(frame, RunnerDownloadComplete):
                     if complete is not None:
@@ -215,7 +263,7 @@ class RunnerTransferManager:
                     raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
                 if frame.offset != offset or offset + len(frame.data) > expected_size:
                     raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
-                _write_all(stage_fd, frame.data)
+                await asyncio.to_thread(_write_all, stage_fd, frame.data)
                 digest.update(frame.data)
                 offset += len(frame.data)
             if (
@@ -226,7 +274,7 @@ class RunnerTransferManager:
                 or digest.hexdigest() != expected_sha256
             ):
                 raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
-            os.fsync(stage_fd)
+            await asyncio.to_thread(os.fsync, stage_fd)
             os.close(stage_fd)
             stage_fd = None
             async with self._commit_lock:
@@ -239,6 +287,7 @@ class RunnerTransferManager:
                         src_dir_fd=parent_fd,
                         dst_dir_fd=parent_fd,
                     )
+                    stage_exists = False
                 else:
                     os.link(
                         stage_name,
@@ -246,9 +295,12 @@ class RunnerTransferManager:
                         src_dir_fd=parent_fd,
                         dst_dir_fd=parent_fd,
                     )
-                    os.unlink(stage_name, dir_fd=parent_fd)
-                os.fsync(parent_fd)
-                published = True
+                if stage_exists:
+                    with contextlib.suppress(OSError):
+                        os.unlink(stage_name, dir_fd=parent_fd)
+                        stage_exists = False
+                with contextlib.suppress(OSError):
+                    await asyncio.to_thread(os.fsync, parent_fd)
             return RunnerTransferResult(
                 identity=intent.identity,
                 operation_id=intent.operation_id,
@@ -263,7 +315,7 @@ class RunnerTransferManager:
         finally:
             if stage_fd is not None:
                 os.close(stage_fd)
-            if not published:
+            if stage_exists:
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(stage_name, dir_fd=parent_fd)
             os.close(parent_fd)
@@ -297,15 +349,15 @@ class RunnerTransferManager:
             copied = 0
             while True:
                 _check_stop(intent, cancelled)
-                chunk = os.read(source_fd, _BUFFER_BYTES)
+                chunk = await asyncio.to_thread(os.read, source_fd, _BUFFER_BYTES)
                 if not chunk:
                     break
                 copied += len(chunk)
                 if copied > expected_size:
                     raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
-                _write_all(snapshot_fd, chunk)
+                await asyncio.to_thread(_write_all, snapshot_fd, chunk)
                 digest.update(chunk)
-            os.fsync(snapshot_fd)
+            await asyncio.to_thread(os.fsync, snapshot_fd)
             os.close(snapshot_fd)
             snapshot_fd = None
             after_fd = _regular_identity(os.fstat(source_fd))
@@ -331,7 +383,11 @@ class RunnerTransferManager:
                     offset = 0
                     while True:
                         _check_stop(intent, cancelled)
-                        chunk = os.read(snapshot_read, _BUFFER_BYTES)
+                        chunk = await asyncio.to_thread(
+                            os.read,
+                            snapshot_read,
+                            _BUFFER_BYTES,
+                        )
                         if not chunk:
                             break
                         yield RunnerDownloadChunk(offset=offset, data=chunk)
@@ -340,7 +396,11 @@ class RunnerTransferManager:
                 finally:
                     os.close(snapshot_read)
 
-            authoritative = await self._transfer.upload(intent.identity, frames())
+            authoritative = await self._transfer.upload(
+                intent.identity,
+                frames(),
+                timeout=_remaining_timeout(intent),
+            )
             if (
                 authoritative.actual_size != copied
                 or authoritative.sha256 != actual_sha256
@@ -369,10 +429,28 @@ class RunnerTransferManager:
     async def _emit(self, result: RunnerTransferResult) -> None:
         await self._control.append_runner_transfer_result(result)
 
-    def _remember(self, key: "_TransferKey", result: RunnerTransferResult) -> None:
-        self._tombstones[key] = result
+    def _emit_later(self, result: RunnerTransferResult) -> None:
+        if self._closed or len(self._pending_emits) >= self._max_tombstones:
+            return
+        task = asyncio.create_task(self._emit(result))
+        self._pending_emits.add(task)
+        task.add_done_callback(self._pending_emits.discard)
+
+    def _remember(
+        self,
+        intent: RunnerTransferIntent,
+        result: RunnerTransferResult,
+    ) -> None:
+        key = _key(intent)
+        identity_key = _identity_key(intent)
+        self._tombstones[key] = _TransferTombstone(intent, result)
+        self._completed_by_identity[identity_key] = key
         while len(self._tombstones) > self._max_tombstones:
-            self._tombstones.pop(next(iter(self._tombstones)))
+            evicted_key = next(iter(self._tombstones))
+            self._tombstones.pop(evicted_key)
+            evicted_identity = _identity_key_from_key(evicted_key)
+            if self._completed_by_identity.get(evicted_identity) == evicted_key:
+                self._completed_by_identity.pop(evicted_identity)
 
 
 @dataclass(frozen=True)
@@ -384,6 +462,14 @@ class _TransferKey:
     operation_id: str
     dispatch_id: str
     direction: RunnerTransferDirection
+
+
+@dataclass(frozen=True)
+class _TransferIdentityKey:
+    transfer_id: str
+    attempt_id: str
+    runtime_id: str
+    generation: int
 
 
 class _TransferFailure(Exception):
@@ -403,6 +489,24 @@ def _key(intent: RunnerTransferIntent) -> _TransferKey:
     )
 
 
+def _identity_key(intent: RunnerTransferIntent) -> _TransferIdentityKey:
+    return _TransferIdentityKey(
+        intent.identity.transfer_id,
+        intent.identity.attempt_id,
+        intent.identity.runtime_id,
+        intent.identity.runner_generation,
+    )
+
+
+def _identity_key_from_key(key: _TransferKey) -> _TransferIdentityKey:
+    return _TransferIdentityKey(
+        key.transfer_id,
+        key.attempt_id,
+        key.runtime_id,
+        key.generation,
+    )
+
+
 def _validate_intent(
     intent: RunnerTransferIntent,
     accepted_generation: int | None,
@@ -416,6 +520,16 @@ def _validate_intent(
         or intent.expected_size < 0
         or intent.deadline_at <= datetime.now(UTC)
         or not PurePath(intent.runtime_path).is_absolute()
+        or not all(
+            _valid_identifier(value)
+            for value in (
+                intent.identity.transfer_id,
+                intent.identity.attempt_id,
+                intent.identity.runtime_id,
+                intent.operation_id,
+                intent.dispatch_id,
+            )
+        )
     ):
         return RunnerTransferFailure.PROTOCOL_VIOLATION
     if (
@@ -426,9 +540,19 @@ def _validate_intent(
     return None
 
 
+def _valid_identifier(value: str) -> bool:
+    try:
+        size = len(value.encode())
+    except UnicodeEncodeError:
+        return False
+    return 1 <= size <= 128
+
+
 def _failed(
     intent: RunnerTransferIntent, failure: RunnerTransferFailure
 ) -> RunnerTransferResult:
+    if failure is RunnerTransferFailure.CANCELLED:
+        return _cancelled(intent)
     return RunnerTransferResult(
         identity=intent.identity,
         operation_id=intent.operation_id,
@@ -461,6 +585,13 @@ def _check_stop(intent: RunnerTransferIntent, cancelled: asyncio.Event) -> None:
         raise _TransferFailure(RunnerTransferFailure.CANCELLED)
     if datetime.now(UTC) >= intent.deadline_at:
         raise _TransferFailure(RunnerTransferFailure.DEADLINE_EXCEEDED)
+
+
+def _remaining_timeout(intent: RunnerTransferIntent) -> float:
+    remaining = (intent.deadline_at - datetime.now(UTC)).total_seconds()
+    if remaining <= 0:
+        raise _TransferFailure(RunnerTransferFailure.DEADLINE_EXCEEDED)
+    return remaining
 
 
 def _open_parent(path: str, *, create: bool) -> tuple[int, str]:
@@ -522,12 +653,22 @@ def _regular_identity(value: os.stat_result) -> _FileIdentity:
 
 
 def _temporary_name(intent: RunnerTransferIntent, direction: str) -> str:
+    identity = "\x00".join(
+        (
+            intent.identity.transfer_id,
+            intent.identity.attempt_id,
+            intent.identity.runtime_id,
+            str(intent.identity.runner_generation),
+            intent.operation_id,
+            intent.dispatch_id,
+        )
+    )
+    fingerprint = hashlib.sha256(identity.encode()).hexdigest()[:32]
     return "-".join(
         (
             ".azents-transfer",
             direction,
-            intent.identity.transfer_id,
-            intent.identity.attempt_id,
+            fingerprint,
             uuid.uuid4().hex,
         )
     )
@@ -538,3 +679,9 @@ def _write_all(fd: int, data: bytes) -> None:
     while view:
         written = os.write(fd, view)
         view = view[written:]
+
+
+def _local_io_failure(intent: RunnerTransferIntent) -> RunnerTransferFailure:
+    if intent.direction is RunnerTransferDirection.DOWNLOAD:
+        return RunnerTransferFailure.DESTINATION_FAILED
+    return RunnerTransferFailure.INTEGRITY_FAILED

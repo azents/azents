@@ -121,7 +121,10 @@ class RuntimeRunnerTransferResultCoordinator:
         operation: RuntimeOperationMetadata,
         result: RunnerTransferResult,
     ) -> None:
-        if operation.status is not RuntimeOperationStatus.ACTIVE:
+        if operation.status is not RuntimeOperationStatus.ACTIVE and not (
+            result.direction is RunnerTransferDirection.DOWNLOAD
+            and operation.status is RuntimeOperationStatus.CANCEL_REQUESTED
+        ):
             return
         if result.direction is RunnerTransferDirection.DOWNLOAD:
             if (
