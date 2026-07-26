@@ -197,17 +197,16 @@ function normalizeAction(
 }
 
 function getInputActionQuery(inputValue: string): string | null {
-  const trimmedStart = inputValue.trimStart();
-  if (!trimmedStart.startsWith("/")) {
+  if (!inputValue.startsWith("/")) {
     return null;
   }
 
-  const commandSegment = trimmedStart.slice(1);
-  if (commandSegment.includes(" ")) {
-    return null;
-  }
-
+  const commandSegment = inputValue.slice(1).match(/^\S*/)?.[0] ?? "";
   return commandSegment.toLowerCase();
+}
+
+function getInputActionMessage(inputValue: string): string {
+  return inputValue.slice(1).replace(/^\S*\s*/, "");
 }
 
 interface ComposerDraft {
@@ -676,6 +675,8 @@ export const ChatInput = memo(function ChatInput({
     );
   const [inputActionSuggestionsDismissed, setInputActionSuggestionsDismissed] =
     useState(false);
+  const [inputActionSuggestionsFocused, setInputActionSuggestionsFocused] =
+    useState(false);
   const [activeInputActionIndex, setActiveInputActionIndex] = useState(0);
   const inputActionListboxId = useId();
   const inputActionOptionRefs = useRef(new Map<number, HTMLButtonElement>());
@@ -699,7 +700,7 @@ export const ChatInput = memo(function ChatInput({
     ? null
     : selectedAction
       ? null
-      : inputActionSuggestionsDismissed
+      : inputActionSuggestionsDismissed || !inputActionSuggestionsFocused
         ? null
         : getInputActionQuery(inputValue);
   const visibleInputActions = useMemo(() => {
@@ -1042,12 +1043,22 @@ export const ChatInput = memo(function ChatInput({
       setSelectedAction(definition);
       setInputActionSuggestionsDismissed(false);
       setActiveInputActionIndex(0);
-      setInputValue("");
-      persistDraft("", normalizedAction, inferenceProfile);
+      const message = getInputActionMessage(inputValue);
+      setInputValue(message);
+      persistDraft(message, normalizedAction, inferenceProfile);
       textareaRef.current?.focus();
     },
-    [inferenceProfile, persistDraft],
+    [inferenceProfile, inputValue, persistDraft],
   );
+
+  const handleInputFocus = useCallback((): void => {
+    setInputActionSuggestionsFocused(true);
+    onFocus?.();
+  }, [onFocus]);
+
+  const handleInputBlur = useCallback((): void => {
+    setInputActionSuggestionsFocused(false);
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1715,7 +1726,8 @@ export const ChatInput = memo(function ChatInput({
               value={inputDisabled ? "" : inputValue}
               onChange={(event) => updateInputValue(event.currentTarget.value)}
               onKeyDown={handleKeyDown}
-              onFocus={onFocus}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
               aria-autocomplete={inputActionQuery === null ? void 0 : "list"}
               aria-controls={
                 visibleInputActions.length > 0 ? inputActionListboxId : void 0
