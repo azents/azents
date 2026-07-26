@@ -786,6 +786,9 @@
         "worker": {
           "$ref": "#/definitions/componentGate"
         },
+        "discordGateway": {
+          "$ref": "#/definitions/componentGate"
+        },
         "scheduler": {
           "$ref": "#/definitions/componentGate"
         },

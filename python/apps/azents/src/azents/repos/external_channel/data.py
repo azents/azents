@@ -865,6 +865,12 @@ class ExternalChannelIngressLease(_Record):
     updated_at: datetime.datetime
 
 
+class ExternalChannelIngressLeaseClaim(_Record):
+    """One successful fenced ingress-lease claim."""
+
+    lease: ExternalChannelIngressLease
+
+
 class ExternalChannelResourceProvisioning(_Record):
     """Durable result state for a resource provisioning operation."""
 
