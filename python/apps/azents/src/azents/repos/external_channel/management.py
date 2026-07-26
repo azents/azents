@@ -19,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
+    ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
@@ -383,6 +384,42 @@ class ExternalChannelManagementRepository:
         connection.socket_heartbeat_at = None
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
+        await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
+        return await self.get_managed_multi_connection(
+            session,
+            workspace_id=workspace_id,
+            connection_id=connection.id,
+        )
+
+    async def replace_multi_discord_configuration(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        provider_app_id: str,
+        encrypted_credentials: str,
+        provider_config: dict[str, object],
+    ) -> ManagedMultiConnection | None:
+        """Fence one Workspace Discord configuration before callback activation."""
+        connection = await self.get_multi_connection(
+            session,
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            lock=True,
+        )
+        if (
+            connection is None
+            or connection.provider is not ExternalChannelProvider.DISCORD
+        ):
+            return None
+        _reset_discord_configuration(
+            connection,
+            provider_app_id=provider_app_id,
+            encrypted_credentials=encrypted_credentials,
+            provider_config=provider_config,
+        )
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return await self.get_managed_multi_connection(
@@ -847,6 +884,40 @@ class ExternalChannelManagementRepository:
         connection.socket_heartbeat_at = None
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
+        await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
+        return _connection(connection, route)
+
+    async def replace_discord_configuration(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        connection_id: str,
+        provider_app_id: str,
+        encrypted_credentials: str,
+        provider_config: dict[str, object],
+    ) -> ManagedConnection | None:
+        """Fence a dedicated Discord configuration before callback activation."""
+        row = await self.get_connection(
+            session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            connection_id=connection_id,
+            lock=True,
+        )
+        if row is None:
+            return None
+        connection, route = row
+        if connection.provider is not ExternalChannelProvider.DISCORD:
+            return None
+        _reset_discord_configuration(
+            connection,
+            provider_app_id=provider_app_id,
+            encrypted_credentials=encrypted_credentials,
+            provider_config=provider_config,
+        )
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)
@@ -1651,6 +1722,33 @@ def _block(
         created_at=block.created_at,
         removed_at=block.removed_at,
     )
+
+
+def _reset_discord_configuration(
+    connection: RDBExternalChannelConnection,
+    *,
+    provider_app_id: str,
+    encrypted_credentials: str,
+    provider_config: dict[str, object],
+) -> None:
+    """Invalidate every prior Discord authority fence before reactivation."""
+    connection.provider_app_id = provider_app_id
+    connection.provider_tenant_id = None
+    connection.provider_bot_user_id = None
+    connection.http_callback_selector_hash = None
+    connection.encrypted_credentials = encrypted_credentials
+    connection.capabilities = None
+    connection.provider_config = provider_config
+    connection.configuration_generation += 1
+    connection.status = ExternalChannelConnectionStatus.CONFIGURING
+    connection.last_verified_at = None
+    connection.last_health_at = None
+    connection.disconnected_at = None
+    connection.socket_lease_owner = None
+    connection.socket_lease_until = None
+    connection.socket_heartbeat_at = None
+    connection.socket_gap_detected_at = None
+    connection.socket_gap_reason = None
 
 
 def _provider_payload(

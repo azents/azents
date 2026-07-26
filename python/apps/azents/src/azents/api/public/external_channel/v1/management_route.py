@@ -252,6 +252,34 @@ async def update_multi_slack_connection(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
+@router.put("/workspaces/{handle}/external-channels/discord/multi/{connection_id}")
+async def update_multi_discord_connection(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    *,
+    connection_id: str,
+    request_body: DiscordConnectionSetupRequest,
+) -> ExternalChannelConnectionStatusSnapshot:
+    """Replace a Discord Multi App and reactivate its callback authority."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    _require_discord_enabled(config)
+    try:
+        return await service.update_multi_discord(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            app_id=request_body.app_id,
+            configuration=request_body.configuration,
+            credentials=request_body.credentials,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ExternalChannelConnectionStateChanged as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
 @router.post(
     "/workspaces/{handle}/external-channels/slack/multi/{connection_id}/validate"
 )
@@ -693,6 +721,41 @@ async def update_slack_connection(
             connection_id=connection_id,
             app_id=request_body.app_id,
             transport=request_body.transport,
+            credentials=request_body.credentials,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ExternalChannelConnectionStateChanged as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.put(
+    "/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord"
+)
+async def update_discord_connection(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+    *,
+    agent_id: str,
+    connection_id: str,
+    request_body: DiscordConnectionSetupRequest,
+) -> ExternalChannelConnectionStatusSnapshot:
+    """Replace a dedicated Discord App and reactivate callback authority."""
+    _require_discord_enabled(config)
+    try:
+        return await service.update_discord(
+            workspace_id=member.workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=member.workspace_user_id,
+            connection_id=connection_id,
+            app_id=request_body.app_id,
+            configuration=request_body.configuration,
             credentials=request_body.credentials,
         )
     except ExternalChannelManagementNotFound as error:
