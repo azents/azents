@@ -38,7 +38,7 @@ async def _noop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_wait_tool_is_independent_and_returns_mailbox_activity() -> None:
+async def test_wait_tool_is_independent_and_describes_input_activity() -> None:
     observer = MailboxActivityObserver()
     toolkit = WaitToolkit(
         wait_service=cast(
@@ -53,7 +53,10 @@ async def test_wait_tool_is_independent_and_returns_mailbox_activity() -> None:
     result = await state.tools[0].handler(json.dumps({}))
     assert json.loads(cast(str, result)) == {
         "outcome": "activity",
-        "reason": "mailbox",
+        "reason": (
+            "new user input, agent or subagent message, scheduled continuation, "
+            "external-channel request, or action"
+        ),
     }
 
 
@@ -100,5 +103,8 @@ async def test_wait_tool_reconciles_after_activity_signal_loss() -> None:
     result = await state.tools[0].handler(json.dumps({"timeout_seconds": 1}))
     assert json.loads(cast(str, result)) == {
         "outcome": "activity",
-        "reason": "mailbox",
+        "reason": (
+            "new user input, agent or subagent message, scheduled continuation, "
+            "external-channel request, or action"
+        ),
     }

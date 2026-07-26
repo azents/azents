@@ -17,6 +17,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { AgentMessageDisclosure } from "./AgentMessageDisclosure";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
 import { MessageActionRow } from "./MessageActionRow";
 import { MessageMetadataSurface } from "./MessageMetadataFooter";
@@ -25,34 +26,6 @@ import type { PendingMailboxEntry } from "../hooks/pendingMailboxState";
 interface PendingMailboxBubbleProps {
   entry: PendingMailboxEntry;
   onDelete: (correlation: string) => void;
-}
-
-type PendingAction = Extract<
-  PendingMailboxEntry["item"]["presentation"],
-  { type: "action_message" }
->["action"];
-
-function skillNameFromPath(skillPath: string): string {
-  const parts = skillPath.split("/").filter(Boolean);
-  const last = parts.at(-1) ?? skillPath;
-  return last === "SKILL.md"
-    ? (parts.at(-2) ?? last)
-    : last.replace(/\.md$/u, "");
-}
-
-function actionDetailLabel(action: PendingAction): string {
-  switch (action.type) {
-    case "command":
-      return `/${action.name}`;
-    case "goal":
-      return "/goal";
-    case "skill":
-      return `/${skillNameFromPath(action.skill_path)}`;
-    case "create_git_worktree":
-      return `/worktree ${action.starting_ref}`;
-    case "cleanup_orphan_git_worktrees":
-      return "/cleanup-worktrees";
-  }
 }
 
 export function PendingMailboxBubble({
@@ -98,23 +71,12 @@ export function PendingMailboxBubble({
   if (presentation.type === "agent_message") {
     return (
       <MessageMetadataSurface>
-        <Paper
-          p="sm"
-          mb="md"
-          radius="lg"
-          withBorder
-          style={{ opacity: deleting ? 0.45 : 0.6 }}
-        >
-          <Stack gap={4}>
-            <Text size="xs" fw={700} c="dimmed">
-              Agent · {presentation.message_kind}
-            </Text>
-            <Text style={{ whiteSpace: "pre-wrap" }}>
-              {presentation.content}
-            </Text>
-            {commonActions}
-          </Stack>
-        </Paper>
+        <AgentMessageDisclosure
+          title={`Agent · ${presentation.message_kind}`}
+          content={presentation.content}
+          actions={commonActions}
+          opacity={deleting ? 0.45 : 0.6}
+        />
       </MessageMetadataSurface>
     );
   }
@@ -188,28 +150,13 @@ export function PendingMailboxBubble({
   if (presentation.type === "action_message") {
     return (
       <MessageMetadataSurface>
-        <Paper
-          withBorder
-          radius="md"
-          p="sm"
-          mb="md"
-          style={{ opacity: deleting ? 0.45 : 0.6 }}
-        >
-          <Stack gap="xs">
-            <Group gap="xs">
-              <Badge color="blue" variant="light">
-                Pending action
-              </Badge>
-              <Text size="xs" fw={700}>
-                {actionDetailLabel(presentation.action)}
-              </Text>
-            </Group>
-            <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-              {presentation.message}
-            </Text>
-            {commonActions}
-          </Stack>
-        </Paper>
+        <InputBufferBubbleFrame
+          content={presentation.message}
+          action={presentation.action}
+          attachments={[]}
+          opacity={deleting ? 0.45 : 0.6}
+          actions={commonActions}
+        />
       </MessageMetadataSurface>
     );
   }

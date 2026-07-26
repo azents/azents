@@ -27,7 +27,7 @@ class WaitToolkitConfig(BaseModel):
 
 
 class WaitToolkit(Toolkit[WaitToolkitConfig]):
-    """Wait for descendant work or durable mailbox activity."""
+    """Wait for descendant work or newly available input activity."""
 
     def __init__(self, *, wait_service: AgentWaitService) -> None:
         self.wait_service = wait_service
@@ -50,13 +50,15 @@ class WaitToolkit(Toolkit[WaitToolkitConfig]):
         """Return concise wait guidance."""
         del context
         return (
-            "Use wait only while descendant work is active. Any mailbox item may "
-            "end the wait; wait does not consume mailbox items."
+            "Use wait only while descendant work is active. New user input, an "
+            "agent or subagent message, a scheduled continuation, an "
+            "external-channel request, or an action may end the wait; wait does "
+            "not consume the input."
         )
 
     def _wait_tool(self) -> FunctionTool:
         async def wait(input: _WaitInput) -> str:
-            """Wait for descendant activity or mailbox activity."""
+            """Wait for descendant activity or newly available input."""
             if self.observer is None:
                 raise FunctionToolError("Mailbox activity observer is unavailable")
             return await self._wait(input.timeout_seconds)
@@ -65,8 +67,10 @@ class WaitToolkit(Toolkit[WaitToolkitConfig]):
             wait,
             name="wait",
             description=(
-                "Wait while descendant work is active. Returns on mailbox activity, "
-                "no descendants, all descendants idle, or timeout."
+                "Wait while descendant work is active. Returns when new user "
+                "input, an agent or subagent message, a scheduled continuation, "
+                "an external-channel request, or an action arrives; also returns "
+                "for no descendants, all descendants idle, or timeout."
             ),
         )
 
@@ -98,7 +102,15 @@ class _WaitInput(BaseModel):
 
 def _outcome(observation: WaitObservation) -> str | None:
     if observation.mailbox_updated:
-        return json.dumps({"outcome": "activity", "reason": "mailbox"})
+        return json.dumps(
+            {
+                "outcome": "activity",
+                "reason": (
+                    "new user input, agent or subagent message, scheduled "
+                    "continuation, external-channel request, or action"
+                ),
+            }
+        )
     if observation.descendant_count == 0:
         return json.dumps({"outcome": "not_waitable", "reason": "no_descendants"})
     if not observation.active_paths:

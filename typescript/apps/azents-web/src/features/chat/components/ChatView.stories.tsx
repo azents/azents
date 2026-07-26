@@ -240,6 +240,7 @@ const baseArgs = {
     reasoning_effort: null,
   },
   isResponsePending: false,
+  isModelResponsePending: false,
   isWritePending: false,
   lastEventReceivedAt: null,
   liveRun: null,
@@ -1322,6 +1323,35 @@ export const WithPendingInputBuffer = {
         },
       },
     ],
+  },
+} satisfies Story;
+
+export const PendingInputDoesNotRenderAgentRunIndicator = {
+  args: {
+    ...baseArgs,
+    isResponsePending: true,
+    isModelResponsePending: false,
+    pendingInputBuffers: [
+      {
+        id: "pending-input-without-run",
+        sessionId: storySessionId,
+        content: "This input is queued for a later model turn.",
+        attachments: [],
+        metadata: { source: "web" },
+        createdAt: "2026-05-19T00:00:00Z",
+        status: "pending",
+        requestedInferenceProfile: {
+          model_target_label: "default",
+          reasoning_effort: null,
+        },
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByRole("status", { name: "Agent is working" }),
+    ).toBeNull();
   },
 } satisfies Story;
 

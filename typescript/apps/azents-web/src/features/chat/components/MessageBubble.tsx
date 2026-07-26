@@ -10,7 +10,6 @@
 import {
   ActionIcon,
   Box,
-  Collapse,
   Group,
   Paper,
   rem,
@@ -18,14 +17,11 @@ import {
   Text,
   Tooltip,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import {
   IconCheck,
-  IconChevronRight,
   IconClock,
   IconMessageCircle,
   IconPencil,
-  IconRobot,
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -36,11 +32,8 @@ import {
   type CurrentWorkspaceProfile,
   humanSenderPresentation,
 } from "../senderPresentation";
+import { AgentMessageDisclosure } from "./AgentMessageDisclosure";
 import inlineControlClasses from "./ChatInlineControl.module.css";
-import {
-  chatChevronTransition,
-  chatCollapseTransitionProps,
-} from "./collapsiblePresentation";
 import { ExternalChannelMessage } from "./ExternalChannelMessage";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
@@ -272,72 +265,15 @@ function AgentMailboxMessage({
   message: ChatMessage;
 }): React.ReactElement {
   const t = useTranslations("chat");
-  const [opened, { toggle }] = useDisclosure(false);
   const sourcePath = message.metadata?.source_path || "/root";
   const sourceName = agentNameFromPath(sourcePath);
 
   return (
-    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
-      <Stack gap={rem(6)} maw={rem(720)}>
-        <Group
-          gap={rem(6)}
-          c="dimmed"
-          wrap="nowrap"
-          role="button"
-          tabIndex={0}
-          aria-expanded={opened}
-          aria-label={t("agentMessage.title", { name: sourcePath })}
-          className={inlineControlClasses.root}
-          style={{ cursor: "pointer", userSelect: "none" }}
-          onClick={toggle}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              toggle();
-            }
-          }}
-        >
-          <IconChevronRight
-            aria-hidden="true"
-            size={14}
-            stroke={1.8}
-            style={{
-              transform: opened ? "rotate(90deg)" : "none",
-              transition: chatChevronTransition,
-            }}
-          />
-          <IconRobot aria-hidden="true" size={14} stroke={1.8} />
-          <Tooltip label={sourcePath} openDelay={500}>
-            <Text
-              size="xs"
-              fw={600}
-              lineClamp={1}
-              className={inlineControlClasses.label}
-              style={{ minWidth: 0 }}
-            >
-              {t("agentMessage.title", { name: sourceName })}
-            </Text>
-          </Tooltip>
-        </Group>
-        <Collapse
-          expanded={opened}
-          keepMounted={false}
-          {...chatCollapseTransitionProps}
-        >
-          <Paper
-            withBorder
-            radius="md"
-            p="sm"
-            bg="var(--mantine-color-body)"
-            style={{ minWidth: 0, overflow: "hidden" }}
-          >
-            <Box style={{ overflowWrap: "anywhere" }}>
-              <MarkdownContent>{message.content ?? ""}</MarkdownContent>
-            </Box>
-          </Paper>
-        </Collapse>
-      </Stack>
-    </Box>
+    <AgentMessageDisclosure
+      title={t("agentMessage.title", { name: sourceName })}
+      titleTooltip={sourcePath}
+      content={message.content ?? ""}
+    />
   );
 }
 
