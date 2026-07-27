@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-07-27
-spec_version: 35
+spec_version: 36
 ---
 
 # Agent Runtime Control
@@ -291,6 +291,7 @@ Production deploys the new path through GitOps:
 
 - ECR repositories and GitHub Actions build/push runtime images.
 - The policy Gateway image exposes its executable at the stable `/usr/local/bin/azents-container-policy-gateway` path consumed by the Kubernetes Provider for the container command and readiness probe.
+- The policy Gateway treats Docker CLI's `HostConfig.MemorySwappiness=-1` wire default as unset and removes it before forwarding, while rejecting explicit swappiness authority.
 - Helm values/templates render runtime-control, runtime-runner, and Kubernetes provider settings.
 - ArgoCD Application/root/overlay includes the runtime provider deployment.
 - Final cutover defaults route production to the Agent Runtime path and disables/prunes the legacy sandbox provider-control traffic path.
@@ -314,6 +315,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-27** (spec_version 36) — Normalized Docker CLI's unset memory-swappiness sentinel so ordinary `docker run` requests pass the policy Gateway without granting swappiness authority.
 - **2026-07-27** (spec_version 35) — Fenced Runner policy evidence by desired generation during workload replacement and aligned the Gateway image executable with the Kubernetes container contract.
 - **2026-07-27** (spec_version 34) — Prevented false start timeouts across Control rollouts and made Kubernetes Runtime Pod replacement wait for asynchronous deletion before recreation.
 - **2026-07-27** (spec_version 33) — Made mixed-policy convergence use a valid module-level security meet and kept invalidated historical evidence in automatic recovery state.

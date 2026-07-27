@@ -119,7 +119,7 @@ def _docker_cli_create_wire_body() -> dict[str, object]:
             "DeviceRequests": None,
             "MemoryReservation": 0,
             "MemorySwap": 0,
-            "MemorySwappiness": None,
+            "MemorySwappiness": -1,
             "OomKillDisable": None,
             "PidsLimit": 0,
             "Ulimits": None,
@@ -307,6 +307,7 @@ def test_pinned_docker_cli_create_defaults_are_normalized(
     assert request.requested_pids_limit == 32
     assert value["HostConfig"]["PidsLimit"] == 32
     assert value["HostConfig"]["ShmSize"] == 67_108_864
+    assert "MemorySwappiness" not in value["HostConfig"]
     assert value["AttachStdout"] is True
     assert value["AttachStderr"] is True
     for dropped in (
@@ -319,6 +320,26 @@ def test_pinned_docker_cli_create_defaults_are_normalized(
         "OnBuild",
     ):
         assert dropped not in value
+
+
+@pytest.mark.parametrize("memory_swappiness", [1, 50, 100])
+def test_container_create_rejects_explicit_memory_swappiness(
+    run_policy: RuntimeExecutionPolicy,
+    memory_swappiness: int,
+) -> None:
+    body = _docker_cli_create_wire_body()
+    host_config = body["HostConfig"]
+    assert isinstance(host_config, dict)
+    host_config["MemorySwappiness"] = memory_swappiness
+
+    with pytest.raises(GatewayAuthorizationDenied, match="MemorySwappiness"):
+        _authorize(
+            run_policy,
+            method="POST",
+            path="/v1.51/containers/create",
+            headers=json_headers(),
+            body=body,
+        )
 
 
 @pytest.mark.parametrize(

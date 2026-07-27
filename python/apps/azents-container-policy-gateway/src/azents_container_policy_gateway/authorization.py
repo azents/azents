@@ -834,7 +834,10 @@ def _host_config(
         "IOMaximumBandwidth",
     }
     for field in always_denied:
-        if _has_authority(value.get(field)):
+        field_value = value.get(field)
+        if field == "MemorySwappiness" and field_value == -1:
+            continue
+        if _has_authority(field_value):
             raise GatewayAuthorizationDenied(
                 "unsafe_container_field",
                 f"HostConfig.{field} is not permitted.",
