@@ -506,6 +506,52 @@ async def test_start_reuses_pod_with_kubernetes_default_tolerations() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_reuses_pod_with_kubernetes_default_service_account() -> None:
+    """The API-server default is safe when token automount remains disabled."""
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    api.pods[pod_key] = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(
+            pod.spec,
+            service_account_name="default",
+        ),
+    )
+
+    await provider.start(command)
+
+    assert api.deleted_pods == []
+    assert api.pods[pod_key].spec.service_account_name == "default"
+    assert api.pods[pod_key].spec.automount_service_account_token is False
+
+
+@pytest.mark.asyncio
+async def test_start_replaces_pod_with_non_default_service_account() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    api.pods[pod_key] = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(
+            pod.spec,
+            service_account_name="privileged-runtime",
+        ),
+    )
+
+    await provider.start(command)
+
+    assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    assert api.pods[pod_key].spec.service_account_name is None
+
+
+@pytest.mark.asyncio
 async def test_start_reuses_pod_with_canonicalized_kubernetes_quantities() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
