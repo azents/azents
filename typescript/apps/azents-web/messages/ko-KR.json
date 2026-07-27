@@ -1718,7 +1718,6 @@
           "reported_digest_mismatch": "Runtime이 현재 target과 다른 정책 식별값을 보고했습니다.",
           "target_generation_mismatch": "Runtime target이 이전 Generation에 속해 있어 다시 조정해야 합니다.",
           "applied_snapshot_missing": "적용된 것으로 기록된 정책 Snapshot을 찾을 수 없습니다.",
-          "applied_snapshot_unverified": "이전에 적용된 정책 증거를 다시 검증해야 합니다.",
           "applied_pointer_mismatch": "Runtime의 적용 정책 참조가 현재 검증된 target을 가리키지 않습니다.",
           "provider_evidence_mismatch": "Runtime Provider가 요청한 Generation과 target에 맞는 정책 증거를 반환하지 않았습니다.",
           "runtime_failure": "Runtime 작업에 실패했습니다. 참조 코드: {code}"

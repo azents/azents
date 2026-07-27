@@ -1718,7 +1718,6 @@
           "reported_digest_mismatch": "Runtime が現在の target と異なるポリシーフィンガープリントを報告しました。",
           "target_generation_mismatch": "Runtime target が以前の Generation に属しているため、再調整が必要です。",
           "applied_snapshot_missing": "適用済みとして記録されたポリシー Snapshot が見つかりません。",
-          "applied_snapshot_unverified": "以前に適用されたポリシー証拠を再検証する必要があります。",
           "applied_pointer_mismatch": "Runtime の適用済みポリシー参照が現在の検証済み target を指していません。",
           "provider_evidence_mismatch": "Runtime Provider が要求された Generation と target に一致するポリシー証拠を返しませんでした。",
           "runtime_failure": "Runtime 操作に失敗しました。参照コード: {code}"

@@ -1718,7 +1718,6 @@
           "reported_digest_mismatch": "Le Runtime a signalé une empreinte de politique différente de celle de la target actuelle.",
           "target_generation_mismatch": "La target Runtime appartient à une ancienne Generation et doit être réconciliée.",
           "applied_snapshot_missing": "Le Snapshot de politique enregistré comme appliqué est introuvable.",
-          "applied_snapshot_unverified": "Les preuves de la politique précédemment appliquée doivent être vérifiées à nouveau.",
           "applied_pointer_mismatch": "La référence de politique appliquée du Runtime ne pointe pas vers la target actuellement vérifiée.",
           "provider_evidence_mismatch": "Le Runtime Provider n'a pas renvoyé de preuve de politique correspondant à la Generation et à la target demandées.",
           "runtime_failure": "L'opération Runtime a échoué. Code de référence : {code}"

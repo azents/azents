@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-07-27
-spec_version: 32
+spec_version: 33
 ---
 
 # Agent Runtime Control
@@ -277,6 +277,14 @@ not report compliance before matching observation. Failed tightening remains pen
 and may fence/stop noncompliant authority, but never invokes reset, terminal delete, Provider
 fallback, or workspace deletion. Unsupported capability remains unavailable rather than weakened.
 
+A mixed policy edit computes the module-owned security meet between the applied policy and current
+intent. Boolean authority intersects, numeric bounds take the lower finite value, Docker storage mode
+and capacity remain one valid module, and network allow/deny rules intersect and union respectively.
+The restrictive subset converges automatically before any remaining authority expansion is offered
+for explicit Apply. A historical applied Snapshot whose evidence was invalidated by a schema
+migration remains internal recovery state; it does not become an administrator action while a valid
+target can be reconciled.
+
 ## Delivery
 
 Production deploys the new path through GitOps:
@@ -305,6 +313,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-27** (spec_version 33) — Made mixed-policy convergence use a valid module-level security meet and kept invalidated historical evidence in automatic recovery state.
 - **2026-07-27** (spec_version 32) — Removed Platform policy source evidence and made the selected Profile the complete execution ceiling.
 - **2026-07-26** (spec_version 31) — Added immutable execution-policy targets, generation-fenced convergence evidence, and reset-free fail-closed tightening semantics.
 - **2026-07-26** (spec_version 30) — Changed periodic desired-running Runtime reconciliation from read-only observe to idempotent start so Runner image and Provider-managed configuration drift converges without deleting Agent Workspace storage.

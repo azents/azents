@@ -26,6 +26,7 @@ from azents.core.runtime_execution_policy import (
     classify_runtime_execution_change,
     digest_runtime_execution_policy,
     empty_runtime_execution_restriction,
+    meet_runtime_execution_policies,
     resolve_runtime_execution_policy,
     standard_runtime_execution_policy,
     validate_runtime_execution_restriction,
@@ -413,4 +414,66 @@ def test_change_classification_distinguishes_restriction_expansion_and_mixed() -
     assert (
         classify_runtime_execution_change(baseline, mixed).direction
         is RuntimeExecutionChangeDirection.MIXED
+    )
+
+
+def test_policy_meet_preserves_valid_storage_module() -> None:
+    """Storage mode and capacity narrow as one valid authority module."""
+    disabled = _policy(
+        storage_mode=RuntimeExecutionStorageMode.NONE,
+        network_mode=RuntimeExecutionNetworkMode.DIRECT,
+    )
+    ephemeral = _policy(
+        storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+        storage_capacity=17_179_869_184,
+        network_mode=RuntimeExecutionNetworkMode.DIRECT,
+    )
+
+    result = meet_runtime_execution_policies(disabled, ephemeral)
+
+    assert result.engine_storage.mode is RuntimeExecutionStorageMode.NONE
+    assert result.engine_storage.capacity_bytes is None
+
+
+def test_policy_meet_intersects_restricted_network_authority() -> None:
+    """Direct authority behaves as the universe while restrictions intersect."""
+    direct = _policy(
+        network_mode=RuntimeExecutionNetworkMode.DIRECT,
+        denied=frozenset({"metadata"}),
+    )
+    restricted = _policy(
+        network_mode=RuntimeExecutionNetworkMode.RESTRICTED,
+        allowed=frozenset({"public", "registry"}),
+        denied=frozenset({"private"}),
+    )
+
+    result = meet_runtime_execution_policies(direct, restricted)
+
+    assert result.network_egress.mode is RuntimeExecutionNetworkMode.RESTRICTED
+    assert result.network_egress.allowed_destinations == frozenset(
+        {"public", "registry"}
+    )
+    assert result.network_egress.denied_destinations == frozenset(
+        {"metadata", "private"}
+    )
+
+
+def test_policy_meet_intersects_two_network_allowlists() -> None:
+    """Two restricted policies retain only destinations allowed by both."""
+    left = _policy(
+        network_mode=RuntimeExecutionNetworkMode.RESTRICTED,
+        allowed=frozenset({"public", "registry"}),
+        denied=frozenset({"metadata"}),
+    )
+    right = _policy(
+        network_mode=RuntimeExecutionNetworkMode.RESTRICTED,
+        allowed=frozenset({"registry", "packages"}),
+        denied=frozenset({"private"}),
+    )
+
+    result = meet_runtime_execution_policies(left, right)
+
+    assert result.network_egress.allowed_destinations == frozenset({"registry"})
+    assert result.network_egress.denied_destinations == frozenset(
+        {"metadata", "private"}
     )

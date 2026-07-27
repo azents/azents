@@ -83,6 +83,22 @@ def _direct_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
     )
 
 
+def _engine_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
+    """Model a Provider that supports temporary Docker storage."""
+    direct = _direct_provider_capabilities()
+    return direct.model_copy(
+        update={
+            "privileged_engine": True,
+            "storage_modes": frozenset(
+                {
+                    RuntimeExecutionStorageMode.NONE,
+                    RuntimeExecutionStorageMode.EPHEMERAL,
+                }
+            ),
+        }
+    )
+
+
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[Mock]:
     yield Mock()
@@ -310,6 +326,67 @@ def _upper_layer_change_resolved(
     )
 
 
+def _storage_expansion_resolved() -> _ResolvedRuntimePolicy:
+    """Return a Runtime whose only remaining change expands Docker storage."""
+    applied_policy = standard_runtime_execution_policy()
+    current_policy = applied_policy.model_copy(
+        update={
+            "engine_storage": applied_policy.engine_storage.model_copy(
+                update={
+                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
+                    "capacity_bytes": 17_179_869_184,
+                }
+            )
+        }
+    )
+    source_versions = RuntimeExecutionSourceVersions(
+        profile=4,
+        workspace=3,
+        agent=4,
+    )
+    resolution = resolve_runtime_execution_policy(
+        profile_policy=current_policy,
+        workspace_restriction=empty_runtime_execution_restriction(),
+        agent_restriction=empty_runtime_execution_restriction(),
+        source_versions=source_versions,
+        provider_capabilities=_engine_provider_capabilities(),
+        profile_active=True,
+        profile_allowed=True,
+        applied_policy=applied_policy,
+    )
+    target_digest = digest_runtime_execution_policy(applied_policy)
+    target = dataclasses.replace(
+        _snapshot(),
+        execution_profile_id="system-standard",
+        execution_profile_version=source_versions.profile,
+        execution_workspace_version=source_versions.workspace,
+        execution_agent_version=source_versions.agent,
+        resolved_execution_policy_json=canonical_runtime_execution_policy_json(
+            applied_policy
+        ),
+        execution_source_trace={},
+        execution_provider_compatibility={},
+        execution_target_digest=target_digest,
+        execution_reported_digest=target_digest,
+        application_state=RuntimePolicySnapshotApplicationState.APPLIED,
+    )
+    runtime = _runtime().model_copy(
+        update={"applied_runtime_policy_snapshot_id": target.id}
+    )
+    return _ResolvedRuntimePolicy(
+        runtime=runtime,
+        target_snapshot=target,
+        applied_snapshot=target,
+        accepted_contract_revision_id="contract-1",
+        provider_compatibility={
+            "mode": "accepted_contract",
+            "contract_revision_id": "contract-1",
+        },
+        profile_id="system-standard",
+        resolution=resolution,
+    )
+
+
 def test_status_projection_requires_explicit_apply_for_saved_intent() -> None:
     """A configured intent mismatch is not presented as applied."""
     status = _build_status_projection(_resolved())
@@ -367,8 +444,8 @@ def test_status_projection_requires_apply_for_upper_layer_expansion(
     assert status.reason_codes == ("explicit_apply_required",)
 
 
-def test_status_projection_requires_apply_for_mixed_upper_layer_change() -> None:
-    """Mixed changes cannot hide their remaining expansion behind Wait."""
+def test_status_projection_waits_while_mixed_change_removes_authority() -> None:
+    """Mixed changes converge their restrictive subset before offering expansion."""
     status = _build_status_projection(
         _upper_layer_change_resolved(
             current_cpu=1_000,
@@ -386,8 +463,18 @@ def test_status_projection_requires_apply_for_mixed_upper_layer_change() -> None
         )
     )
 
+    assert status.status is RuntimeExecutionPolicyStatus.PENDING
+    assert status.required_action is RuntimeExecutionRequiredAction.WAIT
+    assert status.reason_codes == ("automatic_convergence_pending",)
+
+
+def test_status_projection_offers_apply_after_restrictive_subset_converges() -> None:
+    """A module expansion does not remain stuck in automatic convergence."""
+    status = _build_status_projection(_storage_expansion_resolved())
+
     assert status.status is RuntimeExecutionPolicyStatus.CONFIGURED
     assert status.required_action is RuntimeExecutionRequiredAction.APPLY
+    assert status.reason_codes == ("explicit_apply_required",)
 
 
 def test_status_projection_marks_exact_target_pending_until_evidence() -> None:
@@ -403,6 +490,20 @@ def test_status_projection_marks_exact_target_pending_until_evidence() -> None:
     assert status.required_action is RuntimeExecutionRequiredAction.WAIT
     assert status.target is not None
     assert status.applied is None
+
+
+def test_status_projection_recovers_pending_historical_applied_snapshot() -> None:
+    """Migrated historical evidence does not become a user-actionable divergence."""
+    status = _build_status_projection(
+        _targeted_resolved(
+            state=RuntimePolicySnapshotApplicationState.PENDING,
+            applied=True,
+        )
+    )
+
+    assert status.status is RuntimeExecutionPolicyStatus.PENDING
+    assert status.required_action is RuntimeExecutionRequiredAction.WAIT
+    assert status.reason_codes == ("application_pending",)
 
 
 def test_status_projection_marks_only_promoted_exact_target_applied() -> None:
@@ -795,6 +896,32 @@ def test_automatic_convergence_requires_unchanged_agent_intent() -> None:
     )
 
 
+async def test_convergence_leaves_remaining_storage_expansion_for_apply() -> None:
+    """An already-converged security meet does not create restart targets forever."""
+    resolved = _storage_expansion_resolved()
+    snapshot_repository = Mock()
+    snapshot_repository.create_and_advance_target_snapshot = AsyncMock()
+    runtime_repository = Mock()
+    runtime_repository.get_by_id_for_update = AsyncMock(return_value=resolved.runtime)
+    policy_repository = Mock()
+    policy_repository.append_audit_event = AsyncMock()
+    service = RuntimeExecutionPolicyApplicationService(
+        session_manager=_session_manager,
+        policy_repository=policy_repository,
+        snapshot_repository=snapshot_repository,
+        runtime_repository=runtime_repository,
+        provider_repository=Mock(),
+        agent_admin_repository=Mock(),
+    )
+    service._resolve_locked = AsyncMock(return_value=resolved)
+
+    outcome = await service._converge_runtime("runtime-1")
+
+    assert outcome == "pending_expansion"
+    snapshot_repository.create_and_advance_target_snapshot.assert_not_awaited()
+    policy_repository.append_audit_event.assert_not_awaited()
+
+
 async def test_incompatible_convergence_stops_with_a_new_exact_target() -> None:
     """Fail-closed stopping never advances generation without a target snapshot."""
     resolved = _unavailable_resolved()
@@ -903,7 +1030,7 @@ def test_mixed_convergence_copies_only_restrictive_fields() -> None:
     change = classify_runtime_execution_change(applied, current)
     assert change.direction is RuntimeExecutionChangeDirection.MIXED
 
-    projected = _restrictive_projection(applied, current, change)
+    projected = _restrictive_projection(applied, current)
 
     assert projected.image_build.enabled is False
     assert projected.network_egress.mode is RuntimeExecutionNetworkMode.NONE
@@ -922,9 +1049,7 @@ def test_restrictive_projection_keeps_storage_mode_and_capacity_atomic() -> None
             )
         }
     )
-    change = classify_runtime_execution_change(applied, standard)
-
-    projected = _restrictive_projection(applied, standard, change)
+    projected = _restrictive_projection(applied, standard)
 
     assert projected.engine_storage.mode is RuntimeExecutionStorageMode.NONE
     assert projected.engine_storage.capacity_bytes is None
@@ -947,9 +1072,7 @@ def test_restrictive_projection_keeps_network_mode_and_ranges_atomic() -> None:
             )
         }
     )
-    change = classify_runtime_execution_change(applied, current)
-
-    projected = _restrictive_projection(applied, current, change)
+    projected = _restrictive_projection(applied, current)
 
     assert projected.network_egress.mode is RuntimeExecutionNetworkMode.NONE
     assert projected.network_egress.allowed_destinations == frozenset()
@@ -972,12 +1095,36 @@ def test_restrictive_projection_keeps_request_within_new_limit() -> None:
             )
         }
     )
-    change = classify_runtime_execution_change(applied, current)
-
-    projected = _restrictive_projection(applied, current, change)
+    projected = _restrictive_projection(applied, current)
 
     assert projected.resources.cpu_request_millicores == 1_000
     assert projected.resources.cpu_limit_millicores == 1_000
+
+
+def test_restrictive_projection_does_not_split_expanding_storage_module() -> None:
+    """A mixed change cannot produce a capacity with no Docker storage mode."""
+    applied = standard_runtime_execution_policy()
+    current = applied.model_copy(
+        update={
+            "resources": applied.resources.model_copy(
+                update={"cpu_limit_millicores": 1_000}
+            ),
+            "engine_storage": applied.engine_storage.model_copy(
+                update={
+                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
+                    "capacity_bytes": 17_179_869_184,
+                }
+            ),
+        }
+    )
+    change = classify_runtime_execution_change(applied, current)
+    assert change.direction is RuntimeExecutionChangeDirection.MIXED
+
+    projected = _restrictive_projection(applied, current)
+
+    assert projected.resources.cpu_limit_millicores == 1_000
+    assert projected.engine_storage.mode is RuntimeExecutionStorageMode.NONE
+    assert projected.engine_storage.capacity_bytes is None
 
 
 def test_legacy_capabilities_cannot_grant_engine_or_network_authority() -> None:

@@ -30,7 +30,6 @@ const RUNTIME_POLICY_REASON_MESSAGE_KEYS = {
   reported_digest_mismatch: "reasonExplanations.reported_digest_mismatch",
   target_generation_mismatch: "reasonExplanations.target_generation_mismatch",
   applied_snapshot_missing: "reasonExplanations.applied_snapshot_missing",
-  applied_snapshot_unverified: "reasonExplanations.applied_snapshot_unverified",
   applied_pointer_mismatch: "reasonExplanations.applied_pointer_mismatch",
   RUNTIME_POLICY_PROVIDER_EVIDENCE_MISMATCH:
     "reasonExplanations.provider_evidence_mismatch",
