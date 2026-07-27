@@ -1969,6 +1969,16 @@ def _provider_payload(
                 "guild_id": guild_id,
                 "channel_id": thread_id,
             }
+            parent_channel_id = labels.get("parent_channel_id")
+            root_message_id = labels.get("root_message_id")
+            if (
+                isinstance(parent_channel_id, str)
+                and parent_channel_id
+                and isinstance(root_message_id, str)
+                and root_message_id == thread_id
+            ):
+                payload["thread_parent_channel_id"] = parent_channel_id
+                payload["thread_root_message_id"] = root_message_id
         case _ as unreachable:
             assert_never(unreachable)
     if text is not None:

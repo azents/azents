@@ -583,6 +583,44 @@ class TestExternalChannelRepository:
         assert lease.last_handled_dispatch_sequence == 5
         assert lease.encrypted_checkpoint == "checkpoint-5"
 
+        first_checkpoint = await repo.update_discord_gateway_checkpoint(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(5),
+            encrypted_checkpoint="checkpoint-session-1-5",
+            checkpoint_version=1,
+            checkpoint_session_fingerprint="session-1-fingerprint",
+            sequence=5,
+        )
+        stale_checkpoint = await repo.update_discord_gateway_checkpoint(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(6),
+            encrypted_checkpoint="checkpoint-session-1-4",
+            checkpoint_version=1,
+            checkpoint_session_fingerprint="session-1-fingerprint",
+            sequence=4,
+        )
+        reset_checkpoint = await repo.update_discord_gateway_checkpoint(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(7),
+            encrypted_checkpoint="checkpoint-session-2-1",
+            checkpoint_version=1,
+            checkpoint_session_fingerprint="session-2-fingerprint",
+            sequence=1,
+        )
+
+        assert first_checkpoint is True
+        assert stale_checkpoint is False
+        assert reset_checkpoint is True
+
         rdb_connection = await rdb_session.get(
             RDBExternalChannelConnection,
             connection.id,

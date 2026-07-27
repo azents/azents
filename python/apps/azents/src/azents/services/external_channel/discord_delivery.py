@@ -46,6 +46,43 @@ class DiscordDeliveryClient:
     def __init__(self, http_client: httpx.AsyncClient) -> None:
         self.http_client = http_client
 
+    async def ensure_thread(
+        self,
+        *,
+        bot_token: str,
+        parent_channel_id: str,
+        root_message_id: str,
+    ) -> DiscordDeliveryResult:
+        """Return only after the root Discord message has a usable thread."""
+        try:
+            existing = await self.http_client.get(
+                f"{discord_api_base_url()}/channels/{root_message_id}",
+                headers={"Authorization": f"Bot {bot_token}"},
+            )
+        except httpx.RequestError:
+            return _unknown_result()
+        if existing.status_code == 200:
+            return _thread_result(
+                response=existing,
+                parent_channel_id=parent_channel_id,
+                root_message_id=root_message_id,
+            )
+        if existing.status_code != 404:
+            return _response_failure(existing) or _unknown_result()
+        response = await self._request(
+            "POST",
+            f"/channels/{parent_channel_id}/messages/{root_message_id}/threads",
+            bot_token=bot_token,
+            json_body={"name": "Azents"},
+        )
+        if isinstance(response, DiscordDeliveryResult):
+            return response
+        return _thread_result(
+            response=response,
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+        )
+
     async def create_message(
         self,
         *,
@@ -195,40 +232,45 @@ class DiscordDeliveryClient:
             )
         except httpx.RequestError:
             return _unknown_result()
-        if response.status_code in {401, 403}:
-            return DiscordDeliveryResult(
-                status="failed",
-                provider_message_key=None,
-                error_kind=(
-                    "credentials_invalid"
-                    if response.status_code == 401
-                    else "permission_denied"
-                ),
-                error_summary=(
-                    "Discord rejected the active Bot credential."
-                    if response.status_code == 401
-                    else "Discord denied access to the target conversation."
-                ),
-            )
-        if response.status_code == 404:
-            return DiscordDeliveryResult(
-                status="failed",
-                provider_message_key=None,
-                error_kind="message_not_found",
-                error_summary="Discord no longer exposes the target message.",
-            )
-        if response.status_code == 429:
-            return DiscordDeliveryResult(
-                status="failed",
-                provider_message_key=None,
-                error_kind="rate_limited",
-                error_summary="Discord rate limited the provider operation.",
-            )
-        if response.status_code >= 500:
-            return _unknown_result()
-        if response.status_code >= 400:
-            return _rejected_result()
-        return response
+        return _response_failure(response) or response
+
+
+def _response_failure(response: httpx.Response) -> DiscordDeliveryResult | None:
+    """Map a non-success Discord response into a sanitized delivery outcome."""
+    if response.status_code in {401, 403}:
+        return DiscordDeliveryResult(
+            status="failed",
+            provider_message_key=None,
+            error_kind=(
+                "credentials_invalid"
+                if response.status_code == 401
+                else "permission_denied"
+            ),
+            error_summary=(
+                "Discord rejected the active Bot credential."
+                if response.status_code == 401
+                else "Discord denied access to the target conversation."
+            ),
+        )
+    if response.status_code == 404:
+        return DiscordDeliveryResult(
+            status="failed",
+            provider_message_key=None,
+            error_kind="message_not_found",
+            error_summary="Discord no longer exposes the target message.",
+        )
+    if response.status_code == 429:
+        return DiscordDeliveryResult(
+            status="failed",
+            provider_message_key=None,
+            error_kind="rate_limited",
+            error_summary="Discord rate limited the provider operation.",
+        )
+    if response.status_code >= 500:
+        return _unknown_result()
+    if response.status_code >= 400:
+        return _rejected_result()
+    return None
 
 
 def discord_delivery_nonce(delivery_attempt_id: str) -> str:
@@ -259,6 +301,32 @@ def _created_message_result(
     return DiscordDeliveryResult(
         status="delivered",
         provider_message_key=f"discord:{guild_id}:{message_id}",
+        error_kind=None,
+        error_summary=None,
+    )
+
+
+def _thread_result(
+    *,
+    response: httpx.Response,
+    parent_channel_id: str,
+    root_message_id: str,
+) -> DiscordDeliveryResult:
+    """Validate that Discord returned the expected thread channel."""
+    try:
+        payload: object = response.json()
+    except ValueError:
+        return _unknown_result()
+    if not isinstance(payload, dict):
+        return _unknown_result()
+    if (
+        payload.get("id") != root_message_id
+        or payload.get("parent_id") != parent_channel_id
+    ):
+        return _unknown_result()
+    return DiscordDeliveryResult(
+        status="delivered",
+        provider_message_key=None,
         error_kind=None,
         error_summary=None,
     )

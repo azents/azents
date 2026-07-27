@@ -283,6 +283,15 @@ class _DiscordClient:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.uploaded: list[tuple[str, bytes]] = []
 
+    async def ensure_thread(self, **kwargs: object) -> DiscordDeliveryResult:
+        self.calls.append(("ensure_thread", kwargs))
+        return DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
+        )
+
     async def create_message(self, **kwargs: object) -> DiscordDeliveryResult:
         self.calls.append(("create", kwargs))
         return DiscordDeliveryResult(
@@ -539,6 +548,8 @@ async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> N
             "request_payload": {
                 "guild_id": "111",
                 "channel_id": "333",
+                "thread_parent_channel_id": "222",
+                "thread_root_message_id": "333",
                 "text": "Reply",
             },
         }
@@ -570,6 +581,14 @@ async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> N
     ]
     assert discord_client.calls == [
         (
+            "ensure_thread",
+            {
+                "bot_token": "xoxb-secret",
+                "parent_channel_id": "222",
+                "root_message_id": "333",
+            },
+        ),
+        (
             "create",
             {
                 "bot_token": "xoxb-secret",
@@ -578,7 +597,7 @@ async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> N
                 "content": "**Research \\* Agent**\nReply",
                 "delivery_attempt_id": "delivery-1",
             },
-        )
+        ),
     ]
 
 
@@ -596,6 +615,8 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
             "request_payload": {
                 "guild_id": "111",
                 "channel_id": "333",
+                "thread_parent_channel_id": "222",
+                "thread_root_message_id": "333",
                 "text": (
                     "Approval is required. "
                     "[Review access](https://azents.example/request-1)"
@@ -630,6 +651,14 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
     ]
     assert discord_client.calls == [
         (
+            "ensure_thread",
+            {
+                "bot_token": "xoxb-secret",
+                "parent_channel_id": "222",
+                "root_message_id": "333",
+            },
+        ),
+        (
             "create",
             {
                 "bot_token": "xoxb-secret",
@@ -641,7 +670,7 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
                 ),
                 "delivery_attempt_id": "delivery-1",
             },
-        )
+        ),
     ]
 
 

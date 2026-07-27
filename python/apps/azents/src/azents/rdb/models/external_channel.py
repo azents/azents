@@ -557,6 +557,11 @@ class RDBExternalChannelIngressLease(RDBModel):
         nullable=True,
         default=None,
     )
+    checkpoint_session_fingerprint: Mapped[str | None] = mapped_column(
+        sa.String(64),
+        nullable=True,
+        default=None,
+    )
     last_handled_dispatch_sequence: Mapped[int | None] = mapped_column(
         sa.BigInteger,
         nullable=True,
