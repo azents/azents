@@ -1051,11 +1051,14 @@ def _discord_activation_error(
     connection_id: str | None,
 ) -> HTTPException:
     """Log a sanitized Discord setup failure and return a safe client error."""
-    logger.exception(
+    failure_stage, failure_code = _discord_activation_diagnostic(error)
+    logger.error(
         "Discord External Channel activation failed",
         extra={
             "operation": operation,
             "connection_id": connection_id,
+            "failure_stage": failure_stage,
+            "failure_code": failure_code,
             "error_type": type(error).__name__,
         },
     )
@@ -1087,3 +1090,16 @@ def _discord_activation_error(
             "action_hint": "Check the App settings and try again.",
         }
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def _discord_activation_diagnostic(
+    error: DiscordAPIError | ValueError,
+) -> tuple[str, str]:
+    """Return stable diagnostic fields without serializing exception data."""
+    if isinstance(error, DiscordAPICredentialsInvalid):
+        return "provider_authentication", "credentials_invalid"
+    if isinstance(error, DiscordAPIConfigurationInvalid):
+        return "provider_callback", "callback_configuration_invalid"
+    if isinstance(error, DiscordAPIUnavailable):
+        return "provider_api", "api_unavailable"
+    return "configuration", "configuration_invalid"

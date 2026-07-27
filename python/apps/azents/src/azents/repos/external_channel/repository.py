@@ -292,6 +292,7 @@ class ExternalChannelRepository:
         if capabilities is not None:
             rdb.capabilities = capabilities
         rdb.last_health_at = checked_at
+        rdb.last_health_code = None
         if rdb.transport is ExternalChannelTransport.HTTP:
             rdb.socket_lease_owner = None
             rdb.socket_lease_until = None
@@ -354,7 +355,17 @@ class ExternalChannelRepository:
             .with_for_update()
         )
         if claim is not None and claim.connection_id != connection_id:
-            return None
+            claimed_connection = await session.get(
+                RDBExternalChannelConnection,
+                claim.connection_id,
+            )
+            if (
+                claimed_connection is None
+                or claimed_connection.status
+                is not ExternalChannelConnectionStatus.DISCONNECTED
+            ):
+                return None
+            claim.connection_id = connection_id
         if claim is None:
             claim = RDBExternalChannelAppClaim(
                 provider=ExternalChannelProvider.DISCORD,
@@ -375,6 +386,7 @@ class ExternalChannelRepository:
         connection.status = ExternalChannelConnectionStatus.ACTIVE
         connection.last_verified_at = checked_at
         connection.last_health_at = checked_at
+        connection.last_health_code = None
         connection.disconnected_at = None
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
@@ -462,6 +474,50 @@ class ExternalChannelRepository:
         connection.last_health_at = checked_at
         await session.flush()
         return True
+
+    async def record_discord_activation_failure(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        expected_encrypted_credentials: str,
+        expected_configuration_generation: int,
+        failure_code: str,
+        checked_at: datetime.datetime,
+    ) -> ExternalChannelConnection | None:
+        """Persist one fenced, operator-safe Discord activation failure code."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.provider
+                == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelConnection.encrypted_credentials
+                == expected_encrypted_credentials,
+                RDBExternalChannelConnection.configuration_generation
+                == expected_configuration_generation,
+                RDBExternalChannelConnection.status.not_in(
+                    (
+                        ExternalChannelConnectionStatus.DISCONNECTING,
+                        ExternalChannelConnectionStatus.DISCONNECTED,
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+        if connection is None:
+            return None
+        connection.status = ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+        connection.last_health_at = checked_at
+        connection.last_health_code = failure_code
+        connection.socket_lease_owner = None
+        connection.socket_lease_until = None
+        connection.socket_heartbeat_at = None
+        connection.socket_gap_detected_at = None
+        connection.socket_gap_reason = None
+        await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
+        return ExternalChannelConnection.model_validate(connection)
 
     async def list_socket_connection_ids(
         self,

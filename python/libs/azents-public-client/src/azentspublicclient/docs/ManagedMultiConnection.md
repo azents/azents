@@ -19,6 +19,7 @@ Name | Type | Description | Notes
 **provider_config** | **Dict[str, object]** |  | 
 **last_verified_at** | **datetime** |  | 
 **last_health_at** | **datetime** |  | 
+**last_health_code** | **str** |  | [optional] 
 **socket_gap_detected_at** | **datetime** |  | 
 **socket_gap_reason** | **str** |  | 
 **disconnected_at** | **datetime** |  | 

@@ -19043,6 +19043,17 @@
             ],
             "title": "Last Health At"
           },
+          "last_health_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Health Code"
+          },
           "socket_gap_detected_at": {
             "anyOf": [
               {
@@ -19384,6 +19395,17 @@
               }
             ],
             "title": "Last Health At"
+          },
+          "last_health_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Health Code"
           },
           "socket_gap_detected_at": {
             "anyOf": [

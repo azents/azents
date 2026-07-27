@@ -68,6 +68,7 @@ class ExternalChannelConnection(_Record):
     provider_config: dict[str, Any] | None
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
+    last_health_code: str | None = None
     disconnected_at: datetime.datetime | None
     socket_lease_owner: str | None
     socket_lease_until: datetime.datetime | None
@@ -99,6 +100,7 @@ class ExternalChannelConnectionCreate(_Record):
     provider_config: dict[str, Any] | None
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
+    last_health_code: str | None = None
     disconnected_at: datetime.datetime | None
     socket_lease_owner: str | None
     socket_lease_until: datetime.datetime | None
@@ -129,6 +131,7 @@ class ExternalChannelConnectionConfiguration(_Record):
     provider_config: dict[str, Any] | None
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
+    last_health_code: str | None = None
     disconnected_at: datetime.datetime | None
     socket_lease_owner: str | None
     socket_lease_until: datetime.datetime | None

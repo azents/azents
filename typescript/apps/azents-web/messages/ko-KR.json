@@ -980,7 +980,50 @@
         "botIdentity": "Bot identity",
         "socketGapTitle": "Socket delivery gap 감지됨",
         "socketGapDescription": "계속하기 전에 연결을 검증하고 채널 기록을 확인하세요.",
-        "capabilitiesUnavailable": "검증 후 capability를 확인할 수 있습니다.",
+        "capabilitiesUnavailable": "검증 후 기능을 사용할 수 있습니다.",
+        "discordActivationFailureTitle": "Discord 연결에 조치가 필요합니다",
+        "discordFailure": {
+          "discord_credentials_invalid": {
+            "message": "Discord가 Bot Token을 거부했습니다.",
+            "action": "Bot Token을 교체한 뒤 이 연결을 저장하고 검증하세요."
+          },
+          "discord_callback_configuration_invalid": {
+            "message": "Discord가 interaction endpoint를 거부했습니다.",
+            "action": "Application 설정과 공개 callback URL을 확인한 뒤 다시 검증하세요."
+          },
+          "discord_api_unavailable": {
+            "message": "Discord를 일시적으로 사용할 수 없습니다.",
+            "action": "잠시 후 이 연결을 다시 검증하세요."
+          },
+          "discord_callback_url_missing": {
+            "message": "공개 Discord callback URL이 설정되어 있지 않습니다.",
+            "action": "관리자에게 URL 설정을 요청한 뒤 이 연결을 다시 검증하세요."
+          },
+          "discord_credentials_unavailable": {
+            "message": "저장된 Discord 자격 증명을 사용할 수 없습니다.",
+            "action": "Bot Token을 교체한 뒤 이 연결을 저장하고 검증하세요."
+          },
+          "discord_target_guild_missing": {
+            "message": "Discord Guild ID가 없습니다.",
+            "action": "이 연결을 수정하여 대상 Guild ID를 입력하세요."
+          },
+          "discord_target_guild_invalid": {
+            "message": "Discord Guild ID가 올바르지 않습니다.",
+            "action": "이 연결을 수정하여 올바른 대상 Guild ID를 입력하세요."
+          },
+          "discord_application_id_mismatch": {
+            "message": "Application ID가 Bot Token과 일치하지 않습니다.",
+            "action": "이 연결을 수정하여 이 Bot Token의 Application ID를 입력하세요."
+          },
+          "discord_authority_changed": {
+            "message": "검증 중에 연결 설정이 변경되었습니다.",
+            "action": "다시 검증하세요. 계속되면 자격 증명을 교체하세요."
+          },
+          "unknown": {
+            "message": "Discord 연결 검증을 완료하지 못했습니다.",
+            "action": "다시 검증하거나 연결 설정을 수정하세요."
+          }
+        },
         "validate": "검증",
         "edit": "수정",
         "disconnect": "연결 해제",

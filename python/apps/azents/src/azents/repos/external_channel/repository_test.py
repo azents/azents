@@ -26,6 +26,7 @@ from azents.core.enums import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.external_channel import (
+    RDBExternalChannelAppClaim,
     RDBExternalChannelConnection,
     RDBExternalChannelIngressLease,
 )
@@ -344,6 +345,89 @@ class TestExternalChannelRepository:
         assert second.created is False
         assert second.event.id == first.event.id
         assert second.event.provider_event_id == "provider-event-1"
+
+    async def test_discord_activation_reclaims_a_disconnected_app_claim(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A disconnected App history cannot block a later activation."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "discord-disconnected-app-claim",
+        )
+        repo = ExternalChannelRepository()
+        stale = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id).model_copy(
+                update={
+                    "provider": ExternalChannelProvider.DISCORD,
+                    "ingress_profile": (
+                        ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+                    ),
+                    "status": ExternalChannelConnectionStatus.DISCONNECTED,
+                    "provider_app_id": "discord-app-reclaimed",
+                    "provider_tenant_id": None,
+                    "provider_config": {"target_guild_id": "guild-1"},
+                }
+            ),
+        )
+        rdb_session.add(
+            RDBExternalChannelAppClaim(
+                provider=ExternalChannelProvider.DISCORD,
+                provider_app_id="discord-app-reclaimed",
+                connection_id=stale.id,
+                claim_generation=1,
+            )
+        )
+        replacement = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id).model_copy(
+                update={
+                    "provider": ExternalChannelProvider.DISCORD,
+                    "ingress_profile": (
+                        ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+                    ),
+                    "provider_app_id": "discord-app-reclaimed",
+                    "provider_tenant_id": None,
+                    "provider_config": {"target_guild_id": "guild-1"},
+                }
+            ),
+        )
+        await rdb_session.flush()
+
+        prepared = await repo.prepare_discord_callback(
+            rdb_session,
+            connection_id=replacement.id,
+            expected_encrypted_credentials="ciphertext-only",
+            expected_configuration_generation=replacement.configuration_generation,
+            provider_app_id="discord-app-reclaimed",
+            interaction_public_key="a" * 64,
+            callback_selector_hash="reclaimed-selector-hash",
+        )
+        assert prepared is True
+        activated = await repo.activate_discord_connection(
+            rdb_session,
+            connection_id=replacement.id,
+            expected_encrypted_credentials="ciphertext-only",
+            expected_configuration_generation=replacement.configuration_generation,
+            provider_app_id="discord-app-reclaimed",
+            provider_tenant_id="guild-1",
+            provider_bot_user_id=None,
+            interaction_public_key="a" * 64,
+            callback_selector_hash="reclaimed-selector-hash",
+            checked_at=_at(1),
+        )
+
+        assert activated is not None
+        claim = await rdb_session.scalar(
+            sa.select(RDBExternalChannelAppClaim).where(
+                RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelAppClaim.provider_app_id == "discord-app-reclaimed",
+            )
+        )
+        assert claim is not None
+        assert claim.connection_id == replacement.id
+        assert claim.claim_generation == 2
 
     async def test_discord_gateway_admission_atomically_fences_checkpoint(
         self,

@@ -41,6 +41,14 @@ _PROFILE_ONLY_MIGRATION = (
     / "versions"
     / "8ee8f5ae5a4d_remove_runtime_execution_platform_policy.py"
 )
+_EXTERNAL_CHANNEL_HEALTH_CODE_MIGRATION = (
+    PROJECT_ROOT
+    / "db-schemas"
+    / "rdb"
+    / "migrations"
+    / "versions"
+    / "e0615474dc27_add_external_channel_health_code.py"
+)
 
 
 def _migration_values(path: Path) -> dict[str, Any]:
@@ -91,8 +99,9 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     seed_source = _SEED_MIGRATION.read_text()
     egress_source = _DEFAULT_EGRESS_MIGRATION.read_text()
     profile_only_source = _PROFILE_ONLY_MIGRATION.read_text()
+    health_code_source = _EXTERNAL_CHANNEL_HEALTH_CODE_MIGRATION.read_text()
 
-    assert revision_file.read_text().strip() == "8ee8f5ae5a4d"
+    assert revision_file.read_text().strip() == "e0615474dc27"
     assert "INSERT INTO workspace_runtime_execution_policies" in seed_source
     assert "INSERT INTO workspace_runtime_execution_profile_allowances" in seed_source
     assert "INSERT INTO agent_runtime_execution_settings" in seed_source
@@ -101,6 +110,7 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     assert "UPDATE agent_runtimes" not in egress_source
     assert 'op.drop_table("runtime_execution_platform_policies")' in profile_only_source
     assert 'op.drop_column("runtime_policy_snapshots"' in profile_only_source
+    assert '"last_health_code", sa.String(length=64)' in health_code_source
 
 
 def test_generated_revisions_render_valid_incremental_postgresql_sql() -> None:
@@ -128,3 +138,25 @@ def test_generated_revisions_render_valid_incremental_postgresql_sql() -> None:
     assert "UPDATE agent_runtimes" not in rendered
     assert "DROP TABLE runtime_execution_platform_policies" in rendered
     assert "DROP COLUMN execution_platform_version" in rendered
+
+
+def test_external_channel_health_code_migration_is_additive() -> None:
+    """The Discord failure reason storage extends the current schema head."""
+    output = io.StringIO()
+    config = AlembicConfig(
+        PROJECT_ROOT / "db-schemas" / "rdb" / "alembic.ini",
+        output_buffer=output,
+    )
+    config.set_main_option(
+        "sqlalchemy.url",
+        "postgresql+psycopg://user:password@localhost/database",
+    )
+
+    alembic_command.upgrade(
+        config,
+        "8ee8f5ae5a4d:e0615474dc27",
+        sql=True,
+    )
+
+    rendered = output.getvalue()
+    assert "ADD COLUMN last_health_code VARCHAR(64)" in rendered

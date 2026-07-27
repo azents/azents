@@ -980,7 +980,50 @@
         "botIdentity": "Bot identity",
         "socketGapTitle": "Socket delivery gap を検出しました",
         "socketGapDescription": "続行する前に接続を検証し、チャンネル履歴を確認してください。",
-        "capabilitiesUnavailable": "Capability は検証後に表示されます。",
+        "capabilitiesUnavailable": "検証後に機能を利用できます。",
+        "discordActivationFailureTitle": "Discord 接続の対応が必要です",
+        "discordFailure": {
+          "discord_credentials_invalid": {
+            "message": "Discord が Bot Token を拒否しました。",
+            "action": "Bot Token を置き換え、この接続を保存して検証してください。"
+          },
+          "discord_callback_configuration_invalid": {
+            "message": "Discord が interaction endpoint を拒否しました。",
+            "action": "Application 設定と公開 callback URL を確認してから、もう一度検証してください。"
+          },
+          "discord_api_unavailable": {
+            "message": "Discord を一時的に利用できません。",
+            "action": "しばらく待ってから、この接続をもう一度検証してください。"
+          },
+          "discord_callback_url_missing": {
+            "message": "公開 Discord callback URL が設定されていません。",
+            "action": "管理者に設定を依頼してから、この接続をもう一度検証してください。"
+          },
+          "discord_credentials_unavailable": {
+            "message": "保存された Discord 認証情報を利用できません。",
+            "action": "Bot Token を置き換え、この接続を保存して検証してください。"
+          },
+          "discord_target_guild_missing": {
+            "message": "Discord Guild ID がありません。",
+            "action": "この接続を編集して、対象の Guild ID を入力してください。"
+          },
+          "discord_target_guild_invalid": {
+            "message": "Discord Guild ID が正しくありません。",
+            "action": "この接続を編集して、正しい対象 Guild ID を入力してください。"
+          },
+          "discord_application_id_mismatch": {
+            "message": "Application ID が Bot Token と一致しません。",
+            "action": "この接続を編集して、この Bot Token の Application ID を入力してください。"
+          },
+          "discord_authority_changed": {
+            "message": "検証中に接続設定が変更されました。",
+            "action": "もう一度検証してください。続く場合は認証情報を置き換えてください。"
+          },
+          "unknown": {
+            "message": "Discord 接続の検証を完了できませんでした。",
+            "action": "もう一度検証するか、接続設定を編集してください。"
+          }
+        },
         "validate": "検証",
         "edit": "編集",
         "disconnect": "切断",

@@ -65,6 +65,7 @@ class _RepositoryDouble:
         self.activation_kwargs: dict[str, object] | None = None
         self.prepare_kwargs: dict[str, object] | None = None
         self.clear_kwargs: dict[str, object] | None = None
+        self.failure_kwargs: dict[str, object] | None = None
 
     async def get_connection_configuration(
         self,
@@ -108,6 +109,24 @@ class _RepositoryDouble:
         self.events.append("clear")
         self.clear_kwargs = kwargs
         return True
+
+    async def record_discord_activation_failure(
+        self,
+        session: AsyncSession,
+        **kwargs: object,
+    ) -> ExternalChannelConnection:
+        """Record the safe durable reason without exposing credentials."""
+        del session
+        self.events.append("failure")
+        self.failure_kwargs = kwargs
+        return ExternalChannelConnection.model_validate(
+            self.configuration.model_dump()
+            | {
+                "status": ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
+                "last_health_at": _NOW,
+                "last_health_code": kwargs["failure_code"],
+            }
+        )
 
 
 class _DiscordClientDouble:
@@ -252,10 +271,13 @@ async def test_missing_callback_url_fails_before_repository_or_provider_io(
         events=events,
     )
 
-    with pytest.raises(ValueError, match="callback URL"):
-        await service.activate(connection_id=configuration.id)
+    snapshot = await service.activate(connection_id=configuration.id)
 
-    assert events == []
+    assert snapshot.status is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+    assert snapshot.code == "discord_callback_url_missing"
+    assert events == ["load", "failure", "commit"]
+    assert repository.failure_kwargs is not None
+    assert repository.failure_kwargs["failure_code"] == "discord_callback_url_missing"
 
 
 @pytest.mark.asyncio
@@ -330,9 +352,10 @@ async def test_provider_endpoint_failure_does_not_activate(
         events=events,
     )
 
-    with pytest.raises(DiscordAPIUnavailable):
-        await service.activate(connection_id=configuration.id)
+    snapshot = await service.activate(connection_id=configuration.id)
 
+    assert snapshot.status is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+    assert snapshot.code == "discord_api_unavailable"
     assert events == [
         "load",
         "metadata",
@@ -342,7 +365,11 @@ async def test_provider_endpoint_failure_does_not_activate(
         "endpoint",
         "clear",
         "commit",
+        "failure",
+        "commit",
     ]
+    assert repository.failure_kwargs is not None
+    assert repository.failure_kwargs["failure_code"] == "discord_api_unavailable"
     assert repository.activation_kwargs is None
     assert repository.prepare_kwargs is not None
     assert repository.clear_kwargs is not None
@@ -372,9 +399,10 @@ async def test_lost_activation_fence_is_reported_without_commit(
         events=events,
     )
 
-    with pytest.raises(ValueError, match="authority changed"):
-        await service.activate(connection_id=configuration.id)
+    snapshot = await service.activate(connection_id=configuration.id)
 
+    assert snapshot.status is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+    assert snapshot.code == "discord_authority_changed"
     assert events == [
         "load",
         "metadata",
@@ -385,4 +413,8 @@ async def test_lost_activation_fence_is_reported_without_commit(
         "activate",
         "clear",
         "commit",
+        "failure",
+        "commit",
     ]
+    assert repository.failure_kwargs is not None
+    assert repository.failure_kwargs["failure_code"] == "discord_authority_changed"

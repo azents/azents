@@ -2,12 +2,16 @@
 
 import datetime
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
+from azents.api.public.external_channel.v1 import (
+    management_route as management_route_module,
+)
 from azents.app import create_dummy_public_app
 from azents.core.auth.deps import (
     CurrentUser,
@@ -215,6 +219,7 @@ def test_agent_connection_list_includes_read_only_associated_multi_apps() -> Non
             "provider_config": None,
             "last_verified_at": None,
             "last_health_at": None,
+            "last_health_code": None,
             "socket_gap_detected_at": None,
             "socket_gap_reason": None,
             "disconnected_at": None,
@@ -452,7 +457,7 @@ def test_discord_replacement_returns_redacted_status(
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_detail"),
+    ("error", "expected_detail", "failure_stage", "failure_code"),
     [
         (
             DiscordAPICredentialsInvalid(),
@@ -461,6 +466,8 @@ def test_discord_replacement_returns_redacted_status(
                 "message": "Discord rejected the Bot Token.",
                 "action_hint": "Replace the Bot Token and try again.",
             },
+            "provider_authentication",
+            "credentials_invalid",
         ),
         (
             DiscordAPIConfigurationInvalid(),
@@ -472,6 +479,8 @@ def test_discord_replacement_returns_redacted_status(
                     "then try again."
                 ),
             },
+            "provider_callback",
+            "callback_configuration_invalid",
         ),
         (
             DiscordAPIUnavailable(),
@@ -480,6 +489,8 @@ def test_discord_replacement_returns_redacted_status(
                 "message": "Discord is temporarily unavailable.",
                 "action_hint": "Try again later.",
             },
+            "provider_api",
+            "api_unavailable",
         ),
         (
             ValueError("Discord callback URL is not configured."),
@@ -488,6 +499,8 @@ def test_discord_replacement_returns_redacted_status(
                 "message": "Discord connection configuration is invalid.",
                 "action_hint": "Check the App settings and try again.",
             },
+            "configuration",
+            "configuration_invalid",
         ),
     ],
 )
@@ -497,29 +510,91 @@ def test_discord_setup_returns_safe_structured_provider_errors(
     | DiscordAPIUnavailable
     | ValueError,
     expected_detail: dict[str, str],
+    failure_stage: str,
+    failure_code: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Provider failures expose an actionable redacted error without Bot Token data."""
     service = AsyncMock(spec=ExternalChannelManagementService)
     service.setup_discord.side_effect = error
 
-    response = _client(service).post(
-        "/external-channel/v1/workspaces/ws/agents/agent-1/external-channels/discord",
-        json={
-            "app_id": "discord-app-1",
-            "configuration": {
-                "provider": "discord",
-                "target_guild_id": "guild-1",
+    with caplog.at_level(
+        logging.ERROR,
+        logger=management_route_module.logger.name,
+    ):
+        response = _client(service).post(
+            "/external-channel/v1/workspaces/ws/agents/agent-1/"
+            "external-channels/discord",
+            json={
+                "app_id": "discord-app-1",
+                "configuration": {
+                    "provider": "discord",
+                    "target_guild_id": "guild-1",
+                },
+                "credentials": {
+                    "provider": "discord",
+                    "bot_token": "discord-bot-token",
+                },
             },
-            "credentials": {
-                "provider": "discord",
-                "bot_token": "discord-bot-token",
-            },
-        },
-    )
+        )
 
     assert response.status_code == 400
     assert response.json() == {"detail": expected_detail}
     assert "discord-bot-token" not in response.text
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "Discord External Channel activation failed"
+    )
+    assert record.__dict__["operation"] == "setup_dedicated"
+    assert record.__dict__["connection_id"] is None
+    assert record.__dict__["failure_stage"] == failure_stage
+    assert record.__dict__["failure_code"] == failure_code
+    assert record.__dict__["error_type"] == type(error).__name__
+    assert record.exc_info is None
+    assert "discord-bot-token" not in caplog.text
+
+
+def test_discord_setup_failure_log_never_serializes_exception_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Generic setup errors keep diagnostics structured and secret-free."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.setup_discord.side_effect = ValueError(
+        "discord-bot-token must never reach diagnostics"
+    )
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger=management_route_module.logger.name,
+    ):
+        response = _client(service).post(
+            "/external-channel/v1/workspaces/ws/agents/agent-1/"
+            "external-channels/discord",
+            json={
+                "app_id": "discord-app-1",
+                "configuration": {
+                    "provider": "discord",
+                    "target_guild_id": "guild-1",
+                },
+                "credentials": {
+                    "provider": "discord",
+                    "bot_token": "discord-bot-token",
+                },
+            },
+        )
+
+    assert response.status_code == 400
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "Discord External Channel activation failed"
+    )
+    assert record.__dict__["failure_stage"] == "configuration"
+    assert record.__dict__["failure_code"] == "configuration_invalid"
+    assert record.__dict__["error_type"] == "ValueError"
+    assert "discord-bot-token" not in caplog.text
+    assert "must never reach diagnostics" not in caplog.text
 
 
 def test_member_cannot_replace_workspace_discord_multi_app() -> None:
