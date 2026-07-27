@@ -802,7 +802,11 @@ class ExternalChannelRepository:
         checkpoint_version: int,
         sequence: int,
     ) -> bool:
-        """Persist a monotonic checkpoint only for the current fenced owner."""
+        """Persist a checkpoint only for the current fenced owner.
+
+        An invalid Discord session starts a new sequence space, so its first
+        checkpoint may reset the persisted dispatch sequence.
+        """
         result = await session.execute(
             sa.update(RDBExternalChannelIngressLease)
             .where(
@@ -818,6 +822,7 @@ class ExternalChannelRepository:
                     ),
                     RDBExternalChannelIngressLease.last_handled_dispatch_sequence
                     < sequence,
+                    RDBExternalChannelIngressLease.gap_reason == "invalid_session",
                 ),
             )
             .values(
@@ -825,6 +830,7 @@ class ExternalChannelRepository:
                 checkpoint_version=checkpoint_version,
                 last_handled_dispatch_sequence=sequence,
                 heartbeat_at=now,
+                gap_reason=None,
             )
             .returning(RDBExternalChannelIngressLease.id)
         )
