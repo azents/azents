@@ -687,6 +687,7 @@ async def test_pending_context_retention_uses_provider_message_time() -> None:
         resource=ExternalChannelResource.model_construct(id="resource-1"),
         message=ExternalChannelMessage.model_construct(
             current_revision_id="revision-1",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
             pending_size=7,
             provider_created_at=provider_created_at,
         ),
@@ -696,6 +697,85 @@ async def test_pending_context_retention_uses_provider_message_time() -> None:
 
     create = repository.create_pending_context_idempotent.await_args.args[1]
     assert create.expires_at == provider_created_at + datetime.timedelta(days=7)
+
+
+@pytest.mark.parametrize(
+    ("provider_message_key", "provider_position"),
+    [
+        pytest.param(
+            "slack:T1:C1:1784678400.000100",
+            "1784678400.000100",
+            id="slack",
+        ),
+        pytest.param(
+            "discord:G1:123456789012345678",
+            "123456789012345678",
+            id="discord",
+        ),
+    ],
+)
+async def test_pending_context_excludes_disallowed_bot_before_human_message(
+    provider_message_key: str,
+    provider_position: str,
+) -> None:
+    """A disabled external bot cannot be released with later human context."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    repository.create_pending_context_idempotent = AsyncMock()
+    repository.trim_pending_context = AsyncMock(
+        return_value=ExternalChannelPendingContextTrim(
+            deleted_message_count=0,
+            deleted_size=0,
+            retained_message_count=1,
+            retained_size=7,
+        )
+    )
+    service = _service(
+        cast(SessionManager[AsyncSession], MagicMock()),
+        cast(ExternalChannelRepository, repository),
+    )
+    route = ExternalChannelAgentRoute.model_construct(
+        id="route-1",
+        allow_bot_messages=False,
+    )
+    resource = ExternalChannelResource.model_construct(id="resource-1")
+    bot_message = ExternalChannelMessage.model_construct(
+        current_revision_id=f"{provider_message_key}:bot-revision",
+        author_type=ExternalChannelPrincipalAuthorType.BOT,
+        pending_size=9,
+        provider_created_at=_at(1),
+    )
+
+    await service.project_current_revision_for_test(
+        cast(AsyncSession, MagicMock()),
+        route=route,
+        resource=resource,
+        message=bot_message,
+        provider_position=provider_position,
+        now=_at(2),
+    )
+
+    repository.create_pending_context_idempotent.assert_not_awaited()
+    repository.trim_pending_context.assert_not_awaited()
+    human_message = ExternalChannelMessage.model_construct(
+        current_revision_id=f"{provider_message_key}:human-revision",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        pending_size=7,
+        provider_created_at=_at(2),
+    )
+
+    await service.project_current_revision_for_test(
+        cast(AsyncSession, MagicMock()),
+        route=route,
+        resource=resource,
+        message=human_message,
+        provider_position=f"{provider_position}.1",
+        now=_at(3),
+    )
+
+    assert repository.create_pending_context_idempotent.await_count == 1
+    pending = repository.create_pending_context_idempotent.await_args.args[1]
+    assert pending.message_revision_id == f"{provider_message_key}:human-revision"
+    assert pending.provider_position == f"{provider_position}.1"
 
 
 async def _prepare_allow_request(

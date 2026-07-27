@@ -14,7 +14,7 @@ Details of all living specs. Synchronized from frontmatter.
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-27 | 58 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-26 | 133 |
-| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-26 | 18 |
+| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-27 | 19 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-26 | 12 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-24 | 6 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-21 | 17 |
@@ -34,7 +34,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-07-26 | 8 |
+| [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-07-27 | 9 |
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-07-26 | 15 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-27 | 17 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-27 | 12 |

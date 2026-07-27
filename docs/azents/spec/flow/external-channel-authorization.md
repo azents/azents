@@ -29,8 +29,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-07-26
-spec_version: 8
+last_verified_at: 2026-07-27
+spec_version: 9
 ---
 
 # External Channel Authorization
@@ -39,8 +39,23 @@ spec_version: 8
 
 An External Channel participant is an `ExternalChannelPrincipal`, not an Azents User
 or WorkspaceUser. Provider identity is scoped by provider tenant and user ID. Human,
-bot, app, and system authors are retained separately; only eligible human invocation
-messages enter the access decision flow.
+bot, app, and system authors are retained separately.
+
+Every dedicated route has two independent author-admission settings:
+
+- `open_access_enabled` defaults to `true`. A human author may invoke the routed
+  Agent without a per-principal grant unless an active block applies.
+- `allow_bot_messages` defaults to `false`. An external bot author may invoke only
+  when this setting is enabled; it is then eligible without a per-principal grant
+  unless an active block applies.
+
+The connected Azents provider bot is excluded before canonical message persistence
+regardless of either setting, preventing output loops. App and system authors are not
+route-eligible. Any author class rejected by the route policy is retained only outside
+releasable pending context: it cannot be included in a later human or bot invocation
+batch. Blocks take precedence over both grants and automatic route access. A grant
+continues to authorize an eligible principal when the corresponding automatic route
+access is disabled.
 
 The authenticated Azents administrator who grants or revokes access is a requester for that public
 management operation only. Neither the administrator nor the ExternalChannelPrincipal becomes an
@@ -49,11 +64,14 @@ Session/Agent/Workspace/root-tree/Run snapshot after owner-generation claim. A b
 only `session_id`; it cannot carry or override provider, principal, requester, Agent, Workspace,
 prompt, or resource authority.
 
-## Unknown Participant Flow
+## Restricted Human Flow
 
-An unknown human may contribute bounded same-route/resource pending context but cannot create an AgentSession, binding invocation, or Agent wake-up.
+When `open_access_enabled` is disabled, an unknown human may contribute bounded
+same-route/resource pending context but cannot create an AgentSession, binding
+invocation, or Agent wake-up until a grant is created. With the default open-human
+policy, an eligible unblocked human follows the authorized release flow directly.
 
-When the participant invokes the Agent:
+When a restricted participant invokes the Agent:
 
 1. A bound thread or resolved Single/default route proceeds directly. An unresolved
    Multi App shortcut or mention first requires one explicit selector admission and
@@ -101,6 +119,10 @@ and never rolls back the authorization result.
 
 A new binding starts in `waiting_hydration`. It becomes active only after provider-history reconciliation and correlated-event completion. Authorized release selects unexpired pending revisions from the same binding route/resource through the trigger provider position, records immutable batch membership, and deletes only the released pending rows.
 
+Only revisions from route-eligible authors are projected into that pending set. A
+disabled external bot, app, or system message may never be released incidentally by a
+later authorized human trigger.
+
 The resulting InputBuffer is `batch` scheduling with reference-only metadata containing the invocation batch ID. The buffer does not duplicate provider text. At promotion, the batch becomes contiguous `external_channel_message` events with the trigger identity and authorization state, and then wakes the bound AgentSession.
 
 Later authorized original messages on an active binding create another immutable batch and wake the same Session. Edits and deletes update canonical provider state but do not independently invoke the Agent or rewrite prior projected history.
@@ -114,6 +136,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-27** (spec_version 9) — Added route-scoped open human access by
+  default, an opt-in external-bot admission setting, connected-bot loop exclusion,
+  and the rule that rejected author classes never enter releasable pending context.
 - **2026-07-26** (spec_version 8) — Extended the provider-neutral principal,
   source-retention, selector, and approval boundary to signed Discord interactions
   without allowing a callback actor to replace source provenance.

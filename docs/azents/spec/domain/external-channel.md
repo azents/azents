@@ -53,8 +53,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-07-26
-spec_version: 18
+last_verified_at: 2026-07-27
+spec_version: 19
 ---
 
 # External Channel
@@ -93,7 +93,7 @@ contain multiple independent bindings.
 | Record | Current contract |
 | --- | --- |
 | Connection | Workspace-owned provider App identity, immutable `single` or `multi` mode, encrypted credentials, capability/health snapshot, configuration and App-claim generations, terminal disconnect state, and provider ingress lease/checkpoint/gap state. Slack has one selected HTTP or Socket transport; Discord concurrently uses signed HTTP interactions and a Gateway session. |
-| Agent route | Persistent connection-to-Agent relationship. Single Apps require exactly one current route. Multi Apps retain zero or more available or removed catalog routes; immutable Agent identity snapshots preserve history after Agent deletion. |
+| Agent route | Persistent connection-to-Agent relationship. Single Apps require exactly one current route. Multi Apps retain zero or more available or removed catalog routes; immutable Agent identity snapshots preserve history after Agent deletion. Each active dedicated route defaults to open human access and separately defaults to rejecting external bot messages. |
 | Channel default | Multi App channel-to-route preference. At most one active default exists per connection and provider channel. Removing its route invalidates rather than silently retargets it. |
 | Conversation admission | Durable, expiring unbound-conversation scope that records the initiating provider principal and may become selected exactly once. |
 | Interaction | Idempotent signed Slack or Discord shortcut, component/action, navigation, or submission claim. Provider triggers and Discord interaction tokens stay transient and are never persisted or replayed. |
@@ -176,6 +176,12 @@ contain multiple independent bindings.
   creation. Finished work never recreates a Tracker, and a missing delete target is
   already absent.
 - Message revisions never rewrite an already projected revision. Later edits or deletes remain distinct corrections.
+- Route author admission is evaluated before pending-context projection. Humans are
+  route-eligible; an external bot is route-eligible only when
+  `allow_bot_messages` is enabled; app and system authors are never eligible. The
+  connected Azents bot is excluded before persistence to prevent provider loops. A
+  rejected author revision cannot enter a later invocation batch through another
+  participant's trigger.
 - A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, route relationship, and active resource. Blocks take precedence.
 - Creating a new binding Session snapshots the routed Agent's current automatic
   Project policy into the root `SessionAgentContext` in the same transaction as
@@ -191,8 +197,11 @@ Agent administrators manage Single Apps from Agent settings. They can retrieve a
 complete copy-ready Slack App Manifest, follow equivalent manual Slack UI
 instructions, create the App and its sole route, validate it, replace its App ID,
 transport, and complete credential set, disconnect it terminally, and manage grants
-and blocks. Removing the Single association disconnects the App. Secret fields
-remain blank and required when an existing connection is edited.
+and blocks. The active dedicated route management operation also controls
+`open_access_enabled` and `allow_bot_messages`: humans are open by default, external
+bots are disabled by default, and neither setting overrides a block or admits the
+connected Azents bot. Removing the Single association disconnects the App. Secret
+fields remain blank and required when an existing connection is edited.
 
 Workspace Owners and Managers manage Multi Apps from Workspace integrations.
 Ordinary Members have neither Multi read nor write authority. Multi creation starts
@@ -250,6 +259,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-27** (spec_version 19) — Added route-scoped open human access and
+  external-bot admission controls, with rejected authors excluded from releasable
+  pending context and connected-bot loop prevention preserved.
 - **2026-07-26** (spec_version 18) — Removed the Discord rollout gate, made the
   Gateway Worker part of every Server deployment, and specified provisional fenced
   callback authority so Discord's immediate PING verification can succeed without

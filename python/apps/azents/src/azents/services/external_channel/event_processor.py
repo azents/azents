@@ -2298,7 +2298,11 @@ class ExternalChannelEventProcessorService:
         applied: bool,
     ) -> ExternalChannelPendingContextTrim:
         """Materialize route-scoped pending context after route selection."""
-        if not applied or message.current_revision_id is None:
+        if (
+            not applied
+            or message.current_revision_id is None
+            or not _route_accepts_author(route, message.author_type)
+        ):
             return ExternalChannelPendingContextTrim(
                 deleted_message_count=0,
                 deleted_size=0,
