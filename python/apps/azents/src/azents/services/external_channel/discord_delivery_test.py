@@ -49,6 +49,34 @@ async def test_create_message_uses_a_deterministic_nonce_and_returns_identity() 
 
 
 @pytest.mark.asyncio
+async def test_ensure_thread_creates_a_missing_root_message_thread() -> None:
+    """A parent-channel mention gets a usable thread before any reply."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.method == "GET":
+            return httpx.Response(404)
+        return httpx.Response(201, json={"id": "333", "parent_id": "222"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        result = await DiscordDeliveryClient(http_client).ensure_thread(
+            bot_token="discord-secret",
+            parent_channel_id="222",
+            root_message_id="333",
+        )
+
+    assert result.status == "delivered"
+    assert [request.url.path for request in calls] == [
+        "/api/v10/channels/333",
+        "/api/v10/channels/222/messages/333/threads",
+    ]
+    assert json.loads(calls[1].content) == {"name": "Azents"}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("status_code", "expected_status", "expected_kind"),
     [

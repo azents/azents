@@ -2508,6 +2508,17 @@ class ExternalChannelEventProcessorService:
                     else None
                 ),
             }
+            labels = resource.labels or {}
+            parent_channel_id = labels.get("parent_channel_id")
+            root_message_id = labels.get("root_message_id")
+            if (
+                isinstance(parent_channel_id, str)
+                and parent_channel_id
+                and isinstance(root_message_id, str)
+                and root_message_id == channel_id
+            ):
+                payload["thread_parent_channel_id"] = parent_channel_id
+                payload["thread_root_message_id"] = root_message_id
         else:
             raise RuntimeError("External Channel provider is not supported.")
         attempt = await self.repository.create_delivery_attempt_idempotent(

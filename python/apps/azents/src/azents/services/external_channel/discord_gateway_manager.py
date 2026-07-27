@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import datetime
+import hashlib
 import json
 import logging
 import math
@@ -58,6 +59,11 @@ _RATE_LIMIT_RECONNECT_DELAY = datetime.timedelta(minutes=1)
 _MAX_RECONNECT_DELAY = datetime.timedelta(minutes=5)
 _MAX_RATE_LIMIT_RETRY_AFTER = datetime.timedelta(days=1)
 _CHECKPOINT_VERSION = 1
+
+
+def _checkpoint_session_fingerprint(session_id: str) -> str:
+    """Return a non-reversible fingerprint for a Discord Gateway session."""
+    return hashlib.sha256(session_id.encode()).hexdigest()
 
 
 class DiscordGatewayCredentialError(RuntimeError):
@@ -472,6 +478,9 @@ class DiscordGatewayManagerService:
                 now=now,
                 encrypted_checkpoint=encrypted_checkpoint,
                 checkpoint_version=_CHECKPOINT_VERSION,
+                checkpoint_session_fingerprint=_checkpoint_session_fingerprint(
+                    checkpoint.session_id
+                ),
                 sequence=checkpoint.sequence,
             )
             await session.commit()

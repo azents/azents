@@ -460,6 +460,23 @@ class ExternalChannelActionService:
                 text = payload.get("text")
                 if not isinstance(text, str):
                     return _discord_invalid_payload()
+                parent_channel_id = payload.get("thread_parent_channel_id")
+                root_message_id = payload.get("thread_root_message_id")
+                if parent_channel_id is not None or root_message_id is not None:
+                    if (
+                        not isinstance(parent_channel_id, str)
+                        or not parent_channel_id.isdigit()
+                        or not isinstance(root_message_id, str)
+                        or root_message_id != channel_id
+                    ):
+                        return _discord_invalid_payload()
+                    thread = await self.discord_client.ensure_thread(
+                        bot_token=bot_token,
+                        parent_channel_id=parent_channel_id,
+                        root_message_id=root_message_id,
+                    )
+                    if thread.status != "delivered":
+                        return thread
                 if files:
                     runtime_files = [
                         file

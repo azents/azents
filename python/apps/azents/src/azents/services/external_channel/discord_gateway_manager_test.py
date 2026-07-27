@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
@@ -23,6 +24,7 @@ from azents.services.external_channel.connection import (
 )
 from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_gateway import (
+    DiscordGatewayCheckpoint,
     DiscordGatewayConnectionResult,
     DiscordGatewayDispatch,
     DiscordGatewayInvalidPayload,
@@ -52,6 +54,7 @@ class _Repository:
     def __init__(self, admission: object | None) -> None:
         self.admission = admission
         self.calls: list[dict[str, object]] = []
+        self.checkpoint_calls: list[dict[str, object]] = []
         self.reconnect_required_calls: list[dict[str, object]] = []
 
     async def admit_discord_gateway_event(
@@ -61,6 +64,15 @@ class _Repository:
     ) -> object | None:
         self.calls.append(kwargs)
         return self.admission
+
+    async def update_discord_gateway_checkpoint(
+        self,
+        _session: object,
+        **kwargs: object,
+    ) -> bool:
+        """Capture one checkpoint update."""
+        self.checkpoint_calls.append(kwargs)
+        return True
 
     async def mark_discord_gateway_reconnect_required(
         self,
@@ -187,6 +199,7 @@ def _lease() -> ExternalChannelIngressLease:
         gap_reason=None,
         encrypted_checkpoint=None,
         checkpoint_version=None,
+        checkpoint_session_fingerprint=None,
         last_handled_dispatch_sequence=None,
         created_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
         updated_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
@@ -261,6 +274,34 @@ async def test_admits_supported_dispatch_under_current_lease() -> None:
     create = call["create"]
     assert isinstance(create, ExternalChannelEventCreate)
     assert create.provider_event_id == "discord-gateway:session-1:5"
+    sessions.session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_fingerprints_discord_session_id() -> None:
+    """Checkpoint fencing receives a non-reversible Discord session identifier."""
+    sessions = _SessionManager()
+    repository = _Repository(admission=object())
+    cipher = MagicMock()
+    cipher.encrypt.return_value = "checkpoint-ciphertext"
+    service = _service(repository=repository, session_manager=sessions)
+    service.cipher = cipher
+
+    persisted = await service._persist_checkpoint(  # pyright: ignore[reportPrivateUsage]
+        connection_id="connection-1",
+        lease=_lease(),
+        checkpoint=DiscordGatewayCheckpoint(
+            session_id="session-1",
+            resume_gateway_url="wss://gateway.discord.gg",
+            sequence=1,
+        ),
+    )
+
+    assert persisted is True
+    assert repository.checkpoint_calls[0]["checkpoint_session_fingerprint"] == (
+        hashlib.sha256(b"session-1").hexdigest()
+    )
+    assert "session-1" not in repository.checkpoint_calls[0].values()
     sessions.session.commit.assert_awaited_once()
 
 

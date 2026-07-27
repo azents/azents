@@ -867,6 +867,7 @@ class ExternalChannelIngressLease(_Record):
     gap_reason: str | None
     encrypted_checkpoint: str | None
     checkpoint_version: int | None
+    checkpoint_session_fingerprint: str | None
     last_handled_dispatch_sequence: int | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
