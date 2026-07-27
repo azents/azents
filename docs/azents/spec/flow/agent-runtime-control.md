@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-07-27
-spec_version: 34
+spec_version: 35
 ---
 
 # Agent Runtime Control
@@ -99,7 +99,7 @@ The store owns:
 - generation fencing data used to reject stale provider/runner messages
 - request claim cursors and stream metadata used to acknowledge delivered Provider/Runner requests
 
-Generation fencing is enforced before volatile stream messages mutate durable state. Control rejects or closes Provider/Runner streams whose inbound message generation differs from the accepted registration generation. Durable Provider reports are accepted only when both the Provider stream generation and observed desired generation are monotonic relative to the `agent_runtimes` row. Durable Runner state reports are accepted only when the Runner generation is not older than the row generation. Stale reports must not overwrite workspace path, observed state, runner availability, or current failure fields.
+Generation fencing is enforced before volatile stream messages mutate durable state. Control rejects or closes Provider/Runner streams whose inbound message generation differs from the accepted registration generation. Durable Provider reports are accepted only when both the Provider stream generation and observed desired generation are monotonic relative to the `agent_runtimes` row. Durable Runner state reports are accepted only when the Runner generation is not older than the row generation and the reported execution-policy desired generation equals the current durable desired generation. A Runner from the replaced desired generation is ignored during workload handoff and cannot create an evidence-mismatch failure for the new target. Stale reports must not overwrite workspace path, observed state, runner availability, or current failure fields.
 
 Provider report framing always uses the generation accepted for the current Control stream. A Provider reconnect or leader failover may observe backend resources whose labels contain an older Provider generation; those labels are historical command metadata and must be replaced with the current connection generation before initial resync reports, watch reports, or command completion reports are sent to Control.
 
@@ -290,6 +290,7 @@ target can be reconciled.
 Production deploys the new path through GitOps:
 
 - ECR repositories and GitHub Actions build/push runtime images.
+- The policy Gateway image exposes its executable at the stable `/usr/local/bin/azents-container-policy-gateway` path consumed by the Kubernetes Provider for the container command and readiness probe.
 - Helm values/templates render runtime-control, runtime-runner, and Kubernetes provider settings.
 - ArgoCD Application/root/overlay includes the runtime provider deployment.
 - Final cutover defaults route production to the Agent Runtime path and disables/prunes the legacy sandbox provider-control traffic path.
@@ -313,6 +314,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-27** (spec_version 35) — Fenced Runner policy evidence by desired generation during workload replacement and aligned the Gateway image executable with the Kubernetes container contract.
 - **2026-07-27** (spec_version 34) — Prevented false start timeouts across Control rollouts and made Kubernetes Runtime Pod replacement wait for asynchronous deletion before recreation.
 - **2026-07-27** (spec_version 33) — Made mixed-policy convergence use a valid module-level security meet and kept invalidated historical evidence in automatic recovery state.
 - **2026-07-27** (spec_version 32) — Removed Platform policy source evidence and made the selected Profile the complete execution ceiling.

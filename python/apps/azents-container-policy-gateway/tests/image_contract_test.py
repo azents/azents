@@ -50,3 +50,9 @@ def test_gateway_image_runs_as_the_fixed_unprivileged_user() -> None:
     assert "useradd --uid 1001 --gid 1001" in dockerfile
     assert "USER 1001:1001" in dockerfile
     assert "uv sync --frozen --no-dev" in dockerfile
+    assert (
+        "ln -s /workspace/python/apps/azents-container-policy-gateway/"
+        ".venv/bin/azents-container-policy-gateway "
+        "/usr/local/bin/azents-container-policy-gateway"
+    ) in dockerfile
+    assert 'ENTRYPOINT ["/usr/local/bin/azents-container-policy-gateway"]' in dockerfile

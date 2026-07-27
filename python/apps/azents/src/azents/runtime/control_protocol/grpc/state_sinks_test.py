@@ -380,6 +380,54 @@ async def test_runner_state_sink_ignores_stale_report_with_lower_generation(
     assert runtime.runner_generation == 2
 
 
+async def test_runner_state_sink_ignores_previous_desired_generation(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A replaced Runner cannot fail the next desired Runtime generation."""
+    repo = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        runtime_id = await _create_runtime(session, "runner-sink-stale-desired")
+        command = await repo.set_desired_state(
+            session,
+            runtime_id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        await repo.record_provider_observed_state(
+            session,
+            runtime_id,
+            RuntimeProviderObservedState.STARTING,
+            1,
+            command.desired_generation,
+            workspace_path="/workspace/provider",
+        )
+    policy_repository = _policy_repository()
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        policy_repository,
+        rdb_session_manager,
+    )
+
+    await sink.record_runner_state(
+        _report(
+            runtime_id,
+            "/workspace/provider",
+            state=SharedRunnerState.FAILED,
+            runner_generation=99,
+            policy_desired_generation=command.desired_generation - 1,
+        )
+    )
+
+    async with rdb_session_manager() as session:
+        runtime = await repo.get_by_id(session, runtime_id)
+    assert runtime is not None
+    assert runtime.runner_state == RuntimeRunnerState.UNKNOWN
+    assert runtime.runner_generation == 0
+    assert runtime.failure_generation is None
+    assert runtime.failure_code is None
+
+
 async def _create_runtime(session: AsyncSession, slug: str) -> str:
     workspace_repo = WorkspaceRepository()
     result = await workspace_repo.create(
@@ -450,6 +498,7 @@ def _report(
     state: SharedRunnerState = SharedRunnerState.READY,
     runner_generation: int = 1,
     diagnostic: dict[str, str] | None = None,
+    policy_desired_generation: int = 0,
 ) -> RunnerStateReport:
     return RunnerStateReport(
         runtime_id=runtime_id,
@@ -462,7 +511,7 @@ def _report(
         diagnostic=diagnostic or {},
         workspace_path=workspace_path,
         reported_at=datetime(2026, 5, 25, tzinfo=UTC),
-        execution_policy=_execution_policy_evidence(),
+        execution_policy=_execution_policy_evidence(policy_desired_generation),
     )
 
 
