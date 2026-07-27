@@ -488,6 +488,110 @@ class TestExternalChannelRepository:
             is None
         )
 
+    async def test_discord_gateway_terminal_transition_fences_stale_lease(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Only the current Gateway lease can suppress future scheduler claims."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "discord-gateway-terminal-transition",
+        )
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id).model_copy(
+                update={
+                    "provider": ExternalChannelProvider.DISCORD,
+                    "ingress_profile": (
+                        ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+                    ),
+                    "provider_app_id": "discord-app-terminal-1",
+                    "provider_tenant_id": None,
+                    "provider_config": {"target_guild_id": "guild-terminal-1"},
+                }
+            ),
+        )
+        prepared = await repo.prepare_discord_callback(
+            rdb_session,
+            connection_id=connection.id,
+            expected_encrypted_credentials="ciphertext-only",
+            expected_configuration_generation=connection.configuration_generation,
+            provider_app_id="discord-app-terminal-1",
+            interaction_public_key="a" * 64,
+            callback_selector_hash="terminal-selector-hash",
+        )
+        assert prepared is True
+        activated = await repo.activate_discord_connection(
+            rdb_session,
+            connection_id=connection.id,
+            expected_encrypted_credentials="ciphertext-only",
+            expected_configuration_generation=connection.configuration_generation,
+            provider_app_id="discord-app-terminal-1",
+            provider_tenant_id="guild-terminal-1",
+            provider_bot_user_id=None,
+            interaction_public_key="a" * 64,
+            callback_selector_hash="terminal-selector-hash",
+            checked_at=_at(1),
+        )
+        assert activated is not None
+        stale_claim = await repo.claim_discord_gateway_lease(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-stale",
+            now=_at(2),
+            lease_until=_at(3),
+        )
+        assert stale_claim is not None
+        current_claim = await repo.claim_discord_gateway_lease(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-current",
+            now=_at(4),
+            lease_until=_at(10),
+        )
+        assert current_claim is not None
+
+        stale_terminalized = await repo.mark_discord_gateway_reconnect_required(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-stale",
+            lease_generation=stale_claim.lease.lease_generation,
+            now=_at(5),
+            reason="gateway_credentials_invalid",
+        )
+        terminalized = await repo.mark_discord_gateway_reconnect_required(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-current",
+            lease_generation=current_claim.lease.lease_generation,
+            now=_at(5),
+            reason="gateway_credentials_invalid",
+        )
+
+        rdb_connection = await rdb_session.get(
+            RDBExternalChannelConnection,
+            connection.id,
+        )
+        lease = await rdb_session.scalar(
+            sa.select(RDBExternalChannelIngressLease).where(
+                RDBExternalChannelIngressLease.connection_id == connection.id
+            )
+        )
+
+        assert stale_terminalized is False
+        assert terminalized is True
+        assert rdb_connection is not None
+        assert (
+            rdb_connection.status is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+        )
+        assert lease is not None
+        assert lease.lease_owner is None
+        assert lease.lease_until is None
+        assert lease.gap_detected_at == _at(5)
+        assert lease.gap_reason == "gateway_credentials_invalid"
+        assert await repo.list_discord_gateway_connection_ids(rdb_session) == []
+
     async def test_event_claim_is_fenced_and_completion_is_idempotent(
         self,
         rdb_session: AsyncSession,

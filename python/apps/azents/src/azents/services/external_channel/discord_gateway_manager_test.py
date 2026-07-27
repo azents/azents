@@ -1,5 +1,6 @@
 """Deterministic Discord Gateway manager admission tests."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -7,17 +8,20 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from azcommon.di import Container
+from cryptography.fernet import InvalidToken
 
 from azents.core.deps import get_config, get_credential_cipher
 from azents.rdb.deps import get_session_manager
 from azents.repos.external_channel.data import (
     ExternalChannelEventCreate,
     ExternalChannelIngressLease,
+    ExternalChannelIngressLeaseClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
+from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_gateway import DiscordGatewayDispatch
 from azents.services.external_channel.discord_gateway_manager import (
     DiscordGatewayLeaseLost,
@@ -44,6 +48,7 @@ class _Repository:
     def __init__(self, admission: object | None) -> None:
         self.admission = admission
         self.calls: list[dict[str, object]] = []
+        self.reconnect_required_calls: list[dict[str, object]] = []
 
     async def admit_discord_gateway_event(
         self,
@@ -53,20 +58,68 @@ class _Repository:
         self.calls.append(kwargs)
         return self.admission
 
+    async def mark_discord_gateway_reconnect_required(
+        self,
+        _session: object,
+        **kwargs: object,
+    ) -> bool:
+        """Capture one fenced terminal Gateway transition."""
+        self.reconnect_required_calls.append(kwargs)
+        return True
+
+
+class _CredentialFailureRepository(_Repository):
+    """Provide one owned connection whose persisted credential cannot decrypt."""
+
+    def __init__(self) -> None:
+        super().__init__(admission=object())
+        self.release_calls: list[dict[str, object]] = []
+
+    async def claim_discord_gateway_lease(
+        self,
+        _session: object,
+        **_kwargs: object,
+    ) -> ExternalChannelIngressLeaseClaim:
+        """Return one current lease snapshot."""
+        return ExternalChannelIngressLeaseClaim(lease=_lease())
+
+    async def get_owned_discord_gateway_configuration(
+        self,
+        _session: object,
+        **_kwargs: object,
+    ) -> MagicMock:
+        """Return the minimum owned configuration surface for credential decoding."""
+        return MagicMock(
+            encrypted_credentials="ciphertext",
+            provider_app_id="app-1",
+            provider_tenant_id="guild-1",
+        )
+
+    async def release_discord_gateway_lease(
+        self,
+        _session: object,
+        **kwargs: object,
+    ) -> bool:
+        """Capture an unexpected ordinary lease release."""
+        self.release_calls.append(kwargs)
+        return True
+
 
 def _service(
     *,
     repository: _Repository,
     session_manager: _SessionManager,
+    credentials_codec: MagicMock | None = None,
+    http_client: MagicMock | None = None,
 ) -> DiscordGatewayManagerService:
     """Build a manager with only its admission dependencies exercised."""
     return DiscordGatewayManagerService(
         config=MagicMock(),
         session_manager=session_manager,
         repository=repository,  # type: ignore[arg-type]
-        credentials_codec=MagicMock(),
+        credentials_codec=credentials_codec or MagicMock(),
         cipher=MagicMock(),
-        http_client=MagicMock(),
+        http_client=http_client or MagicMock(),
         manager_id="manager-1",
     )
 
@@ -200,3 +253,66 @@ async def test_stale_authority_fence_stops_gateway_checkpoint_progress() -> None
 
     assert len(repository.calls) == 1
     sessions.session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_invalid_persisted_credential_terminalizes_current_gateway_lease() -> (
+    None
+):
+    """A credential decode failure stops future scheduler claims for this connection."""
+    sessions = _SessionManager()
+    repository = _CredentialFailureRepository()
+    credentials_codec = MagicMock()
+    credentials_codec.decrypt = MagicMock(side_effect=InvalidToken)
+    service = _service(
+        repository=repository,
+        session_manager=sessions,
+        credentials_codec=credentials_codec,
+    )
+
+    await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]  # Exercise terminal credential handling from the owned-session boundary.
+        connection_id="connection-1",
+        shutdown_event=asyncio.Event(),
+    )
+
+    assert len(repository.reconnect_required_calls) == 1
+    call = repository.reconnect_required_calls[0]
+    assert call["connection_id"] == "connection-1"
+    assert call["lease_owner"] == "manager-1"
+    assert call["lease_generation"] == 3
+    assert call["reason"] == "gateway_credentials_invalid"
+    assert repository.release_calls == []
+    assert sessions.session.commit.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_gateway_discovery_credential_rejection_terminalizes_current_lease() -> (
+    None
+):
+    """A discovery 401 terminalizes ownership instead of entering the poll loop."""
+    sessions = _SessionManager()
+    repository = _CredentialFailureRepository()
+    credentials_codec = MagicMock()
+    credentials_codec.decrypt = MagicMock(
+        return_value=DiscordConnectionCredentials(bot_token="test-token")
+    )
+    http_client = MagicMock()
+    http_client.get = AsyncMock(return_value=MagicMock(status_code=401))
+    service = _service(
+        repository=repository,
+        session_manager=sessions,
+        credentials_codec=credentials_codec,
+        http_client=http_client,
+    )
+
+    await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]  # Exercise terminal discovery handling from the owned-session boundary.
+        connection_id="connection-1",
+        shutdown_event=asyncio.Event(),
+    )
+
+    assert len(repository.reconnect_required_calls) == 1
+    call = repository.reconnect_required_calls[0]
+    assert call["lease_owner"] == "manager-1"
+    assert call["lease_generation"] == 3
+    assert call["reason"] == "gateway_credentials_invalid"
+    assert repository.release_calls == []

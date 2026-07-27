@@ -659,6 +659,55 @@ class ExternalChannelRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def mark_discord_gateway_reconnect_required(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        lease_generation: int,
+        now: datetime.datetime,
+        reason: str,
+    ) -> bool:
+        """Terminalize one current Discord Gateway lease and preserve its route."""
+        result = await session.execute(
+            sa.select(
+                RDBExternalChannelConnection,
+                RDBExternalChannelIngressLease,
+            )
+            .join(
+                RDBExternalChannelIngressLease,
+                RDBExternalChannelIngressLease.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .join(
+                RDBExternalChannelAppClaim,
+                RDBExternalChannelAppClaim.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .where(
+                _discord_gateway_lease_fence(
+                    connection_id=connection_id,
+                    lease_owner=lease_owner,
+                    lease_generation=lease_generation,
+                    now=now,
+                )
+            )
+            .with_for_update()
+        )
+        owned = result.tuples().one_or_none()
+        if owned is None:
+            return False
+        connection, lease = owned
+        connection.status = ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+        lease.lease_owner = None
+        lease.lease_until = None
+        lease.heartbeat_at = now
+        lease.gap_detected_at = now
+        lease.gap_reason = reason
+        await session.flush()
+        return True
+
     async def release_discord_gateway_lease(
         self,
         session: AsyncSession,
