@@ -112,6 +112,49 @@ class ExternalChannelManagementRepository:
         ).all()
         return [_connection(connection, route) for connection, route in rows]
 
+    async def update_connection_access_policy(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        connection_id: str,
+        open_access_enabled: bool,
+        allow_bot_messages: bool,
+    ) -> ManagedConnection | None:
+        """Persist one dedicated route's non-secret ingress policy."""
+        row = (
+            await session.execute(
+                sa.select(RDBExternalChannelConnection, RDBExternalChannelAgentRoute)
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.connection_id
+                    == RDBExternalChannelConnection.id,
+                )
+                .where(
+                    RDBExternalChannelConnection.id == connection_id,
+                    RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.app_mode
+                    == ExternalChannelAppMode.SINGLE,
+                    RDBExternalChannelAgentRoute.connection_app_mode
+                    == ExternalChannelAppMode.SINGLE,
+                    RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    self._has_sole_route(),
+                    RDBExternalChannelConnection.status
+                    != ExternalChannelConnectionStatus.DISCONNECTED,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        connection, route = row
+        route.open_access_enabled = open_access_enabled
+        route.allow_bot_messages = allow_bot_messages
+        await session.flush()
+        await session.refresh(route, attribute_names=["updated_at"])
+        return _connection(connection, route)
+
     async def list_multi_connections(
         self,
         session: AsyncSession,
@@ -1566,6 +1609,8 @@ def _connection(
         provider_app_id=connection.provider_app_id,
         provider_tenant_id=connection.provider_tenant_id,
         provider_bot_user_id=connection.provider_bot_user_id,
+        open_access_enabled=route.open_access_enabled,
+        allow_bot_messages=route.allow_bot_messages,
         credentials_configured=connection.encrypted_credentials is not None,
         capabilities=connection.capabilities,
         provider_config=connection.provider_config,

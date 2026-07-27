@@ -915,8 +915,12 @@ class ExternalChannelEventProcessorService:
             raise _ConnectionUnavailable(
                 "discord_message_content_unavailable"
             ) from error
-        if normalized.author_type is not ExternalChannelPrincipalAuthorType.HUMAN:
-            raise DiscordEventExcluded("Discord bot and system messages are ignored.")
+        if normalized.author_type is ExternalChannelPrincipalAuthorType.SYSTEM:
+            raise DiscordEventExcluded("Discord system messages are ignored.")
+        if connection_authored(configuration, normalized):
+            raise DiscordEventExcluded(
+                "Connection-authored Discord message was ignored."
+            )
         existing_resource_key = _discord_resource_key(
             tenant_id=tenant_id,
             thread_id=normalized.thread_id or normalized.channel_id,
@@ -967,6 +971,13 @@ class ExternalChannelEventProcessorService:
                             labels={
                                 "provider": "discord",
                                 "guild_id": tenant_id,
+                                "channel_id": (
+                                    normalized.parent_channel_id
+                                    or normalized.channel_id
+                                ),
+                                "thread_ts": (
+                                    normalized.thread_id or normalized.message_id
+                                ),
                                 "thread_id": (
                                     normalized.thread_id or normalized.message_id
                                 ),
@@ -1182,9 +1193,9 @@ class ExternalChannelEventProcessorService:
         control_delivery_attempt_id = None
         wake_session_id: str | None = None
         principal_id = canonical_message.principal_id
-        if (
-            principal_id is not None
-            and message.author_type is ExternalChannelPrincipalAuthorType.HUMAN
+        if principal_id is not None and _route_accepts_author(
+            route,
+            message.author_type,
         ):
             blocked = (
                 await self.repository.get_active_block(
@@ -1204,11 +1215,15 @@ class ExternalChannelEventProcessorService:
                         binding.agent_session_id if binding is not None else None
                     ),
                 )
+            authorized = grant is not None or _route_has_automatic_access(
+                route,
+                message.author_type,
+            )
             if (
                 binding is not None
                 and binding.activation_status
                 is ExternalChannelBindingActivationStatus.ACTIVE
-                and grant is not None
+                and authorized
                 and persisted_revision.applied
                 and message.revision_kind is ExternalChannelMessageRevisionKind.ORIGINAL
             ):
@@ -1225,7 +1240,7 @@ class ExternalChannelEventProcessorService:
                 if released is not None:
                     wake_session_id = binding.agent_session_id
             elif message.invocation and not blocked:
-                if binding is None and grant is not None:
+                if binding is None and authorized:
                     binding = await self._create_granted_initial_binding(
                         session,
                         route=route,
@@ -1736,9 +1751,9 @@ class ExternalChannelEventProcessorService:
             )
             control_delivery_attempt_id = None
             principal_id = canonical_message.principal_id
-            if (
-                principal_id is not None
-                and message.author_type is ExternalChannelPrincipalAuthorType.HUMAN
+            if principal_id is not None and _route_accepts_author(
+                route,
+                message.author_type,
             ):
                 blocked = (
                     await self.repository.get_active_block(
@@ -1758,11 +1773,15 @@ class ExternalChannelEventProcessorService:
                             binding.agent_session_id if binding is not None else None
                         ),
                     )
+                authorized = grant is not None or _route_has_automatic_access(
+                    route,
+                    message.author_type,
+                )
                 if (
                     binding is not None
                     and binding.activation_status
                     is ExternalChannelBindingActivationStatus.ACTIVE
-                    and grant is not None
+                    and authorized
                     and persisted_revision.applied
                     and message.revision_kind
                     is ExternalChannelMessageRevisionKind.ORIGINAL
@@ -1782,7 +1801,7 @@ class ExternalChannelEventProcessorService:
                             released.activity_delivery_attempt_id
                         )
                 elif message.invocation and not blocked:
-                    if binding is None and grant is not None:
+                    if binding is None and authorized:
                         binding = await self._create_granted_initial_binding(
                             session,
                             route=route,
@@ -3831,7 +3850,7 @@ def _resource_boundary(
 
 def connection_authored(
     configuration: ExternalChannelConnectionConfiguration,
-    message: SlackNormalizedMessage,
+    message: SlackNormalizedMessage | DiscordNormalizedMessage,
 ) -> bool:
     provider_user_id = message.provider_user_id
     if provider_user_id is None:
@@ -3843,3 +3862,29 @@ def connection_authored(
             provider_user_id.removeprefix("bot:") == configuration.provider_bot_user_id
         )
     return provider_user_id == configuration.provider_bot_user_id
+
+
+def _route_accepts_author(
+    route: ExternalChannelAgentRoute,
+    author_type: ExternalChannelPrincipalAuthorType,
+) -> bool:
+    """Return whether this route admits a provider principal class."""
+    if author_type is ExternalChannelPrincipalAuthorType.HUMAN:
+        return True
+    return (
+        author_type is ExternalChannelPrincipalAuthorType.BOT
+        and route.allow_bot_messages
+    )
+
+
+def _route_has_automatic_access(
+    route: ExternalChannelAgentRoute,
+    author_type: ExternalChannelPrincipalAuthorType,
+) -> bool:
+    """Return whether this route bypasses a per-principal access grant."""
+    if author_type is ExternalChannelPrincipalAuthorType.HUMAN:
+        return route.open_access_enabled
+    return (
+        author_type is ExternalChannelPrincipalAuthorType.BOT
+        and route.allow_bot_messages
+    )

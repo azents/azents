@@ -172,12 +172,9 @@ def normalize_projected_discord_event(
     created_at = _discord_timestamp(raw_message.get("timestamp"))
     updated_at = _discord_timestamp(raw_message.get("edited_timestamp"))
     thread_id, parent_channel_id = _thread_identity(raw_message)
-    invocation = (
-        author_type is ExternalChannelPrincipalAuthorType.HUMAN
-        and _mentions_connected_bot(
-            raw_message.get("mentions"),
-            connected_bot_user_id=connected_bot_user_id,
-        )
+    invocation = _mentions_connected_bot(
+        raw_message.get("mentions"),
+        connected_bot_user_id=connected_bot_user_id,
     )
     return DiscordNormalizedMessage(
         tenant_id=tenant_id,

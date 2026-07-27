@@ -19,6 +19,7 @@ import {
   SegmentedControl,
   SimpleGrid,
   Stack,
+  Switch,
   Tabs,
   Text,
   TextInput,
@@ -110,6 +111,7 @@ function ConnectionRow({
   onValidate,
   onEdit,
   onDisconnect,
+  onUpdateAccessPolicy,
 }: {
   connection: ManagedConnection;
   busy: boolean;
@@ -117,6 +119,11 @@ function ConnectionRow({
   onValidate: (connection: ManagedConnection) => void;
   onEdit: (connection: ManagedConnection) => void;
   onDisconnect: (connection: ManagedConnection) => void;
+  onUpdateAccessPolicy: (
+    connection: ManagedConnection,
+    openAccessEnabled: boolean,
+    allowBotMessages: boolean,
+  ) => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.externalChannels");
   const capabilities = capabilityEntries(connection.capabilities);
@@ -223,6 +230,35 @@ function ConnectionRow({
             ))
           )}
         </Group>
+
+        <Stack gap={4}>
+          <Switch
+            label={t("openAccessEnabled")}
+            description={t("openAccessEnabledDescription")}
+            checked={connection.open_access_enabled}
+            disabled={actionsBusy}
+            onChange={(event) =>
+              onUpdateAccessPolicy(
+                connection,
+                event.currentTarget.checked,
+                connection.allow_bot_messages,
+              )
+            }
+          />
+          <Switch
+            label={t("allowBotMessages")}
+            description={t("allowBotMessagesDescription")}
+            checked={connection.allow_bot_messages}
+            disabled={actionsBusy}
+            onChange={(event) =>
+              onUpdateAccessPolicy(
+                connection,
+                connection.open_access_enabled,
+                event.currentTarget.checked,
+              )
+            }
+          />
+        </Stack>
 
         <Group justify="flex-end" gap="xs">
           <Button
@@ -797,6 +833,7 @@ export function ExternalChannelSettings({
   onSubmitDiscordDialog,
   onValidate,
   onDisconnect,
+  onUpdateAccessPolicy,
   onRevokeGrant,
   onRemoveBlock,
 }: ExternalChannelSettingsContainerOutput): React.ReactElement {
@@ -902,6 +939,7 @@ export function ExternalChannelSettings({
                     actionsBusy={actionsBusy}
                     onValidate={onValidate}
                     onEdit={onOpenEdit}
+                    onUpdateAccessPolicy={onUpdateAccessPolicy}
                     onDisconnect={(selected) =>
                       openConfirm({
                         title: t("disconnect"),

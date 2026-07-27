@@ -26,6 +26,7 @@ import {
   externalChannelV1SetupMultiDiscordConnection,
   externalChannelV1SetupMultiSlackConnection,
   externalChannelV1SetupSlackConnection,
+  externalChannelV1UpdateConnectionAccessPolicy,
   externalChannelV1UpdateDiscordConnection,
   externalChannelV1UpdateMultiDiscordConnection,
   externalChannelV1UpdateMultiSlackConnection,
@@ -698,6 +699,37 @@ export const externalChannelRouter = router({
             app_id: input.appId,
             configuration: { target_guild_id: input.credentials.targetGuildId },
             credentials: { bot_token: input.credentials.botToken },
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
+  updateConnectionAccessPolicy: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        connectionId: z.string().min(1),
+        openAccessEnabled: z.boolean(),
+        allowBotMessages: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1UpdateConnectionAccessPolicy({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            connection_id: input.connectionId,
+          },
+          body: {
+            open_access_enabled: input.openAccessEnabled,
+            allow_bot_messages: input.allowBotMessages,
           },
           throwOnError: true,
         });

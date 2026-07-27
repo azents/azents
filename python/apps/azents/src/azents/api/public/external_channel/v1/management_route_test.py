@@ -65,6 +65,8 @@ def _connection() -> ManagedConnection:
         provider_app_id="A1",
         provider_tenant_id=None,
         provider_bot_user_id=None,
+        open_access_enabled=True,
+        allow_bot_messages=False,
         credentials_configured=True,
         capabilities=None,
         provider_config=None,

@@ -364,10 +364,7 @@ def _normalize_slack_event(
         message=message,
         normalized_body=normalized_body,
     )
-    invocation = (
-        event_type == "app_mention"
-        and author_type is ExternalChannelPrincipalAuthorType.HUMAN
-    )
+    invocation = event_type == "app_mention"
     return SlackNormalizedMessage(
         tenant_id=tenant_id,
         channel_id=channel_id,

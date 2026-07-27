@@ -141,6 +141,7 @@ azentspublicclient/docs/ChatWriteSnapshotResponse.md
 azentspublicclient/docs/CleanupOrphanGitWorktreesAction.md
 azentspublicclient/docs/CleanupSessionGitWorktreeRequest.md
 azentspublicclient/docs/CommandAction.md
+azentspublicclient/docs/ConnectionAccessPolicyRequest.md
 azentspublicclient/docs/CreateGitWorktreeAction.md
 azentspublicclient/docs/CreateInvitationRequest.md
 azentspublicclient/docs/CreateJoinRequestRequest.md
@@ -570,6 +571,7 @@ azentspublicclient/models/chat_write_snapshot_response.py
 azentspublicclient/models/cleanup_orphan_git_worktrees_action.py
 azentspublicclient/models/cleanup_session_git_worktree_request.py
 azentspublicclient/models/command_action.py
+azentspublicclient/models/connection_access_policy_request.py
 azentspublicclient/models/create_git_worktree_action.py
 azentspublicclient/models/create_invitation_request.py
 azentspublicclient/models/create_join_request_request.py
@@ -987,6 +989,7 @@ azentspublicclient/test/test_chat_write_snapshot_response.py
 azentspublicclient/test/test_cleanup_orphan_git_worktrees_action.py
 azentspublicclient/test/test_cleanup_session_git_worktree_request.py
 azentspublicclient/test/test_command_action.py
+azentspublicclient/test/test_connection_access_policy_request.py
 azentspublicclient/test/test_create_git_worktree_action.py
 azentspublicclient/test/test_create_invitation_request.py
 azentspublicclient/test/test_create_join_request_request.py

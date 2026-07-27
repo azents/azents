@@ -215,6 +215,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_update_connection_access_policy(self) -> None:
+        """Test case for external_channel_v1_update_connection_access_policy
+
+        Update Connection Access Policy
+        """
+        pass
+
     def test_external_channel_v1_update_discord_connection(self) -> None:
         """Test case for external_channel_v1_update_discord_connection
 

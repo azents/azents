@@ -53,6 +53,7 @@ from azents.services.external_channel.discord_api import (
     DiscordAPIUnavailable,
 )
 from azents.services.external_channel.management import (
+    ExternalChannelAccessPolicyInput,
     ExternalChannelDecisionInput,
     ExternalChannelManagementGenerationChanged,
     ExternalChannelManagementNotFound,
@@ -126,6 +127,10 @@ class MultiChannelDefaultRequest(GenerationFenceRequest):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     route_id: str = Field(min_length=1, max_length=32)
+
+
+class ConnectionAccessPolicyRequest(ExternalChannelAccessPolicyInput):
+    """Dedicated External Channel ingress policy request."""
 
 
 @router.get("/workspaces/{handle}/external-channels/slack/multi")
@@ -847,6 +852,30 @@ async def disconnect_connection(
             agent_id=agent_id,
             workspace_user_id=member.workspace_user_id,
             connection_id=connection_id,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.put(
+    "/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/access-policy"
+)
+async def update_connection_access_policy(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    agent_id: str,
+    connection_id: str,
+    request_body: ConnectionAccessPolicyRequest,
+) -> ManagedConnection:
+    """Update open human access and external bot-message admission."""
+    try:
+        return await service.update_connection_access_policy(
+            workspace_id=member.workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=member.workspace_user_id,
+            connection_id=connection_id,
+            policy=request_body,
         )
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error

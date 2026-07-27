@@ -14,6 +14,8 @@ Name | Type | Description | Notes
 **provider_app_id** | **str** |  | 
 **provider_tenant_id** | **str** |  | 
 **provider_bot_user_id** | **str** |  | 
+**open_access_enabled** | **bool** |  | 
+**allow_bot_messages** | **bool** |  | 
 **credentials_configured** | **bool** |  | 
 **capabilities** | **Dict[str, object]** |  | 
 **provider_config** | **Dict[str, object]** |  | 

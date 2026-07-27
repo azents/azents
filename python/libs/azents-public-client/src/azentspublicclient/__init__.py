@@ -160,6 +160,7 @@ __all__ = [
     "CleanupOrphanGitWorktreesAction",
     "CleanupSessionGitWorktreeRequest",
     "CommandAction",
+    "ConnectionAccessPolicyRequest",
     "CreateGitWorktreeAction",
     "CreateInvitationRequest",
     "CreateJoinRequestRequest",
@@ -608,6 +609,7 @@ from azentspublicclient.models.chat_write_snapshot_response import ChatWriteSnap
 from azentspublicclient.models.cleanup_orphan_git_worktrees_action import CleanupOrphanGitWorktreesAction as CleanupOrphanGitWorktreesAction
 from azentspublicclient.models.cleanup_session_git_worktree_request import CleanupSessionGitWorktreeRequest as CleanupSessionGitWorktreeRequest
 from azentspublicclient.models.command_action import CommandAction as CommandAction
+from azentspublicclient.models.connection_access_policy_request import ConnectionAccessPolicyRequest as ConnectionAccessPolicyRequest
 from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction as CreateGitWorktreeAction
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest as CreateInvitationRequest
 from azentspublicclient.models.create_join_request_request import CreateJoinRequestRequest as CreateJoinRequestRequest

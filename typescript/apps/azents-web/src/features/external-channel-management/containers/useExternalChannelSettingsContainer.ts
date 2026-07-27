@@ -51,6 +51,11 @@ export interface ExternalChannelSettingsContainerOutput {
   onSubmitDiscordDialog: () => void;
   onValidate: (connection: ManagedConnection) => void;
   onDisconnect: (connection: ManagedConnection) => void;
+  onUpdateAccessPolicy: (
+    connection: ManagedConnection,
+    openAccessEnabled: boolean,
+    allowBotMessages: boolean,
+  ) => void;
   onRevokeGrant: (grant: ManagedGrant) => void;
   onRemoveBlock: (block: ManagedBlock) => void;
 }
@@ -203,6 +208,17 @@ export function useExternalChannelSettingsContainer({
           actionLock.current = false;
           setActionTarget(null);
           setActionError(validationMessage(result));
+        }
+      },
+      onError: (error) => failAction(error),
+    });
+  const accessPolicyMutation =
+    trpc.externalChannel.updateConnectionAccessPolicy.useMutation({
+      onSuccess: async () => {
+        try {
+          await invalidate("update");
+        } finally {
+          clearAction();
         }
       },
       onError: (error) => failAction(error),
@@ -416,6 +432,17 @@ export function useExternalChannelSettingsContainer({
       disconnectMutation.mutate({
         ...queryInput,
         connectionId: connection.id,
+      });
+    },
+    onUpdateAccessPolicy: (connection, openAccessEnabled, allowBotMessages) => {
+      if (!beginAction(connection.id)) {
+        return;
+      }
+      accessPolicyMutation.mutate({
+        ...queryInput,
+        connectionId: connection.id,
+        openAccessEnabled,
+        allowBotMessages,
       });
     },
     onRevokeGrant: (grant) => {
