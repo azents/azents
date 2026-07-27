@@ -3,6 +3,7 @@
 import {
   Alert,
   Badge,
+  Box,
   Button,
   Divider,
   Group,
@@ -15,6 +16,7 @@ import {
   Title,
 } from "@mantine/core";
 import { IconCircleCheck, IconCircleX, IconServer } from "@tabler/icons-react";
+import { MasterDetailLayout } from "@/shared/components/MasterDetailLayout";
 import type {
   RuntimeProviderAuthAuditState,
   RuntimeProviderAuthBindingItem,
@@ -66,9 +68,14 @@ function ProviderListItem({
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <Group gap="sm" wrap="nowrap">
           <IconServer size={18} />
-          <Stack gap={2}>
+          <Stack gap={2} style={{ minWidth: 0 }}>
             <Text fw={600}>{provider.display_name}</Text>
-            <Text size="xs" c="dimmed" ff="monospace">
+            <Text
+              size="xs"
+              c="dimmed"
+              ff="monospace"
+              style={{ overflowWrap: "anywhere" }}
+            >
               {provider.provider_id}
             </Text>
           </Stack>
@@ -126,8 +133,8 @@ function AuthenticationSection({
         state.items.map((binding) => (
           <Paper key={binding.id} withBorder p="sm" radius="sm">
             <Stack gap="xs">
-              <Group justify="space-between" align="flex-start" wrap="nowrap">
-                <Stack gap={2}>
+              <Group justify="space-between" align="flex-start" wrap="wrap">
+                <Stack gap={2} style={{ minWidth: 0 }}>
                   <Group gap="xs">
                     <Badge variant="light">{binding.auth_method}</Badge>
                     <Badge
@@ -143,7 +150,11 @@ function AuthenticationSection({
                       {binding.connected ? "Connected" : "Disconnected"}
                     </Badge>
                   </Group>
-                  <Text size="sm" ff="monospace">
+                  <Text
+                    size="sm"
+                    ff="monospace"
+                    style={{ overflowWrap: "anywhere" }}
+                  >
                     {binding.subject}
                   </Text>
                   <Text size="xs" c="dimmed">
@@ -240,8 +251,8 @@ function ContractSection({
       {state.type === "LOADED" &&
         state.items.map((contract) => (
           <Paper key={contract.id} withBorder p="sm" radius="sm">
-            <Group justify="space-between" align="flex-start" wrap="nowrap">
-              <Stack gap={2}>
+            <Group justify="space-between" align="flex-start" wrap="wrap">
+              <Stack gap={2} style={{ minWidth: 0 }}>
                 <Group gap="xs">
                   <Badge
                     color={contract.status === "accepted" ? "green" : "yellow"}
@@ -254,7 +265,12 @@ function ContractSection({
                     {contract.protocol_version}
                   </Text>
                 </Group>
-                <Text size="xs" c="dimmed" ff="monospace">
+                <Text
+                  size="xs"
+                  c="dimmed"
+                  ff="monospace"
+                  style={{ overflowWrap: "anywhere" }}
+                >
                   {contract.digest}
                 </Text>
                 {contract.validation_message && (
@@ -363,7 +379,12 @@ function ProviderDetail({
       <Group justify="space-between" align="flex-start">
         <Stack gap={3}>
           <Title order={3}>{provider.display_name}</Title>
-          <Text size="sm" c="dimmed" ff="monospace">
+          <Text
+            size="sm"
+            c="dimmed"
+            ff="monospace"
+            style={{ overflowWrap: "anywhere" }}
+          >
             {provider.provider_id}
           </Text>
         </Stack>
@@ -436,6 +457,7 @@ function ProviderDetail({
 export function RuntimeProvidersPageContent({
   state,
   selectedProvider,
+  detailOpen,
   contractState,
   authBindingState,
   authAuditState,
@@ -445,6 +467,7 @@ export function RuntimeProvidersPageContent({
   acceptingContract,
   errorMessage,
   onSelectProvider,
+  onDetailClose,
   onToggleEnabled,
   onAcceptContract,
   onCreateAuthBinding,
@@ -454,8 +477,46 @@ export function RuntimeProvidersPageContent({
   onCloseAuthAudit,
   onClearOneTimeSecret,
 }: RuntimeProvidersPageContentProps): React.ReactElement {
+  const master = (
+    <ScrollArea h="100%" p="sm" type="auto">
+      <Stack gap="xs">
+        {state.type === "LOADED" &&
+          state.items.map((provider) => (
+            <ProviderListItem
+              key={provider.provider_id}
+              provider={provider}
+              selected={provider.provider_id === selectedProvider?.provider_id}
+              onSelect={() => onSelectProvider(provider.provider_id)}
+            />
+          ))}
+      </Stack>
+    </ScrollArea>
+  );
+  const detail = (
+    <Stack p={{ base: "md", sm: "xl" }}>
+      {selectedProvider ? (
+        <ProviderDetail
+          provider={selectedProvider}
+          contractState={contractState}
+          authBindingState={authBindingState}
+          authMutating={authMutating}
+          updating={updating}
+          acceptingContract={acceptingContract}
+          onToggleEnabled={() => onToggleEnabled(selectedProvider)}
+          onAcceptContract={onAcceptContract}
+          onCreateAuthBinding={onCreateAuthBinding}
+          onRotateAuthBinding={onRotateAuthBinding}
+          onRevokeAuthBinding={onRevokeAuthBinding}
+          onOpenAuthAudit={onOpenAuthAudit}
+        />
+      ) : (
+        <Text c="dimmed">Select a Provider to inspect its state.</Text>
+      )}
+    </Stack>
+  );
+
   return (
-    <Stack gap="lg" p="md">
+    <Box h="100%" display="flex" style={{ flexDirection: "column" }}>
       <Modal
         opened={oneTimeSecret !== null}
         onClose={onClearOneTimeSecret}
@@ -479,62 +540,34 @@ export function RuntimeProvidersPageContent({
         <AuthenticationAudit state={authAuditState} />
       </Modal>
 
-      <Stack gap={4}>
+      <Stack gap={4} p="md">
         <Title order={2}>Runtime Providers</Title>
         <Text c="dimmed">
           Inspect Provider readiness, contract state, and administrative policy.
         </Text>
       </Stack>
 
-      {errorMessage && <Alert color="red">{errorMessage}</Alert>}
-      {state.type === "LOADING" && <Loader />}
-      {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
-      {state.type === "LOADED" && state.items.length === 0 && (
-        <Alert color="yellow" title="No Runtime Providers">
-          Bootstrap or register a Provider before creating new Runtimes.
-        </Alert>
-      )}
+      <Stack gap="sm" px="md">
+        {errorMessage && <Alert color="red">{errorMessage}</Alert>}
+        {state.type === "LOADING" && <Loader />}
+        {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
+        {state.type === "LOADED" && state.items.length === 0 && (
+          <Alert color="yellow" title="No Runtime Providers">
+            Bootstrap or register a Provider before creating new Runtimes.
+          </Alert>
+        )}
+      </Stack>
       {state.type === "LOADED" && state.items.length > 0 && (
-        <Paper withBorder radius="md" p={0} style={{ overflow: "hidden" }}>
-          <Group align="stretch" gap={0} wrap="nowrap">
-            <ScrollArea w={{ base: 260, sm: 340 }} p="sm" type="auto">
-              <Stack gap="xs">
-                {state.items.map((provider) => (
-                  <ProviderListItem
-                    key={provider.provider_id}
-                    provider={provider}
-                    selected={
-                      provider.provider_id === selectedProvider?.provider_id
-                    }
-                    onSelect={() => onSelectProvider(provider.provider_id)}
-                  />
-                ))}
-              </Stack>
-            </ScrollArea>
-            <Divider orientation="vertical" />
-            <Stack p="xl" style={{ flex: 1, minWidth: 0 }}>
-              {selectedProvider ? (
-                <ProviderDetail
-                  provider={selectedProvider}
-                  contractState={contractState}
-                  authBindingState={authBindingState}
-                  authMutating={authMutating}
-                  updating={updating}
-                  acceptingContract={acceptingContract}
-                  onToggleEnabled={() => onToggleEnabled(selectedProvider)}
-                  onAcceptContract={onAcceptContract}
-                  onCreateAuthBinding={onCreateAuthBinding}
-                  onRotateAuthBinding={onRotateAuthBinding}
-                  onRevokeAuthBinding={onRevokeAuthBinding}
-                  onOpenAuthAudit={onOpenAuthAudit}
-                />
-              ) : (
-                <Text c="dimmed">Select a Provider to inspect its state.</Text>
-              )}
-            </Stack>
-          </Group>
-        </Paper>
+        <Box px="md" pb="md" style={{ flex: 1, minHeight: 0 }}>
+          <MasterDetailLayout
+            columns="1fr 2fr"
+            master={master}
+            detail={detail}
+            detailOpen={detailOpen}
+            onDetailClose={onDetailClose}
+          />
+        </Box>
       )}
-    </Stack>
+    </Box>
   );
 }

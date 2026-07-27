@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { serializers, useQueryState } from "@/hooks/use-query-state";
+import { useCallback } from "react";
+import { serializers, useQueryStates } from "@/hooks/use-query-state";
 import type { WorkspaceResponse } from "../types";
+
+const MODES = ["view", "create"] as const;
 
 export interface WorkspacesPageContentProps {
   selectedWorkspaceHandle: string | null;
@@ -14,50 +16,40 @@ export interface WorkspacesPageContentProps {
   onDetailClose: () => void;
 }
 
-/**
- * Workspaces 페이지 컨테이너 훅
- *
- * URL 쿼리 상태로 선택된 workspace handle과 생성 모드를 관리합니다.
- */
+/** Manage the selected Workspace and creation mode in URL query state. */
 export function useWorkspacesPageContainer(): WorkspacesPageContentProps {
-  const [selectedWorkspaceHandle, setSelectedWorkspaceHandle] = useQueryState(
-    "workspace",
-    {
-      serializer: serializers.stringOrNull(),
-    },
-  );
-
-  const [isCreateMode, setIsCreateMode] = useState(false);
+  const [state, setState] = useQueryStates({
+    workspace: serializers.stringOrNull(),
+    mode: serializers.literal(MODES, "view"),
+  });
+  const selectedWorkspaceHandle = state.workspace;
+  const isCreateMode = state.mode === "create";
 
   const handleWorkspaceSelect = useCallback(
     (workspace: WorkspaceResponse): void => {
-      setSelectedWorkspaceHandle(workspace.handle);
-      setIsCreateMode(false);
+      setState({ workspace: workspace.handle, mode: "view" });
     },
-    [setSelectedWorkspaceHandle],
+    [setState],
   );
 
   const handleCreateNew = useCallback((): void => {
-    setSelectedWorkspaceHandle(null);
-    setIsCreateMode(true);
-  }, [setSelectedWorkspaceHandle]);
+    setState({ workspace: null, mode: "create" });
+  }, [setState]);
 
   const handleCancel = useCallback((): void => {
-    setIsCreateMode(false);
-  }, []);
+    setState({ mode: "view" });
+  }, [setState]);
 
   const handleSaved = useCallback(
     (handle: string): void => {
-      setSelectedWorkspaceHandle(handle);
-      setIsCreateMode(false);
+      setState({ workspace: handle, mode: "view" });
     },
-    [setSelectedWorkspaceHandle],
+    [setState],
   );
 
   const handleDetailClose = useCallback((): void => {
-    setSelectedWorkspaceHandle(null);
-    setIsCreateMode(false);
-  }, [setSelectedWorkspaceHandle]);
+    setState({ workspace: null, mode: "view" });
+  }, [setState]);
 
   return {
     selectedWorkspaceHandle,

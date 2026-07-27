@@ -1,12 +1,10 @@
 "use client";
 
 /**
- * 반응형 Master-Detail 레이아웃.
+ * Responsive master-detail layout.
  *
- * 데스크톱: CSS Grid 2컬럼 (master + detail), height 100%, overflow auto
- * 모바일: master만 표시, detail은 Drawer로 오버레이
- *
- * azents admin-web의 레이아웃 패턴을 따름.
+ * Desktop: two-column CSS Grid with independently scrolling panels.
+ * Mobile: master panel with the detail rendered in a full-screen Drawer.
  */
 import { Box, Drawer, Paper } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
@@ -16,6 +14,10 @@ interface MasterDetailLayoutProps {
   detail: React.ReactNode;
   detailOpen: boolean;
   onDetailClose: () => void;
+  /** CSS grid-template-columns value. */
+  columns?: string;
+  /** Additional styles for the root container. */
+  style?: React.CSSProperties;
 }
 
 export function MasterDetailLayout({
@@ -23,9 +25,11 @@ export function MasterDetailLayout({
   detail,
   detailOpen,
   onDetailClose,
+  columns = "1fr 1fr",
+  style,
 }: MasterDetailLayoutProps): React.ReactElement {
-  // Mantine md breakpoint = 62em = 992px
-  // SSR 기본값을 true로 설정하여 레이아웃 시프트 방지
+  // Mantine's md breakpoint is 62em. Default to desktop during SSR to avoid
+  // shifting an already-wide layout after hydration.
   const isDesktop = useMediaQuery("(min-width: 62em)", true);
 
   if (isDesktop) {
@@ -33,9 +37,10 @@ export function MasterDetailLayout({
       <Box
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
+          gridTemplateColumns: columns,
           gap: "var(--mantine-spacing-md)",
           height: "100%",
+          ...style,
         }}
       >
         <Paper
@@ -54,10 +59,11 @@ export function MasterDetailLayout({
     );
   }
 
-  // 모바일: master만 표시, detail은 Drawer
   return (
-    <>
-      <Box h="100%">{master}</Box>
+    <Box style={{ height: "100%", ...style }}>
+      <Paper withBorder style={{ overflow: "auto", height: "100%" }}>
+        {master}
+      </Paper>
       <Drawer
         opened={detailOpen}
         onClose={onDetailClose}
@@ -67,6 +73,6 @@ export function MasterDetailLayout({
       >
         {detail}
       </Drawer>
-    </>
+    </Box>
   );
 }
