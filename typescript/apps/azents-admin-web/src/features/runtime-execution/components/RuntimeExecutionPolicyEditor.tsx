@@ -168,6 +168,52 @@ export function RuntimeExecutionPolicyEditor({
               }}
             />
           </SimpleGrid>
+          <Stack gap={2}>
+            <Text size="sm" fw={500}>
+              Nested container limits
+            </Text>
+            <Text size="xs" c="dimmed">
+              Enforced across the Docker containers created inside this Runtime.
+            </Text>
+          </Stack>
+          <SimpleGrid cols={{ base: 1, sm: 2 }}>
+            <NumberInput
+              label="Aggregate PID limit"
+              description="Maximum total PIDs across all nested Docker containers."
+              value={policy.resources.pids ?? ""}
+              min={1}
+              placeholder="e.g. 256"
+              withAsterisk={dockerEnabled}
+              disabled={readOnly}
+              onChange={(value) =>
+                onChange({
+                  ...policy,
+                  resources: {
+                    ...policy.resources,
+                    pids: optionalNumber(value),
+                  },
+                })
+              }
+            />
+            <NumberInput
+              label="Container count limit"
+              description="Maximum number of nested Docker containers."
+              value={policy.resources.container_count ?? ""}
+              min={1}
+              placeholder="e.g. 4"
+              withAsterisk={dockerEnabled}
+              disabled={readOnly}
+              onChange={(value) =>
+                onChange({
+                  ...policy,
+                  resources: {
+                    ...policy.resources,
+                    container_count: optionalNumber(value),
+                  },
+                })
+              }
+            />
+          </SimpleGrid>
           <ByteSizeInput
             label="Temporary Docker storage capacity"
             description="Required for Docker images and containers."
@@ -190,14 +236,22 @@ export function RuntimeExecutionPolicyEditor({
 
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">
-          <Text fw={600}>Resource ceilings</Text>
+          <Stack gap={2}>
+            <Text fw={600}>Kubernetes resource limits</Text>
+            <Text size="sm" c="dimmed">
+              Applied as Kubernetes resources.limits and split between the
+              Docker engine and policy-gateway containers. resources.requests
+              are not set.
+            </Text>
+          </Stack>
           <Grid>
             <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
               <NumberInput
-                label="CPU millicores"
+                label="CPU limit (millicores)"
                 value={policy.resources.cpu_millicores ?? ""}
                 min={1}
                 placeholder="e.g. 1000"
+                withAsterisk={dockerEnabled}
                 disabled={readOnly}
                 onChange={(value) =>
                   onChange({
@@ -212,9 +266,10 @@ export function RuntimeExecutionPolicyEditor({
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, lg: 8 }}>
               <ByteSizeInput
-                label="Memory"
+                label="Memory limit"
                 value={policy.resources.memory_bytes}
                 placeholder="e.g. 4"
+                required={dockerEnabled}
                 disabled={readOnly}
                 onChange={(value) =>
                   onChange({
@@ -227,47 +282,12 @@ export function RuntimeExecutionPolicyEditor({
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label="Process limit"
-                value={policy.resources.pids ?? ""}
-                min={1}
-                placeholder="e.g. 256"
-                disabled={readOnly}
-                onChange={(value) =>
-                  onChange({
-                    ...policy,
-                    resources: {
-                      ...policy.resources,
-                      pids: optionalNumber(value),
-                    },
-                  })
-                }
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label="Container count"
-                value={policy.resources.container_count ?? ""}
-                min={1}
-                placeholder="e.g. 4"
-                disabled={readOnly}
-                onChange={(value) =>
-                  onChange({
-                    ...policy,
-                    resources: {
-                      ...policy.resources,
-                      container_count: optionalNumber(value),
-                    },
-                  })
-                }
-              />
-            </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, lg: 8 }}>
               <ByteSizeInput
-                label="Runtime temporary storage"
+                label="Ephemeral storage limit"
                 value={policy.resources.ephemeral_storage_bytes}
                 placeholder="e.g. 8"
+                required={dockerEnabled}
                 disabled={readOnly}
                 onChange={(value) =>
                   onChange({

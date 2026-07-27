@@ -54,7 +54,7 @@ export function getRuntimeExecutionPolicyIssue(
       resources.ephemeral_storage_bytes,
     ].some((value) => value === null || value < 1)
   ) {
-    return "Set every Runtime resource limit to a positive value before enabling Docker.";
+    return "Set every Kubernetes and nested-container limit to a positive value before enabling Docker.";
   }
   return null;
 }
