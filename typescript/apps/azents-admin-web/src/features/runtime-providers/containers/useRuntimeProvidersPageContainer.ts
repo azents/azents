@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { serializers, useQueryState } from "@/hooks/use-query-state";
 import { trpc } from "@/trpc/client";
 import type {
   RuntimeProviderAuthenticationBindingAuditEventResponse,
@@ -48,6 +49,7 @@ export interface RuntimeProvidersPageContentProps {
   state: RuntimeProviderListState;
   selectedProviderId: string | null;
   selectedProvider: RuntimeProviderItem | null;
+  detailOpen: boolean;
   contractState: RuntimeProviderContractState;
   authBindingState: RuntimeProviderAuthBindingState;
   authAuditState: RuntimeProviderAuthAuditState;
@@ -57,6 +59,7 @@ export interface RuntimeProvidersPageContentProps {
   acceptingContract: boolean;
   errorMessage: string | null;
   onSelectProvider: (providerId: string) => void;
+  onDetailClose: () => void;
   onToggleEnabled: (provider: RuntimeProviderItem) => void;
   onAcceptContract: (contract: RuntimeProviderContractItem) => void;
   onCreateAuthBinding: () => void;
@@ -76,8 +79,9 @@ function messageFromUnknown(error: unknown): string {
 export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentProps {
   const utils = trpc.useUtils();
   const providersQuery = trpc.runtimeProvider.list.useQuery();
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
-    null,
+  const [selectedProviderId, setSelectedProviderId] = useQueryState(
+    "providerId",
+    { serializer: serializers.stringOrNull() },
   );
   const updatePolicy = trpc.runtimeProvider.updatePolicy.useMutation({
     onSuccess: async () => {
@@ -194,11 +198,14 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
     },
     [updatePolicy],
   );
-  const handleSelectProvider = useCallback((providerId: string): void => {
-    setSelectedProviderId(providerId);
-    setAuditBinding(null);
-    setRotateError(null);
-  }, []);
+  const handleSelectProvider = useCallback(
+    (providerId: string): void => {
+      setSelectedProviderId(providerId);
+      setAuditBinding(null);
+      setRotateError(null);
+    },
+    [setSelectedProviderId],
+  );
   const handleCreateAuthBinding = useCallback((): void => {
     if (effectiveSelectedProviderId === null) {
       return;
@@ -278,6 +285,7 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
     state,
     selectedProviderId: effectiveSelectedProviderId,
     selectedProvider,
+    detailOpen: selectedProviderId !== null,
     contractState,
     authBindingState,
     authAuditState,
@@ -296,6 +304,7 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
       revokeAuthBinding.error?.message ??
       null,
     onSelectProvider: handleSelectProvider,
+    onDetailClose: () => setSelectedProviderId(null),
     onToggleEnabled: handleToggleEnabled,
     onAcceptContract: handleAcceptContract,
     onCreateAuthBinding: handleCreateAuthBinding,

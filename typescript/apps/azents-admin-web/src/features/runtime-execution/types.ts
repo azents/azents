@@ -29,6 +29,7 @@ export interface RuntimeExecutionPageContentProps {
   platformDraft: RuntimeExecutionPolicyDocument | null;
   profileDraft: RuntimeExecutionProfileDraft | null;
   selectedProfileId: string | null;
+  profileDetailOpen: boolean;
   profileModalOpened: boolean;
   savingPlatform: boolean;
   savingProfile: boolean;
@@ -37,6 +38,7 @@ export interface RuntimeExecutionPageContentProps {
   onPlatformDraftChange: (policy: RuntimeExecutionPolicyDocument) => void;
   onSavePlatform: () => void;
   onSelectProfile: (profileId: string) => void;
+  onProfileDetailClose: () => void;
   onProfileDraftChange: (draft: RuntimeExecutionProfileDraft) => void;
   onOpenCreateProfile: () => void;
   onCloseProfileModal: () => void;

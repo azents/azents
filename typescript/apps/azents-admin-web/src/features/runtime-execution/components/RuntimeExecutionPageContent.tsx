@@ -3,9 +3,9 @@
 import {
   Alert,
   Badge,
+  Box,
   Button,
   Code,
-  Divider,
   Group,
   Loader,
   Modal,
@@ -18,6 +18,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
+import { MasterDetailLayout } from "@/shared/components/MasterDetailLayout";
 import { isRuntimeExecutionPolicySupported } from "../runtimeExecutionPresentation";
 import { RuntimeExecutionPolicyEditor } from "./RuntimeExecutionPolicyEditor";
 import type {
@@ -143,6 +144,7 @@ export function RuntimeExecutionPageContent({
   platformDraft,
   profileDraft,
   selectedProfileId,
+  profileDetailOpen,
   profileModalOpened,
   savingPlatform,
   savingProfile,
@@ -151,6 +153,7 @@ export function RuntimeExecutionPageContent({
   onPlatformDraftChange,
   onSavePlatform,
   onSelectProfile,
+  onProfileDetailClose,
   onProfileDraftChange,
   onOpenCreateProfile,
   onCloseProfileModal,
@@ -160,7 +163,7 @@ export function RuntimeExecutionPageContent({
   const capabilities =
     state.type === "LOADED" ? state.platform.capabilities : null;
   return (
-    <Stack gap="lg" p="md">
+    <Box h="100%" display="flex" style={{ flexDirection: "column" }}>
       <Modal
         opened={profileModalOpened}
         onClose={onCloseProfileModal}
@@ -181,22 +184,34 @@ export function RuntimeExecutionPageContent({
         )}
       </Modal>
 
-      <Stack gap={4}>
+      <Stack gap={4} p="md">
         <Title order={2}>Runtime Execution</Title>
         <Text c="dimmed">
           Manage installation limits, reusable Profiles, and safe policy audit
           history.
         </Text>
       </Stack>
-      {actionError && (
-        <Alert color="red" title="Action failed">
-          {actionError}
-        </Alert>
-      )}
-      {state.type === "LOADING" && <Loader />}
-      {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
+      <Stack gap="sm" px="md">
+        {actionError && (
+          <Alert color="red" title="Action failed">
+            {actionError}
+          </Alert>
+        )}
+        {state.type === "LOADING" && <Loader />}
+        {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
+      </Stack>
       {state.type === "LOADED" && (
-        <Tabs defaultValue="platform">
+        <Tabs
+          defaultValue={profileDetailOpen ? "profiles" : "platform"}
+          px="md"
+          pb="md"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           <Tabs.List>
             <Tabs.Tab value="platform">Platform limits</Tabs.Tab>
             <Tabs.Tab value="profiles">
@@ -207,7 +222,11 @@ export function RuntimeExecutionPageContent({
             </Tabs.Tab>
           </Tabs.List>
 
-          <Tabs.Panel value="platform" pt="lg">
+          <Tabs.Panel
+            value="platform"
+            pt="lg"
+            style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+          >
             <Stack gap="md">
               <Group justify="space-between" align="flex-start">
                 <Stack gap={2}>
@@ -241,70 +260,86 @@ export function RuntimeExecutionPageContent({
             </Stack>
           </Tabs.Panel>
 
-          <Tabs.Panel value="profiles" pt="lg">
-            <Group align="stretch" gap={0} wrap="nowrap">
-              <ScrollArea w={{ base: 240, sm: 320 }} type="auto">
-                <Stack gap="xs" pr="md">
-                  <Button variant="light" onClick={onOpenCreateProfile}>
-                    Create Profile
-                  </Button>
-                  {state.profiles.map((profile) => (
-                    <Paper
-                      key={profile.id}
-                      withBorder
-                      p="sm"
-                      radius="sm"
-                      bg={
-                        profile.id === selectedProfileId
-                          ? "var(--mantine-color-blue-light)"
-                          : "transparent"
-                      }
-                      style={{ cursor: "pointer" }}
-                      onClick={() => onSelectProfile(profile.id)}
-                    >
-                      <Stack gap={3}>
-                        <Group justify="space-between" wrap="nowrap">
-                          <Text fw={600} truncate>
-                            {profile.display_name}
+          <Tabs.Panel
+            value="profiles"
+            pt="lg"
+            style={{ flex: 1, minHeight: 0 }}
+          >
+            <MasterDetailLayout
+              columns="1fr 2fr"
+              master={
+                <ScrollArea h="100%" p="sm" type="auto">
+                  <Stack gap="xs">
+                    <Button variant="light" onClick={onOpenCreateProfile}>
+                      Create Profile
+                    </Button>
+                    {state.profiles.map((profile) => (
+                      <Paper
+                        key={profile.id}
+                        withBorder
+                        p="sm"
+                        radius="sm"
+                        bg={
+                          profile.id === selectedProfileId
+                            ? "var(--mantine-color-blue-light)"
+                            : "transparent"
+                        }
+                        style={{ cursor: "pointer" }}
+                        onClick={() => onSelectProfile(profile.id)}
+                      >
+                        <Stack gap={3}>
+                          <Group justify="space-between" wrap="nowrap">
+                            <Text fw={600} truncate>
+                              {profile.display_name}
+                            </Text>
+                            <Badge
+                              color={
+                                profile.lifecycle === "active"
+                                  ? "green"
+                                  : "gray"
+                              }
+                              variant="light"
+                            >
+                              {profile.lifecycle}
+                            </Badge>
+                          </Group>
+                          <Text size="xs" c="dimmed">
+                            v{profile.version} · {profile.id}
                           </Text>
-                          <Badge
-                            color={
-                              profile.lifecycle === "active" ? "green" : "gray"
-                            }
-                            variant="light"
-                          >
-                            {profile.lifecycle}
-                          </Badge>
-                        </Group>
-                        <Text size="xs" c="dimmed">
-                          v{profile.version} · {profile.id}
-                        </Text>
-                      </Stack>
-                    </Paper>
-                  ))}
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Stack>
+                </ScrollArea>
+              }
+              detail={
+                <Stack p={{ base: "md", sm: "xl" }}>
+                  {profileDraft ? (
+                    <ProfileEditor
+                      draft={profileDraft}
+                      creating={false}
+                      saving={savingProfile}
+                      retiring={retiringProfile}
+                      capabilities={state.platform.capabilities}
+                      onChange={onProfileDraftChange}
+                      onSave={onSaveProfile}
+                      onRetire={onRetireProfile}
+                    />
+                  ) : (
+                    <Alert color="yellow">No Profiles are available.</Alert>
+                  )}
                 </Stack>
-              </ScrollArea>
-              <Divider orientation="vertical" />
-              <Stack pl="xl" style={{ flex: 1, minWidth: 0 }}>
-                {profileDraft ? (
-                  <ProfileEditor
-                    draft={profileDraft}
-                    creating={false}
-                    saving={savingProfile}
-                    retiring={retiringProfile}
-                    capabilities={state.platform.capabilities}
-                    onChange={onProfileDraftChange}
-                    onSave={onSaveProfile}
-                    onRetire={onRetireProfile}
-                  />
-                ) : (
-                  <Alert color="yellow">No Profiles are available.</Alert>
-                )}
-              </Stack>
-            </Group>
+              }
+              detailOpen={profileDetailOpen}
+              onDetailClose={onProfileDetailClose}
+            />
           </Tabs.Panel>
 
-          <Tabs.Panel value="audit" pt="lg">
+          <Tabs.Panel
+            value="audit"
+            pt="lg"
+            style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+          >
             <Stack gap="sm">
               {state.auditEvents.length === 0 && (
                 <Alert color="yellow">No Runtime Execution audit events.</Alert>
@@ -335,6 +370,6 @@ export function RuntimeExecutionPageContent({
           </Tabs.Panel>
         </Tabs>
       )}
-    </Stack>
+    </Box>
   );
 }

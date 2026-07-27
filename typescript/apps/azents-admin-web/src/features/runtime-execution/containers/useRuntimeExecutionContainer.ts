@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { serializers, useQueryState } from "@/hooks/use-query-state";
 import { trpc } from "@/trpc/client";
 import { isRuntimeExecutionPolicySupported } from "../runtimeExecutionPresentation";
 import type {
@@ -13,9 +14,9 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
   const platformQuery = trpc.runtimeExecution.getPlatformPolicy.useQuery();
   const profilesQuery = trpc.runtimeExecution.listProfiles.useQuery();
   const auditQuery = trpc.runtimeExecution.listAuditEvents.useQuery();
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
-    null,
-  );
+  const [selectedProfileId, setSelectedProfileId] = useQueryState("profileId", {
+    serializer: serializers.stringOrNull(),
+  });
   const [platformDraft, setPlatformDraft] = useState(
     platformQuery.data?.policy ?? null,
   );
@@ -112,6 +113,7 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
     platformDraft,
     profileDraft,
     selectedProfileId: effectiveProfileId,
+    profileDetailOpen: selectedProfileId !== null,
     profileModalOpened,
     savingPlatform: replacePlatform.isPending,
     savingProfile: createProfile.isPending || replaceProfile.isPending,
@@ -139,6 +141,7 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
       setSelectedProfileId(profileId);
       setActionError(null);
     },
+    onProfileDetailClose: () => setSelectedProfileId(null),
     onProfileDraftChange: setProfileDraft,
     onOpenCreateProfile: () => {
       if (!platformQuery.data) {
