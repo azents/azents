@@ -1313,6 +1313,12 @@ class TestAgentRuntimeRepository:
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None
+        dispatched = await repo.mark_lifecycle_dispatched(
+            rdb_session,
+            runtime.id,
+            command.desired_generation,
+        )
+        assert dispatched is not None
         old_state_change_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
@@ -1334,3 +1340,48 @@ class TestAgentRuntimeRepository:
         )
         assert timed_out[0].failure_generation == command.desired_generation
         assert timed_out[0].failure_code == "START_TIMEOUT"
+
+    async def test_mark_start_timeouts_skips_undispatched_generation(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """A desired generation cannot time out before reaching its Provider."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-undispatched-timeout-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "agent-runtime-undispatched-timeout"
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        runtime = await repo.record_provider_connection_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderConnectionState.CONNECTED,
+        )
+        assert runtime is not None
+        command = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        old_state_change_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+            minutes=10
+        )
+        await rdb_session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(last_state_change_at=old_state_change_at)
+        )
+
+        timed_out = await repo.mark_start_timeouts(
+            rdb_session,
+            stale_threshold=datetime.timedelta(minutes=5),
+            limit=10,
+        )
+        current = await repo.get_by_id(rdb_session, runtime.id)
+
+        assert timed_out == []
+        assert current is not None
+        assert current.failure_code is None

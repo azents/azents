@@ -637,6 +637,8 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
                 RDBAgentRuntime.provider_connection_state
                 == RuntimeProviderConnectionState.CONNECTED,
+                RDBAgentRuntime.last_lifecycle_dispatch_generation
+                == RDBAgentRuntime.desired_generation,
                 RDBAgentRuntime.last_state_change_at
                 < sa.func.clock_timestamp() - stale_threshold,
                 sa.not_(

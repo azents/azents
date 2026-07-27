@@ -567,12 +567,13 @@ class KubernetesRuntimeProvider:
                 self._config.namespace,
                 grace_period_seconds=grace_period_seconds,
             )
-            if command.command_type is RuntimeLifecycleCommandType.START:
-                pod = await self._api.get_pod(pod_name, self._config.namespace)
-                if pod is not None:
-                    return
-            else:
-                pod = None
+            # Kubernetes Pod deletion is asynchronous. Never server-side apply a
+            # replacement while the old object still owns the name: that becomes an
+            # immutable Pod PATCH and fails with 422. A later idempotent lifecycle
+            # retry creates the replacement after deletion is observable.
+            pod = await self._api.get_pod(pod_name, self._config.namespace)
+            if pod is not None:
+                return
         if pod is None:
             _LOGGER.info(
                 "Kubernetes Runtime applying Pod",

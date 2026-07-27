@@ -83,12 +83,14 @@ class FakeKubernetesApi(KubernetesApi):
         self.pods: dict[tuple[str, str], PodResource] = {}
         self.pvcs: dict[tuple[str, str], PersistentVolumeClaimResource] = {}
         self.network_policies: dict[tuple[str, str], NetworkPolicyResource] = {}
+        self.applied_pods: list[str] = []
         self.deleted_pods: list[str] = []
         self.deleted_pod_grace_periods: list[int | None] = []
         self.deleted_pvcs: list[str] = []
         self.deleted_network_policies: list[str] = []
         self.watch_events: list[PodWatchEvent] = []
         self.fail_pod_deletion = False
+        self.defer_pod_deletion = False
 
     async def get_pod(self, name: str, namespace: str) -> PodResource | None:
         """Return a Pod by name."""
@@ -96,6 +98,7 @@ class FakeKubernetesApi(KubernetesApi):
 
     async def apply_pod(self, pod: PodResource) -> None:
         """Apply a Pod."""
+        self.applied_pods.append(pod.metadata.name)
         self.pods[(pod.metadata.namespace, pod.metadata.name)] = pod
 
     async def delete_pod(
@@ -110,7 +113,8 @@ class FakeKubernetesApi(KubernetesApi):
         self.deleted_pod_grace_periods.append(grace_period_seconds)
         if self.fail_pod_deletion:
             raise RuntimeError("Pod deletion failed")
-        self.pods.pop((namespace, name), None)
+        if not self.defer_pod_deletion:
+            self.pods.pop((namespace, name), None)
 
     async def list_pods(
         self,
@@ -1066,6 +1070,30 @@ async def test_restart_preserves_pvc_and_replaces_pod() -> None:
     assert api.deleted_pods == ["azents-runtime-runtime-1"]
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
     assert ("azents-runtime", "azents-runtime-runtime-1") in api.pods
+
+
+@pytest.mark.asyncio
+async def test_restart_waits_for_asynchronous_pod_deletion_before_recreate() -> None:
+    """Restart never patches immutable fields on a terminating Pod."""
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    api.defer_pod_deletion = True
+
+    result = await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
+
+    assert result.report.observed_state is RuntimeProviderObservedState.STARTING
+    assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    assert api.applied_pods == ["azents-runtime-runtime-1"]
+
+    api.pods.pop(("azents-runtime", "azents-runtime-runtime-1"))
+    api.defer_pod_deletion = False
+    await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
+
+    assert api.applied_pods == [
+        "azents-runtime-runtime-1",
+        "azents-runtime-runtime-1",
+    ]
 
 
 @pytest.mark.asyncio
