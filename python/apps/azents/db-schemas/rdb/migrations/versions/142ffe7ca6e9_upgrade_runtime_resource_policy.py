@@ -74,6 +74,16 @@ def _transform_document(
     return transformed
 
 
+def _transform_optional_document(
+    document: object,
+    transform: Callable[[Mapping[str, Any]], dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Transform JSON policy objects while preserving JSON null snapshots."""
+    if not isinstance(document, Mapping):
+        return None
+    return _transform_document(document, transform)
+
+
 def _transform_current_documents(
     *,
     table: str,
@@ -112,11 +122,15 @@ def _transform_snapshots(
     rows = bind.execute(
         sa.text(
             "SELECT id, resolved_execution_policy FROM runtime_policy_snapshots "
-            "WHERE resolved_execution_policy IS NOT NULL"
+            "WHERE jsonb_typeof(resolved_execution_policy) = 'object'"
         )
     ).mappings()
     for row in rows:
-        document = _transform_document(row["resolved_execution_policy"], transform)
+        document = _transform_optional_document(
+            row["resolved_execution_policy"], transform
+        )
+        if document is None:
+            continue
         bind.execute(
             sa.text(
                 "UPDATE runtime_policy_snapshots SET "
