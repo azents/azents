@@ -1,6 +1,7 @@
 """External Channel v1 provider callback routes."""
 
 import datetime
+import logging
 from typing import Annotated
 
 from fastapi import (
@@ -33,6 +34,7 @@ from azents.services.external_channel.slack_http import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/discord/interactions/{selector}", include_in_schema=False)
@@ -63,6 +65,10 @@ async def receive_discord_interaction(
             received_at=datetime.datetime.now(datetime.UTC),
         )
     except DiscordInteractionUnauthorized as error:
+        logger.info(
+            "Rejected unauthenticated Discord interaction",
+            extra={"authentication_failure_code": error.failure_code},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Discord interaction could not be authenticated.",
