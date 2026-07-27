@@ -159,6 +159,7 @@ class DiscordGatewayManagerService:
         if claim is None:
             return
         lease = claim.lease
+        lease_released = False
         try:
             configuration = await self._owned_configuration(
                 connection_id=connection_id,
@@ -193,6 +194,14 @@ class DiscordGatewayManagerService:
                 if result is None:
                     return
                 checkpoint = result.checkpoint if result.can_resume else None
+                if not result.reconnect:
+                    await self._mark_reconnect_required(
+                        connection_id=connection_id,
+                        lease=lease,
+                        reason=result.reason,
+                    )
+                    lease_released = True
+                    return
                 if not await self._record_gap(
                     connection_id=connection_id,
                     lease=lease,
@@ -206,9 +215,16 @@ class DiscordGatewayManagerService:
             await asyncio.shield(
                 self._release(connection_id=connection_id, lease=lease)
             )
+            lease_released = True
             raise
+        except DiscordGatewayCredentialError:
+            await self._mark_reconnect_required(
+                connection_id=connection_id,
+                lease=lease,
+                reason="gateway_credentials_invalid",
+            )
+            lease_released = True
         except (
-            DiscordGatewayCredentialError,
             DiscordGatewayError,
             httpx.RequestError,
             OSError,
@@ -221,7 +237,8 @@ class DiscordGatewayManagerService:
                 reason="gateway_transport_unavailable",
             )
         finally:
-            await self._release(connection_id=connection_id, lease=lease)
+            if not lease_released:
+                await self._release(connection_id=connection_id, lease=lease)
 
     async def _run_connection_with_lease(
         self,
@@ -366,6 +383,27 @@ class DiscordGatewayManagerService:
             await session.commit()
             return released
 
+    async def _mark_reconnect_required(
+        self,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+        reason: str,
+    ) -> bool:
+        async with self.session_manager() as session:
+            terminalized = (
+                await self.repository.mark_discord_gateway_reconnect_required(
+                    session,
+                    connection_id=connection_id,
+                    lease_owner=self.manager_id,
+                    lease_generation=lease.lease_generation,
+                    now=_utc_now(),
+                    reason=reason,
+                )
+            )
+            await session.commit()
+            return terminalized
+
     async def _persist_checkpoint(
         self,
         *,
@@ -487,7 +525,10 @@ class DiscordGatewayManagerService:
     def _credentials(self, ciphertext: str | None) -> DiscordConnectionCredentials:
         if ciphertext is None:
             raise DiscordGatewayCredentialError
-        credentials = self.credentials_codec.decrypt(ciphertext)
+        try:
+            credentials = self.credentials_codec.decrypt(ciphertext)
+        except (InvalidToken, ValidationError) as error:
+            raise DiscordGatewayCredentialError from error
         if not isinstance(credentials, DiscordConnectionCredentials):
             raise DiscordGatewayCredentialError
         return credentials

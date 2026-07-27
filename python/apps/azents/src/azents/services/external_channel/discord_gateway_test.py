@@ -5,6 +5,8 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 from pytest import MonkeyPatch
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
 
 from azents.services.external_channel.discord_gateway import (
     DISCORD_GATEWAY_INTENTS,
@@ -18,13 +20,19 @@ from azents.services.external_channel.discord_gateway import (
 class _Socket:
     """Script one Gateway WebSocket exchange without a network dependency."""
 
-    def __init__(self, messages: list[dict[str, object]]) -> None:
-        self.messages = [json.dumps(message) for message in messages]
+    def __init__(self, messages: list[dict[str, object] | BaseException]) -> None:
+        self.messages = [
+            json.dumps(message) if isinstance(message, dict) else message
+            for message in messages
+        ]
         self.sent: list[dict[str, object]] = []
         self.closed = False
 
     async def recv(self) -> str:
-        return self.messages.pop(0)
+        message = self.messages.pop(0)
+        if isinstance(message, BaseException):
+            raise message
+        return message
 
     async def send(self, message: str) -> None:
         value = json.loads(message)
@@ -195,6 +203,33 @@ async def test_resume_advances_existing_checkpoint() -> None:
     assert result.reconnect is True
     assert result.can_resume is False
     assert result.checkpoint is None
+
+
+@pytest.mark.asyncio
+async def test_authentication_close_terminalizes_gateway_session() -> None:
+    """Discord authentication rejection cannot enter a reconnect loop."""
+    socket = _Socket(
+        [
+            {"op": 10, "d": {"heartbeat_interval": 60_000}},
+            ConnectionClosedError(Close(4004, "authentication failed"), None),
+        ]
+    )
+    client = DiscordGatewayClient(
+        connector=lambda *args: _connector(socket, *args),
+    )
+
+    result = await client.run_connection(
+        endpoint_url="wss://gateway.discord.gg",
+        bot_token="redacted-token",
+        checkpoint=None,
+        persist_checkpoint=_checkpoint_sink([]),
+        handle_dispatch=_dispatch_sink([]),
+    )
+
+    assert result.reconnect is False
+    assert result.can_resume is False
+    assert result.reason == "gateway_credentials_rejected"
+    assert socket.closed is True
 
 
 @pytest.mark.asyncio

@@ -36,8 +36,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-07-26
-spec_version: 11
+last_verified_at: 2026-07-27
+spec_version: 12
 ---
 
 # External Channel Provider Ingress
@@ -147,6 +147,12 @@ session/sequence checkpoint commit together under the lease fence. The Worker ad
 no checkpoint after a failed admission. `READY` and `RESUMED` establish session state
 but are not canonical message events.
 
+Credential failures and Gateway outcomes that cannot reconnect terminalize the current
+fenced lease in one transaction: they record the reason, release that lease, and move
+the connection to `reconnect_required`. The scheduler excludes that state until a
+validated configuration edit reactivates the connection. Recoverable Gateway and
+network failures retain the normal gap-and-retry behavior.
+
 Production requires `https` REST discovery and `wss` Gateway transport. A deterministic
 fake may use `http`/`ws` only with both explicit Discord test-origin and insecure
 Gateway opt-in configuration.
@@ -234,6 +240,8 @@ excluded.
 
 ## Changelog
 
+- **2026-07-27** (spec_version 12) — Terminalized fenced Discord Gateway credential
+  and non-reconnectable outcomes so they cannot cause repeated scheduler claims.
 - **2026-07-26** (spec_version 11) — Completed Discord mention routing through
   provider-neutral authorization, immediate binding activation, invocation release,
   Channel Work, and post-commit wake-up without provider-principal-to-User mapping.

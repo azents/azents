@@ -22,8 +22,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-26
-spec_version: 13
+last_verified_at: 2026-07-27
+spec_version: 14
 ---
 
 # External Channel Lifecycle
@@ -94,8 +94,10 @@ App uninstall clears provider credentials and terminalizes provider resources wh
 preserving the route relationship for later reconfiguration. In-flight validation
 results are generation-fenced so they cannot overwrite a newer edit or disconnect.
 
-Discord Gateway credential, intent, close-code, or transport failures likewise update
-only connection health/gap state and preserve route relationships, bindings, and work.
+Discord Gateway credential and non-reconnectable intent or close-code failures
+atomically record the fenced gap, release the current Gateway lease, and move only
+connection health to `reconnect_required`; they preserve route relationships,
+bindings, and work. Recoverable transport failures retain their gap-and-retry path.
 Discord callback and Gateway authority are released during disconnect after terminal
 local state commits; provider cleanup failure remains a visible post-commit outcome.
 
@@ -157,6 +159,8 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-27** (spec_version 14) — Made terminal Discord Gateway failures
+  atomically fence, release, and suppress further scheduler claims until reactivation.
 - **2026-07-26** (spec_version 13) — Added provider-aware Allow activation:
   immediate Discord binding/work/invocation release and approval-control deletion,
   while preserving Slack hydration activation.

@@ -235,12 +235,17 @@ class DiscordGatewayClient:
                         checkpoint=active_checkpoint if can_resume else None,
                     )
         except ConnectionClosed as error:
-            close_code = getattr(error, "code", None)
-            if close_code == 4014:
+            close_code = error.rcvd.code if error.rcvd is not None else None
+            terminal_reasons = {
+                4004: "gateway_credentials_rejected",
+                4013: "intents_invalid",
+                4014: "intents_disallowed",
+            }
+            if close_code in terminal_reasons:
                 return DiscordGatewayConnectionResult(
                     reconnect=False,
                     can_resume=False,
-                    reason="intents_disallowed",
+                    reason=terminal_reasons[close_code],
                     checkpoint=active_checkpoint,
                 )
             return DiscordGatewayConnectionResult(
