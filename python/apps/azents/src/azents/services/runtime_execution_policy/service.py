@@ -17,7 +17,6 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionManagementLayer,
     RuntimeExecutionModuleId,
     RuntimeExecutionModuleSupport,
-    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionPolicyLayer,
     RuntimeExecutionPolicyRestriction,
@@ -135,11 +134,8 @@ class RuntimeExecutionProfileAvailability:
 class RuntimeExecutionManagementCapabilities:
     """Safe server-owned capability availability for policy management UI."""
 
-    image_build: bool
-    container_run: bool
-    compose: bool
+    docker: bool
     storage_modes: tuple[RuntimeExecutionStorageMode, ...]
-    network_modes: tuple[RuntimeExecutionNetworkMode, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1115,25 +1111,7 @@ def _restriction_field_direction(
             if after < before
             else RuntimeExecutionChangeDirection.AUTHORITY_EXPANDING
         )
-    if path.endswith("denied_destinations"):
-        return (
-            RuntimeExecutionChangeDirection.RESTRICTIVE
-            if _string_set(after) >= _string_set(before)
-            else RuntimeExecutionChangeDirection.AUTHORITY_EXPANDING
-        )
-    if path.endswith("allowed_destinations"):
-        return (
-            RuntimeExecutionChangeDirection.RESTRICTIVE
-            if _string_set(after) <= _string_set(before)
-            else RuntimeExecutionChangeDirection.AUTHORITY_EXPANDING
-        )
     return RuntimeExecutionChangeDirection.MIXED
-
-
-def _string_set(value: JsonValue) -> set[str]:
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ValueError("Execution-policy destination set is invalid.")
-    return {item for item in value if isinstance(item, str)}
 
 
 def _validation_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
@@ -1146,18 +1124,10 @@ def _validation_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
             )
             for module_id in RuntimeExecutionModuleId
         ),
-        privileged_engine=True,
         storage_modes=frozenset(
             {
                 RuntimeExecutionStorageMode.NONE,
                 RuntimeExecutionStorageMode.EPHEMERAL,
-            }
-        ),
-        network_modes=frozenset(
-            {
-                RuntimeExecutionNetworkMode.NONE,
-                RuntimeExecutionNetworkMode.RESTRICTED,
-                RuntimeExecutionNetworkMode.DIRECT,
             }
         ),
         resource_maxima=None,
@@ -1167,13 +1137,9 @@ def _validation_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
 def _management_capabilities() -> RuntimeExecutionManagementCapabilities:
     """Project current compatibility into a stable UI capability gate."""
     capabilities = _validation_provider_capabilities()
-    privileged_engine = capabilities.privileged_engine
     return RuntimeExecutionManagementCapabilities(
-        image_build=privileged_engine,
-        container_run=privileged_engine,
-        compose=privileged_engine,
+        docker=True,
         storage_modes=tuple(sorted(capabilities.storage_modes)),
-        network_modes=tuple(sorted(capabilities.network_modes)),
     )
 
 

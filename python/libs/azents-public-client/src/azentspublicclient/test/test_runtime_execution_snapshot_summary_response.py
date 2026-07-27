@@ -40,13 +40,12 @@ class TestRuntimeExecutionSnapshotSummaryResponse(unittest.TestCase):
                 desired_generation = 56,
                 capabilities = [
                     azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                        module_id = 'container.image_build', 
+                        module_id = 'docker', 
                         version = 56, 
                         enabled = True, )
                     ],
                 storage_mode = 'none',
-                storage_capacity_bytes = 56,
-                network_mode = 'none'
+                storage_capacity_bytes = 56
             )
         else:
             return RuntimeExecutionSnapshotSummaryResponse(
@@ -55,13 +54,12 @@ class TestRuntimeExecutionSnapshotSummaryResponse(unittest.TestCase):
                 desired_generation = 56,
                 capabilities = [
                     azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                        module_id = 'container.image_build', 
+                        module_id = 'docker', 
                         version = 56, 
                         enabled = True, )
                     ],
                 storage_mode = 'none',
                 storage_capacity_bytes = 56,
-                network_mode = 'none',
         )
         """
 

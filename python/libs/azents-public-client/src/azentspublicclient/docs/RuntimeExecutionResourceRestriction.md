@@ -10,8 +10,6 @@ Name | Type | Description | Notes
 **cpu_limit_millicores** | **int** |  | 
 **memory_request_bytes** | **int** |  | 
 **memory_limit_bytes** | **int** |  | 
-**pids** | **int** |  | 
-**container_count** | **int** |  | 
 **ephemeral_storage_bytes** | **int** |  | 
 **persistent_storage_bytes** | **int** |  | 
 

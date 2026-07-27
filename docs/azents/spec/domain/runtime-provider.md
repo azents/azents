@@ -43,8 +43,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/runtime-execution/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeExecution.ts
-last_verified_at: 2026-07-27
-spec_version: 12
+last_verified_at: 2026-07-28
+spec_version: 13
 ---
 
 # Runtime Provider
@@ -104,18 +104,16 @@ intent but makes affected selection unavailable until a valid Profile is chosen.
 capability-gated, so unsupported authority cannot be introduced by profile creation or
 replacement.
 
-The reserved `system-standard` default permits unrestricted direct outbound
-networking, represented by `network.egress=direct` with empty allow and deny destination sets.
-This default applies to both the Runner and nested engine containers because the Kubernetes
-NetworkPolicy selects the complete Runtime Pod. Image build, nested container execution, Compose,
-and engine storage remain disabled until an Admin explicitly grants them through policy.
+The reserved `system-standard` default does not grant Docker authority. A Profile may enable one
+complete Docker capability; build, run, Compose, SDK, Testcontainers, port-binding, and daemon API
+behavior are not separately gated.
 
 Raw Provider registration metadata is not product capability authority. The server-owned
 management/status gate is authoritative: the resolver marks an unsatisfied Profile unavailable and
 provisioning fails closed rather than dropping an unsupported module or selecting a weaker Runtime.
 The immutable contract may include a typed `execution_policy` section declaring exact module
-versions, privileged-engine implementation support, storage modes, network modes, and optional
-resource maxima. Runtime resolution uses only the bound Provider's current accepted contract;
+versions, Docker storage modes, and optional resource maxima. Runtime resolution uses only the
+bound Provider's current accepted contract;
 missing, candidate, rejected, malformed, or superseded declarations cannot grant authority. A new
 target snapshot records and references that accepted contract revision even when the previous
 snapshot used an older revision. A stale non-null Provider configuration remains unavailable until
@@ -133,30 +131,24 @@ generation. Profile or Workspace tightening automatically creates a narrower tar
 second Agent Apply, while authority expansion remains pending until explicit Apply; convergence
 preserves Agent Workspace storage and does not invoke reset or terminal delete. Mode changes and their
 dependent fields are projected atomically: Docker storage mode travels with Docker storage capacity,
-and outbound network mode travels with its CIDR sets. Selective Kubernetes resource tightening also
-normalizes CPU and memory requests so neither can exceed its resulting limit. Audit and public projections contain only bounded policy metadata, reason codes, source
+as one atomic module. Selective Kubernetes resource tightening also normalizes CPU and memory
+requests so neither can exceed its resulting limit. Audit and public projections contain only bounded policy metadata, reason codes, source
 layers, digests, and generations.
 
-The installation management gate exposes image build, container run, Compose, `none` or
-`ephemeral` Docker storage, and all three implemented network policies: system traffic only,
-allowlisted IP CIDRs, and all IP addresses. These network policies are always advertised without a
-deployment-owned capability filter. The Kubernetes Provider enforces the selected mode with a
-generation-fenced NetworkPolicy that always permits required DNS and Runtime Control traffic,
-adds only the selected allowlisted IPv4/IPv6 CIDRs in allowlist mode, or adds IPv4/IPv6 default
-routes in all-address mode. Denied CIDRs are subtracted from otherwise allowed IP blocks. The Helm
-deployment NetworkPolicy remains a separate hard cap: its denied CIDRs, explicit CIDR exceptions,
-and selector/port egress rules are passed into the Provider and intersected with each generated
-Runtime policy. Deployment-only selector/port exceptions are added only to all-address mode, never
-to a Profile allowlist or system-only policy.
+The installation management gate exposes `docker/v1`, `runtime.resources/v1`, and `none` or
+`ephemeral` Docker storage. `runtime.resources/v1` separates optional Kubernetes CPU and memory
+requests from optional limits. Ephemeral storage is one fixed allocation applied as the same
+request and limit. Temporary Docker image/container data uses a separate bounded engine-only
+`emptyDir`. Persistent Workspace storage configures the Runtime PVC request: expansion is applied
+in place, but a smaller configured value is retained until an explicit operation deletes and
+recreates the PVC. PID, nested-container count, and Profile network fields are absent because a
+direct privileged Docker socket cannot reliably enforce them.
 
-`container.resources/v1` separates optional Kubernetes CPU and memory requests from optional
-limits. Ephemeral storage is one fixed allocation applied as the same request and limit. Optional
-PID and container-count values bound nested Docker workloads when set; `null` means unlimited and
-skips the corresponding aggregate Gateway check. Temporary Docker image/container data uses a
-separate bounded engine-only `emptyDir`. Persistent workspace storage configures the Runtime
-PVC request: expansion is applied in place, but a smaller configured value is retained until an
-explicit operation deletes and recreates the PVC. Persistent Docker engine storage and
-proxy-required egress remain unavailable because the Provider does not advertise them.
+The Kubernetes Provider applies a generation-fenced NetworkPolicy to the complete Runtime Pod. It
+always permits required DNS and Runtime Control traffic and IPv4/IPv6 outbound traffic subject to
+the Helm deployment hard cap. Deployment-owned denied CIDRs, explicit CIDR exceptions, and
+selector/port egress rules remain the installation boundary and are not Profile settings.
+Persistent Docker data remains unavailable because the Provider does not advertise it.
 Admin/Public surfaces must not expose Provider credentials, socket paths, raw manifests, Kubernetes
 resource names, or generic privileged controls.
 
@@ -197,6 +189,7 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **13 (2026-07-28):** Removed the Container Policy Gateway and unenforceable granular Docker, network, PID, and nested-container controls; Docker is one complete direct-DIND capability bounded by Kubernetes resources, storage, and the deployment NetworkPolicy hard cap.
 - **12 (2026-07-27):** Persisted the exact current Provider advertisement separately from accepted history, made Admin readiness and acceptance follow that pointer, and made dependent storage/network policy projection atomic.
 - **11 (2026-07-27):** Made the currently advertised Provider contract the sole approval target, deleted stale never-accepted proposals, and allowed a previously accepted digest to be proposed again after drift.
 - **10 (2026-07-27):** Unified every unreleased execution-policy module on v1, migrated stored policies without a v2 compatibility path, replaced protobuf Struct and snapshot JSONB with canonical JSON text, and prevented stale contract acceptance.

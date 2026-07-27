@@ -88,15 +88,8 @@ function Summary({
     ephemeral: t("storageModes.ephemeral"),
     persistent: t("storageModes.persistent"),
   }[summary.storage_mode];
-  const networkLabel = {
-    none: t("networkModes.none"),
-    restricted: t("networkModes.restricted"),
-    direct: t("networkModes.direct"),
-  }[summary.network_mode];
   const capabilityLabels: Record<string, string> = {
-    "container.image_build": t("capabilityLabels.imageBuild"),
-    "container.run": t("capabilityLabels.containerRun"),
-    "container.compose": t("capabilityLabels.compose"),
+    docker: t("capabilityLabels.docker"),
   };
   return (
     <Paper withBorder p="md" radius="md">
@@ -124,9 +117,6 @@ function Summary({
           {summary.storage_capacity_bytes === null
             ? ""
             : ` · ${formatBytes(summary.storage_capacity_bytes)}`}
-        </Text>
-        <Text size="xs" c="dimmed">
-          {t("network")}: {networkLabel}
         </Text>
         <Group gap="xs">
           {summary.capabilities.map((capability) => (
@@ -198,22 +188,15 @@ export function AgentRuntimePolicyStatus({
     return t(key);
   });
   const fieldLabels: Record<string, string> = {
-    "image_build.enabled": t("fieldLabels.imageBuild"),
-    "container_run.enabled": t("fieldLabels.containerRun"),
-    "compose.enabled": t("fieldLabels.compose"),
+    "docker.enabled": t("fieldLabels.docker"),
     "resources.cpu_request_millicores": t("fieldLabels.cpuRequest"),
     "resources.cpu_limit_millicores": t("fieldLabels.cpuLimit"),
     "resources.memory_request_bytes": t("fieldLabels.memoryRequest"),
     "resources.memory_limit_bytes": t("fieldLabels.memoryLimit"),
-    "resources.pids": t("fieldLabels.pidLimit"),
-    "resources.container_count": t("fieldLabels.containerCount"),
     "resources.ephemeral_storage_bytes": t("fieldLabels.ephemeralStorage"),
     "resources.persistent_storage_bytes": t("fieldLabels.persistentStorage"),
-    "engine_storage.mode": t("fieldLabels.dockerStoragePolicy"),
-    "engine_storage.capacity_bytes": t("fieldLabels.dockerStorageCapacity"),
-    "network_egress.mode": t("fieldLabels.networkPolicy"),
-    "network_egress.allowed_destinations": t("fieldLabels.allowedIpRanges"),
-    "network_egress.denied_destinations": t("fieldLabels.blockedIpRanges"),
+    "docker.storage_mode": t("fieldLabels.dockerStoragePolicy"),
+    "docker.storage_capacity_bytes": t("fieldLabels.dockerStorageCapacity"),
   };
   const fieldsByLayer = Object.entries(status.governing_layers).reduce<
     Record<string, string[]>

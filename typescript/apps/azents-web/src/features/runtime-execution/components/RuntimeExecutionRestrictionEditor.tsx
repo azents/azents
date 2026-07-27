@@ -6,14 +6,13 @@ import {
   NumberInput,
   Paper,
   Select,
-  SimpleGrid,
   Stack,
   Text,
-  Textarea,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { ByteSizeInput } from "./ByteSizeInput";
 import type {
+  RuntimeExecutionDockerRestriction,
   RuntimeExecutionPolicyRestriction,
   RuntimeExecutionResourceRestriction,
 } from "@azents/public-client";
@@ -28,22 +27,19 @@ function optionalNumber(value: string | number): number | null {
   return typeof value === "number" ? value : null;
 }
 
-function lines(value: string): string[] {
-  return value
-    .split("\n")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
 const EMPTY_RESOURCES: RuntimeExecutionResourceRestriction = {
   cpu_request_millicores: null,
   cpu_limit_millicores: null,
   memory_request_bytes: null,
   memory_limit_bytes: null,
-  pids: null,
-  container_count: null,
   ephemeral_storage_bytes: null,
   persistent_storage_bytes: null,
+};
+
+const EMPTY_DOCKER: RuntimeExecutionDockerRestriction = {
+  enabled: null,
+  storage_mode: null,
+  storage_capacity_bytes: null,
 };
 
 export function RuntimeExecutionRestrictionEditor({
@@ -53,21 +49,21 @@ export function RuntimeExecutionRestrictionEditor({
 }: RuntimeExecutionRestrictionEditorProps): React.ReactElement {
   const t = useTranslations("workspace.runtimeExecution.restrictions");
   const resources = restriction.resources ?? EMPTY_RESOURCES;
-  const storage = restriction.engine_storage ?? {
-    mode: null,
-    capacity_bytes: null,
-  };
-  const network = restriction.network_egress ?? {
-    mode: null,
-    allowed_destinations: null,
-    denied_destinations: [],
-  };
+  const docker = restriction.docker ?? EMPTY_DOCKER;
   const updateResources = (
     values: Partial<RuntimeExecutionResourceRestriction>,
   ): void => {
     onChange({
       ...restriction,
       resources: { ...resources, ...values },
+    });
+  };
+  const updateDocker = (
+    values: Partial<RuntimeExecutionDockerRestriction>,
+  ): void => {
+    onChange({
+      ...restriction,
+      docker: { ...docker, ...values },
     });
   };
 
@@ -81,115 +77,45 @@ export function RuntimeExecutionRestrictionEditor({
               {t("dockerDescription")}
             </Text>
           </Stack>
-          <SimpleGrid cols={{ base: 1, sm: 3 }}>
-            <Checkbox
-              label={t("disableImageBuild")}
-              checked={restriction.image_build !== null}
-              disabled={readOnly}
-              onChange={(event) =>
-                onChange({
-                  ...restriction,
-                  image_build: event.currentTarget.checked
-                    ? { enabled: false }
-                    : null,
-                })
-              }
-            />
-            <Checkbox
-              label={t("disableContainerRun")}
-              checked={restriction.container_run !== null}
-              disabled={readOnly}
-              onChange={(event) =>
-                onChange({
-                  ...restriction,
-                  container_run: event.currentTarget.checked
-                    ? { enabled: false }
-                    : null,
-                })
-              }
-            />
-            <Checkbox
-              label={t("disableCompose")}
-              checked={restriction.compose !== null}
-              disabled={readOnly}
-              onChange={(event) =>
-                onChange({
-                  ...restriction,
-                  compose: event.currentTarget.checked
-                    ? { enabled: false }
-                    : null,
-                })
-              }
-            />
-          </SimpleGrid>
-          <Stack gap={2}>
-            <Text size="sm" fw={500}>
-              {t("nestedContainerLimits")}
-            </Text>
-            <Text size="xs" c="dimmed">
-              {t("optionalRestrictionDescription")}
-            </Text>
-          </Stack>
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <NumberInput
-              label={t("aggregatePidLimit")}
-              description={t("inheritWhenEmpty")}
-              value={resources.pids ?? ""}
-              min={1}
-              placeholder={t("pidPlaceholder")}
-              disabled={readOnly}
-              onChange={(value) =>
-                updateResources({ pids: optionalNumber(value) })
-              }
-            />
-            <NumberInput
-              label={t("containerCountLimit")}
-              description={t("inheritWhenEmpty")}
-              value={resources.container_count ?? ""}
-              min={1}
-              placeholder={t("containerPlaceholder")}
-              disabled={readOnly}
-              onChange={(value) =>
-                updateResources({ container_count: optionalNumber(value) })
-              }
-            />
-          </SimpleGrid>
+          <Checkbox
+            label={t("disableDocker")}
+            checked={docker.enabled === false}
+            disabled={readOnly}
+            onChange={(event) =>
+              updateDocker({
+                enabled: event.currentTarget.checked ? false : null,
+                storage_mode: null,
+                storage_capacity_bytes: null,
+              })
+            }
+          />
           <Select
             label={t("dockerStoragePolicy")}
             description={t("dockerStorageDescription")}
             data={[
               { value: "inherit", label: t("inheritProfile") },
-              { value: "none", label: t("storageNone") },
               { value: "ephemeral", label: t("storageEphemeral") },
             ]}
-            value={storage.mode ?? "inherit"}
+            value={docker.storage_mode ?? "inherit"}
             allowDeselect={false}
-            disabled={readOnly}
+            disabled={readOnly || docker.enabled === false}
             onChange={(value) => {
-              if (value === null) {
-                return;
+              if (value !== null) {
+                updateDocker({
+                  storage_mode: value === "inherit" ? null : value,
+                });
               }
-              onChange({
-                ...restriction,
-                engine_storage: {
-                  ...storage,
-                  mode: value === "inherit" ? null : value,
-                },
-              });
             }}
           />
           <ByteSizeInput
             label={t("temporaryDockerStorage")}
             description={t("inheritWhenEmpty")}
             unitLabel={t("unit")}
-            value={storage.capacity_bytes}
+            value={docker.storage_capacity_bytes}
             placeholder={t("storagePlaceholder")}
-            disabled={readOnly || storage.mode === "none"}
+            disabled={readOnly || docker.enabled === false}
             onChange={(value) =>
-              onChange({
-                ...restriction,
-                engine_storage: { ...storage, capacity_bytes: value },
-              })
+              updateDocker({ storage_capacity_bytes: value })
             }
           />
         </Stack>
@@ -287,81 +213,6 @@ export function RuntimeExecutionRestrictionEditor({
               />
             </Grid.Col>
           </Grid>
-        </Stack>
-      </Paper>
-
-      <Paper withBorder p="md" radius="md">
-        <Stack gap="sm">
-          <Stack gap={2}>
-            <Text fw={600}>{t("networkTitle")}</Text>
-            <Text size="sm" c="dimmed">
-              {t("networkDescription")}
-            </Text>
-          </Stack>
-          <Select
-            label={t("accessPolicy")}
-            data={[
-              { value: "inherit", label: t("inheritProfile") },
-              { value: "none", label: t("networkNone") },
-              { value: "restricted", label: t("networkRestricted") },
-              { value: "direct", label: t("networkDirect") },
-            ]}
-            value={network.mode ?? "inherit"}
-            allowDeselect={false}
-            disabled={readOnly}
-            onChange={(value) => {
-              if (value === null) {
-                return;
-              }
-              onChange({
-                ...restriction,
-                network_egress: {
-                  ...network,
-                  mode: value === "inherit" ? null : value,
-                },
-              });
-            }}
-          />
-          {network.mode === "restricted" && (
-            <Textarea
-              label={t("allowedIpRanges")}
-              description={t("cidrDescription")}
-              placeholder={t("allowedCidrPlaceholder")}
-              value={(network.allowed_destinations ?? []).join("\n")}
-              disabled={readOnly}
-              autosize
-              minRows={3}
-              onChange={(event) =>
-                onChange({
-                  ...restriction,
-                  network_egress: {
-                    ...network,
-                    allowed_destinations: lines(event.currentTarget.value),
-                  },
-                })
-              }
-            />
-          )}
-          {network.mode !== "none" && (
-            <Textarea
-              label={t("blockedIpRanges")}
-              description={t("blockedCidrDescription")}
-              placeholder={t("blockedCidrPlaceholder")}
-              value={network.denied_destinations.join("\n")}
-              disabled={readOnly}
-              autosize
-              minRows={3}
-              onChange={(event) =>
-                onChange({
-                  ...restriction,
-                  network_egress: {
-                    ...network,
-                    denied_destinations: lines(event.currentTarget.value),
-                  },
-                })
-              }
-            />
-          )}
         </Stack>
       </Paper>
     </Stack>

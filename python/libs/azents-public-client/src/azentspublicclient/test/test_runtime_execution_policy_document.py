@@ -36,22 +36,14 @@ class TestRuntimeExecutionPolicyDocument(unittest.TestCase):
         if include_optional:
             return RuntimeExecutionPolicyDocument(
                 schema_version = 1,
-                image_build = { },
-                container_run = { },
-                compose = { },
-                resources = { },
-                engine_storage = { },
-                network_egress = { }
+                docker = { },
+                resources = { }
             )
         else:
             return RuntimeExecutionPolicyDocument(
                 schema_version = 1,
-                image_build = { },
-                container_run = { },
-                compose = { },
+                docker = { },
                 resources = { },
-                engine_storage = { },
-                network_egress = { },
         )
         """
 

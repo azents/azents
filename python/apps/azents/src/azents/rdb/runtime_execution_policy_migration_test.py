@@ -91,6 +91,14 @@ _DISCORD_GATEWAY_CHECKPOINT_SESSION_MIGRATION = (
     / "versions"
     / "17a0f533cc20_add_discord_gateway_checkpoint_session_.py"
 )
+_DOCKER_V1_MIGRATION = (
+    PROJECT_ROOT
+    / "db-schemas"
+    / "rdb"
+    / "migrations"
+    / "versions"
+    / "6c42043df81f_simplify_runtime_docker_policy.py"
+)
 
 
 def _migration_values(path: Path) -> dict[str, Any]:
@@ -124,13 +132,16 @@ def test_default_egress_migration_matches_application_owned_standard_policy() ->
     values = _migration_values(_DEFAULT_EGRESS_MIGRATION)
     resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
     json_text_values = _migration_values(_JSON_TEXT_MIGRATION)
+    docker_values = _migration_values(_DOCKER_V1_MIGRATION)
     policy = RuntimeExecutionPolicyDocument.model_validate(
-        json_text_values["_set_resource_module_version"](
-            resource_values["_transform_document"](
-                values["_DIRECT_STANDARD_POLICY"],
-                resource_values["_upgrade_resources"],
+        docker_values["_transform_policy"](
+            json_text_values["_set_resource_module_version"](
+                resource_values["_transform_document"](
+                    values["_DIRECT_STANDARD_POLICY"],
+                    resource_values["_upgrade_resources"],
+                ),
+                version=1,
             ),
-            version=1,
         )
     )
 
@@ -148,13 +159,16 @@ def test_migration_backfill_restriction_is_canonical_empty_intent() -> None:
     values = _migration_values(_SEED_MIGRATION)
     resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
     json_text_values = _migration_values(_JSON_TEXT_MIGRATION)
+    docker_values = _migration_values(_DOCKER_V1_MIGRATION)
     restriction = RuntimeExecutionPolicyRestriction.model_validate(
-        json_text_values["_set_resource_module_version"](
-            resource_values["_transform_document"](
-                values["_EMPTY_RESTRICTION"],
-                resource_values["_upgrade_resources"],
+        docker_values["_transform_policy"](
+            json_text_values["_set_resource_module_version"](
+                resource_values["_transform_document"](
+                    values["_EMPTY_RESTRICTION"],
+                    resource_values["_upgrade_resources"],
+                ),
+                version=1,
             ),
-            version=1,
         )
     )
 
@@ -165,6 +179,101 @@ def test_migration_backfill_restriction_is_canonical_empty_intent() -> None:
         digest_runtime_execution_policy(restriction)
     )
     assert all(value is None for name, value in restriction if name != "schema_version")
+
+
+def test_docker_v1_migration_collapses_authority_and_discards_false_controls() -> None:
+    """Existing granular policy becomes one usable Docker capability."""
+    values = _migration_values(_DOCKER_V1_MIGRATION)
+    policy = RuntimeExecutionPolicyDocument.model_validate(
+        values["_transform_policy"](
+            {
+                "schema_version": 1,
+                "image_build": {
+                    "module_id": "container.image_build",
+                    "version": 1,
+                    "enabled": False,
+                },
+                "container_run": {
+                    "module_id": "container.run",
+                    "version": 1,
+                    "enabled": True,
+                },
+                "compose": {
+                    "module_id": "container.compose",
+                    "version": 1,
+                    "enabled": False,
+                },
+                "engine_storage": {
+                    "module_id": "engine.storage",
+                    "version": 1,
+                    "mode": "none",
+                    "capacity_bytes": None,
+                },
+                "network_egress": {
+                    "module_id": "network.egress",
+                    "version": 1,
+                    "mode": "restricted",
+                    "allowed_destinations": ["github.com:443/tcp"],
+                    "denied_destinations": ["10.0.0.0/8:any/any"],
+                },
+                "resources": {
+                    "module_id": "container.resources",
+                    "version": 1,
+                    "cpu_request_millicores": 500,
+                    "cpu_limit_millicores": 1_000,
+                    "memory_request_bytes": 512 * 1024**2,
+                    "memory_limit_bytes": 1024**3,
+                    "pids": 256,
+                    "container_count": 4,
+                    "ephemeral_storage_bytes": 16 * 1024**3,
+                    "persistent_storage_bytes": 32 * 1024**3,
+                },
+            }
+        )
+    )
+
+    assert policy.docker.enabled is True
+    assert policy.docker.storage_mode.value == "ephemeral"
+    assert policy.docker.storage_capacity_bytes == 16 * 1024**3
+    assert policy.resources.cpu_request_millicores == 500
+    assert policy.resources.persistent_storage_bytes == 32 * 1024**3
+    assert "network_egress" not in policy.model_dump(mode="json")
+    assert "pids" not in policy.resources.model_dump(mode="json")
+    assert "container_count" not in policy.resources.model_dump(mode="json")
+
+
+def test_docker_v1_migration_keeps_lower_layer_docker_disablement_valid() -> None:
+    """Old granular disablement becomes atomic Docker disablement without storage."""
+    values = _migration_values(_DOCKER_V1_MIGRATION)
+
+    for old_restriction in (
+        {
+            "schema_version": 1,
+            "image_build": {"enabled": False},
+            "container_run": None,
+            "compose": None,
+            "resources": None,
+            "engine_storage": None,
+            "network_egress": None,
+        },
+        {
+            "schema_version": 1,
+            "image_build": None,
+            "container_run": None,
+            "compose": None,
+            "resources": None,
+            "engine_storage": {"mode": "none", "capacity_bytes": None},
+            "network_egress": None,
+        },
+    ):
+        restriction = RuntimeExecutionPolicyRestriction.model_validate(
+            values["_transform_policy"](old_restriction)
+        )
+
+        assert restriction.docker is not None
+        assert restriction.docker.enabled is False
+        assert restriction.docker.storage_mode is None
+        assert restriction.docker.storage_capacity_bytes is None
 
 
 def test_resource_migration_preserves_json_null_runtime_snapshots() -> None:
@@ -212,14 +321,21 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     checkpoint_session_source = (
         _DISCORD_GATEWAY_CHECKPOINT_SESSION_MIGRATION.read_text()
     )
+    docker_v1_source = _DOCKER_V1_MIGRATION.read_text()
     resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
     route_access_policy_values = _migration_values(
         _EXTERNAL_CHANNEL_ROUTE_ACCESS_POLICY_MIGRATION
     )
+    checkpoint_session_values = _migration_values(
+        _DISCORD_GATEWAY_CHECKPOINT_SESSION_MIGRATION
+    )
+    docker_v1_values = _migration_values(_DOCKER_V1_MIGRATION)
 
-    assert revision_file.read_text().strip() == "17a0f533cc20"
+    assert revision_file.read_text().strip() == "6c42043df81f"
     assert resource_values["down_revision"] == "e0615474dc27"
     assert route_access_policy_values["down_revision"] == "c1d4e7f2a9b0"
+    assert checkpoint_session_values["down_revision"] == "f17b4c8d6a21"
+    assert docker_v1_values["down_revision"] == "17a0f533cc20"
     assert "INSERT INTO workspace_runtime_execution_policies" in seed_source
     assert "INSERT INTO workspace_runtime_execution_profile_allowances" in seed_source
     assert "INSERT INTO agent_runtime_execution_settings" in seed_source
@@ -248,6 +364,10 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     assert '"open_access_enabled"' in route_access_policy_source
     assert '"allow_bot_messages"' in route_access_policy_source
     assert "checkpoint_session_fingerprint" in checkpoint_session_source
+    assert '"module_id": "docker"' in docker_v1_source
+    assert '"module_id": "runtime.resources"' in docker_v1_source
+    assert '"pids"' not in docker_v1_source
+    assert '"container_count"' not in docker_v1_source
 
 
 def test_generated_revisions_render_valid_incremental_postgresql_sql() -> None:

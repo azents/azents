@@ -1571,16 +1571,8 @@
       "restrictions": {
         "dockerTitle": "Docker",
         "dockerDescription": "선택한 Profile이 허용한 Docker 기능을 Workspace에서 추가로 제한합니다. 설정하지 않은 값은 Profile을 따릅니다.",
-        "disableImageBuild": "Docker 이미지 빌드 비활성화",
-        "disableContainerRun": "Docker 컨테이너 실행 비활성화",
-        "disableCompose": "Docker Compose 비활성화",
-        "nestedContainerLimits": "중첩 컨테이너 제한",
-        "optionalRestrictionDescription": "이 Workspace에서 더 줄여야 하는 값만 설정하세요.",
-        "aggregatePidLimit": "전체 PID Limit",
-        "containerCountLimit": "컨테이너 수 Limit",
+        "disableDocker": "Docker 비활성화",
         "inheritWhenEmpty": "비워두면 Profile 값을 따릅니다.",
-        "pidPlaceholder": "예: 256",
-        "containerPlaceholder": "예: 4",
         "dockerStoragePolicy": "Docker 스토리지 정책",
         "dockerStorageDescription": "Profile 설정을 유지하거나 임시 Docker 데이터를 더 제한합니다.",
         "inheritProfile": "Profile에서 상속",
@@ -1603,20 +1595,7 @@
         "persistentStorageDescription": "PVC 증설은 자동 반영됩니다. 더 작은 값은 PVC를 삭제하고 다시 만들 때 반영됩니다.",
         "persistentPlaceholder": "예: 20",
         "unit": "단위",
-        "storageNone": "Docker 스토리지 비활성화",
-        "storageEphemeral": "임시 스토리지",
-        "networkTitle": "Outbound network access",
-        "networkDescription": "Profile이 허용한 outbound access를 Workspace에서 추가로 제한합니다.",
-        "accessPolicy": "Access policy",
-        "networkNone": "System traffic only",
-        "networkRestricted": "Allowlist (선택한 IP 대역)",
-        "networkDirect": "모든 IP 주소",
-        "allowedIpRanges": "허용할 IP 대역 (CIDR)",
-        "blockedIpRanges": "차단할 IP 대역 (CIDR)",
-        "cidrDescription": "한 줄에 IPv4 또는 IPv6 CIDR 하나를 입력하세요. hostname과 URL은 사용할 수 없습니다.",
-        "blockedCidrDescription": "다른 설정에서 허용하더라도 이 대역으로 향하는 traffic은 차단됩니다.",
-        "allowedCidrPlaceholder": "140.82.112.0/20\n2606:50c0::/32",
-        "blockedCidrPlaceholder": "10.0.0.0/8\nfd00::/8"
+        "storageEphemeral": "임시 스토리지"
       },
       "workspacePage": {
         "title": "Runtime 실행",
@@ -1727,22 +1706,15 @@
           "runtime_failure": "Runtime 작업에 실패했습니다. 참조 코드: {code}"
         },
         "fieldLabels": {
-          "imageBuild": "Docker 이미지 빌드",
-          "containerRun": "Docker 컨테이너 실행",
-          "compose": "Docker Compose 사용",
+          "docker": "Docker",
           "cpuRequest": "CPU Request",
           "cpuLimit": "CPU Limit",
           "memoryRequest": "Memory Request",
           "memoryLimit": "Memory Limit",
-          "pidLimit": "전체 PID 상한",
-          "containerCount": "컨테이너 수 상한",
           "ephemeralStorage": "Runtime 임시 스토리지",
           "persistentStorage": "영구 Workspace 스토리지",
           "dockerStoragePolicy": "임시 Docker 스토리지 정책",
-          "dockerStorageCapacity": "임시 Docker 스토리지 용량",
-          "networkPolicy": "Outbound 네트워크 접근",
-          "allowedIpRanges": "허용 IP 대역",
-          "blockedIpRanges": "차단 IP 대역"
+          "dockerStorageCapacity": "임시 Docker 스토리지 용량"
         },
         "layerLabels": {
           "profile": "Profile",
@@ -1750,9 +1722,7 @@
           "agent": "Agent 설정"
         },
         "capabilityLabels": {
-          "imageBuild": "이미지 빌드",
-          "containerRun": "컨테이너 실행",
-          "compose": "Docker Compose"
+          "docker": "Docker"
         },
         "storageModes": {
           "none": "임시 Docker 스토리지 없음",

@@ -7,12 +7,8 @@ Complete versioned execution-policy document.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **schema_version** | **int** |  | 
-**image_build** | [**RuntimeExecutionBooleanModule**](RuntimeExecutionBooleanModule.md) |  | 
-**container_run** | [**RuntimeExecutionBooleanModule**](RuntimeExecutionBooleanModule.md) |  | 
-**compose** | [**RuntimeExecutionBooleanModule**](RuntimeExecutionBooleanModule.md) |  | 
+**docker** | [**RuntimeExecutionDockerModule**](RuntimeExecutionDockerModule.md) |  | 
 **resources** | [**RuntimeExecutionResourceModule**](RuntimeExecutionResourceModule.md) |  | 
-**engine_storage** | [**RuntimeExecutionStorageModule**](RuntimeExecutionStorageModule.md) |  | 
-**network_egress** | [**RuntimeExecutionNetworkModule**](RuntimeExecutionNetworkModule.md) |  | 
 
 ## Example
 

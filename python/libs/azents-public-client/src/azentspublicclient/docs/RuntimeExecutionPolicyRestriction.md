@@ -7,12 +7,8 @@ Restrictive-only Workspace or Agent policy contribution.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **schema_version** | **int** |  | 
-**image_build** | [**RuntimeExecutionBooleanRestriction**](RuntimeExecutionBooleanRestriction.md) |  | 
-**container_run** | [**RuntimeExecutionBooleanRestriction**](RuntimeExecutionBooleanRestriction.md) |  | 
-**compose** | [**RuntimeExecutionBooleanRestriction**](RuntimeExecutionBooleanRestriction.md) |  | 
+**docker** | [**RuntimeExecutionDockerRestriction**](RuntimeExecutionDockerRestriction.md) |  | 
 **resources** | [**RuntimeExecutionResourceRestriction**](RuntimeExecutionResourceRestriction.md) |  | 
-**engine_storage** | [**RuntimeExecutionStorageRestriction**](RuntimeExecutionStorageRestriction.md) |  | 
-**network_egress** | [**RuntimeExecutionNetworkRestriction**](RuntimeExecutionNetworkRestriction.md) |  | 
 
 ## Example
 

@@ -31,12 +31,10 @@ class RuntimeExecutionResourceRestriction(BaseModel):
     cpu_limit_millicores: Optional[Annotated[int, Field(strict=True, ge=1)]]
     memory_request_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
     memory_limit_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
-    pids: Optional[Annotated[int, Field(strict=True, ge=1)]]
-    container_count: Optional[Annotated[int, Field(strict=True, ge=1)]]
     ephemeral_storage_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
     persistent_storage_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["cpu_request_millicores", "cpu_limit_millicores", "memory_request_bytes", "memory_limit_bytes", "pids", "container_count", "ephemeral_storage_bytes", "persistent_storage_bytes"]
+    __properties: ClassVar[List[str]] = ["cpu_request_millicores", "cpu_limit_millicores", "memory_request_bytes", "memory_limit_bytes", "ephemeral_storage_bytes", "persistent_storage_bytes"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -104,16 +102,6 @@ class RuntimeExecutionResourceRestriction(BaseModel):
         if self.memory_limit_bytes is None and "memory_limit_bytes" in self.model_fields_set:
             _dict['memory_limit_bytes'] = None
 
-        # set to None if pids (nullable) is None
-        # and model_fields_set contains the field
-        if self.pids is None and "pids" in self.model_fields_set:
-            _dict['pids'] = None
-
-        # set to None if container_count (nullable) is None
-        # and model_fields_set contains the field
-        if self.container_count is None and "container_count" in self.model_fields_set:
-            _dict['container_count'] = None
-
         # set to None if ephemeral_storage_bytes (nullable) is None
         # and model_fields_set contains the field
         if self.ephemeral_storage_bytes is None and "ephemeral_storage_bytes" in self.model_fields_set:
@@ -140,8 +128,6 @@ class RuntimeExecutionResourceRestriction(BaseModel):
             "cpu_limit_millicores": obj.get("cpu_limit_millicores"),
             "memory_request_bytes": obj.get("memory_request_bytes"),
             "memory_limit_bytes": obj.get("memory_limit_bytes"),
-            "pids": obj.get("pids"),
-            "container_count": obj.get("container_count"),
             "ephemeral_storage_bytes": obj.get("ephemeral_storage_bytes"),
             "persistent_storage_bytes": obj.get("persistent_storage_bytes")
         })

@@ -14,11 +14,8 @@ const RUNTIME_POLICY_REASON_MESSAGE_KEYS = {
   profile_not_allowed: "reasonExplanations.profile_not_allowed",
   dependency_unsatisfied: "reasonExplanations.dependency_unsatisfied",
   provider_module_unsupported: "reasonExplanations.provider_module_unsupported",
-  provider_engine_unsupported: "reasonExplanations.provider_engine_unsupported",
   provider_storage_unsupported:
     "reasonExplanations.provider_storage_unsupported",
-  provider_network_unsupported:
-    "reasonExplanations.provider_network_unsupported",
   provider_limit_exceeded: "reasonExplanations.provider_limit_exceeded",
   execution_policy_unavailable:
     "reasonExplanations.execution_policy_unavailable",
@@ -67,11 +64,8 @@ export function isRuntimeExecutionPolicySupported(
   capabilities: RuntimeExecutionManagementCapabilitiesResponse,
 ): boolean {
   return (
-    (!policy.image_build.enabled || capabilities.image_build) &&
-    (!policy.container_run.enabled || capabilities.container_run) &&
-    (!policy.compose.enabled || capabilities.compose) &&
-    capabilities.storage_modes.includes(policy.engine_storage.mode) &&
-    capabilities.network_modes.includes(policy.network_egress.mode)
+    (!policy.docker.enabled || capabilities.docker) &&
+    capabilities.storage_modes.includes(policy.docker.storage_mode)
   );
 }
 

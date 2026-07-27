@@ -118,12 +118,8 @@ async def test_create_adds_system_standard_execution_setting() -> None:
     assert execution_setting.version == 1
     assert execution_setting.restriction == {
         "schema_version": 1,
-        "image_build": None,
-        "container_run": None,
-        "compose": None,
+        "docker": None,
         "resources": None,
-        "engine_storage": None,
-        "network_egress": None,
     }
 
 

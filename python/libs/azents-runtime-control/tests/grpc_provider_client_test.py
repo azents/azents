@@ -77,14 +77,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                         snapshot_id="snapshot-1",
                         digest=digest_effective_policy(execution_policy),
                         desired_generation=5,
-                        module_versions={
-                            "container.image_build": 1,
-                            "container.run": 1,
-                            "container.compose": 1,
-                            "container.resources": 1,
-                            "engine.storage": 1,
-                            "network.egress": 1,
-                        },
+                        module_versions={"docker": 1, "runtime.resources": 1},
                         source_versions={
                             "profile": 1,
                             "workspace": 1,
@@ -284,7 +277,7 @@ def _execution_policy_evidence() -> RuntimeExecutionPolicyEvidence:
         snapshot_id="snapshot-1",
         digest="d" * 64,
         desired_generation=5,
-        module_versions={"container.run": 1},
+        module_versions={"docker": 1, "runtime.resources": 1},
         source_versions={"profile": 1, "workspace": 1, "agent": 1},
     )
 
@@ -292,45 +285,22 @@ def _execution_policy_evidence() -> RuntimeExecutionPolicyEvidence:
 def _execution_policy_document() -> dict[str, JsonValue]:
     return {
         "schema_version": 1,
-        "image_build": {
-            "module_id": "container.image_build",
+        "docker": {
+            "module_id": "docker",
             "version": 1,
             "enabled": False,
-        },
-        "container_run": {
-            "module_id": "container.run",
-            "version": 1,
-            "enabled": False,
-        },
-        "compose": {
-            "module_id": "container.compose",
-            "version": 1,
-            "enabled": False,
+            "storage_mode": "none",
+            "storage_capacity_bytes": None,
         },
         "resources": {
-            "module_id": "container.resources",
+            "module_id": "runtime.resources",
             "version": 1,
             "cpu_request_millicores": None,
             "cpu_limit_millicores": None,
             "memory_request_bytes": None,
             "memory_limit_bytes": None,
-            "pids": None,
-            "container_count": None,
             "ephemeral_storage_bytes": None,
             "persistent_storage_bytes": None,
-        },
-        "engine_storage": {
-            "module_id": "engine.storage",
-            "version": 1,
-            "mode": "none",
-            "capacity_bytes": None,
-        },
-        "network_egress": {
-            "module_id": "network.egress",
-            "version": 1,
-            "mode": "none",
-            "allowed_destinations": [],
-            "denied_destinations": [],
         },
     }
 

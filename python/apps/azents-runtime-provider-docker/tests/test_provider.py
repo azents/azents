@@ -588,7 +588,7 @@ async def test_authority_bearing_policy_is_rejected(tmp_path: Path) -> None:
         await provider.start(
             _command(
                 RuntimeLifecycleCommandType.START,
-                execution_policy=_execution_policy(image_build=True),
+                execution_policy=_execution_policy(docker_enabled=True),
             )
         )
 
@@ -597,50 +597,27 @@ async def test_authority_bearing_policy_is_rejected(tmp_path: Path) -> None:
 
 def _execution_policy(
     *,
-    image_build: bool = False,
+    docker_enabled: bool = False,
     desired_generation: int = 1,
 ) -> RuntimeExecutionPolicyEnvelope:
     policy: dict[str, JsonValue] = {
         "schema_version": 1,
-        "image_build": {
-            "module_id": "container.image_build",
+        "docker": {
+            "module_id": "docker",
             "version": 1,
-            "enabled": image_build,
-        },
-        "container_run": {
-            "module_id": "container.run",
-            "version": 1,
-            "enabled": False,
-        },
-        "compose": {
-            "module_id": "container.compose",
-            "version": 1,
-            "enabled": False,
+            "enabled": docker_enabled,
+            "storage_mode": "ephemeral" if docker_enabled else "none",
+            "storage_capacity_bytes": (1_073_741_824 if docker_enabled else None),
         },
         "resources": {
-            "module_id": "container.resources",
+            "module_id": "runtime.resources",
             "version": 1,
             "cpu_request_millicores": None,
-            "cpu_limit_millicores": 1_000 if image_build else None,
+            "cpu_limit_millicores": 1_000 if docker_enabled else None,
             "memory_request_bytes": None,
-            "memory_limit_bytes": 1_073_741_824 if image_build else None,
-            "pids": 256 if image_build else None,
-            "container_count": 1 if image_build else None,
-            "ephemeral_storage_bytes": 1_073_741_824 if image_build else None,
+            "memory_limit_bytes": 1_073_741_824 if docker_enabled else None,
+            "ephemeral_storage_bytes": (1_073_741_824 if docker_enabled else None),
             "persistent_storage_bytes": None,
-        },
-        "engine_storage": {
-            "module_id": "engine.storage",
-            "version": 1,
-            "mode": "ephemeral" if image_build else "none",
-            "capacity_bytes": 1_073_741_824 if image_build else None,
-        },
-        "network_egress": {
-            "module_id": "network.egress",
-            "version": 1,
-            "mode": "none",
-            "allowed_destinations": [],
-            "denied_destinations": [],
         },
     }
     return RuntimeExecutionPolicyEnvelope(
@@ -648,14 +625,7 @@ def _execution_policy(
             snapshot_id="snapshot-1",
             digest=digest_effective_policy(policy),
             desired_generation=desired_generation,
-            module_versions={
-                "container.image_build": 1,
-                "container.run": 1,
-                "container.compose": 1,
-                "container.resources": 1,
-                "engine.storage": 1,
-                "network.egress": 1,
-            },
+            module_versions={"docker": 1, "runtime.resources": 1},
             source_versions={
                 "profile": 1,
                 "workspace": 1,

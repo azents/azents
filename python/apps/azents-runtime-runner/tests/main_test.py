@@ -56,7 +56,7 @@ def test_runner_reads_provider_injected_policy_evidence(
     monkeypatch.setenv("AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION", "3")
     monkeypatch.setenv(
         "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS",
-        json.dumps({"container.run": 1}),
+        json.dumps({"docker": 1, "runtime.resources": 1}),
     )
     monkeypatch.setenv(
         "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS",

@@ -32,25 +32,12 @@ function ProfilePolicySummary({
   return (
     <Group gap="xs">
       <Badge
-        color={profile.policy.image_build.enabled ? "blue" : "gray"}
+        color={profile.policy.docker.enabled ? "blue" : "gray"}
         variant="light"
       >
-        Build
+        Docker
       </Badge>
-      <Badge
-        color={profile.policy.container_run.enabled ? "blue" : "gray"}
-        variant="light"
-      >
-        Containers
-      </Badge>
-      <Badge
-        color={profile.policy.compose.enabled ? "blue" : "gray"}
-        variant="light"
-      >
-        Compose
-      </Badge>
-      <Badge variant="outline">{profile.policy.engine_storage.mode}</Badge>
-      <Badge variant="outline">{profile.policy.network_egress.mode}</Badge>
+      <Badge variant="outline">{profile.policy.docker.storage_mode}</Badge>
     </Group>
   );
 }
@@ -79,12 +66,8 @@ export function WorkspaceRuntimeExecution({
         return t("reasons.dependency_unsatisfied");
       case "provider_module_unsupported":
         return t("reasons.provider_module_unsupported");
-      case "provider_engine_unsupported":
-        return t("reasons.provider_engine_unsupported");
       case "provider_storage_unsupported":
         return t("reasons.provider_storage_unsupported");
-      case "provider_network_unsupported":
-        return t("reasons.provider_network_unsupported");
       case "provider_limit_exceeded":
         return t("reasons.provider_limit_exceeded");
     }

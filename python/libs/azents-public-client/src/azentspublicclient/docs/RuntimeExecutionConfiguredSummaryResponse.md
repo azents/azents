@@ -11,7 +11,6 @@ Name | Type | Description | Notes
 **capabilities** | [**List[RuntimeExecutionCapabilitySummaryResponse]**](RuntimeExecutionCapabilitySummaryResponse.md) |  | 
 **storage_mode** | [**RuntimeExecutionStorageMode**](RuntimeExecutionStorageMode.md) |  | 
 **storage_capacity_bytes** | **int** |  | 
-**network_mode** | [**RuntimeExecutionNetworkMode**](RuntimeExecutionNetworkMode.md) |  | 
 
 ## Example
 

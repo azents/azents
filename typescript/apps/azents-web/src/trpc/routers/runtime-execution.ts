@@ -18,31 +18,20 @@ const resourceRestrictionSchema = z.object({
   cpu_limit_millicores: z.number().int().positive().nullable(),
   memory_request_bytes: z.number().int().positive().nullable(),
   memory_limit_bytes: z.number().int().positive().nullable(),
-  pids: z.number().int().positive().nullable(),
-  container_count: z.number().int().positive().nullable(),
   ephemeral_storage_bytes: z.number().int().positive().nullable(),
   persistent_storage_bytes: z.number().int().positive().nullable(),
 });
 
 const restrictionSchema = z.object({
   schema_version: z.literal(1),
-  image_build: z.object({ enabled: z.literal(false) }).nullable(),
-  container_run: z.object({ enabled: z.literal(false) }).nullable(),
-  compose: z.object({ enabled: z.literal(false) }).nullable(),
+  docker: z
+    .object({
+      enabled: z.literal(false).nullable(),
+      storage_mode: z.enum(["none", "ephemeral", "persistent"]).nullable(),
+      storage_capacity_bytes: z.number().int().positive().nullable(),
+    })
+    .nullable(),
   resources: resourceRestrictionSchema.nullable(),
-  engine_storage: z
-    .object({
-      mode: z.enum(["none", "ephemeral", "persistent"]).nullable(),
-      capacity_bytes: z.number().int().positive().nullable(),
-    })
-    .nullable(),
-  network_egress: z
-    .object({
-      mode: z.enum(["none", "restricted", "direct"]).nullable(),
-      allowed_destinations: z.array(z.string()).nullable(),
-      denied_destinations: z.array(z.string()),
-    })
-    .nullable(),
 });
 
 const workspaceInput = z.object({ handle: z.string().min(1) });

@@ -39,13 +39,12 @@ class TestRuntimeExecutionConfiguredSummaryResponse(unittest.TestCase):
                 digest = '',
                 capabilities = [
                     azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                        module_id = 'container.image_build', 
+                        module_id = 'docker', 
                         version = 56, 
                         enabled = True, )
                     ],
                 storage_mode = 'none',
-                storage_capacity_bytes = 56,
-                network_mode = 'none'
+                storage_capacity_bytes = 56
             )
         else:
             return RuntimeExecutionConfiguredSummaryResponse(
@@ -53,13 +52,12 @@ class TestRuntimeExecutionConfiguredSummaryResponse(unittest.TestCase):
                 digest = '',
                 capabilities = [
                     azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                        module_id = 'container.image_build', 
+                        module_id = 'docker', 
                         version = 56, 
                         enabled = True, )
                     ],
                 storage_mode = 'none',
                 storage_capacity_bytes = 56,
-                network_mode = 'none',
         )
         """
 

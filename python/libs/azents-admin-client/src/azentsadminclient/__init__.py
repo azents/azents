@@ -75,12 +75,10 @@ __all__ = [
     "PlatformGitHubAppHealthResponse",
     "PlatformGitHubAppPatchRequest",
     "RuntimeExecutionAuditEventType",
-    "RuntimeExecutionBooleanModule",
     "RuntimeExecutionChangeDirection",
+    "RuntimeExecutionDockerModule",
     "RuntimeExecutionManagementCapabilitiesResponse",
     "RuntimeExecutionManagementLayer",
-    "RuntimeExecutionNetworkMode",
-    "RuntimeExecutionNetworkModule",
     "RuntimeExecutionPolicyAuditEventResponse",
     "RuntimeExecutionPolicyAuditListResponse",
     "RuntimeExecutionPolicyDocument",
@@ -92,7 +90,6 @@ __all__ = [
     "RuntimeExecutionProfileRetireRequest",
     "RuntimeExecutionResourceModule",
     "RuntimeExecutionStorageMode",
-    "RuntimeExecutionStorageModule",
     "RuntimeProviderAuthMethod",
     "RuntimeProviderAuthenticationBindingAuditEventResponse",
     "RuntimeProviderAuthenticationBindingAuditListResponse",
@@ -226,12 +223,10 @@ from azentsadminclient.models.platform_git_hub_app_field_response import Platfor
 from azentsadminclient.models.platform_git_hub_app_health_response import PlatformGitHubAppHealthResponse as PlatformGitHubAppHealthResponse
 from azentsadminclient.models.platform_git_hub_app_patch_request import PlatformGitHubAppPatchRequest as PlatformGitHubAppPatchRequest
 from azentsadminclient.models.runtime_execution_audit_event_type import RuntimeExecutionAuditEventType as RuntimeExecutionAuditEventType
-from azentsadminclient.models.runtime_execution_boolean_module import RuntimeExecutionBooleanModule as RuntimeExecutionBooleanModule
 from azentsadminclient.models.runtime_execution_change_direction import RuntimeExecutionChangeDirection as RuntimeExecutionChangeDirection
+from azentsadminclient.models.runtime_execution_docker_module import RuntimeExecutionDockerModule as RuntimeExecutionDockerModule
 from azentsadminclient.models.runtime_execution_management_capabilities_response import RuntimeExecutionManagementCapabilitiesResponse as RuntimeExecutionManagementCapabilitiesResponse
 from azentsadminclient.models.runtime_execution_management_layer import RuntimeExecutionManagementLayer as RuntimeExecutionManagementLayer
-from azentsadminclient.models.runtime_execution_network_mode import RuntimeExecutionNetworkMode as RuntimeExecutionNetworkMode
-from azentsadminclient.models.runtime_execution_network_module import RuntimeExecutionNetworkModule as RuntimeExecutionNetworkModule
 from azentsadminclient.models.runtime_execution_policy_audit_event_response import RuntimeExecutionPolicyAuditEventResponse as RuntimeExecutionPolicyAuditEventResponse
 from azentsadminclient.models.runtime_execution_policy_audit_list_response import RuntimeExecutionPolicyAuditListResponse as RuntimeExecutionPolicyAuditListResponse
 from azentsadminclient.models.runtime_execution_policy_document import RuntimeExecutionPolicyDocument as RuntimeExecutionPolicyDocument
@@ -243,7 +238,6 @@ from azentsadminclient.models.runtime_execution_profile_response import RuntimeE
 from azentsadminclient.models.runtime_execution_profile_retire_request import RuntimeExecutionProfileRetireRequest as RuntimeExecutionProfileRetireRequest
 from azentsadminclient.models.runtime_execution_resource_module import RuntimeExecutionResourceModule as RuntimeExecutionResourceModule
 from azentsadminclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode as RuntimeExecutionStorageMode
-from azentsadminclient.models.runtime_execution_storage_module import RuntimeExecutionStorageModule as RuntimeExecutionStorageModule
 from azentsadminclient.models.runtime_provider_auth_method import RuntimeProviderAuthMethod as RuntimeProviderAuthMethod
 from azentsadminclient.models.runtime_provider_authentication_binding_audit_event_response import RuntimeProviderAuthenticationBindingAuditEventResponse as RuntimeProviderAuthenticationBindingAuditEventResponse
 from azentsadminclient.models.runtime_provider_authentication_binding_audit_list_response import RuntimeProviderAuthenticationBindingAuditListResponse as RuntimeProviderAuthenticationBindingAuditListResponse

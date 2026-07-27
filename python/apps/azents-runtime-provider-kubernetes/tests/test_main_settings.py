@@ -92,7 +92,6 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH", "/workspace/agent")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_STORAGE_CLASS", "gp3")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PVC_SIZE", "20Gi")
-    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_GATEWAY_IMAGE", "gateway@sha256:test")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE", "engine@sha256:test")
     monkeypatch.setenv(
         "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE",
@@ -136,7 +135,6 @@ def test_provider_settings_defaults_runner_resources_to_none(
     assert settings.runner_resources is None
     assert settings.runner_env == {}
     assert settings.image_pull_secrets == ()
-    assert settings.gateway_image == "gateway@sha256:test"
     assert settings.engine_image == "engine@sha256:test"
     assert settings.runtime_control_namespace == "azents"
     assert settings.runtime_control_labels == {
@@ -361,9 +359,7 @@ def test_capability_contract_declares_qualified_execution_support() -> None:
     execution_policy = provider_main._CAPABILITY_CONTRACT["execution_policy"]
 
     assert isinstance(execution_policy, dict)
-    assert execution_policy["privileged_engine"] is True
     assert execution_policy["storage_modes"] == ["none", "ephemeral"]
-    assert execution_policy["network_modes"] == ["none", "restricted", "direct"]
     supported_modules = execution_policy["supported_modules"]
     assert isinstance(supported_modules, list)
     module_versions: dict[str, int] = {}
@@ -375,10 +371,6 @@ def test_capability_contract_declares_qualified_execution_support() -> None:
         assert isinstance(version, int)
         module_versions[module_id] = version
     assert module_versions == {
-        "container.image_build": 1,
-        "container.run": 1,
-        "container.compose": 1,
-        "container.resources": 1,
-        "engine.storage": 1,
-        "network.egress": 1,
+        "docker": 1,
+        "runtime.resources": 1,
     }

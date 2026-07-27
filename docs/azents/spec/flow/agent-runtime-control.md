@@ -29,8 +29,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-07-27
-spec_version: 37
+last_verified_at: 2026-07-28
+spec_version: 38
 ---
 
 # Agent Runtime Control
@@ -278,8 +278,8 @@ and may fence/stop noncompliant authority, but never invokes reset, terminal del
 fallback, or workspace deletion. Unsupported capability remains unavailable rather than weakened.
 
 A mixed policy edit computes the module-owned security meet between the applied policy and current
-intent. Boolean authority intersects, numeric bounds take the lower finite value, Docker storage mode
-and capacity remain one valid module, and network allow/deny rules intersect and union respectively.
+intent. Docker enablement, storage mode, and storage capacity remain one atomic module, while
+numeric Kubernetes resource bounds take the lower finite value.
 The restrictive subset converges automatically before any remaining authority expansion is offered
 for explicit Apply. A historical applied Snapshot whose evidence was invalidated by a schema
 migration remains internal recovery state; it does not become an administrator action while a valid
@@ -290,9 +290,9 @@ target can be reconciled.
 Production deploys the new path through GitOps:
 
 - ECR repositories and GitHub Actions build/push runtime images.
-- The policy Gateway image exposes its executable at the stable `/usr/local/bin/azents-container-policy-gateway` path consumed by the Kubernetes Provider for the container command and readiness probe.
-- The policy Gateway treats Docker CLI's `HostConfig.MemorySwappiness=-1` wire default as unset and removes it before forwarding, while rejecting explicit swappiness authority.
-- The policy Gateway validates transport framing and security-sensitive headers, forwards only its fixed Engine header contract, and silently removes all other bounded client metadata instead of coupling compatibility to individual Docker clients.
+- A Docker-enabled Kubernetes Runtime mounts its private DIND Unix socket directly into the Runner.
+- The Runner receives Docker and Testcontainers endpoint settings; no Azents component filters or rewrites Docker HTTP requests.
+- The privileged DIND sidecar receives the Profile's Kubernetes resource values and owns a separate bounded temporary data volume.
 - Helm values/templates render runtime-control, runtime-runner, and Kubernetes provider settings.
 - ArgoCD Application/root/overlay includes the runtime provider deployment.
 - Final cutover defaults route production to the Agent Runtime path and disables/prunes the legacy sandbox provider-control traffic path.
@@ -308,7 +308,8 @@ Required deterministic coverage:
 - provider/runner gRPC registration, generation fencing, request/reply/body stream tests
 - Runner operation tests for process, file, Git, and strict V4A patch operations
 - Runtime Control contract tests for ordered operation cancellation, start/cancel races, terminal cursor authority, and typed patch result folding
-- Provider tests for Docker host bind mount persistence and Kubernetes PVC persistence
+- Provider tests for Docker host bind mount persistence, Kubernetes PVC persistence, direct DIND socket topology, and deployment-owned NetworkPolicy hard caps
+- Docker compatibility tests for CLI, Compose, SDK, Testcontainers Network, PostgreSQL port binding, and Ryuk cleanup
 - azents deterministic E2E for Agent Workspace bootstrap and lifecycle actions
 - credential-free runtime-provider E2E for multi-file `apply_patch`, typed results, final manifests, and traversal rejection
 
@@ -316,6 +317,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-28** (spec_version 38) — Removed the Container Policy Gateway, exposed each Runtime's private DIND socket directly, collapsed Docker into one atomic v1 capability, and removed unenforceable nested PID/count and Profile network controls.
 - **2026-07-27** (spec_version 37) — Replaced the Docker client header allowlist with effect-based validation and stripping so SDK metadata cannot break otherwise authorized Engine operations.
 - **2026-07-27** (spec_version 36) — Normalized Docker CLI's unset memory-swappiness sentinel so ordinary `docker run` requests pass the policy Gateway without granting swappiness authority.
 - **2026-07-27** (spec_version 35) — Fenced Runner policy evidence by desired generation during workload replacement and aligned the Gateway image executable with the Kubernetes container contract.

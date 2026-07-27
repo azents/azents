@@ -30,9 +30,7 @@ class RuntimeExecutionAvailabilityReason(str, Enum):
     PROFILE_NOT_ALLOWED = 'profile_not_allowed'
     DEPENDENCY_UNSATISFIED = 'dependency_unsatisfied'
     PROVIDER_MODULE_UNSUPPORTED = 'provider_module_unsupported'
-    PROVIDER_ENGINE_UNSUPPORTED = 'provider_engine_unsupported'
     PROVIDER_STORAGE_UNSUPPORTED = 'provider_storage_unsupported'
-    PROVIDER_NETWORK_UNSUPPORTED = 'provider_network_unsupported'
     PROVIDER_LIMIT_EXCEEDED = 'provider_limit_exceeded'
 
     @classmethod

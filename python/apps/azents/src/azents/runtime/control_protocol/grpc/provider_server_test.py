@@ -583,14 +583,7 @@ def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
             snapshot_id="snapshot-1",
             digest=digest_runtime_execution_policy(policy),
             desired_generation=5,
-            module_versions={
-                "container.compose": 1,
-                "container.image_build": 1,
-                "container.resources": 1,
-                "container.run": 1,
-                "engine.storage": 1,
-                "network.egress": 1,
-            },
+            module_versions={"docker": 1, "runtime.resources": 1},
             source_versions={
                 "profile": 1,
                 "workspace": 1,

@@ -71,8 +71,6 @@ spec:
               value: {{ .Values.runtimeProviderKubernetes.storage.className | quote }}
             - name: AZ_RUNTIME_PROVIDER_PVC_SIZE
               value: {{ .Values.runtimeProviderKubernetes.storage.size | quote }}
-            - name: AZ_RUNTIME_PROVIDER_GATEWAY_IMAGE
-              value: {{ include "azents.runtimeGatewayImage" . | quote }}
             - name: AZ_RUNTIME_PROVIDER_ENGINE_IMAGE
               value: {{ include "azents.runtimeEngineImage" . | quote }}
             - name: AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE

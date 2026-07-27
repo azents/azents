@@ -36,22 +36,14 @@ class TestRuntimeExecutionPolicyRestriction(unittest.TestCase):
         if include_optional:
             return RuntimeExecutionPolicyRestriction(
                 schema_version = 1,
-                image_build = { },
-                container_run = { },
-                compose = { },
-                resources = { },
-                engine_storage = { },
-                network_egress = { }
+                docker = { },
+                resources = { }
             )
         else:
             return RuntimeExecutionPolicyRestriction(
                 schema_version = 1,
-                image_build = { },
-                container_run = { },
-                compose = { },
+                docker = { },
                 resources = { },
-                engine_storage = { },
-                network_egress = { },
         )
         """
 

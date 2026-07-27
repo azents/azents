@@ -1,6 +1,6 @@
 # RuntimeExecutionStorageMode
 
-Nested-engine storage lifecycle ordered from narrowest to broadest.
+Docker data-storage lifecycle ordered from narrowest to broadest.
 
 ## Enum
 

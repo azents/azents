@@ -13,7 +13,6 @@ from azents.core.auth.roles import get_permissions_for_role
 from azents.core.enums import WorkspaceUserRole
 from azents.core.runtime_execution_policy import (
     SYSTEM_STANDARD_PROFILE_ID,
-    RuntimeExecutionNetworkMode,
     RuntimeExecutionProfileLifecycle,
     RuntimeExecutionProviderCapabilities,
     RuntimeExecutionSourceVersions,
@@ -93,9 +92,7 @@ def _agent_policy_view() -> AgentRuntimeExecutionPolicyView:
         ),
         provider_capabilities=RuntimeExecutionProviderCapabilities(
             supported_modules=frozenset(),
-            privileged_engine=False,
             storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
-            network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
             resource_maxima=None,
         ),
         profile_active=True,
@@ -108,11 +105,8 @@ def _agent_policy_view() -> AgentRuntimeExecutionPolicyView:
         resolution=resolution,
         provider_compatibility_evaluated=True,
         capabilities=RuntimeExecutionManagementCapabilities(
-            image_build=False,
-            container_run=False,
-            compose=False,
+            docker=False,
             storage_modes=(RuntimeExecutionStorageMode.NONE,),
-            network_modes=(RuntimeExecutionNetworkMode.NONE,),
         ),
     )
 
@@ -126,11 +120,8 @@ def _client(
     app = create_dummy_public_app()
     service.get_management_capabilities.return_value = (
         RuntimeExecutionManagementCapabilities(
-            image_build=False,
-            container_run=False,
-            compose=False,
+            docker=False,
             storage_modes=(RuntimeExecutionStorageMode.NONE,),
-            network_modes=(RuntimeExecutionNetworkMode.NONE,),
         )
     )
     app.dependency_overrides[RuntimeExecutionPolicyService] = lambda: service

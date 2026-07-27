@@ -17,8 +17,8 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
-last_verified_at: 2026-07-27
-spec_version: 10
+last_verified_at: 2026-07-28
+spec_version: 11
 ---
 
 # Agent Runtime Persistence
@@ -128,20 +128,24 @@ and fenced by Control generation. Stale observations cannot overwrite newer desi
 Reset is the only command that may delete/recreate the PVC contents. Stop/restart/recover must not
 delete the PVC.
 
-The initial execution-policy topology is fixed Provider infrastructure, not user-configurable Pod
-input. A Runtime may contain the Runner, policy gateway, and fixed engine components, but the
-Runner and nested workloads do not receive the Provider ServiceAccount, Provider credentials,
-Runtime Control credentials other than their Runtime-bound path, host sockets, or generic
-privileged controls. Agent Workspace PVC storage remains distinct from nested-engine storage.
-The Kubernetes Provider's typed Admin-accepted contract advertises image build, nested container
-run, Compose, ephemeral engine storage, and system-only, IP-allowlist, or all-IP egress. Runtime policy resolution and
-the next immutable target snapshot use the Provider's current accepted contract rather than raw
-registration metadata or a prior snapshot's contract revision. The Provider adds the fixed gateway
-and privileged engine only when the effective policy requires them, keeps engine state in a bounded
-engine-only `emptyDir`, and applies a Runtime-specific NetworkPolicy intersected with the Helm
-deployment NetworkPolicy hard cap. Optional PID and nested-container-count fields are enforced as
-aggregate ceilings when present; `null` is explicitly unlimited. Persistent nested-engine storage
-remains unavailable until a Provider advertises and qualifies bounded persistent capacity.
+The execution-policy topology is fixed Provider infrastructure, not user-configurable Pod input. A
+Docker-disabled Runtime contains only the unprivileged Runner. A Docker-enabled Runtime adds one
+privileged DIND sidecar and mounts its Runtime-private Unix socket read-only into the Runner. There
+is no Docker API Gateway or partial operation allowlist. The complete Docker capability supports
+CLI, Compose, SDK, Testcontainers, Ryuk, and port-binding workflows supported by the daemon.
+
+The Runner and nested workloads do not receive the Provider ServiceAccount, Provider credentials,
+host Docker socket, or another Runtime's DIND socket. Agent Workspace PVC storage remains distinct
+from temporary Docker data, which uses a bounded engine-only `emptyDir`. The Profile may set the
+DIND sidecar's Kubernetes CPU/memory requests and limits and fixed ephemeral-storage allocation.
+PID, nested-container count, and per-Profile network fields are not advertised because direct
+privileged Docker authority bypasses such in-daemon policy claims.
+
+The Runtime-specific Kubernetes NetworkPolicy always permits outbound IPv4 and IPv6 subject to the
+Helm deployment NetworkPolicy hard cap, plus required DNS and Runtime Control traffic. Runtime
+policy resolution and the next immutable target snapshot use the Provider's current accepted
+contract rather than raw registration metadata or a prior snapshot's contract revision.
+Persistent Docker data remains unavailable until a Provider advertises and qualifies it.
 The Profile separately controls Agent Workspace PVC capacity. Expansions apply to the existing PVC;
 shrinks are deferred until an explicit reset or terminal deletion recreates storage.
 
@@ -182,6 +186,7 @@ Required checks:
 
 ## Changelog
 
+- **2026-07-28 (spec_version=11)** — Replaced the policy Gateway with a direct Runtime-private DIND socket, collapsed Docker operations into one capability, and removed unenforceable PID, nested-container, and Profile network controls while retaining Kubernetes resource, storage, and deployment hard-cap boundaries.
 - **2026-07-27 (spec_version=10)** — Added all implemented Profile network modes, Kubernetes request/limit resource semantics, and Profile-controlled PVC expansion with destructive shrink application.
 - **2026-07-27 (spec_version=9)** — Removed Platform execution-policy state and made the selected Profile the complete versioned ceiling and snapshot source.
 - **2026-07-27 (spec_version=7)** — Added lazy exact-Provider binding and initial policy snapshot attachment for pre-contract Runtime rows without workspace replacement.

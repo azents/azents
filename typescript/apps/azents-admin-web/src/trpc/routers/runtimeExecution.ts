@@ -9,45 +9,24 @@ import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
 import { protectedProcedure, router } from "../init";
 
-const booleanModuleSchema = z.object({
-  module_id: z.enum([
-    "container.image_build",
-    "container.run",
-    "container.compose",
-  ]),
-  version: z.literal(1),
-  enabled: z.boolean(),
-});
-
 const policySchema = z.object({
   schema_version: z.literal(1),
-  image_build: booleanModuleSchema,
-  container_run: booleanModuleSchema,
-  compose: booleanModuleSchema,
+  docker: z.object({
+    module_id: z.literal("docker"),
+    version: z.literal(1),
+    enabled: z.boolean(),
+    storage_mode: z.enum(["none", "ephemeral", "persistent"]),
+    storage_capacity_bytes: z.number().int().positive().nullable(),
+  }),
   resources: z.object({
-    module_id: z.literal("container.resources"),
+    module_id: z.literal("runtime.resources"),
     version: z.literal(1),
     cpu_request_millicores: z.number().int().positive().nullable(),
     cpu_limit_millicores: z.number().int().positive().nullable(),
     memory_request_bytes: z.number().int().positive().nullable(),
     memory_limit_bytes: z.number().int().positive().nullable(),
-    pids: z.number().int().positive().nullable(),
-    container_count: z.number().int().positive().nullable(),
     ephemeral_storage_bytes: z.number().int().positive().nullable(),
     persistent_storage_bytes: z.number().int().positive().nullable(),
-  }),
-  engine_storage: z.object({
-    module_id: z.literal("engine.storage"),
-    version: z.literal(1),
-    mode: z.enum(["none", "ephemeral", "persistent"]),
-    capacity_bytes: z.number().int().positive().nullable(),
-  }),
-  network_egress: z.object({
-    module_id: z.literal("network.egress"),
-    version: z.literal(1),
-    mode: z.enum(["none", "restricted", "direct"]),
-    allowed_destinations: z.array(z.string()),
-    denied_destinations: z.array(z.string()),
   }),
 });
 

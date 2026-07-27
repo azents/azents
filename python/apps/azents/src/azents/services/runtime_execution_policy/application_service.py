@@ -23,7 +23,6 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionChangeDirection,
     RuntimeExecutionManagementLayer,
     RuntimeExecutionModuleId,
-    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionPolicyLayer,
     RuntimeExecutionPolicyStatus,
@@ -108,7 +107,6 @@ class RuntimeExecutionConfiguredSummary:
     capabilities: tuple[RuntimeExecutionCapabilitySummary, ...]
     storage_mode: RuntimeExecutionStorageMode
     storage_capacity_bytes: int | None
-    network_mode: RuntimeExecutionNetworkMode
 
 
 @dataclasses.dataclass(frozen=True)
@@ -121,7 +119,6 @@ class RuntimeExecutionSnapshotSummary:
     capabilities: tuple[RuntimeExecutionCapabilitySummary, ...]
     storage_mode: RuntimeExecutionStorageMode
     storage_capacity_bytes: int | None
-    network_mode: RuntimeExecutionNetworkMode
 
 
 @dataclasses.dataclass(frozen=True)
@@ -978,9 +975,8 @@ def _configured_summary(
         profile_id=profile_id,
         digest=digest,
         capabilities=_capability_summaries(policy),
-        storage_mode=policy.engine_storage.mode,
-        storage_capacity_bytes=policy.engine_storage.capacity_bytes,
-        network_mode=policy.network_egress.mode,
+        storage_mode=policy.docker.storage_mode,
+        storage_capacity_bytes=policy.docker.storage_capacity_bytes,
     )
 
 
@@ -1000,9 +996,8 @@ def _snapshot_summary(
         digest=snapshot.execution_target_digest,
         desired_generation=snapshot.target_desired_generation,
         capabilities=_capability_summaries(policy),
-        storage_mode=policy.engine_storage.mode,
-        storage_capacity_bytes=policy.engine_storage.capacity_bytes,
-        network_mode=policy.network_egress.mode,
+        storage_mode=policy.docker.storage_mode,
+        storage_capacity_bytes=policy.docker.storage_capacity_bytes,
     )
 
 
@@ -1015,7 +1010,7 @@ def _capability_summaries(
             version=module.version,
             enabled=module.enabled,
         )
-        for module in (policy.image_build, policy.container_run, policy.compose)
+        for module in (policy.docker,)
     )
 
 
@@ -1091,17 +1086,16 @@ def _provider_compatibility(
     storage_modes: list[JsonValue] = [
         mode.value for mode in sorted(capabilities.storage_modes)
     ]
-    network_modes: list[JsonValue] = [
-        mode.value for mode in sorted(capabilities.network_modes)
-    ]
     return {
         "mode": "accepted_contract",
         "contract_revision_id": contract_revision_id,
         "contract_digest": contract_digest,
-        "authority_bearing_policy_supported": capabilities.privileged_engine,
+        "docker_supported": any(
+            support.module_id is RuntimeExecutionModuleId.DOCKER
+            for support in capabilities.supported_modules
+        ),
         "supported_modules": supported_modules,
         "storage_modes": storage_modes,
-        "network_modes": network_modes,
     }
 
 

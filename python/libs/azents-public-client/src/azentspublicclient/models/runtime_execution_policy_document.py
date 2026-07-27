@@ -19,10 +19,8 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
 from typing import Any, ClassVar, Dict, List
-from azentspublicclient.models.runtime_execution_boolean_module import RuntimeExecutionBooleanModule
-from azentspublicclient.models.runtime_execution_network_module import RuntimeExecutionNetworkModule
+from azentspublicclient.models.runtime_execution_docker_module import RuntimeExecutionDockerModule
 from azentspublicclient.models.runtime_execution_resource_module import RuntimeExecutionResourceModule
-from azentspublicclient.models.runtime_execution_storage_module import RuntimeExecutionStorageModule
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -31,14 +29,10 @@ class RuntimeExecutionPolicyDocument(BaseModel):
     Complete versioned execution-policy document.
     """ # noqa: E501
     schema_version: StrictInt
-    image_build: RuntimeExecutionBooleanModule
-    container_run: RuntimeExecutionBooleanModule
-    compose: RuntimeExecutionBooleanModule
+    docker: RuntimeExecutionDockerModule
     resources: RuntimeExecutionResourceModule
-    engine_storage: RuntimeExecutionStorageModule
-    network_egress: RuntimeExecutionNetworkModule
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["schema_version", "image_build", "container_run", "compose", "resources", "engine_storage", "network_egress"]
+    __properties: ClassVar[List[str]] = ["schema_version", "docker", "resources"]
 
     @field_validator('schema_version')
     def schema_version_validate_enum(cls, value):
@@ -88,24 +82,12 @@ class RuntimeExecutionPolicyDocument(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of image_build
-        if self.image_build:
-            _dict['image_build'] = self.image_build.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of container_run
-        if self.container_run:
-            _dict['container_run'] = self.container_run.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of compose
-        if self.compose:
-            _dict['compose'] = self.compose.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of docker
+        if self.docker:
+            _dict['docker'] = self.docker.to_dict()
         # override the default output from pydantic by calling `to_dict()` of resources
         if self.resources:
             _dict['resources'] = self.resources.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of engine_storage
-        if self.engine_storage:
-            _dict['engine_storage'] = self.engine_storage.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of network_egress
-        if self.network_egress:
-            _dict['network_egress'] = self.network_egress.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -124,12 +106,8 @@ class RuntimeExecutionPolicyDocument(BaseModel):
 
         _obj = cls.model_validate({
             "schema_version": obj.get("schema_version"),
-            "image_build": RuntimeExecutionBooleanModule.from_dict(obj["image_build"]) if obj.get("image_build") is not None else None,
-            "container_run": RuntimeExecutionBooleanModule.from_dict(obj["container_run"]) if obj.get("container_run") is not None else None,
-            "compose": RuntimeExecutionBooleanModule.from_dict(obj["compose"]) if obj.get("compose") is not None else None,
-            "resources": RuntimeExecutionResourceModule.from_dict(obj["resources"]) if obj.get("resources") is not None else None,
-            "engine_storage": RuntimeExecutionStorageModule.from_dict(obj["engine_storage"]) if obj.get("engine_storage") is not None else None,
-            "network_egress": RuntimeExecutionNetworkModule.from_dict(obj["network_egress"]) if obj.get("network_egress") is not None else None
+            "docker": RuntimeExecutionDockerModule.from_dict(obj["docker"]) if obj.get("docker") is not None else None,
+            "resources": RuntimeExecutionResourceModule.from_dict(obj["resources"]) if obj.get("resources") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

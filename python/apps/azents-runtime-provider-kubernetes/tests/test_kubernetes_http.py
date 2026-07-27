@@ -190,17 +190,17 @@ def test_pod_resource_preserves_generic_resource_requirements() -> None:
 
 def test_pod_policy_topology_round_trips() -> None:
     runner = _pod(resources=None).spec.containers[0]
-    gateway = ContainerSpec(
-        name="container-policy-gateway",
-        image="gateway@sha256:test",
-        command=("/usr/local/bin/azents-container-policy-gateway",),
+    engine = ContainerSpec(
+        name="container-engine",
+        image="engine@sha256:test",
+        command=("dockerd",),
         args=(),
         working_dir="/",
         resources=None,
         security_context=runner.security_context,
         readiness_probe=Probe(
             exec_action=ExecAction(
-                command=("test", "-S", "/var/run/azents-gateway/docker.sock")
+                command=("test", "-S", "/var/run/azents-engine/docker.sock")
             ),
             initial_delay_seconds=1,
             period_seconds=2,
@@ -210,8 +210,8 @@ def test_pod_policy_topology_round_trips() -> None:
         env=(),
         volume_mounts=(
             VolumeMount(
-                name="container-gateway-socket",
-                mount_path="/var/run/azents-gateway",
+                name="container-engine-socket",
+                mount_path="/var/run/azents-engine",
                 read_only=False,
             ),
         ),
@@ -235,10 +235,10 @@ def test_pod_policy_topology_round_trips() -> None:
             ),
             node_selector={},
             tolerations=(),
-            containers=(runner, gateway),
+            containers=(runner, engine),
             volumes=(
                 EmptyDirVolume(
-                    name="container-gateway-socket",
+                    name="container-engine-socket",
                     medium="Memory",
                     size_limit="16Mi",
                 ),

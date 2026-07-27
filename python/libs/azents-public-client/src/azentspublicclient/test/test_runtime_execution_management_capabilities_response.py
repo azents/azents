@@ -35,25 +35,15 @@ class TestRuntimeExecutionManagementCapabilitiesResponse(unittest.TestCase):
         model = RuntimeExecutionManagementCapabilitiesResponse()
         if include_optional:
             return RuntimeExecutionManagementCapabilitiesResponse(
-                image_build = True,
-                container_run = True,
-                compose = True,
+                docker = True,
                 storage_modes = [
-                    'none'
-                    ],
-                network_modes = [
                     'none'
                     ]
             )
         else:
             return RuntimeExecutionManagementCapabilitiesResponse(
-                image_build = True,
-                container_run = True,
-                compose = True,
+                docker = True,
                 storage_modes = [
-                    'none'
-                    ],
-                network_modes = [
                     'none'
                     ],
         )

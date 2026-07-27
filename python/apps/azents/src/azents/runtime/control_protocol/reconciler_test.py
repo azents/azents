@@ -544,16 +544,10 @@ async def _attach_execution_policy(
             "execution_policy": {
                 "schema_version": 1,
                 "supported_modules": [
-                    {"module_id": "container.compose", "version": 1},
-                    {"module_id": "container.image_build", "version": 1},
-                    {"module_id": "container.resources", "version": 1},
-                    {"module_id": "container.run", "version": 1},
-                    {"module_id": "engine.storage", "version": 1},
-                    {"module_id": "network.egress", "version": 1},
+                    {"module_id": "docker", "version": 1},
+                    {"module_id": "runtime.resources", "version": 1},
                 ],
-                "privileged_engine": True,
                 "storage_modes": ["ephemeral", "none"],
-                "network_modes": ["direct", "none"],
                 "resource_maxima": None,
             },
         },

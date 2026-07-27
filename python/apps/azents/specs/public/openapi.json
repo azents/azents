@@ -22271,60 +22271,11 @@
           "profile_not_allowed",
           "dependency_unsatisfied",
           "provider_module_unsupported",
-          "provider_engine_unsupported",
           "provider_storage_unsupported",
-          "provider_network_unsupported",
           "provider_limit_exceeded"
         ],
         "title": "RuntimeExecutionAvailabilityReason",
         "description": "Bounded reason explaining why an execution policy is unavailable."
-      },
-      "RuntimeExecutionBooleanModule": {
-        "properties": {
-          "module_id": {
-            "type": "string",
-            "enum": [
-              "container.image_build",
-              "container.run",
-              "container.compose"
-            ],
-            "title": "Module Id"
-          },
-          "version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Version"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "module_id",
-          "version",
-          "enabled"
-        ],
-        "title": "RuntimeExecutionBooleanModule",
-        "description": "One versioned boolean execution capability module."
-      },
-      "RuntimeExecutionBooleanRestriction": {
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "const": false,
-            "title": "Enabled"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "enabled"
-        ],
-        "title": "RuntimeExecutionBooleanRestriction",
-        "description": "Boolean authority can only be explicitly disabled."
       },
       "RuntimeExecutionCapabilitySummaryResponse": {
         "properties": {
@@ -22414,9 +22365,6 @@
               }
             ],
             "title": "Storage Capacity Bytes"
-          },
-          "network_mode": {
-            "$ref": "#/components/schemas/RuntimeExecutionNetworkMode"
           }
         },
         "type": "object",
@@ -22425,11 +22373,101 @@
           "digest",
           "capabilities",
           "storage_mode",
-          "storage_capacity_bytes",
-          "network_mode"
+          "storage_capacity_bytes"
         ],
         "title": "RuntimeExecutionConfiguredSummaryResponse",
         "description": "Safe configured Runtime execution-policy summary."
+      },
+      "RuntimeExecutionDockerModule": {
+        "properties": {
+          "module_id": {
+            "type": "string",
+            "const": "docker",
+            "title": "Module Id"
+          },
+          "version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Version"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "storage_mode": {
+            "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
+          },
+          "storage_capacity_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Capacity Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "module_id",
+          "version",
+          "enabled",
+          "storage_mode",
+          "storage_capacity_bytes"
+        ],
+        "title": "RuntimeExecutionDockerModule",
+        "description": "Complete Docker capability and its private data-volume lifecycle."
+      },
+      "RuntimeExecutionDockerRestriction": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean",
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "storage_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "storage_capacity_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Capacity Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled",
+          "storage_mode",
+          "storage_capacity_bytes"
+        ],
+        "title": "RuntimeExecutionDockerRestriction",
+        "description": "Optional lower-layer Docker authority narrowing."
       },
       "RuntimeExecutionFieldChange": {
         "properties": {
@@ -22454,17 +22492,9 @@
       },
       "RuntimeExecutionManagementCapabilitiesResponse": {
         "properties": {
-          "image_build": {
+          "docker": {
             "type": "boolean",
-            "title": "Image Build"
-          },
-          "container_run": {
-            "type": "boolean",
-            "title": "Container Run"
-          },
-          "compose": {
-            "type": "boolean",
-            "title": "Compose"
+            "title": "Docker"
           },
           "storage_modes": {
             "items": {
@@ -22472,22 +22502,12 @@
             },
             "type": "array",
             "title": "Storage Modes"
-          },
-          "network_modes": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionNetworkMode"
-            },
-            "type": "array",
-            "title": "Network Modes"
           }
         },
         "type": "object",
         "required": [
-          "image_build",
-          "container_run",
-          "compose",
-          "storage_modes",
-          "network_modes"
+          "docker",
+          "storage_modes"
         ],
         "title": "RuntimeExecutionManagementCapabilitiesResponse",
         "description": "Safe server-owned policy management capability gate."
@@ -22506,123 +22526,11 @@
       "RuntimeExecutionModuleId": {
         "type": "string",
         "enum": [
-          "container.image_build",
-          "container.run",
-          "container.compose",
-          "container.resources",
-          "engine.storage",
-          "network.egress"
+          "docker",
+          "runtime.resources"
         ],
         "title": "RuntimeExecutionModuleId",
         "description": "Application-owned execution capability module identifiers."
-      },
-      "RuntimeExecutionNetworkMode": {
-        "type": "string",
-        "enum": [
-          "none",
-          "restricted",
-          "direct"
-        ],
-        "title": "RuntimeExecutionNetworkMode",
-        "description": "Optional egress authority ordered from narrowest to broadest."
-      },
-      "RuntimeExecutionNetworkModule": {
-        "properties": {
-          "module_id": {
-            "type": "string",
-            "const": "network.egress",
-            "title": "Module Id"
-          },
-          "version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Version"
-          },
-          "mode": {
-            "$ref": "#/components/schemas/RuntimeExecutionNetworkMode"
-          },
-          "allowed_destinations": {
-            "items": {
-              "type": "string",
-              "maxLength": 255,
-              "minLength": 1
-            },
-            "type": "array",
-            "uniqueItems": true,
-            "title": "Allowed Destinations"
-          },
-          "denied_destinations": {
-            "items": {
-              "type": "string",
-              "maxLength": 255,
-              "minLength": 1
-            },
-            "type": "array",
-            "uniqueItems": true,
-            "title": "Denied Destinations"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "module_id",
-          "version",
-          "mode",
-          "allowed_destinations",
-          "denied_destinations"
-        ],
-        "title": "RuntimeExecutionNetworkModule",
-        "description": "Nested-workload optional egress authority."
-      },
-      "RuntimeExecutionNetworkRestriction": {
-        "properties": {
-          "mode": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionNetworkMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "allowed_destinations": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string",
-                  "maxLength": 255,
-                  "minLength": 1
-                },
-                "type": "array",
-                "uniqueItems": true
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Allowed Destinations"
-          },
-          "denied_destinations": {
-            "items": {
-              "type": "string",
-              "maxLength": 255,
-              "minLength": 1
-            },
-            "type": "array",
-            "uniqueItems": true,
-            "title": "Denied Destinations"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "mode",
-          "allowed_destinations",
-          "denied_destinations"
-        ],
-        "title": "RuntimeExecutionNetworkRestriction",
-        "description": "Optional lower-layer egress narrowing."
       },
       "RuntimeExecutionPolicyAuditEventResponse": {
         "properties": {
@@ -22769,35 +22677,19 @@
             "const": 1,
             "title": "Schema Version"
           },
-          "image_build": {
-            "$ref": "#/components/schemas/RuntimeExecutionBooleanModule"
-          },
-          "container_run": {
-            "$ref": "#/components/schemas/RuntimeExecutionBooleanModule"
-          },
-          "compose": {
-            "$ref": "#/components/schemas/RuntimeExecutionBooleanModule"
+          "docker": {
+            "$ref": "#/components/schemas/RuntimeExecutionDockerModule"
           },
           "resources": {
             "$ref": "#/components/schemas/RuntimeExecutionResourceModule"
-          },
-          "engine_storage": {
-            "$ref": "#/components/schemas/RuntimeExecutionStorageModule"
-          },
-          "network_egress": {
-            "$ref": "#/components/schemas/RuntimeExecutionNetworkModule"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "schema_version",
-          "image_build",
-          "container_run",
-          "compose",
-          "resources",
-          "engine_storage",
-          "network_egress"
+          "docker",
+          "resources"
         ],
         "title": "RuntimeExecutionPolicyDocument",
         "description": "Complete versioned execution-policy document."
@@ -22819,30 +22711,10 @@
             "const": 1,
             "title": "Schema Version"
           },
-          "image_build": {
+          "docker": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RuntimeExecutionBooleanRestriction"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "container_run": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionBooleanRestriction"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "compose": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionBooleanRestriction"
+                "$ref": "#/components/schemas/RuntimeExecutionDockerRestriction"
               },
               {
                 "type": "null"
@@ -22858,38 +22730,14 @@
                 "type": "null"
               }
             ]
-          },
-          "engine_storage": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionStorageRestriction"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "network_egress": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionNetworkRestriction"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "schema_version",
-          "image_build",
-          "container_run",
-          "compose",
-          "resources",
-          "engine_storage",
-          "network_egress"
+          "docker",
+          "resources"
         ],
         "title": "RuntimeExecutionPolicyRestriction",
         "description": "Restrictive-only Workspace or Agent policy contribution."
@@ -23042,7 +22890,7 @@
         "properties": {
           "module_id": {
             "type": "string",
-            "const": "container.resources",
+            "const": "runtime.resources",
             "title": "Module Id"
           },
           "version": {
@@ -23098,30 +22946,6 @@
             ],
             "title": "Memory Limit Bytes"
           },
-          "pids": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pids"
-          },
-          "container_count": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Container Count"
-          },
           "ephemeral_storage_bytes": {
             "anyOf": [
               {
@@ -23156,13 +22980,11 @@
           "cpu_limit_millicores",
           "memory_request_bytes",
           "memory_limit_bytes",
-          "pids",
-          "container_count",
           "ephemeral_storage_bytes",
           "persistent_storage_bytes"
         ],
         "title": "RuntimeExecutionResourceModule",
-        "description": "Kubernetes resources and nested-workload resource ceilings."
+        "description": "Kubernetes resources for the Runtime workload and Workspace volume."
       },
       "RuntimeExecutionResourceRestriction": {
         "properties": {
@@ -23214,30 +23036,6 @@
             ],
             "title": "Memory Limit Bytes"
           },
-          "pids": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pids"
-          },
-          "container_count": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Container Count"
-          },
           "ephemeral_storage_bytes": {
             "anyOf": [
               {
@@ -23270,8 +23068,6 @@
           "cpu_limit_millicores",
           "memory_request_bytes",
           "memory_limit_bytes",
-          "pids",
-          "container_count",
           "ephemeral_storage_bytes",
           "persistent_storage_bytes"
         ],
@@ -23312,9 +23108,6 @@
               }
             ],
             "title": "Storage Capacity Bytes"
-          },
-          "network_mode": {
-            "$ref": "#/components/schemas/RuntimeExecutionNetworkMode"
           }
         },
         "type": "object",
@@ -23324,8 +23117,7 @@
           "desired_generation",
           "capabilities",
           "storage_mode",
-          "storage_capacity_bytes",
-          "network_mode"
+          "storage_capacity_bytes"
         ],
         "title": "RuntimeExecutionSnapshotSummaryResponse",
         "description": "Safe target or applied Runtime execution-policy summary."
@@ -23366,80 +23158,7 @@
           "persistent"
         ],
         "title": "RuntimeExecutionStorageMode",
-        "description": "Nested-engine storage lifecycle ordered from narrowest to broadest."
-      },
-      "RuntimeExecutionStorageModule": {
-        "properties": {
-          "module_id": {
-            "type": "string",
-            "const": "engine.storage",
-            "title": "Module Id"
-          },
-          "version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Version"
-          },
-          "mode": {
-            "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
-          },
-          "capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Capacity Bytes"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "module_id",
-          "version",
-          "mode",
-          "capacity_bytes"
-        ],
-        "title": "RuntimeExecutionStorageModule",
-        "description": "Nested-engine storage mode and capacity ceiling."
-      },
-      "RuntimeExecutionStorageRestriction": {
-        "properties": {
-          "mode": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Capacity Bytes"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "mode",
-          "capacity_bytes"
-        ],
-        "title": "RuntimeExecutionStorageRestriction",
-        "description": "Optional lower-layer engine-storage narrowing."
+        "description": "Docker data-storage lifecycle ordered from narrowest to broadest."
       },
       "RuntimeLifecycleCommandType": {
         "type": "string",

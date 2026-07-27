@@ -6,11 +6,8 @@ Safe server-owned policy management capability gate.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**image_build** | **bool** |  | 
-**container_run** | **bool** |  | 
-**compose** | **bool** |  | 
+**docker** | **bool** |  | 
 **storage_modes** | [**List[RuntimeExecutionStorageMode]**](RuntimeExecutionStorageMode.md) |  | 
-**network_modes** | [**List[RuntimeExecutionNetworkMode]**](RuntimeExecutionNetworkMode.md) |  | 
 
 ## Example
 

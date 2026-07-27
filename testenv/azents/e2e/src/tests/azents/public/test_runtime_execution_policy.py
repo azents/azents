@@ -63,10 +63,9 @@ def _request_object(
     )
     if response.status_code != expected_status:
         path = urlsplit(url).path
-        raise AssertionError(
-            f"{method} {path} returned HTTP {response.status_code}; "
-            f"expected HTTP {expected_status}"
-        )
+        failure = f"{method} {path} returned HTTP {response.status_code}"
+        expectation = f"expected HTTP {expected_status}"
+        raise AssertionError(f"{failure}; {expectation}")
     return _json_object(response, token=token)
 
 
@@ -74,12 +73,8 @@ def _empty_restriction() -> dict[str, object]:
     """Return the complete empty restrictive contribution."""
     return {
         "schema_version": 1,
-        "image_build": None,
-        "container_run": None,
-        "compose": None,
+        "docker": None,
         "resources": None,
-        "engine_storage": None,
-        "network_egress": None,
     }
 
 
@@ -91,8 +86,6 @@ def _resource_restriction(cpu_limit_millicores: int) -> dict[str, object]:
         "cpu_limit_millicores": cpu_limit_millicores,
         "memory_request_bytes": None,
         "memory_limit_bytes": None,
-        "pids": None,
-        "container_count": None,
         "ephemeral_storage_bytes": None,
         "persistent_storage_bytes": None,
     }
@@ -109,9 +102,10 @@ def _assert_safe_projection(
         mapping = _JSON_OBJECT.validate_python(value)
         for key, child in mapping.items():
             normalized = key.lower()
-            if any(
+            forbidden_key = any(
                 part in normalized for part in _ALWAYS_FORBIDDEN_SAFE_PROJECTION_KEYS
-            ):
+            )
+            if forbidden_key:
                 raise AssertionError(f"unsafe projection key returned: {key}")
             if child is not None and any(
                 part in normalized for part in _NON_NULL_FORBIDDEN_SAFE_PROJECTION_KEYS
@@ -186,13 +180,14 @@ def _wait_for_runtime_policy(
             status.get("required_action"),
             status.get("desired_generation"),
         )
+        actual_generation = status["desired_generation"]
+        generation_matches = expected_generation is None or (
+            actual_generation == expected_generation
+        )
         if (
             status["status"] == expected_status
             and status["required_action"] == expected_action
-            and (
-                expected_generation is None
-                or status["desired_generation"] == expected_generation
-            )
+            and generation_matches
         ):
             return runtime
         time.sleep(0.25)
@@ -206,19 +201,18 @@ def _restart_runtime_provider(container: DockerContainer) -> None:
     """Restart the shared Runtime Provider without exposing its logs."""
     marker = "Runtime Provider registered"
     stdout, stderr = container.get_logs()
-    previous_count = (
-        stdout.decode(errors="replace") + stderr.decode(errors="replace")
-    ).count(marker)
+    previous_logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
+    previous_count = previous_logs.count(marker)
     container.start()
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         if container.get_wrapped_container().status == "exited":
             raise AssertionError("Runtime Provider exited while restarting")
         current_stdout, current_stderr = container.get_logs()
-        current_count = (
-            current_stdout.decode(errors="replace")
-            + current_stderr.decode(errors="replace")
-        ).count(marker)
+        current_logs = current_stdout.decode(errors="replace") + current_stderr.decode(
+            errors="replace"
+        )
+        current_count = current_logs.count(marker)
         if current_count > previous_count:
             return
         time.sleep(1)
@@ -281,11 +275,8 @@ def test_capability_gate_accepts_qualified_typed_policy(
         known_sensitive_values=_known_sensitive_values(token),
     )
     assert capabilities == {
-        "image_build": True,
-        "container_run": True,
-        "compose": True,
+        "docker": True,
         "storage_modes": ["ephemeral", "none"],
-        "network_modes": ["direct", "none", "restricted"],
     }
     standard_policy = _JSON_OBJECT.validate_python(standard["policy"])
 
@@ -306,33 +297,22 @@ def test_capability_gate_accepts_qualified_typed_policy(
     _json_object(unknown_response, token=token)
 
     authority_policy = copy.deepcopy(standard_policy)
-    image_build = _JSON_OBJECT.validate_python(authority_policy["image_build"])
-    image_build["enabled"] = True
-    authority_policy["image_build"] = image_build
+    authority_policy["docker"] = {
+        "module_id": "docker",
+        "version": 1,
+        "enabled": True,
+        "storage_mode": "ephemeral",
+        "storage_capacity_bytes": 1073741824,
+    }
     authority_policy["resources"] = {
-        "module_id": "container.resources",
+        "module_id": "runtime.resources",
         "version": 1,
         "cpu_request_millicores": 500,
         "cpu_limit_millicores": 1000,
         "memory_request_bytes": 268435456,
         "memory_limit_bytes": 536870912,
-        "pids": 128,
-        "container_count": 4,
         "ephemeral_storage_bytes": 1073741824,
         "persistent_storage_bytes": 21474836480,
-    }
-    authority_policy["engine_storage"] = {
-        "module_id": "engine.storage",
-        "version": 1,
-        "mode": "ephemeral",
-        "capacity_bytes": 1073741824,
-    }
-    authority_policy["network_egress"] = {
-        "module_id": "network.egress",
-        "version": 1,
-        "mode": "restricted",
-        "allowed_destinations": ["140.82.112.0/20"],
-        "denied_destinations": ["140.82.120.0/24"],
     }
     created = _request_object(
         "POST",
@@ -383,10 +363,8 @@ def test_hierarchy_profile_override_apply_status_and_audit(
         workspace_handle=context.workspace_handle,
         agent_id=context.agent_id,
     )
-    workspace_base = (
-        f"{azents_public_server_url}/runtime-execution/v1/workspaces/"
-        f"{context.workspace_handle}"
-    )
+    runtime_execution_url = f"{azents_public_server_url}/runtime-execution/v1"
+    workspace_base = f"{runtime_execution_url}/workspaces/{context.workspace_handle}"
     agent_base = f"{workspace_base}/agents/{context.agent_id}"
 
     initial_profiles = _request_object(
@@ -586,7 +564,6 @@ def test_hierarchy_profile_override_apply_status_and_audit(
     assert initial_target["profile_id"] == profile_id
     assert initial_target["storage_mode"] == "none"
     assert initial_target["storage_capacity_bytes"] is None
-    assert initial_target["network_mode"] == "none"
     initial_target_digest = initial_target["digest"]
     assert isinstance(initial_target_digest, str)
     _assert_safe_projection(
@@ -659,9 +636,8 @@ def test_hierarchy_profile_override_apply_status_and_audit(
             tightened_preview["effective_policy"],
             token=context.token,
         )
-        effective_resources = _JSON_OBJECT.validate_python(
-            effective_policy["resources"]
-        )
+        resources_value = effective_policy["resources"]
+        effective_resources = _JSON_OBJECT.validate_python(resources_value)
         assert effective_resources["cpu_limit_millicores"] == 250
         assert (
             _JSON_OBJECT.validate_python(tightened_preview["governing_layers"])[
@@ -700,9 +676,8 @@ def test_hierarchy_profile_override_apply_status_and_audit(
         expected_status=200,
     )
     workspace_events = _JSON_OBJECT_LIST.validate_python(workspace_audit["items"])
-    assert any(
-        event["event_type"] == "workspace_policy_replaced" for event in workspace_events
-    )
+    event_types = {event["event_type"] for event in workspace_events}
+    assert "workspace_policy_replaced" in event_types
     _assert_safe_projection(
         workspace_audit,
         known_sensitive_values=_known_sensitive_values(context.token),

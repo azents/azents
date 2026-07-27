@@ -19,10 +19,8 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.runtime_execution_boolean_restriction import RuntimeExecutionBooleanRestriction
-from azentspublicclient.models.runtime_execution_network_restriction import RuntimeExecutionNetworkRestriction
+from azentspublicclient.models.runtime_execution_docker_restriction import RuntimeExecutionDockerRestriction
 from azentspublicclient.models.runtime_execution_resource_restriction import RuntimeExecutionResourceRestriction
-from azentspublicclient.models.runtime_execution_storage_restriction import RuntimeExecutionStorageRestriction
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -31,14 +29,10 @@ class RuntimeExecutionPolicyRestriction(BaseModel):
     Restrictive-only Workspace or Agent policy contribution.
     """ # noqa: E501
     schema_version: StrictInt
-    image_build: Optional[RuntimeExecutionBooleanRestriction]
-    container_run: Optional[RuntimeExecutionBooleanRestriction]
-    compose: Optional[RuntimeExecutionBooleanRestriction]
+    docker: Optional[RuntimeExecutionDockerRestriction]
     resources: Optional[RuntimeExecutionResourceRestriction]
-    engine_storage: Optional[RuntimeExecutionStorageRestriction]
-    network_egress: Optional[RuntimeExecutionNetworkRestriction]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["schema_version", "image_build", "container_run", "compose", "resources", "engine_storage", "network_egress"]
+    __properties: ClassVar[List[str]] = ["schema_version", "docker", "resources"]
 
     @field_validator('schema_version')
     def schema_version_validate_enum(cls, value):
@@ -88,58 +82,26 @@ class RuntimeExecutionPolicyRestriction(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of image_build
-        if self.image_build:
-            _dict['image_build'] = self.image_build.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of container_run
-        if self.container_run:
-            _dict['container_run'] = self.container_run.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of compose
-        if self.compose:
-            _dict['compose'] = self.compose.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of docker
+        if self.docker:
+            _dict['docker'] = self.docker.to_dict()
         # override the default output from pydantic by calling `to_dict()` of resources
         if self.resources:
             _dict['resources'] = self.resources.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of engine_storage
-        if self.engine_storage:
-            _dict['engine_storage'] = self.engine_storage.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of network_egress
-        if self.network_egress:
-            _dict['network_egress'] = self.network_egress.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if image_build (nullable) is None
+        # set to None if docker (nullable) is None
         # and model_fields_set contains the field
-        if self.image_build is None and "image_build" in self.model_fields_set:
-            _dict['image_build'] = None
-
-        # set to None if container_run (nullable) is None
-        # and model_fields_set contains the field
-        if self.container_run is None and "container_run" in self.model_fields_set:
-            _dict['container_run'] = None
-
-        # set to None if compose (nullable) is None
-        # and model_fields_set contains the field
-        if self.compose is None and "compose" in self.model_fields_set:
-            _dict['compose'] = None
+        if self.docker is None and "docker" in self.model_fields_set:
+            _dict['docker'] = None
 
         # set to None if resources (nullable) is None
         # and model_fields_set contains the field
         if self.resources is None and "resources" in self.model_fields_set:
             _dict['resources'] = None
-
-        # set to None if engine_storage (nullable) is None
-        # and model_fields_set contains the field
-        if self.engine_storage is None and "engine_storage" in self.model_fields_set:
-            _dict['engine_storage'] = None
-
-        # set to None if network_egress (nullable) is None
-        # and model_fields_set contains the field
-        if self.network_egress is None and "network_egress" in self.model_fields_set:
-            _dict['network_egress'] = None
 
         return _dict
 
@@ -154,12 +116,8 @@ class RuntimeExecutionPolicyRestriction(BaseModel):
 
         _obj = cls.model_validate({
             "schema_version": obj.get("schema_version"),
-            "image_build": RuntimeExecutionBooleanRestriction.from_dict(obj["image_build"]) if obj.get("image_build") is not None else None,
-            "container_run": RuntimeExecutionBooleanRestriction.from_dict(obj["container_run"]) if obj.get("container_run") is not None else None,
-            "compose": RuntimeExecutionBooleanRestriction.from_dict(obj["compose"]) if obj.get("compose") is not None else None,
-            "resources": RuntimeExecutionResourceRestriction.from_dict(obj["resources"]) if obj.get("resources") is not None else None,
-            "engine_storage": RuntimeExecutionStorageRestriction.from_dict(obj["engine_storage"]) if obj.get("engine_storage") is not None else None,
-            "network_egress": RuntimeExecutionNetworkRestriction.from_dict(obj["network_egress"]) if obj.get("network_egress") is not None else None
+            "docker": RuntimeExecutionDockerRestriction.from_dict(obj["docker"]) if obj.get("docker") is not None else None,
+            "resources": RuntimeExecutionResourceRestriction.from_dict(obj["resources"]) if obj.get("resources") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -1571,16 +1571,8 @@
       "restrictions": {
         "dockerTitle": "Docker",
         "dockerDescription": "選択した Profile が許可する Docker 機能を Workspace で追加制限します。未設定の値は Profile を継承します。",
-        "disableImageBuild": "Docker イメージビルドを無効化",
-        "disableContainerRun": "Docker コンテナ実行を無効化",
-        "disableCompose": "Docker Compose を無効化",
-        "nestedContainerLimits": "ネストコンテナの制限",
-        "optionalRestrictionDescription": "この Workspace でさらに制限する値だけを設定します。",
-        "aggregatePidLimit": "合計 PID Limit",
-        "containerCountLimit": "コンテナ数 Limit",
+        "disableDocker": "Docker を無効化",
         "inheritWhenEmpty": "空欄の場合は Profile の値を継承します。",
-        "pidPlaceholder": "例: 256",
-        "containerPlaceholder": "例: 4",
         "dockerStoragePolicy": "Docker ストレージポリシー",
         "dockerStorageDescription": "Profile の設定を維持するか、一時 Docker データをさらに制限します。",
         "inheritProfile": "Profile から継承",
@@ -1603,20 +1595,7 @@
         "persistentStorageDescription": "PVC の拡張は自動反映されます。縮小値は PVC を削除して再作成したときに反映されます。",
         "persistentPlaceholder": "例: 20",
         "unit": "単位",
-        "storageNone": "Docker ストレージを無効化",
-        "storageEphemeral": "一時ストレージ",
-        "networkTitle": "Outbound network access",
-        "networkDescription": "Profile が許可する outbound access を Workspace で追加制限します。",
-        "accessPolicy": "Access policy",
-        "networkNone": "System traffic only",
-        "networkRestricted": "Allowlist（選択した IP 範囲）",
-        "networkDirect": "すべての IP アドレス",
-        "allowedIpRanges": "許可する IP 範囲（CIDR）",
-        "blockedIpRanges": "ブロックする IP 範囲（CIDR）",
-        "cidrDescription": "1 行に IPv4 または IPv6 CIDR を 1 つ入力します。hostname と URL は使用できません。",
-        "blockedCidrDescription": "他の設定で許可されていても、この範囲への traffic はブロックされます。",
-        "allowedCidrPlaceholder": "140.82.112.0/20\n2606:50c0::/32",
-        "blockedCidrPlaceholder": "10.0.0.0/8\nfd00::/8"
+        "storageEphemeral": "一時ストレージ"
       },
       "workspacePage": {
         "title": "Runtime 実行",
@@ -1727,22 +1706,15 @@
           "runtime_failure": "Runtime 操作に失敗しました。参照コード: {code}"
         },
         "fieldLabels": {
-          "imageBuild": "Docker イメージのビルド",
-          "containerRun": "Docker コンテナの実行",
-          "compose": "Docker Compose の使用",
+          "docker": "Docker",
           "cpuRequest": "CPU Request",
           "cpuLimit": "CPU Limit",
           "memoryRequest": "Memory Request",
           "memoryLimit": "Memory Limit",
-          "pidLimit": "合計 PID 上限",
-          "containerCount": "コンテナ数上限",
           "ephemeralStorage": "Runtime 一時ストレージ",
           "persistentStorage": "永続 Workspace ストレージ",
           "dockerStoragePolicy": "一時 Docker ストレージポリシー",
-          "dockerStorageCapacity": "一時 Docker ストレージ容量",
-          "networkPolicy": "Outbound ネットワークアクセス",
-          "allowedIpRanges": "許可 IP 範囲",
-          "blockedIpRanges": "拒否 IP 範囲"
+          "dockerStorageCapacity": "一時 Docker ストレージ容量"
         },
         "layerLabels": {
           "profile": "Profile",
@@ -1750,9 +1722,7 @@
           "agent": "Agent 設定"
         },
         "capabilityLabels": {
-          "imageBuild": "イメージのビルド",
-          "containerRun": "コンテナの実行",
-          "compose": "Docker Compose"
+          "docker": "Docker"
         },
         "storageModes": {
           "none": "一時 Docker ストレージなし",

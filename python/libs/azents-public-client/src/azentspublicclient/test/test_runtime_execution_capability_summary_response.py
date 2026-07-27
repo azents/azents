@@ -35,13 +35,13 @@ class TestRuntimeExecutionCapabilitySummaryResponse(unittest.TestCase):
         model = RuntimeExecutionCapabilitySummaryResponse()
         if include_optional:
             return RuntimeExecutionCapabilitySummaryResponse(
-                module_id = 'container.image_build',
+                module_id = 'docker',
                 version = 56,
                 enabled = True
             )
         else:
             return RuntimeExecutionCapabilitySummaryResponse(
-                module_id = 'container.image_build',
+                module_id = 'docker',
                 version = 56,
                 enabled = True,
         )
