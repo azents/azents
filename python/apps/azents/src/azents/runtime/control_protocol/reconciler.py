@@ -100,11 +100,6 @@ class RuntimeLifecycleReconciler:
     async def reconcile_once(self, *, limit: int = _DEFAULT_LIMIT) -> int:
         """Dispatch one batch of pending lifecycle commands."""
         async with self._session_manager() as session:
-            timed_out = await self._runtime_repository.mark_start_timeouts(
-                session,
-                stale_threshold=self._config.start_timeout,
-                limit=limit,
-            )
             runtimes = (
                 await self._runtime_repository.find_lifecycle_dispatch_candidates(
                     session,
@@ -120,14 +115,6 @@ class RuntimeLifecycleReconciler:
                 )
             )
 
-        if timed_out:
-            _LOGGER.warning(
-                "Runtime lifecycle start timed out",
-                extra={
-                    "count": len(timed_out),
-                    "start_timeout_seconds": self._config.start_timeout.total_seconds(),
-                },
-            )
         dispatched = 0
         for runtime in runtimes:
             if await self._dispatch_runtime(runtime):
@@ -138,6 +125,27 @@ class RuntimeLifecycleReconciler:
                 continue
             if await self._dispatch_periodic_reconcile(runtime):
                 dispatched += 1
+
+        # A persisted CONNECTED flag can outlive the Control process that owned the
+        # actual Provider stream. Give the current coordination registry a chance to
+        # refresh that cache (or dispatch and refresh the start timer) before turning
+        # an old start attempt into a terminal timeout.
+        async with self._session_manager() as session:
+            timed_out = await self._runtime_repository.mark_start_timeouts(
+                session,
+                stale_threshold=self._config.start_timeout,
+                limit=limit,
+            )
+        if timed_out:
+            _LOGGER.warning(
+                "Runtime lifecycle start timed out",
+                extra={
+                    "count": len(timed_out),
+                    "start_timeout_seconds": (
+                        self._config.start_timeout.total_seconds()
+                    ),
+                },
+            )
         return dispatched
 
     async def _dispatch_runtime(self, runtime: AgentRuntime) -> bool:

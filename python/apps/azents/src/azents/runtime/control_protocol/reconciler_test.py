@@ -60,6 +60,86 @@ from azents.runtime.coordination.memory import (
 from azents.testing.model_selection import make_test_model_selection_dict
 
 
+async def test_reconciler_refreshes_stale_provider_connection_before_start_timeout(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A Control restart must not trust the previous process's connection cache."""
+    runtime_repository = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        workspace_id = await _create_workspace(session, "reconciler-stale-provider-ws")
+        agent_id = await _create_agent(
+            session,
+            workspace_id,
+            "reconciler-stale-provider-agent",
+            runtime_provider_id="provider-1",
+        )
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        command = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        dispatched = await runtime_repository.mark_lifecycle_dispatched(
+            session,
+            runtime.id,
+            command.desired_generation,
+        )
+        assert dispatched is not None
+        observed = await runtime_repository.record_provider_observed_state(
+            session,
+            runtime.id,
+            RuntimeProviderObservedState.STARTING,
+            1,
+            command.desired_generation,
+        )
+        assert observed is not None
+        connected = await runtime_repository.record_provider_connection_state(
+            session,
+            runtime.id,
+            RuntimeProviderConnectionState.CONNECTED,
+        )
+        assert connected is not None
+        old_state_change_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+            minutes=10
+        )
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(last_state_change_at=old_state_change_at)
+        )
+
+    store = InMemoryRuntimeCoordinationStore()
+    reconciler = RuntimeLifecycleReconciler(
+        runtime_repository=runtime_repository,
+        policy_repository=RuntimeProviderPolicyRepository(),
+        session_manager=rdb_session_manager,
+        coordination_store=store,
+        control_protocol=RuntimeControlProtocolService(store),
+        config=RuntimeLifecycleDispatchConfig(
+            runner_image="runner:test",
+            runner_control_endpoint="runtime-control:9090",
+            runner_credential_identifier=_runner_credential_verifier(),
+            runner_control_tls_ca_pem=None,
+            allow_insecure_runner_control=True,
+            start_timeout=datetime.timedelta(minutes=5),
+            lifecycle_retry_delay=datetime.timedelta(minutes=1),
+        ),
+    )
+
+    dispatched_count = await reconciler.reconcile_once(limit=10)
+    async with rdb_session_manager() as session:
+        updated = await runtime_repository.get_by_agent_id(session, agent_id)
+
+    assert dispatched_count == 0
+    assert updated is not None
+    assert (
+        updated.provider_connection_state == RuntimeProviderConnectionState.DISCONNECTED
+    )
+    assert updated.failure_code is None
+
+
 async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
