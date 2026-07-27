@@ -44,6 +44,7 @@ class ManagedMultiConnection(BaseModel):
     provider_config: Optional[Dict[str, Any]]
     last_verified_at: Optional[datetime]
     last_health_at: Optional[datetime]
+    last_health_code: Optional[StrictStr] = None
     socket_gap_detected_at: Optional[datetime]
     socket_gap_reason: Optional[StrictStr]
     disconnected_at: Optional[datetime]
@@ -51,7 +52,7 @@ class ManagedMultiConnection(BaseModel):
     active_agent_count: StrictInt
     configured_default_count: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider", "transport", "app_mode", "status", "provider_app_id", "provider_tenant_id", "provider_bot_user_id", "credentials_configured", "capabilities", "provider_config", "last_verified_at", "last_health_at", "socket_gap_detected_at", "socket_gap_reason", "disconnected_at", "generation", "active_agent_count", "configured_default_count"]
+    __properties: ClassVar[List[str]] = ["id", "provider", "transport", "app_mode", "status", "provider_app_id", "provider_tenant_id", "provider_bot_user_id", "credentials_configured", "capabilities", "provider_config", "last_verified_at", "last_health_at", "last_health_code", "socket_gap_detected_at", "socket_gap_reason", "disconnected_at", "generation", "active_agent_count", "configured_default_count"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -134,6 +135,11 @@ class ManagedMultiConnection(BaseModel):
         if self.last_health_at is None and "last_health_at" in self.model_fields_set:
             _dict['last_health_at'] = None
 
+        # set to None if last_health_code (nullable) is None
+        # and model_fields_set contains the field
+        if self.last_health_code is None and "last_health_code" in self.model_fields_set:
+            _dict['last_health_code'] = None
+
         # set to None if socket_gap_detected_at (nullable) is None
         # and model_fields_set contains the field
         if self.socket_gap_detected_at is None and "socket_gap_detected_at" in self.model_fields_set:
@@ -174,6 +180,7 @@ class ManagedMultiConnection(BaseModel):
             "provider_config": obj.get("provider_config"),
             "last_verified_at": obj.get("last_verified_at"),
             "last_health_at": obj.get("last_health_at"),
+            "last_health_code": obj.get("last_health_code"),
             "socket_gap_detected_at": obj.get("socket_gap_detected_at"),
             "socket_gap_reason": obj.get("socket_gap_reason"),
             "disconnected_at": obj.get("disconnected_at"),

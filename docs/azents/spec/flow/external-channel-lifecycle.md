@@ -13,6 +13,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/external_channel/discord_activation.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
+  - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/session_lifecycle/orchestrator.py
   - python/apps/azents/src/azents/services/session_lifecycle/registry.py
@@ -23,7 +24,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-27
-spec_version: 14
+spec_version: 16
 ---
 
 # External Channel Lifecycle
@@ -67,6 +68,21 @@ registration clears that provisional authority and moves the connection to
 `reconnect_required`; normal interactions are rejected until the final activation
 commit. The Gateway Worker can claim only the newly activated configuration; a stale
 worker cannot continue mutation after replacement or disconnect.
+
+A completed Discord disconnect releases its current Application claim. During
+activation, a claim held only by a disconnected history row transfers atomically to
+the new connection; claims held by a mutable connection remain exclusive. Failed
+Discord activation writes one sanitized, structured operator log with the operation,
+connection identifier when available, failure stage, stable failure code, and error
+class. It never serializes credentials, callback selectors or URLs, request headers,
+raw provider responses, or exception text.
+
+Discord setup persists its connection and Single App route before activation. An
+activation failure returns the created connection rather than a failed setup request,
+so retrying the dialog cannot create duplicate rows. The connection transitions to
+`reconnect_required` and stores only a controlled `last_health_code`, cleared by
+successful activation or configuration replacement. Agent Settings renders the code
+as a localized cause and recovery action; it never renders provider response text.
 
 Revoking a participant grant deletes the selected grant policy row after an ownership
 check. It does not delete canonical provider content, invocation history, projected
@@ -145,12 +161,13 @@ ownership boundaries.
 
 ## Operational Projection
 
-Agent Settings shows active Single App health, reconnect requirement, revocation,
-transport, complete connection editing, unconditional disconnect, complete provider
-user IDs for grants and blocks, and associated Multi Apps as read-only
-Workspace-managed context. Workspace integrations owns Multi App setup, catalog,
-channel defaults, impact previews, and terminal disconnect. Destructive connection,
-route, default, grant, and block actions use in-product confirmation dialogs.
+Agent Settings shows active Single App health, reconnect requirement with a
+localized safe Discord cause and recovery action, revocation, transport, complete
+connection editing, unconditional disconnect, complete provider user IDs for grants
+and blocks, and associated Multi Apps as read-only Workspace-managed context.
+Workspace integrations owns Multi App setup, catalog, channel defaults, impact
+previews, and terminal disconnect. Destructive connection, route, default, grant,
+and block actions use in-product confirmation dialogs.
 
 Session Channels remains readable after archive and displays disconnected bindings,
 ended work, ordered task state, the Activity Tracker projection state, truncation,
@@ -159,6 +176,13 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-27** (spec_version 16) — Persisted controlled Discord activation
+  failure codes, returned already-created setup connections after activation
+  failures, and rendered localized durable recovery guidance.
+- **2026-07-27** (spec_version 15) — Released Discord App claims during terminal
+  disconnect and configuration replacement, reclaimed claims from disconnected
+  history during activation, and made setup-failure diagnostics structured and
+  secret-free.
 - **2026-07-27** (spec_version 14) — Made terminal Discord Gateway failures
   atomically fence, release, and suppress further scheduler claims until reactivation.
 - **2026-07-26** (spec_version 13) — Added provider-aware Allow activation:

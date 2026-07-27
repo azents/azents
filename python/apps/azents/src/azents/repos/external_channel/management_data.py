@@ -42,6 +42,7 @@ class ManagedConnection(_Projection):
     provider_config: dict[str, Any] | None
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
+    last_health_code: str | None = None
     socket_gap_detected_at: datetime.datetime | None
     socket_gap_reason: str | None
     disconnected_at: datetime.datetime | None
@@ -63,6 +64,7 @@ class ManagedMultiConnection(_Projection):
     provider_config: dict[str, Any] | None
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
+    last_health_code: str | None = None
     socket_gap_detected_at: datetime.datetime | None
     socket_gap_reason: str | None
     disconnected_at: datetime.datetime | None

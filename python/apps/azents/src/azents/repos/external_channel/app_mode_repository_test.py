@@ -37,6 +37,7 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
+    RDBExternalChannelAppClaim,
     RDBExternalChannelBinding,
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
@@ -1884,6 +1885,57 @@ async def test_multi_disconnect_terminalizes_zero_route_connection(
     assert retry is not None
     assert connection.status is ExternalChannelConnectionStatus.DISCONNECTED
     assert connection.encrypted_credentials is None
+
+
+async def test_disconnect_releases_the_current_discord_app_claim(
+    rdb_session: AsyncSession,
+) -> None:
+    """A disconnected Discord history no longer reserves its Application."""
+    workspace_id = await _workspace(rdb_session, "discord-claim-disconnect")
+    connection = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id,
+            provider_app_id="discord-claim-app",
+            provider_tenant_id="guild-1",
+        )
+        .model_copy(
+            update={
+                "provider": ExternalChannelProvider.DISCORD,
+                "app_mode": ExternalChannelAppMode.MULTI,
+            }
+        )
+        .model_dump()
+    )
+    rdb_session.add(connection)
+    await rdb_session.flush()
+    rdb_session.add(
+        RDBExternalChannelAppClaim(
+            provider=ExternalChannelProvider.DISCORD,
+            provider_app_id="discord-claim-app",
+            connection_id=connection.id,
+            claim_generation=1,
+        )
+    )
+    await rdb_session.flush()
+
+    lifecycle = ExternalChannelLifecycleRepository()
+    disconnected = await lifecycle.disconnect_multi_connection(
+        rdb_session,
+        connection_id=connection.id,
+        now=_at(40),
+        reason="manager_disconnected",
+    )
+
+    assert disconnected is not None
+    assert (
+        await rdb_session.scalar(
+            sa.select(RDBExternalChannelAppClaim).where(
+                RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelAppClaim.provider_app_id == "discord-claim-app",
+            )
+        )
+        is None
+    )
 
 
 async def test_agent_decommission_detaches_routes_before_agent_delete(

@@ -32,6 +32,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessRequest,
     RDBExternalChannelAction,
     RDBExternalChannelAgentRoute,
+    RDBExternalChannelAppClaim,
     RDBExternalChannelBinding,
     RDBExternalChannelBlock,
     RDBExternalChannelChannelDefault,
@@ -378,6 +379,7 @@ class ExternalChannelManagementRepository:
         connection.status = ExternalChannelConnectionStatus.CONFIGURING
         connection.last_verified_at = None
         connection.last_health_at = None
+        connection.last_health_code = None
         connection.disconnected_at = None
         connection.socket_lease_owner = None
         connection.socket_lease_until = None
@@ -414,6 +416,7 @@ class ExternalChannelManagementRepository:
             or connection.provider is not ExternalChannelProvider.DISCORD
         ):
             return None
+        await _release_discord_app_claim(session, connection_id=connection.id)
         _reset_discord_configuration(
             connection,
             provider_app_id=provider_app_id,
@@ -878,6 +881,7 @@ class ExternalChannelManagementRepository:
         connection.status = ExternalChannelConnectionStatus.CONFIGURING
         connection.last_verified_at = None
         connection.last_health_at = None
+        connection.last_health_code = None
         connection.disconnected_at = None
         connection.socket_lease_owner = None
         connection.socket_lease_until = None
@@ -912,6 +916,7 @@ class ExternalChannelManagementRepository:
         connection, route = row
         if connection.provider is not ExternalChannelProvider.DISCORD:
             return None
+        await _release_discord_app_claim(session, connection_id=connection.id)
         _reset_discord_configuration(
             connection,
             provider_app_id=provider_app_id,
@@ -1566,6 +1571,7 @@ def _connection(
         provider_config=connection.provider_config,
         last_verified_at=connection.last_verified_at,
         last_health_at=connection.last_health_at,
+        last_health_code=connection.last_health_code,
         socket_gap_detected_at=connection.socket_gap_detected_at,
         socket_gap_reason=connection.socket_gap_reason,
         disconnected_at=connection.disconnected_at,
@@ -1592,6 +1598,7 @@ def _multi_connection(
         provider_config=connection.provider_config,
         last_verified_at=connection.last_verified_at,
         last_health_at=connection.last_health_at,
+        last_health_code=connection.last_health_code,
         socket_gap_detected_at=connection.socket_gap_detected_at,
         socket_gap_reason=connection.socket_gap_reason,
         disconnected_at=connection.disconnected_at,
@@ -1743,12 +1750,27 @@ def _reset_discord_configuration(
     connection.status = ExternalChannelConnectionStatus.CONFIGURING
     connection.last_verified_at = None
     connection.last_health_at = None
+    connection.last_health_code = None
     connection.disconnected_at = None
     connection.socket_lease_owner = None
     connection.socket_lease_until = None
     connection.socket_heartbeat_at = None
     connection.socket_gap_detected_at = None
     connection.socket_gap_reason = None
+
+
+async def _release_discord_app_claim(
+    session: AsyncSession,
+    *,
+    connection_id: str,
+) -> None:
+    """Release every current Discord App claim owned by one connection."""
+    await session.execute(
+        sa.delete(RDBExternalChannelAppClaim).where(
+            RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
+            RDBExternalChannelAppClaim.connection_id == connection_id,
+        )
+    )
 
 
 def _provider_payload(

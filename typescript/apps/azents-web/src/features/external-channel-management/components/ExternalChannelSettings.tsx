@@ -70,6 +70,28 @@ function formatDate(value: string | null): string {
   return value === null ? "—" : new Date(value).toLocaleString();
 }
 
+const DISCORD_FAILURE_CODES = [
+  "discord_credentials_invalid",
+  "discord_callback_configuration_invalid",
+  "discord_api_unavailable",
+  "discord_callback_url_missing",
+  "discord_credentials_unavailable",
+  "discord_target_guild_missing",
+  "discord_target_guild_invalid",
+  "discord_application_id_mismatch",
+  "discord_authority_changed",
+] as const;
+
+type DiscordFailureCode = (typeof DISCORD_FAILURE_CODES)[number];
+
+function discordFailureCode(
+  value: string | null,
+): DiscordFailureCode | "unknown" {
+  return DISCORD_FAILURE_CODES.some((code) => code === value)
+    ? (value as DiscordFailureCode)
+    : "unknown";
+}
+
 function capabilityEntries(
   capabilities: ManagedConnection["capabilities"],
 ): Array<[string, boolean]> {
@@ -157,6 +179,25 @@ function ConnectionRow({
             <Text size="sm">{connection.provider_bot_user_id ?? "—"}</Text>
           </Box>
         </SimpleGrid>
+
+        {connection.provider === "discord" &&
+          connection.status === "reconnect_required" &&
+          connection.last_health_code && (
+            <Alert color="red" title={t("discordActivationFailureTitle")}>
+              <Stack gap={2}>
+                <Text size="sm">
+                  {t(
+                    `discordFailure.${discordFailureCode(connection.last_health_code)}.message`,
+                  )}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {t(
+                    `discordFailure.${discordFailureCode(connection.last_health_code)}.action`,
+                  )}
+                </Text>
+              </Stack>
+            </Alert>
+          )}
 
         {connection.transport === "socket" &&
           connection.socket_gap_detected_at && (

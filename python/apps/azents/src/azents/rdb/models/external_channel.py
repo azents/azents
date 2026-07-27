@@ -356,6 +356,11 @@ class RDBExternalChannelConnection(RDBModel):
         nullable=True,
         default=None,
     )
+    last_health_code: Mapped[str | None] = mapped_column(
+        sa.String(64),
+        nullable=True,
+        default=None,
+    )
     disconnected_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
         nullable=True,

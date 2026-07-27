@@ -981,6 +981,49 @@
         "socketGapTitle": "Socket delivery gap detected",
         "socketGapDescription": "Validate the connection and review channel history before continuing.",
         "capabilitiesUnavailable": "Capabilities are available after validation.",
+        "discordActivationFailureTitle": "Discord connection needs attention",
+        "discordFailure": {
+          "discord_credentials_invalid": {
+            "message": "Discord rejected the Bot Token.",
+            "action": "Replace the Bot Token, then save and validate this connection."
+          },
+          "discord_callback_configuration_invalid": {
+            "message": "Discord rejected the interaction endpoint.",
+            "action": "Check the Application settings and public callback URL, then validate again."
+          },
+          "discord_api_unavailable": {
+            "message": "Discord is temporarily unavailable.",
+            "action": "Wait a moment, then validate this connection again."
+          },
+          "discord_callback_url_missing": {
+            "message": "The public Discord callback URL is not configured.",
+            "action": "Ask an administrator to configure it, then validate this connection again."
+          },
+          "discord_credentials_unavailable": {
+            "message": "The stored Discord credentials cannot be used.",
+            "action": "Replace the Bot Token, then save and validate this connection."
+          },
+          "discord_target_guild_missing": {
+            "message": "The Discord Guild ID is missing.",
+            "action": "Edit this connection and enter the target Guild ID."
+          },
+          "discord_target_guild_invalid": {
+            "message": "The Discord Guild ID is invalid.",
+            "action": "Edit this connection and enter the correct target Guild ID."
+          },
+          "discord_application_id_mismatch": {
+            "message": "The Application ID does not match the Bot Token.",
+            "action": "Edit this connection and use the Application ID for this Bot Token."
+          },
+          "discord_authority_changed": {
+            "message": "The connection changed while it was being validated.",
+            "action": "Validate again. If it persists, replace the credentials."
+          },
+          "unknown": {
+            "message": "Discord connection validation did not complete.",
+            "action": "Validate again or edit the connection settings."
+          }
+        },
         "validate": "Validate",
         "edit": "Edit",
         "disconnect": "Disconnect",

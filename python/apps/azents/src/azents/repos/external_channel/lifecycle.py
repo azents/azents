@@ -32,6 +32,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessRequest,
     RDBExternalChannelAction,
     RDBExternalChannelAgentRoute,
+    RDBExternalChannelAppClaim,
     RDBExternalChannelBinding,
     RDBExternalChannelBlock,
     RDBExternalChannelChannelDefault,
@@ -915,6 +916,11 @@ class ExternalChannelLifecycleRepository:
                 route.catalog_removed_by_user_id = None
             route.agent_id = None
         connection.status = ExternalChannelConnectionStatus.DISCONNECTED
+        await self._delete(
+            session,
+            RDBExternalChannelAppClaim,
+            RDBExternalChannelAppClaim.connection_id == connection.id,
+        )
         if not defer_provider_state_purge:
             self._purge_connection_provider_state(connection)
         connection.disconnected_at = now

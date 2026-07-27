@@ -980,7 +980,50 @@
         "botIdentity": "Identité du bot",
         "socketGapTitle": "Interruption de livraison Socket détectée",
         "socketGapDescription": "Vérifiez la connexion et l’historique du canal avant de continuer.",
-        "capabilitiesUnavailable": "Les capacités seront disponibles après validation.",
+        "capabilitiesUnavailable": "Les fonctionnalités sont disponibles après validation.",
+        "discordActivationFailureTitle": "La connexion Discord nécessite une intervention",
+        "discordFailure": {
+          "discord_credentials_invalid": {
+            "message": "Discord a refusé le jeton du bot.",
+            "action": "Remplacez le jeton du bot, puis enregistrez et validez cette connexion."
+          },
+          "discord_callback_configuration_invalid": {
+            "message": "Discord a refusé le point de terminaison des interactions.",
+            "action": "Vérifiez les paramètres de l’application et l’URL publique de rappel, puis validez à nouveau."
+          },
+          "discord_api_unavailable": {
+            "message": "Discord est temporairement indisponible.",
+            "action": "Patientez un instant, puis validez à nouveau cette connexion."
+          },
+          "discord_callback_url_missing": {
+            "message": "L’URL publique de rappel Discord n’est pas configurée.",
+            "action": "Demandez à un administrateur de la configurer, puis validez à nouveau cette connexion."
+          },
+          "discord_credentials_unavailable": {
+            "message": "Les identifiants Discord enregistrés ne peuvent pas être utilisés.",
+            "action": "Remplacez le jeton du bot, puis enregistrez et validez cette connexion."
+          },
+          "discord_target_guild_missing": {
+            "message": "L’identifiant de serveur Discord est manquant.",
+            "action": "Modifiez cette connexion et saisissez l’identifiant du serveur cible."
+          },
+          "discord_target_guild_invalid": {
+            "message": "L’identifiant de serveur Discord n’est pas valide.",
+            "action": "Modifiez cette connexion et saisissez l’identifiant correct du serveur cible."
+          },
+          "discord_application_id_mismatch": {
+            "message": "L’identifiant de l’application ne correspond pas au jeton du bot.",
+            "action": "Modifiez cette connexion et utilisez l’identifiant de l’application associée à ce jeton."
+          },
+          "discord_authority_changed": {
+            "message": "La connexion a changé pendant sa validation.",
+            "action": "Validez à nouveau. Si le problème persiste, remplacez les identifiants."
+          },
+          "unknown": {
+            "message": "La validation de la connexion Discord n’est pas terminée.",
+            "action": "Validez à nouveau ou modifiez les paramètres de connexion."
+          }
+        },
         "validate": "Valider",
         "edit": "Modifier",
         "disconnect": "Déconnecter",
