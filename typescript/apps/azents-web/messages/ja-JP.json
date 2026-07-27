@@ -1709,7 +1709,19 @@
           "provider_engine_unsupported": "Runtime Provider が要求された Docker 機能をサポートしていません。",
           "provider_storage_unsupported": "Runtime Provider が要求されたストレージポリシーをサポートしていません。",
           "provider_network_unsupported": "Runtime Provider が要求された outbound ネットワークポリシーをサポートしていません。",
-          "provider_limit_exceeded": "要求値の一部が Runtime Provider の対応上限を超えています。"
+          "provider_limit_exceeded": "要求値の一部が Runtime Provider の対応上限を超えています。",
+          "execution_policy_unavailable": "現在の設定から Runtime ポリシーを解決できません。",
+          "automatic_convergence_pending": "より制限的なポリシー変更を Runtime に自動適用しています。",
+          "explicit_apply_required": "保存された構成が Runtime target と異なります。準備ができたら適用してください。",
+          "application_pending": "Runtime は現在の target の適用をまだ確認していません。",
+          "target_divergent": "Runtime が報告した証拠が現在の target と一致しません。",
+          "reported_digest_mismatch": "Runtime が現在の target と異なるポリシーフィンガープリントを報告しました。",
+          "target_generation_mismatch": "Runtime target が以前の Generation に属しているため、再調整が必要です。",
+          "applied_snapshot_missing": "適用済みとして記録されたポリシー Snapshot が見つかりません。",
+          "applied_snapshot_unverified": "以前に適用されたポリシー証拠を再検証する必要があります。",
+          "applied_pointer_mismatch": "Runtime の適用済みポリシー参照が現在の検証済み target を指していません。",
+          "provider_evidence_mismatch": "Runtime Provider が要求された Generation と target に一致するポリシー証拠を返しませんでした。",
+          "runtime_failure": "Runtime 操作に失敗しました。参照コード: {code}"
         },
         "fieldLabels": {
           "imageBuild": "Docker イメージのビルド",

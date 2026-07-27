@@ -40,6 +40,9 @@ class RuntimeProvider(BaseModel):
     accepted_contract_revision_id: str | None = Field(
         default=None, description="Accepted capability contract revision ID"
     )
+    current_contract_revision_id: str | None = Field(
+        description="Capability contract revision advertised by the current Provider",
+    )
     active_config_revision_id: str | None = Field(
         default=None, description="Desired active Provider configuration revision ID"
     )

@@ -139,6 +139,7 @@ async def test_provider_proposal_is_idempotent_and_admin_accepts_explicitly(
         )
     assert provider is not None
     assert provider.accepted_contract_revision_id == first.id
+    assert provider.current_contract_revision_id == first.id
     assert provider.admin_version == 1
     assert provider.capabilities["optional_capabilities"] == ["execution_policy_v1"]
 
@@ -305,6 +306,16 @@ async def test_current_provider_contract_is_reproposed_after_drift(
     assert listed[-1].id == original.id
     assert listed[-1].status is RuntimeProviderContractStatus.SUPERSEDED
 
+    async with rdb_session_manager() as session:
+        provider = await RuntimeProviderRepository().get_by_id(
+            session,
+            provider_id=provider_resource_id,
+            for_update=False,
+        )
+    assert provider is not None
+    assert provider.accepted_contract_revision_id == drifted.id
+    assert provider.current_contract_revision_id == reproposed.id
+
     accepted = await service.accept_contract(
         "system-kubernetes-contract-test",
         reproposed.id,
@@ -312,6 +323,88 @@ async def test_current_provider_contract_is_reproposed_after_drift(
         actor_user_id=actor_user_id,
     )
     assert accepted.status is RuntimeProviderContractStatus.ACCEPTED
+
+
+async def test_repeated_accepted_advertisement_remains_current(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Reconnection records an already accepted digest as the current contract."""
+    provider_resource_id, actor_user_id = await _create_provider_and_admin(
+        rdb_session_manager
+    )
+    service = _service(rdb_session_manager)
+    candidate = await service.propose_contract(
+        provider_resource_id=provider_resource_id,
+        provider_type="kubernetes",
+        protocol_version=_PROTOCOL_VERSION,
+        contract_payload=_contract_payload(),
+    )
+    await service.accept_contract(
+        "system-kubernetes-contract-test",
+        candidate.id,
+        expected_admin_version=0,
+        actor_user_id=actor_user_id,
+    )
+
+    advertised = await service.propose_contract(
+        provider_resource_id=provider_resource_id,
+        provider_type="kubernetes",
+        protocol_version=_PROTOCOL_VERSION,
+        contract_payload=_contract_payload(),
+    )
+
+    async with rdb_session_manager() as session:
+        provider = await RuntimeProviderRepository().get_by_id(
+            session,
+            provider_id=provider_resource_id,
+            for_update=False,
+        )
+    assert advertised.id == candidate.id
+    assert provider is not None
+    assert provider.current_contract_revision_id == candidate.id
+    assert provider.accepted_contract_revision_id == candidate.id
+
+
+async def test_restored_accepted_advertisement_deletes_stale_candidate(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Rolling back to the accepted advert removes the abandoned proposal."""
+    provider_resource_id, actor_user_id = await _create_provider_and_admin(
+        rdb_session_manager
+    )
+    service = _service(rdb_session_manager)
+    accepted = await service.propose_contract(
+        provider_resource_id=provider_resource_id,
+        provider_type="kubernetes",
+        protocol_version=_PROTOCOL_VERSION,
+        contract_payload=_contract_payload(),
+    )
+    accepted = await service.accept_contract(
+        "system-kubernetes-contract-test",
+        accepted.id,
+        expected_admin_version=0,
+        actor_user_id=actor_user_id,
+    )
+    drifted_payload = _contract_payload()
+    drifted_payload["implementation_version"] = "0.1.1"
+    drifted = await service.propose_contract(
+        provider_resource_id=provider_resource_id,
+        provider_type="kubernetes",
+        protocol_version=_PROTOCOL_VERSION,
+        contract_payload=drifted_payload,
+    )
+
+    restored = await service.propose_contract(
+        provider_resource_id=provider_resource_id,
+        provider_type="kubernetes",
+        protocol_version=_PROTOCOL_VERSION,
+        contract_payload=_contract_payload(),
+    )
+
+    assert restored.id == accepted.id
+    assert restored.status is RuntimeProviderContractStatus.ACCEPTED
+    assert drifted.id != restored.id
+    assert await service.list_contracts("system-kubernetes-contract-test") == [accepted]
 
 
 async def test_proposal_rejects_registration_contract_identity_mismatch(

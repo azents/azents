@@ -129,12 +129,6 @@ class RuntimeProviderPolicyRepository:
         )
         if provider_exists is None:
             raise ValueError("Provider does not exist.")
-        await session.execute(
-            sa.delete(RDBRuntimeProviderContractRevision).where(
-                RDBRuntimeProviderContractRevision.provider_id == create.provider_id,
-                RDBRuntimeProviderContractRevision.accepted_at.is_(None),
-            )
-        )
         rdb = RDBRuntimeProviderContractRevision(
             provider_id=create.provider_id,
             digest=create.digest,
@@ -148,7 +142,44 @@ class RuntimeProviderPolicyRepository:
         )
         session.add(rdb)
         await session.flush()
+        await session.execute(
+            sa.update(RDBRuntimeProvider)
+            .where(RDBRuntimeProvider.id == create.provider_id)
+            .values(current_contract_revision_id=rdb.id)
+        )
+        await session.execute(
+            sa.delete(RDBRuntimeProviderContractRevision).where(
+                RDBRuntimeProviderContractRevision.provider_id == create.provider_id,
+                RDBRuntimeProviderContractRevision.accepted_at.is_(None),
+                RDBRuntimeProviderContractRevision.id != rdb.id,
+            )
+        )
         return self._build_contract(rdb)
+
+    async def set_current_contract_revision(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        contract_revision_id: str,
+    ) -> bool:
+        """Record the exact contract advertised by the connected Provider."""
+        result = await session.execute(
+            sa.update(RDBRuntimeProvider)
+            .where(RDBRuntimeProvider.id == provider_id)
+            .values(current_contract_revision_id=contract_revision_id)
+            .returning(RDBRuntimeProvider.id)
+        )
+        updated_provider_id = result.scalar_one_or_none()
+        if updated_provider_id is not None:
+            await session.execute(
+                sa.delete(RDBRuntimeProviderContractRevision).where(
+                    RDBRuntimeProviderContractRevision.provider_id == provider_id,
+                    RDBRuntimeProviderContractRevision.accepted_at.is_(None),
+                    RDBRuntimeProviderContractRevision.id != contract_revision_id,
+                )
+            )
+        return updated_provider_id is not None
 
     async def accept_contract(
         self,
@@ -160,16 +191,12 @@ class RuntimeProviderPolicyRepository:
         accepted_at: datetime.datetime,
     ) -> RuntimeProviderContractRevision | None:
         """Accept one candidate and atomically move the Provider contract pointer."""
-        latest_contract_revision_id = await session.scalar(
-            sa.select(RDBRuntimeProviderContractRevision.id)
-            .where(RDBRuntimeProviderContractRevision.provider_id == provider_id)
-            .order_by(
-                RDBRuntimeProviderContractRevision.created_at.desc(),
-                RDBRuntimeProviderContractRevision.id.desc(),
+        current_contract_revision_id = await session.scalar(
+            sa.select(RDBRuntimeProvider.current_contract_revision_id).where(
+                RDBRuntimeProvider.id == provider_id
             )
-            .limit(1)
         )
-        if latest_contract_revision_id != contract_revision_id:
+        if current_contract_revision_id != contract_revision_id:
             return None
         result = await session.execute(
             sa.update(RDBRuntimeProviderContractRevision)

@@ -44,7 +44,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeExecution.ts
 last_verified_at: 2026-07-27
-spec_version: 11
+spec_version: 12
 ---
 
 # Runtime Provider
@@ -59,15 +59,17 @@ Providers are optional. A Provider must be enabled, active, connected, Workspace
 
 ## Policy and contract state
 
-The aggregate stores lifecycle state, enablement, scope, Workspace availability mode, declared capabilities, accepted contract revision, active configuration revision, and an incrementing Admin policy version. Accepted contract revisions are immutable history. Never-accepted proposals are transient approval targets: a newer Provider proposal deletes the older unapproved row so only the current proposal remains actionable. Configuration revisions are immutable candidates that require Provider validation and explicit activation; active configuration is tied to the accepted contract and is never returned with secret plaintext.
+The aggregate stores lifecycle state, enablement, scope, Workspace availability mode, declared capabilities, the currently advertised contract revision, the accepted contract revision, active configuration revision, and an incrementing Admin policy version. The current pointer is Provider-reported state; the accepted pointer is Admin authority. Equality means the live advertisement is accepted, while inequality means the exact current advertisement requires review. Accepted contract revisions are immutable history. Never-accepted proposals are transient approval targets: a newer or restored Provider advertisement deletes every other unapproved row so only the current proposal remains actionable. Configuration revisions are immutable candidates that require Provider validation and explicit activation; active configuration is tied to the accepted contract and is never returned with secret plaintext.
 
 After workload authentication and identity matching, Provider registration submits the complete
 restricted capability contract. Runtime Control validates its implementation and protocol identity,
 canonicalizes the payload, and creates or finds the Provider-local digest revision before accepting
 the connection. A first or changed valid digest remains a candidate: the Provider may stay connected
 for observation, but it is not provisioning-ready until a System Admin explicitly accepts that exact
-revision. Admin routes expose contract history and expected-`admin_version` acceptance, and the Admin
-Provider detail presents pending revisions with an explicit acceptance action.
+revision. Admin routes expose contract history and expected-`admin_version` acceptance. Admin
+Provider detail presents the current advertisement before immutable contract history and offers
+acceptance only on that current candidate. List readiness is derived from the current and accepted
+pointers; accepted history by itself never produces a review-ready state.
 Only the Provider's current advertised contract may remain a candidate or be accepted. A newer
 proposal deletes older never-accepted proposals, and an older revision cannot later replace the
 current candidate. If the Provider advertises a digest that was accepted and later superseded,
@@ -129,7 +131,10 @@ Agent intent is independent from a physical Runtime. Saving Agent Profile/overri
 advance Runtime desired generation. Explicit Apply attaches an immutable target snapshot and
 generation. Profile or Workspace tightening automatically creates a narrower target without a
 second Agent Apply, while authority expansion remains pending until explicit Apply; convergence
-preserves Agent Workspace storage and does not invoke reset or terminal delete. Audit and public projections contain only bounded policy metadata, reason codes, source
+preserves Agent Workspace storage and does not invoke reset or terminal delete. Mode changes and their
+dependent fields are projected atomically: Docker storage mode travels with Docker storage capacity,
+and outbound network mode travels with its CIDR sets. Selective Kubernetes resource tightening also
+normalizes CPU and memory requests so neither can exceed its resulting limit. Audit and public projections contain only bounded policy metadata, reason codes, source
 layers, digests, and generations.
 
 The installation management gate exposes image build, container run, Compose, `none` or
@@ -192,6 +197,7 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **12 (2026-07-27):** Persisted the exact current Provider advertisement separately from accepted history, made Admin readiness and acceptance follow that pointer, and made dependent storage/network policy projection atomic.
 - **11 (2026-07-27):** Made the currently advertised Provider contract the sole approval target, deleted stale never-accepted proposals, and allowed a previously accepted digest to be proposed again after drift.
 - **10 (2026-07-27):** Unified every unreleased execution-policy module on v1, migrated stored policies without a v2 compatibility path, replaced protobuf Struct and snapshot JSONB with canonical JSON text, and prevented stale contract acceptance.
 - **9 (2026-07-27):** Advertised all implemented network modes, defined resource module v1 request/limit semantics, and added Profile-controlled persistent workspace capacity with deferred shrink.

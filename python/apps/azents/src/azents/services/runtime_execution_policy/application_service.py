@@ -1132,10 +1132,36 @@ def _restrictive_projection(
     current_values = canonical_runtime_execution_policy(current)
     if not isinstance(projected, dict) or not isinstance(current_values, dict):
         raise AssertionError("Canonical execution policies must be objects.")
+    atomic_modules = {
+        field.path.split(".", 1)[0]
+        for field in change.fields
+        if field.direction is RuntimeExecutionChangeDirection.RESTRICTIVE
+        and field.path in {"engine_storage.mode", "network_egress.mode"}
+    }
+    for module in atomic_modules:
+        projected[module] = current_values[module]
     for field in change.fields:
         if field.direction is RuntimeExecutionChangeDirection.RESTRICTIVE:
+            if field.path.split(".", 1)[0] in atomic_modules:
+                continue
             _copy_path(projected, current_values, field.path.split("."))
+    _normalize_projected_resource_pairs(projected)
     return RuntimeExecutionPolicyDocument.model_validate(projected)
+
+
+def _normalize_projected_resource_pairs(policy: dict[str, JsonValue]) -> None:
+    """Keep selectively projected Kubernetes requests within their limits."""
+    resources = policy.get("resources")
+    if not isinstance(resources, dict):
+        raise ValueError("Execution-policy resources module is invalid.")
+    for request_name, limit_name in (
+        ("cpu_request_millicores", "cpu_limit_millicores"),
+        ("memory_request_bytes", "memory_limit_bytes"),
+    ):
+        request = resources.get(request_name)
+        limit = resources.get(limit_name)
+        if isinstance(request, int) and isinstance(limit, int) and request > limit:
+            resources[request_name] = limit
 
 
 def _copy_path(
