@@ -24,7 +24,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-27
-spec_version: 16
+spec_version: 17
 ---
 
 # External Channel Lifecycle
@@ -68,6 +68,9 @@ registration clears that provisional authority and moves the connection to
 `reconnect_required`; normal interactions are rejected until the final activation
 commit. The Gateway Worker can claim only the newly activated configuration; a stale
 worker cannot continue mutation after replacement or disconnect.
+Retrying a `reconnect_required` Discord connection restores `configuring` while it
+persists a new provisional selector and public key, so endpoint-verification PING can
+authenticate without admitting normal interactions.
 
 A completed Discord disconnect releases its current Application claim. During
 activation, a claim held only by a disconnected history row transfers atomically to
@@ -176,6 +179,8 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-27** (spec_version 17) — Restored `configuring` provisional PING
+  authority when retrying a Discord callback activation from `reconnect_required`.
 - **2026-07-27** (spec_version 16) — Persisted controlled Discord activation
   failure codes, returned already-created setup connections after activation
   failures, and rendered localized durable recovery guidance.
