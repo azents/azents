@@ -909,6 +909,77 @@ def test_mixed_convergence_copies_only_restrictive_fields() -> None:
     assert projected.network_egress.mode is RuntimeExecutionNetworkMode.NONE
 
 
+def test_restrictive_projection_keeps_storage_mode_and_capacity_atomic() -> None:
+    """Disabling Docker storage cannot retain the previously applied capacity."""
+    standard = standard_runtime_execution_policy()
+    applied = standard.model_copy(
+        update={
+            "engine_storage": standard.engine_storage.model_copy(
+                update={
+                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
+                    "capacity_bytes": 17_179_869_184,
+                }
+            )
+        }
+    )
+    change = classify_runtime_execution_change(applied, standard)
+
+    projected = _restrictive_projection(applied, standard, change)
+
+    assert projected.engine_storage.mode is RuntimeExecutionStorageMode.NONE
+    assert projected.engine_storage.capacity_bytes is None
+
+
+def test_restrictive_projection_keeps_network_mode_and_ranges_atomic() -> None:
+    """No-egress projection cannot retain an older direct-mode allow range."""
+    standard = standard_runtime_execution_policy()
+    applied = standard.model_copy(
+        update={
+            "network_egress": standard.network_egress.model_copy(
+                update={"allowed_destinations": frozenset({"0.0.0.0/0"})}
+            )
+        }
+    )
+    current = standard.model_copy(
+        update={
+            "network_egress": standard.network_egress.model_copy(
+                update={"mode": RuntimeExecutionNetworkMode.NONE}
+            )
+        }
+    )
+    change = classify_runtime_execution_change(applied, current)
+
+    projected = _restrictive_projection(applied, current, change)
+
+    assert projected.network_egress.mode is RuntimeExecutionNetworkMode.NONE
+    assert projected.network_egress.allowed_destinations == frozenset()
+
+
+def test_restrictive_projection_keeps_request_within_new_limit() -> None:
+    """A new limit safely clamps a previously unbounded Kubernetes request."""
+    standard = standard_runtime_execution_policy()
+    applied = standard.model_copy(
+        update={
+            "resources": standard.resources.model_copy(
+                update={"cpu_request_millicores": 2_000}
+            )
+        }
+    )
+    current = standard.model_copy(
+        update={
+            "resources": standard.resources.model_copy(
+                update={"cpu_limit_millicores": 1_000}
+            )
+        }
+    )
+    change = classify_runtime_execution_change(applied, current)
+
+    projected = _restrictive_projection(applied, current, change)
+
+    assert projected.resources.cpu_request_millicores == 1_000
+    assert projected.resources.cpu_limit_millicores == 1_000
+
+
 def test_legacy_capabilities_cannot_grant_engine_or_network_authority() -> None:
     capabilities = _legacy_provider_capabilities()
 

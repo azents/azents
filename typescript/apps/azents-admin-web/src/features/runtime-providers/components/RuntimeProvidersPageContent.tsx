@@ -17,6 +17,7 @@ import {
 } from "@mantine/core";
 import { IconCircleCheck, IconCircleX, IconServer } from "@tabler/icons-react";
 import { MasterDetailLayout } from "@/shared/components/MasterDetailLayout";
+import { runtimeProviderReadiness } from "../runtimeProviderPresentation";
 import type {
   RuntimeProviderAuthAuditState,
   RuntimeProviderAuthBindingItem,
@@ -28,23 +29,11 @@ import type {
 } from "../containers/useRuntimeProvidersPageContainer";
 
 function statusColor(provider: RuntimeProviderItem): string {
-  if (!provider.enabled || provider.lifecycle_state !== "active") {
-    return "gray";
-  }
-  return provider.accepted_contract_revision_id ? "green" : "yellow";
+  return runtimeProviderReadiness(provider).color;
 }
 
 function statusLabel(provider: RuntimeProviderItem): string {
-  if (!provider.enabled) {
-    return "Disabled";
-  }
-  if (provider.lifecycle_state !== "active") {
-    return provider.lifecycle_state;
-  }
-  if (!provider.accepted_contract_revision_id) {
-    return "Contract pending";
-  }
-  return "Ready for review";
+  return runtimeProviderReadiness(provider).label;
 }
 
 function ProviderListItem({
@@ -219,21 +208,92 @@ function ContractSection({
   accepting: boolean;
   onAccept: (contract: RuntimeProviderContractItem) => void;
 }): React.ReactElement {
+  const currentContract =
+    state.type === "LOADED"
+      ? (state.items.find(
+          (contract) => contract.id === provider.current_contract_revision_id,
+        ) ?? null)
+      : null;
+  const historicalContracts =
+    state.type === "LOADED"
+      ? state.items.filter(
+          (contract) => contract.id !== provider.current_contract_revision_id,
+        )
+      : [];
+
+  const contractCard = (
+    contract: RuntimeProviderContractItem,
+    current: boolean,
+  ): React.ReactElement => (
+    <Paper key={contract.id} withBorder p="sm" radius="sm">
+      <Group justify="space-between" align="flex-start" wrap="wrap">
+        <Stack gap={2} style={{ minWidth: 0 }}>
+          <Group gap="xs">
+            {current && (
+              <Badge color="blue" variant="light">
+                Current advertisement
+              </Badge>
+            )}
+            <Badge
+              color={contract.status === "accepted" ? "green" : "yellow"}
+              variant="light"
+            >
+              {contract.status}
+            </Badge>
+            <Text size="xs">
+              Implementation {contract.implementation_version} · Protocol{" "}
+              {contract.protocol_version}
+            </Text>
+          </Group>
+          <Text
+            size="xs"
+            c="dimmed"
+            ff="monospace"
+            style={{ overflowWrap: "anywhere" }}
+          >
+            {contract.digest}
+          </Text>
+          {contract.validation_message && (
+            <Text size="xs" c="red">
+              {contract.validation_message}
+            </Text>
+          )}
+        </Stack>
+        {current &&
+          contract.status === "candidate" &&
+          contract.validation_code === null && (
+            <Button
+              size="xs"
+              loading={accepting}
+              onClick={() => onAccept(contract)}
+            >
+              Accept current contract
+            </Button>
+          )}
+      </Group>
+    </Paper>
+  );
+
   return (
     <Stack gap="sm">
       <Text size="sm" fw={600}>
         Contract and configuration
       </Text>
       <Group gap="xs">
-        {provider.accepted_contract_revision_id ? (
+        {provider.current_contract_revision_id !== null &&
+        provider.current_contract_revision_id ===
+          provider.accepted_contract_revision_id ? (
           <IconCircleCheck size={16} color="var(--mantine-color-green-6)" />
         ) : (
           <IconCircleX size={16} color="var(--mantine-color-yellow-6)" />
         )}
         <Text size="sm">
-          {provider.accepted_contract_revision_id
-            ? "Capability contract accepted"
-            : "Capability contract requires Admin acceptance"}
+          {provider.current_contract_revision_id === null
+            ? "Waiting for the Provider to advertise a capability contract"
+            : provider.current_contract_revision_id ===
+                provider.accepted_contract_revision_id
+              ? "Current capability contract accepted"
+              : "Current capability contract requires Admin acceptance"}
         </Text>
       </Group>
       {state.type === "IDLE" && (
@@ -243,55 +303,28 @@ function ContractSection({
       )}
       {state.type === "LOADING" && <Loader size="sm" />}
       {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
-      {state.type === "LOADED" && state.items.length === 0 && (
-        <Alert color="yellow">
-          The connected Provider has not submitted a capability contract yet.
-        </Alert>
-      )}
       {state.type === "LOADED" &&
-        state.items.map((contract) => (
-          <Paper key={contract.id} withBorder p="sm" radius="sm">
-            <Group justify="space-between" align="flex-start" wrap="wrap">
-              <Stack gap={2} style={{ minWidth: 0 }}>
-                <Group gap="xs">
-                  <Badge
-                    color={contract.status === "accepted" ? "green" : "yellow"}
-                    variant="light"
-                  >
-                    {contract.status}
-                  </Badge>
-                  <Text size="xs">
-                    Implementation {contract.implementation_version} · Protocol{" "}
-                    {contract.protocol_version}
-                  </Text>
-                </Group>
-                <Text
-                  size="xs"
-                  c="dimmed"
-                  ff="monospace"
-                  style={{ overflowWrap: "anywhere" }}
-                >
-                  {contract.digest}
-                </Text>
-                {contract.validation_message && (
-                  <Text size="xs" c="red">
-                    {contract.validation_message}
-                  </Text>
-                )}
-              </Stack>
-              {contract.status === "candidate" &&
-                contract.validation_code === null && (
-                  <Button
-                    size="xs"
-                    loading={accepting}
-                    onClick={() => onAccept(contract)}
-                  >
-                    Accept contract
-                  </Button>
-                )}
-            </Group>
-          </Paper>
-        ))}
+        provider.current_contract_revision_id === null && (
+          <Alert color="yellow">
+            The connected Provider has not submitted a capability contract yet.
+          </Alert>
+        )}
+      {state.type === "LOADED" &&
+        provider.current_contract_revision_id !== null &&
+        currentContract === null && (
+          <Alert color="red">
+            The current Provider advertisement is missing from contract history.
+          </Alert>
+        )}
+      {currentContract !== null && contractCard(currentContract, true)}
+      {historicalContracts.length > 0 && (
+        <Stack gap="xs">
+          <Text size="xs" fw={600} c="dimmed">
+            Contract history
+          </Text>
+          {historicalContracts.map((contract) => contractCard(contract, false))}
+        </Stack>
+      )}
       <Text size="sm" c="dimmed" ff="monospace">
         Config revision: {provider.active_config_revision_id ?? "None"}
       </Text>

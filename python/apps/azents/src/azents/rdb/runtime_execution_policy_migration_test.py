@@ -67,6 +67,14 @@ _JSON_TEXT_MIGRATION = (
     / "versions"
     / "7b4c1d2e9f60_store_runtime_policy_as_json_text.py"
 )
+_CURRENT_CONTRACT_MIGRATION = (
+    PROJECT_ROOT
+    / "db-schemas"
+    / "rdb"
+    / "migrations"
+    / "versions"
+    / "c1d4e7f2a9b0_track_current_provider_contract.py"
+)
 
 
 def _migration_values(path: Path) -> dict[str, Any]:
@@ -181,9 +189,10 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     health_code_source = _EXTERNAL_CHANNEL_HEALTH_CODE_MIGRATION.read_text()
     resource_v2_source = _RESOURCE_V2_MIGRATION.read_text()
     json_text_source = _JSON_TEXT_MIGRATION.read_text()
+    current_contract_source = _CURRENT_CONTRACT_MIGRATION.read_text()
     resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
 
-    assert revision_file.read_text().strip() == "7b4c1d2e9f60"
+    assert revision_file.read_text().strip() == "c1d4e7f2a9b0"
     assert resource_values["down_revision"] == "e0615474dc27"
     assert "INSERT INTO workspace_runtime_execution_policies" in seed_source
     assert "INSERT INTO workspace_runtime_execution_profile_allowances" in seed_source
@@ -204,6 +213,11 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     assert "stale.accepted_at IS NULL" in json_text_source
     assert (
         '"uq_runtime_provider_contract_revisions_provider_digest"' in json_text_source
+    )
+    assert "revision.status = 'candidate'" in current_contract_source
+    assert "provider.accepted_contract_revision_id" in current_contract_source
+    assert (
+        '"fk_runtime_providers_current_contract_revision_id"' in current_contract_source
     )
 
 

@@ -6368,6 +6368,17 @@
             ],
             "title": "Accepted Contract Revision Id"
           },
+          "current_contract_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Contract Revision Id"
+          },
           "active_config_revision_id": {
             "anyOf": [
               {
@@ -6426,6 +6437,7 @@
           "lifecycle_state",
           "availability_mode",
           "accepted_contract_revision_id",
+          "current_contract_revision_id",
           "active_config_revision_id",
           "admin_version",
           "capabilities",

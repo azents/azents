@@ -13,7 +13,10 @@ import {
   Text,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { canApplyRuntimeExecution } from "../runtimeExecutionPresentation";
+import {
+  canApplyRuntimeExecution,
+  runtimePolicyReasonMessageKey,
+} from "../runtimeExecutionPresentation";
 import type { AgentRuntimeStatusState } from "../types";
 import type {
   RuntimeExecutionConfiguredSummaryResponse,
@@ -188,24 +191,11 @@ export function AgentRuntimePolicyStatus({
     administrator_action: t("actions.administrator_action"),
   }[status.required_action];
   const reasonMessages = status.reason_codes.map((reason) => {
-    switch (reason) {
-      case "profile_retired":
-        return t("reasonExplanations.profile_retired");
-      case "profile_not_allowed":
-        return t("reasonExplanations.profile_not_allowed");
-      case "dependency_unsatisfied":
-        return t("reasonExplanations.dependency_unsatisfied");
-      case "provider_module_unsupported":
-        return t("reasonExplanations.provider_module_unsupported");
-      case "provider_engine_unsupported":
-        return t("reasonExplanations.provider_engine_unsupported");
-      case "provider_storage_unsupported":
-        return t("reasonExplanations.provider_storage_unsupported");
-      case "provider_network_unsupported":
-        return t("reasonExplanations.provider_network_unsupported");
-      case "provider_limit_exceeded":
-        return t("reasonExplanations.provider_limit_exceeded");
+    const key = runtimePolicyReasonMessageKey(reason);
+    if (key === "reasonExplanations.runtime_failure") {
+      return t(key, { code: reason });
     }
+    return t(key);
   });
   const fieldLabels: Record<string, string> = {
     "image_build.enabled": t("fieldLabels.imageBuild"),

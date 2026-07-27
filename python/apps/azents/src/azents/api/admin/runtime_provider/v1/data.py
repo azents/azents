@@ -41,6 +41,7 @@ class RuntimeProviderResponse(BaseModel):
     lifecycle_state: RuntimeProviderLifecycleState
     availability_mode: RuntimeProviderAvailabilityMode
     accepted_contract_revision_id: str | None
+    current_contract_revision_id: str | None
     active_config_revision_id: str | None
     admin_version: int
     capabilities: dict[str, Any]
@@ -62,6 +63,7 @@ class RuntimeProviderResponse(BaseModel):
             lifecycle_state=provider.lifecycle_state,
             availability_mode=provider.availability_mode,
             accepted_contract_revision_id=provider.accepted_contract_revision_id,
+            current_contract_revision_id=provider.current_contract_revision_id,
             active_config_revision_id=provider.active_config_revision_id,
             admin_version=provider.admin_version,
             capabilities=provider.capabilities,

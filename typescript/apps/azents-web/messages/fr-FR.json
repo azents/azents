@@ -1709,7 +1709,19 @@
           "provider_engine_unsupported": "Le Runtime Provider ne prend pas en charge les fonctions Docker demandées.",
           "provider_storage_unsupported": "Le Runtime Provider ne prend pas en charge la politique de stockage demandée.",
           "provider_network_unsupported": "Le Runtime Provider ne prend pas en charge la politique réseau outbound demandée.",
-          "provider_limit_exceeded": "Certaines valeurs dépassent le maximum pris en charge par le Runtime Provider."
+          "provider_limit_exceeded": "Certaines valeurs dépassent le maximum pris en charge par le Runtime Provider.",
+          "execution_policy_unavailable": "La politique Runtime ne peut pas être résolue à partir de la configuration actuelle.",
+          "automatic_convergence_pending": "Une modification de politique plus restrictive est appliquée automatiquement au Runtime.",
+          "explicit_apply_required": "La configuration enregistrée diffère de la target Runtime. Appliquez-la lorsque vous êtes prêt.",
+          "application_pending": "Le Runtime n'a pas encore confirmé l'application de la target actuelle.",
+          "target_divergent": "Les preuves signalées par le Runtime ne correspondent pas à la target actuelle.",
+          "reported_digest_mismatch": "Le Runtime a signalé une empreinte de politique différente de celle de la target actuelle.",
+          "target_generation_mismatch": "La target Runtime appartient à une ancienne Generation et doit être réconciliée.",
+          "applied_snapshot_missing": "Le Snapshot de politique enregistré comme appliqué est introuvable.",
+          "applied_snapshot_unverified": "Les preuves de la politique précédemment appliquée doivent être vérifiées à nouveau.",
+          "applied_pointer_mismatch": "La référence de politique appliquée du Runtime ne pointe pas vers la target actuellement vérifiée.",
+          "provider_evidence_mismatch": "Le Runtime Provider n'a pas renvoyé de preuve de politique correspondant à la Generation et à la target demandées.",
+          "runtime_failure": "L'opération Runtime a échoué. Code de référence : {code}"
         },
         "fieldLabels": {
           "imageBuild": "Créer des images Docker",

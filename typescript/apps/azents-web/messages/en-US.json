@@ -1709,7 +1709,19 @@
           "provider_engine_unsupported": "The Runtime Provider does not support the requested Docker capabilities.",
           "provider_storage_unsupported": "The Runtime Provider does not support the requested storage policy.",
           "provider_network_unsupported": "The Runtime Provider does not support the requested outbound network policy.",
-          "provider_limit_exceeded": "One or more requested values exceed the Runtime Provider's supported maximum."
+          "provider_limit_exceeded": "One or more requested values exceed the Runtime Provider's supported maximum.",
+          "execution_policy_unavailable": "The Runtime policy could not be resolved from the current configuration.",
+          "automatic_convergence_pending": "A restrictive policy change is being applied automatically.",
+          "explicit_apply_required": "The saved configuration differs from the Runtime target. Apply it when ready.",
+          "application_pending": "The Runtime has not yet confirmed the current target.",
+          "target_divergent": "The Runtime reported evidence that does not match the current target.",
+          "reported_digest_mismatch": "The Runtime reported a different policy fingerprint from the current target.",
+          "target_generation_mismatch": "The Runtime target belongs to an older Generation and must be reconciled.",
+          "applied_snapshot_missing": "The recorded applied policy Snapshot is missing.",
+          "applied_snapshot_unverified": "The previously applied policy evidence must be verified again before it can be trusted.",
+          "applied_pointer_mismatch": "The Runtime's applied policy reference does not point to the current verified target.",
+          "provider_evidence_mismatch": "The Runtime Provider did not return policy evidence matching the requested Generation and target.",
+          "runtime_failure": "The Runtime reported an operational failure. Reference code: {code}"
         },
         "fieldLabels": {
           "imageBuild": "Build Docker images",
