@@ -14,9 +14,10 @@ COPY python/apps/azents-container-policy-gateway/src ./src
 
 RUN uv sync --frozen --no-dev \
     && groupadd --gid 1001 gateway \
-    && useradd --uid 1001 --gid 1001 --no-create-home --home-dir /nonexistent gateway
+    && useradd --uid 1001 --gid 1001 --no-create-home --home-dir /nonexistent gateway \
+    && ln -s /workspace/python/apps/azents-container-policy-gateway/.venv/bin/azents-container-policy-gateway /usr/local/bin/azents-container-policy-gateway
 
 USER 1001:1001
 
-ENTRYPOINT ["/workspace/python/apps/azents-container-policy-gateway/.venv/bin/azents-container-policy-gateway"]
+ENTRYPOINT ["/usr/local/bin/azents-container-policy-gateway"]
 CMD ["serve"]
