@@ -152,6 +152,7 @@ async def runtime_control_server_lifespan(
         policy_repository=execution_policy_repository,
         snapshot_repository=policy_repository,
         runtime_repository=runtime_repository,
+        provider_repository=RuntimeProviderRepository(),
         agent_admin_repository=AgentAdminRepository(),
     )
     kubernetes_api_client: ApiClient | None = None

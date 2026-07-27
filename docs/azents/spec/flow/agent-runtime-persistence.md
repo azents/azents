@@ -18,7 +18,7 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
 last_verified_at: 2026-07-27
-spec_version: 7
+spec_version: 8
 ---
 
 # Agent Runtime Persistence
@@ -132,9 +132,13 @@ input. A Runtime may contain the Runner, policy gateway, and fixed engine compon
 Runner and nested workloads do not receive the Provider ServiceAccount, Provider credentials,
 Runtime Control credentials other than their Runtime-bound path, host sockets, or generic
 privileged controls. Agent Workspace PVC storage remains distinct from nested-engine storage.
-The current server capability gate exposes engine storage mode `none`; raw Provider registration
-metadata does not itself enable ephemeral storage. Persistent nested-engine storage also remains
-unavailable until a Provider advertises and qualifies bounded capacity.
+The Kubernetes Provider's typed Admin-accepted contract advertises image build, nested container
+run, Compose, ephemeral engine storage, and direct or disabled egress. Runtime policy resolution and
+the next immutable target snapshot use the Provider's current accepted contract rather than raw
+registration metadata or a prior snapshot's contract revision. The Provider adds the fixed gateway
+and privileged engine only when the effective policy requires them, keeps engine state in a bounded
+engine-only `emptyDir`, and applies a Runtime-specific NetworkPolicy. Persistent nested-engine
+storage remains unavailable until a Provider advertises and qualifies bounded persistent capacity.
 
 ## Docker Provider v1
 

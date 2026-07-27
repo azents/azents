@@ -245,11 +245,11 @@ def _create_standard_profile(
     return profile_id
 
 
-def test_capability_gate_and_typed_policy_fail_closed(
+def test_capability_gate_accepts_qualified_typed_policy(
     azents_admin_server_url: str,
     system_bootstrap_evidence: SystemBootstrapEvidence,
 ) -> None:
-    """Reject unknown and authority-bearing policy without weaker fallback."""
+    """Reject unknown fields and accept qualified typed engine authority."""
     token = system_bootstrap_evidence.access_token
     platform = _request_object(
         "GET",
@@ -263,11 +263,11 @@ def test_capability_gate_and_typed_policy_fail_closed(
         known_sensitive_values=_known_sensitive_values(token),
     )
     assert capabilities == {
-        "image_build": False,
-        "container_run": False,
-        "compose": False,
-        "storage_modes": ["none"],
-        "network_modes": ["none"],
+        "image_build": True,
+        "container_run": True,
+        "compose": True,
+        "storage_modes": ["ephemeral", "none"],
+        "network_modes": ["direct", "none"],
     }
     standard_policy = _JSON_OBJECT.validate_python(platform["policy"])
 
@@ -306,11 +306,11 @@ def test_capability_gate_and_typed_policy_fail_closed(
         "mode": "ephemeral",
         "capacity_bytes": 1073741824,
     }
-    rejected = _request_object(
+    created = _request_object(
         "POST",
         f"{azents_admin_server_url}/runtime-execution/v1/profiles",
         token=token,
-        expected_status=409,
+        expected_status=201,
         body={
             "profile_id": f"authority-{unique()}",
             "display_name": "Authority request",
@@ -319,10 +319,10 @@ def test_capability_gate_and_typed_policy_fail_closed(
         },
     )
     _assert_safe_projection(
-        rejected,
+        created,
         known_sensitive_values=_known_sensitive_values(token),
     )
-    assert rejected == {"detail": {"code": "provider_engine_unsupported"}}
+    assert created["policy"] == authority_policy
 
 
 @pytest.mark.runtime_provider

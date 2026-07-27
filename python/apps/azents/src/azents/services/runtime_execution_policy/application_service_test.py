@@ -14,15 +14,19 @@ from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimePolicySnapshotApplicationState,
+    RuntimeProviderContractStatus,
     WorkspaceUserRole,
 )
 from azents.core.runtime_execution_policy import (
     RuntimeExecutionBooleanModule,
     RuntimeExecutionChangeDirection,
     RuntimeExecutionModuleId,
+    RuntimeExecutionModuleSupport,
     RuntimeExecutionNetworkMode,
     RuntimeExecutionNetworkModule,
     RuntimeExecutionPolicyStatus,
+    RuntimeExecutionProfileLifecycle,
+    RuntimeExecutionProviderCapabilities,
     RuntimeExecutionRequiredAction,
     RuntimeExecutionSourceVersions,
     RuntimeExecutionStorageMode,
@@ -33,6 +37,11 @@ from azents.core.runtime_execution_policy import (
     standard_runtime_execution_policy,
 )
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.runtime_execution_policy.data import (
+    AgentRuntimeExecutionSetting,
+    RuntimeExecutionPlatformPolicy,
+    RuntimeExecutionProfile,
+)
 from azents.repos.runtime_provider_policy.data import RuntimePolicySnapshot
 
 from .application_service import (
@@ -40,12 +49,25 @@ from .application_service import (
     RuntimeExecutionPolicyApplicationUnavailable,
     _automatic_convergence_source_allowed,
     _build_status_projection,
-    _phase_three_provider_capabilities,
     _ResolvedRuntimePolicy,
     _restrictive_projection,
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
+
+
+def _legacy_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
+    """Model the accepted pre-engine Provider boundary used by legacy tests."""
+    return RuntimeExecutionProviderCapabilities(
+        supported_modules=frozenset(
+            RuntimeExecutionModuleSupport(module_id=module_id, version=1)
+            for module_id in RuntimeExecutionModuleId
+        ),
+        privileged_engine=False,
+        storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
+        network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
+        resource_maxima=None,
+    )
 
 
 @asynccontextmanager
@@ -113,7 +135,7 @@ def _resolved() -> _ResolvedRuntimePolicy:
             workspace=3,
             agent=4,
         ),
-        provider_capabilities=_phase_three_provider_capabilities(),
+        provider_capabilities=_legacy_provider_capabilities(),
         profile_active=True,
         profile_allowed=True,
         applied_policy=None,
@@ -123,6 +145,11 @@ def _resolved() -> _ResolvedRuntimePolicy:
         runtime=_runtime(),
         target_snapshot=_snapshot(),
         applied_snapshot=None,
+        accepted_contract_revision_id="contract-1",
+        provider_compatibility={
+            "mode": "accepted_contract",
+            "contract_revision_id": "contract-1",
+        },
         profile_id="system-standard",
         resolution=resolution,
     )
@@ -141,7 +168,7 @@ def _unavailable_resolved() -> _ResolvedRuntimePolicy:
             workspace=3,
             agent=4,
         ),
-        provider_capabilities=_phase_three_provider_capabilities(),
+        provider_capabilities=_legacy_provider_capabilities(),
         profile_active=False,
         profile_allowed=True,
         applied_policy=policy,
@@ -238,7 +265,7 @@ def _upper_layer_change_resolved(
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),
         source_versions=source_versions,
-        provider_capabilities=_phase_three_provider_capabilities(),
+        provider_capabilities=_legacy_provider_capabilities(),
         profile_active=True,
         profile_allowed=True,
         applied_policy=baseline,
@@ -265,6 +292,11 @@ def _upper_layer_change_resolved(
         runtime=runtime,
         target_snapshot=target,
         applied_snapshot=target,
+        accepted_contract_revision_id="contract-1",
+        provider_compatibility={
+            "mode": "accepted_contract",
+            "contract_revision_id": "contract-1",
+        },
         profile_id="system-standard",
         resolution=resolution,
     )
@@ -409,6 +441,136 @@ def test_status_projection_marks_snapshot_divergence() -> None:
     assert status.reason_codes == ("target_divergent",)
 
 
+async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> None:
+    """Runtime resolution consumes typed authority from the accepted contract."""
+    base = standard_runtime_execution_policy()
+    engine_policy = base.model_copy(
+        update={
+            "image_build": base.image_build.model_copy(update={"enabled": True}),
+            "container_run": base.container_run.model_copy(update={"enabled": True}),
+            "resources": base.resources.model_copy(
+                update={
+                    "cpu_millicores": 1_000,
+                    "memory_bytes": 1_073_741_824,
+                    "pids": 256,
+                    "container_count": 8,
+                    "ephemeral_storage_bytes": 8_589_934_592,
+                }
+            ),
+            "engine_storage": base.engine_storage.model_copy(
+                update={
+                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
+                    "capacity_bytes": 8_589_934_592,
+                }
+            ),
+        }
+    )
+    platform = RuntimeExecutionPlatformPolicy(
+        id="platform",
+        version=1,
+        policy=engine_policy,
+        digest=digest_runtime_execution_policy(engine_policy),
+        updated_by_user_id=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    profile = RuntimeExecutionProfile(
+        id="nested-engine",
+        display_name="Nested engine",
+        description="Qualified engine profile",
+        lifecycle=RuntimeExecutionProfileLifecycle.ACTIVE,
+        version=1,
+        policy=engine_policy,
+        digest=digest_runtime_execution_policy(engine_policy),
+        reserved=False,
+        system_key=None,
+        updated_by_user_id=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    setting = AgentRuntimeExecutionSetting(
+        agent_id="agent-1",
+        profile_id=profile.id,
+        version=1,
+        restriction=empty_runtime_execution_restriction(),
+        digest=digest_runtime_execution_policy(empty_runtime_execution_restriction()),
+        updated_by_workspace_user_id=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    provider = Mock()
+    provider.id = "provider-1"
+    provider.accepted_contract_revision_id = "contract-2"
+    contract_revision = Mock()
+    contract_revision.id = "contract-2"
+    contract_revision.provider_id = "provider-1"
+    contract_revision.digest = "c" * 64
+    contract_revision.status = RuntimeProviderContractStatus.ACCEPTED
+    contract_revision.contract = {
+        "schema_version": 1,
+        "implementation_key": "kubernetes",
+        "implementation_version": "0.1.0",
+        "protocol_version": "agent-runtime-provider-kubernetes-v1",
+        "core_lifecycle_operations": [
+            "start",
+            "stop",
+            "restart",
+            "reset",
+            "observe",
+            "terminal_delete",
+        ],
+        "optional_capabilities": ["execution_policy_v1"],
+        "persistence": {
+            "kind": "persistent",
+            "reset_destroys_workspace": True,
+            "terminal_delete_destroys_workspace": True,
+        },
+        "configuration_fields": [],
+        "execution_policy": {
+            "schema_version": 1,
+            "supported_modules": [
+                {"module_id": module_id.value, "version": 1}
+                for module_id in RuntimeExecutionModuleId
+            ],
+            "privileged_engine": True,
+            "storage_modes": ["none", "ephemeral"],
+            "network_modes": ["none", "direct"],
+            "resource_maxima": None,
+        },
+    }
+    policy_repository = Mock()
+    workspace = Mock()
+    workspace.restriction = empty_runtime_execution_restriction()
+    workspace.allowed_profile_ids = frozenset({profile.id})
+    workspace.version = 1
+    policy_repository.get_platform = AsyncMock(return_value=platform)
+    policy_repository.get_agent_setting = AsyncMock(return_value=setting)
+    policy_repository.get_workspace = AsyncMock(return_value=workspace)
+    policy_repository.get_profile = AsyncMock(return_value=profile)
+    snapshot_repository = Mock()
+    snapshot_repository.get_contract_by_id = AsyncMock(return_value=contract_revision)
+    snapshot_repository.get_snapshot = AsyncMock(return_value=_snapshot())
+    runtime_repository = Mock()
+    runtime_repository.get_by_agent_id = AsyncMock(return_value=_runtime())
+    provider_repository = Mock()
+    provider_repository.get_by_id = AsyncMock(return_value=provider)
+    service = RuntimeExecutionPolicyApplicationService(
+        session_manager=_session_manager,
+        policy_repository=policy_repository,
+        snapshot_repository=snapshot_repository,
+        runtime_repository=runtime_repository,
+        provider_repository=provider_repository,
+        agent_admin_repository=Mock(),
+    )
+
+    resolved = await service._resolve_read(Mock(), agent_id="agent-1")
+
+    assert resolved.resolution.available
+    assert resolved.accepted_contract_revision_id == "contract-2"
+    assert resolved.provider_compatibility["authority_bearing_policy_supported"]
+    assert resolved.provider_compatibility["network_modes"] == ["direct", "none"]
+
+
 async def test_status_read_uses_read_resolver_without_target_mutation() -> None:
     """Status reads never call target creation or convergence paths."""
     snapshot_repository = Mock()
@@ -420,6 +582,7 @@ async def test_status_read_uses_read_resolver_without_target_mutation() -> None:
         policy_repository=policy_repository,
         snapshot_repository=snapshot_repository,
         runtime_repository=Mock(),
+        provider_repository=Mock(),
         agent_admin_repository=Mock(),
     )
     service._resolve_read = AsyncMock(return_value=_resolved())
@@ -442,6 +605,7 @@ async def test_apply_requires_existing_agent_management_authority() -> None:
         policy_repository=policy_repository,
         snapshot_repository=Mock(),
         runtime_repository=Mock(),
+        provider_repository=Mock(),
         agent_admin_repository=agent_admin_repository,
     )
 
@@ -478,9 +642,17 @@ async def test_explicit_apply_creates_next_generation_target_atomically() -> Non
         policy_repository=policy_repository,
         snapshot_repository=snapshot_repository,
         runtime_repository=Mock(),
+        provider_repository=Mock(),
         agent_admin_repository=Mock(),
     )
-    resolved = _resolved()
+    resolved = dataclasses.replace(
+        _resolved(),
+        accepted_contract_revision_id="contract-2",
+        provider_compatibility={
+            "mode": "accepted_contract",
+            "contract_revision_id": "contract-2",
+        },
+    )
 
     result = await service._target_resolution(
         Mock(),
@@ -496,6 +668,10 @@ async def test_explicit_apply_creates_next_generation_target_atomically() -> Non
     assert result.created
     call = snapshot_repository.create_and_advance_target_snapshot.await_args
     assert call.kwargs["create"].target_desired_generation == 3
+    assert call.kwargs["create"].contract_revision_id == "contract-2"
+    assert call.kwargs["create"].execution_provider_compatibility == (
+        resolved.provider_compatibility
+    )
     assert call.kwargs["expected_target_snapshot_id"] == "snapshot-1"
     assert call.kwargs["lifecycle_command"] is RuntimeLifecycleCommandType.RESTART
     policy_repository.append_audit_event.assert_awaited_once()
@@ -528,6 +704,7 @@ async def test_terminal_delete_targets_next_generation_with_bound_snapshot() -> 
         policy_repository=Mock(),
         snapshot_repository=snapshot_repository,
         runtime_repository=runtime_repository,
+        provider_repository=Mock(),
         agent_admin_repository=Mock(),
     )
     service._resolve_locked = AsyncMock(return_value=resolved)
@@ -572,6 +749,7 @@ async def test_terminal_delete_retry_reuses_current_generation() -> None:
         policy_repository=Mock(),
         snapshot_repository=snapshot_repository,
         runtime_repository=Mock(),
+        provider_repository=Mock(),
         agent_admin_repository=Mock(),
     )
     service._resolve_locked = AsyncMock(return_value=resolved)
@@ -655,6 +833,7 @@ async def test_incompatible_convergence_stops_with_a_new_exact_target() -> None:
         policy_repository=policy_repository,
         snapshot_repository=snapshot_repository,
         runtime_repository=runtime_repository,
+        provider_repository=Mock(),
         agent_admin_repository=Mock(),
     )
     service._resolve_locked = AsyncMock(return_value=resolved)
@@ -694,6 +873,7 @@ async def test_unavailable_agent_intent_change_remains_pending_apply() -> None:
         policy_repository=policy_repository,
         snapshot_repository=snapshot_repository,
         runtime_repository=runtime_repository,
+        provider_repository=Mock(),
         agent_admin_repository=Mock(),
     )
     service._resolve_locked = AsyncMock(return_value=resolved)
@@ -737,8 +917,8 @@ def test_mixed_convergence_copies_only_restrictive_fields() -> None:
     assert projected.network_egress.mode is RuntimeExecutionNetworkMode.NONE
 
 
-def test_phase_three_capabilities_cannot_grant_engine_or_network_authority() -> None:
-    capabilities = _phase_three_provider_capabilities()
+def test_legacy_capabilities_cannot_grant_engine_or_network_authority() -> None:
+    capabilities = _legacy_provider_capabilities()
 
     assert not capabilities.privileged_engine
     assert capabilities.storage_modes == {RuntimeExecutionStorageMode.NONE}

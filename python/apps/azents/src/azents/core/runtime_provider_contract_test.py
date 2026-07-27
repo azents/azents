@@ -3,16 +3,23 @@
 import pytest
 from pydantic import ValidationError
 
+from azents.core.runtime_execution_policy import (
+    RuntimeExecutionModuleId,
+    RuntimeExecutionNetworkMode,
+    RuntimeExecutionStorageMode,
+)
 from azents.core.runtime_provider_contract import (
     RuntimeProviderApplicationImpact,
     RuntimeProviderCapabilityContract,
     RuntimeProviderConfigField,
+    RuntimeProviderExecutionPolicyContract,
     RuntimeProviderLifecycleOperation,
     RuntimeProviderPersistenceContract,
     RuntimeProviderPersistenceKind,
     RuntimeProviderPolicyScope,
     RuntimeProviderStringConfigField,
     canonicalize_runtime_provider_contract,
+    runtime_execution_capabilities_from_provider_contract,
 )
 
 _REQUIRED_OPERATIONS = set(RuntimeProviderLifecycleOperation)
@@ -82,3 +89,51 @@ def test_contract_canonicalization_produces_stable_digest() -> None:
     assert first.canonical_json == second.canonical_json
     assert first.digest == second.digest
     assert len(first.digest) == 64
+    assert "execution_policy" not in first.canonical_json
+
+
+def test_execution_policy_capabilities_are_typed_and_canonical() -> None:
+    """Execution support is stable contract authority rather than metadata."""
+    contract = _contract().model_copy(
+        update={
+            "execution_policy": RuntimeProviderExecutionPolicyContract.model_validate(
+                {
+                    "schema_version": 1,
+                    "supported_modules": [
+                        {"module_id": "container.run", "version": 1},
+                        {"module_id": "container.image_build", "version": 1},
+                    ],
+                    "privileged_engine": True,
+                    "storage_modes": ["ephemeral", "none"],
+                    "network_modes": ["none"],
+                    "resource_maxima": None,
+                }
+            )
+        }
+    )
+
+    canonical = canonicalize_runtime_provider_contract(contract)
+    capabilities = runtime_execution_capabilities_from_provider_contract(contract)
+
+    execution_policy = canonical.canonical_json["execution_policy"]
+    assert isinstance(execution_policy, dict)
+    assert execution_policy["supported_modules"] == [
+        {"module_id": "container.image_build", "version": 1},
+        {"module_id": "container.run", "version": 1},
+    ]
+    assert execution_policy["storage_modes"] == ["ephemeral", "none"]
+    assert capabilities.privileged_engine
+    assert {support.module_id for support in capabilities.supported_modules} == {
+        RuntimeExecutionModuleId.IMAGE_BUILD,
+        RuntimeExecutionModuleId.CONTAINER_RUN,
+    }
+
+
+def test_missing_execution_policy_contract_fails_closed() -> None:
+    """Legacy accepted contracts cannot grant nested-engine authority."""
+    capabilities = runtime_execution_capabilities_from_provider_contract(_contract())
+
+    assert not capabilities.privileged_engine
+    assert not capabilities.supported_modules
+    assert capabilities.storage_modes == {RuntimeExecutionStorageMode.NONE}
+    assert capabilities.network_modes == {RuntimeExecutionNetworkMode.NONE}

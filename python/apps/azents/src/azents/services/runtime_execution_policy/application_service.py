@@ -6,12 +6,14 @@ import json
 from typing import Annotated
 
 from fastapi import Depends
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimePolicySnapshotApplicationState,
+    RuntimeProviderContractStatus,
     WorkspaceUserRole,
 )
 from azents.core.runtime_execution_policy import (
@@ -23,7 +25,6 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionChangeSummary,
     RuntimeExecutionManagementLayer,
     RuntimeExecutionModuleId,
-    RuntimeExecutionModuleSupport,
     RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionPolicyLayer,
@@ -39,6 +40,10 @@ from azents.core.runtime_execution_policy import (
     empty_runtime_execution_restriction,
     resolve_runtime_execution_policy,
 )
+from azents.core.runtime_provider_contract import (
+    RuntimeProviderCapabilityContract,
+    runtime_execution_capabilities_from_provider_contract,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_admin import AgentAdminRepository
@@ -50,6 +55,7 @@ from azents.repos.runtime_execution_policy.data import (
 from azents.repos.runtime_execution_policy.repository import (
     RuntimeExecutionPolicyRepository,
 )
+from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.data import (
     RuntimePolicySnapshot,
     RuntimePolicySnapshotCreate,
@@ -140,6 +146,8 @@ class _ResolvedRuntimePolicy:
     runtime: AgentRuntime
     target_snapshot: RuntimePolicySnapshot
     applied_snapshot: RuntimePolicySnapshot | None
+    accepted_contract_revision_id: str
+    provider_compatibility: dict[str, JsonValue]
     profile_id: str
     resolution: RuntimeExecutionResolution
 
@@ -171,6 +179,10 @@ class RuntimeExecutionPolicyApplicationService:
     runtime_repository: Annotated[
         AgentRuntimeRepository,
         Depends(AgentRuntimeRepository),
+    ]
+    provider_repository: Annotated[
+        RuntimeProviderRepository,
+        Depends(RuntimeProviderRepository),
     ]
     agent_admin_repository: Annotated[
         AgentAdminRepository,
@@ -339,15 +351,11 @@ class RuntimeExecutionPolicyApplicationService:
                     for reduction in resolved.resolution.reductions
                 ],
             }
-            provider_compatibility = {
-                "mode": "standard_only",
-                "authority_bearing_policy_supported": False,
-            }
         else:
             source_versions = _snapshot_source_versions(target)
             profile_id = target.execution_profile_id
             execution_source_trace = target.execution_source_trace
-            provider_compatibility = target.execution_provider_compatibility
+        provider_compatibility = resolved.provider_compatibility
 
         next_generation = resolved.runtime.desired_generation + 1
         canonical_policy = canonical_runtime_execution_policy(effective_policy)
@@ -359,7 +367,7 @@ class RuntimeExecutionPolicyApplicationService:
             create=RuntimePolicySnapshotCreate(
                 runtime_id=resolved.runtime.id,
                 provider_id=target.provider_id,
-                contract_revision_id=target.contract_revision_id,
+                contract_revision_id=resolved.accepted_contract_revision_id,
                 config_revision_id=target.config_revision_id,
                 override_provider_id=target.override_provider_id,
                 override_version=target.override_version,
@@ -544,6 +552,42 @@ class RuntimeExecutionPolicyApplicationService:
                 "runtime_provider_binding_missing",
                 agent_id,
             )
+        provider = await self.provider_repository.get_by_id(
+            session,
+            provider_id=runtime.runtime_provider_resource_id,
+            for_update=for_update,
+        )
+        if provider is None or provider.accepted_contract_revision_id is None:
+            raise RuntimeExecutionPolicyApplicationUnavailable(
+                "runtime_provider_contract_unaccepted",
+                runtime.runtime_provider_resource_id,
+            )
+        contract_revision = await self.snapshot_repository.get_contract_by_id(
+            session,
+            contract_revision_id=provider.accepted_contract_revision_id,
+            for_update=False,
+        )
+        if (
+            contract_revision is None
+            or contract_revision.provider_id != provider.id
+            or contract_revision.status is not RuntimeProviderContractStatus.ACCEPTED
+        ):
+            raise RuntimeExecutionPolicyApplicationUnavailable(
+                "runtime_provider_contract_unaccepted",
+                provider.id,
+            )
+        try:
+            provider_contract = RuntimeProviderCapabilityContract.model_validate(
+                contract_revision.contract
+            )
+        except ValidationError as error:
+            raise RuntimeExecutionPolicyApplicationUnavailable(
+                "runtime_provider_contract_invalid",
+                provider.id,
+            ) from error
+        provider_capabilities = runtime_execution_capabilities_from_provider_contract(
+            provider_contract
+        )
         platform = await self.policy_repository.get_platform(
             session,
             for_update=for_update,
@@ -588,6 +632,14 @@ class RuntimeExecutionPolicyApplicationService:
                 "runtime_policy_target_missing",
                 runtime.id,
             )
+        if (
+            target_snapshot.contract_revision_id != contract_revision.id
+            and target_snapshot.config_revision_id is not None
+        ):
+            raise RuntimeExecutionPolicyApplicationUnavailable(
+                "runtime_provider_configuration_contract_stale",
+                provider.id,
+            )
         applied_snapshot = None
         if runtime.applied_runtime_policy_snapshot_id is not None:
             applied_snapshot = await self.snapshot_repository.get_snapshot(
@@ -616,7 +668,7 @@ class RuntimeExecutionPolicyApplicationService:
                 workspace=workspace.version if workspace is not None else 1,
                 agent=setting.version,
             ),
-            provider_capabilities=_phase_three_provider_capabilities(),
+            provider_capabilities=provider_capabilities,
             profile_active=(
                 profile.lifecycle is RuntimeExecutionProfileLifecycle.ACTIVE
             ),
@@ -627,6 +679,12 @@ class RuntimeExecutionPolicyApplicationService:
             runtime=runtime,
             target_snapshot=target_snapshot,
             applied_snapshot=applied_snapshot,
+            accepted_contract_revision_id=contract_revision.id,
+            provider_compatibility=_provider_compatibility(
+                contract_revision_id=contract_revision.id,
+                contract_digest=contract_revision.digest,
+                capabilities=provider_capabilities,
+            ),
             profile_id=profile.id,
             resolution=resolution,
         )
@@ -648,6 +706,7 @@ class RuntimeExecutionPolicyApplicationService:
         execution_digest = digest_runtime_execution_policy(effective_policy)
         if _snapshot_matches_target(
             resolved.target_snapshot,
+            contract_revision_id=resolved.accepted_contract_revision_id,
             execution_digest=execution_digest,
             source_versions=source_versions,
             desired_generation=runtime.desired_generation,
@@ -670,7 +729,7 @@ class RuntimeExecutionPolicyApplicationService:
             create=RuntimePolicySnapshotCreate(
                 runtime_id=runtime.id,
                 provider_id=resolved.target_snapshot.provider_id,
-                contract_revision_id=resolved.target_snapshot.contract_revision_id,
+                contract_revision_id=resolved.accepted_contract_revision_id,
                 config_revision_id=resolved.target_snapshot.config_revision_id,
                 override_provider_id=resolved.target_snapshot.override_provider_id,
                 override_version=resolved.target_snapshot.override_version,
@@ -690,10 +749,7 @@ class RuntimeExecutionPolicyApplicationService:
                         for reduction in resolved.resolution.reductions
                     ],
                 },
-                execution_provider_compatibility={
-                    "mode": "standard_only",
-                    "authority_bearing_policy_supported": False,
-                },
+                execution_provider_compatibility=resolved.provider_compatibility,
                 execution_target_digest=execution_digest,
                 execution_reported_digest=None,
                 resolved_config=resolved.target_snapshot.resolved_config,
@@ -788,20 +844,6 @@ class RuntimeExecutionPolicyApplicationService:
         )
 
 
-def _phase_three_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
-    """Expose only support that cannot grant Runtime authority in Phase 3."""
-    return RuntimeExecutionProviderCapabilities(
-        supported_modules=frozenset(
-            RuntimeExecutionModuleSupport(module_id=module_id, version=1)
-            for module_id in RuntimeExecutionModuleId
-        ),
-        privileged_engine=False,
-        storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
-        network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
-        resource_maxima=None,
-    )
-
-
 def _build_status_projection(
     resolved: _ResolvedRuntimePolicy,
 ) -> RuntimeExecutionPolicyStatusProjection:
@@ -847,6 +889,7 @@ def _build_status_projection(
 
     configured_matches_target = _snapshot_matches_target(
         resolved.target_snapshot,
+        contract_revision_id=resolved.accepted_contract_revision_id,
         execution_digest=resolution.digest,
         source_versions=resolution.source_versions,
         desired_generation=runtime.desired_generation,
@@ -1033,18 +1076,54 @@ def _snapshot_source_versions(
 def _snapshot_matches_target(
     snapshot: RuntimePolicySnapshot,
     *,
+    contract_revision_id: str,
     execution_digest: str,
     source_versions: RuntimeExecutionSourceVersions,
     desired_generation: int,
 ) -> bool:
     return (
-        snapshot.execution_target_digest == execution_digest
+        snapshot.contract_revision_id == contract_revision_id
+        and snapshot.execution_target_digest == execution_digest
         and snapshot.target_desired_generation == desired_generation
         and snapshot.execution_platform_version == source_versions.platform
         and snapshot.execution_profile_version == source_versions.profile
         and snapshot.execution_workspace_version == source_versions.workspace
         and snapshot.execution_agent_version == source_versions.agent
     )
+
+
+def _provider_compatibility(
+    *,
+    contract_revision_id: str,
+    contract_digest: str,
+    capabilities: RuntimeExecutionProviderCapabilities,
+) -> dict[str, JsonValue]:
+    """Build the safe accepted-contract evidence stored with a snapshot."""
+    supported_modules: list[JsonValue] = [
+        {
+            "module_id": support.module_id.value,
+            "version": support.version,
+        }
+        for support in sorted(
+            capabilities.supported_modules,
+            key=lambda item: (item.module_id.value, item.version),
+        )
+    ]
+    storage_modes: list[JsonValue] = [
+        mode.value for mode in sorted(capabilities.storage_modes)
+    ]
+    network_modes: list[JsonValue] = [
+        mode.value for mode in sorted(capabilities.network_modes)
+    ]
+    return {
+        "mode": "accepted_contract",
+        "contract_revision_id": contract_revision_id,
+        "contract_digest": contract_digest,
+        "authority_bearing_policy_supported": capabilities.privileged_engine,
+        "supported_modules": supported_modules,
+        "storage_modes": storage_modes,
+        "network_modes": network_modes,
+    }
 
 
 def _automatic_convergence_source_allowed(
