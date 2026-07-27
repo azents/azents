@@ -508,7 +508,7 @@ def _execution_policy_envelope(
 ) -> RuntimeExecutionPolicyEnvelope:
     return RuntimeExecutionPolicyEnvelope(
         evidence=_execution_policy_evidence(message.evidence),
-        effective_policy=json_value_from_struct(message.effective_policy),
+        effective_policy=_execution_policy_from_struct(message.effective_policy),
     )
 
 
@@ -544,6 +544,26 @@ def _struct(metadata: object) -> struct_pb2.Struct:
 
 def json_value_from_struct(struct: struct_pb2.Struct) -> dict[str, JsonValue]:
     return cast(dict[str, JsonValue], json_format.MessageToDict(struct))
+
+
+def _execution_policy_from_struct(
+    struct: struct_pb2.Struct,
+) -> dict[str, JsonValue]:
+    """Restore JSON integers erased by protobuf Struct's double representation."""
+    value = _restore_integral_numbers(json_value_from_struct(struct))
+    if not isinstance(value, dict):
+        raise AssertionError("Runtime execution policy must be a JSON object.")
+    return value
+
+
+def _restore_integral_numbers(value: JsonValue) -> JsonValue:
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, list):
+        return [_restore_integral_numbers(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _restore_integral_numbers(item) for key, item in value.items()}
+    return value
 
 
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
