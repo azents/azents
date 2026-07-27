@@ -3,6 +3,7 @@
 import datetime
 import json
 from dataclasses import dataclass
+from typing import Literal
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -27,8 +28,28 @@ class DiscordInteractionError(ValueError):
     """Base class for controlled Discord interaction failures."""
 
 
+DiscordInteractionAuthenticationFailureCode = Literal[
+    "discord_callback_configuration_missing",
+    "discord_callback_public_key_missing",
+    "discord_interaction_signature_headers_missing",
+    "discord_interaction_signature_invalid",
+    "discord_interaction_application_mismatch",
+    "discord_interaction_not_active",
+    "discord_interaction_guild_mismatch",
+]
+
+
 class DiscordInteractionUnauthorized(DiscordInteractionError):
     """The interaction signature cannot be authenticated."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: DiscordInteractionAuthenticationFailureCode,
+    ) -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
 
 
 class DiscordInteractionInvalidPayload(DiscordInteractionError):
@@ -144,7 +165,10 @@ def verify_discord_interaction_signature(
 ) -> None:
     """Verify the exact timestamp-prefixed raw body with an App public key."""
     if timestamp is None or signature is None:
-        raise DiscordInteractionUnauthorized("Discord signature headers are missing.")
+        raise DiscordInteractionUnauthorized(
+            "Discord signature headers are missing.",
+            failure_code="discord_interaction_signature_headers_missing",
+        )
     try:
         public_key_bytes = bytes.fromhex(public_key)
         signature_bytes = bytes.fromhex(signature)
@@ -152,7 +176,8 @@ def verify_discord_interaction_signature(
         verifier.verify(signature_bytes, timestamp.encode() + raw_body)
     except (ValueError, InvalidSignature) as error:
         raise DiscordInteractionUnauthorized(
-            "Discord interaction signature is invalid."
+            "Discord interaction signature is invalid.",
+            failure_code="discord_interaction_signature_invalid",
         ) from error
 
 

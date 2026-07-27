@@ -1,5 +1,6 @@
 """External Channel Slack callback route tests."""
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -78,21 +79,36 @@ def test_discord_admission_returns_matching_initial_response(
     assert call["raw_body"] == b'{"token":"request-local-only"}'
 
 
-def test_discord_authentication_failure_uses_one_safe_response() -> None:
+def test_discord_authentication_failure_uses_one_safe_response(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Unknown selectors and invalid signatures remain indistinguishable."""
     service = AsyncMock(spec=DiscordHTTPAdmissionService)
-    service.handle.side_effect = DiscordInteractionUnauthorized("private detail")
-
-    response = _discord_client(service).post(
-        "/external-channel/v1/discord/interactions/opaque-selector",
-        content=b"{}",
+    service.handle.side_effect = DiscordInteractionUnauthorized(
+        "private detail",
+        failure_code="discord_interaction_signature_invalid",
     )
+
+    with caplog.at_level(logging.INFO):
+        response = _discord_client(service).post(
+            "/external-channel/v1/discord/interactions/opaque-selector",
+            content=b"{}",
+        )
 
     assert response.status_code == 401
     assert response.json() == {
         "detail": "Discord interaction could not be authenticated."
     }
     assert "private detail" not in response.text
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "Rejected unauthenticated Discord interaction"
+    ]
+    assert len(records) == 1
+    assert records[0].__dict__["authentication_failure_code"] == (
+        "discord_interaction_signature_invalid"
+    )
 
 
 def test_oversized_discord_body_is_rejected_before_admission() -> None:

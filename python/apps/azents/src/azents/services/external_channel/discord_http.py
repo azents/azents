@@ -73,12 +73,14 @@ class DiscordHTTPAdmissionService:
             )
         if configuration is None or configuration.capabilities is None:
             raise DiscordInteractionUnauthorized(
-                "Discord interaction could not be authenticated."
+                "Discord interaction could not be authenticated.",
+                failure_code="discord_callback_configuration_missing",
             )
         public_key = configuration.capabilities.get("interaction_public_key")
         if not isinstance(public_key, str):
             raise DiscordInteractionUnauthorized(
-                "Discord interaction could not be authenticated."
+                "Discord interaction could not be authenticated.",
+                failure_code="discord_callback_public_key_missing",
             )
         verify_discord_interaction_signature(
             raw_body=raw_body,
@@ -89,7 +91,8 @@ class DiscordHTTPAdmissionService:
         envelope = parse_discord_interaction(raw_body)
         if envelope.application_id != configuration.provider_app_id:
             raise DiscordInteractionUnauthorized(
-                "Discord interaction could not be authenticated."
+                "Discord interaction could not be authenticated.",
+                failure_code="discord_interaction_application_mismatch",
             )
         if envelope.interaction_type == 1:
             return DiscordHTTPAdmissionResult(envelope=envelope, admission=None)
@@ -98,11 +101,13 @@ class DiscordHTTPAdmissionService:
             ExternalChannelConnectionStatus.DEGRADED,
         ):
             raise DiscordInteractionUnauthorized(
-                "Discord interaction callback is not active."
+                "Discord interaction callback is not active.",
+                failure_code="discord_interaction_not_active",
             )
         if envelope.guild_id != configuration.provider_tenant_id:
             raise DiscordInteractionUnauthorized(
-                "Discord interaction could not be authenticated."
+                "Discord interaction could not be authenticated.",
+                failure_code="discord_interaction_guild_mismatch",
             )
         inputs = discord_interaction_admission_inputs(
             connection_id=configuration.id,

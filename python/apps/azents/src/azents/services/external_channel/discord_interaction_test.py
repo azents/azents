@@ -46,13 +46,29 @@ def test_rejects_tampered_raw_body() -> None:
     signed_body = b'{"id":"1","type":1,"application_id":"app"}'
     timestamp = "1721984000"
 
-    with pytest.raises(DiscordInteractionUnauthorized, match="invalid"):
+    with pytest.raises(DiscordInteractionUnauthorized, match="invalid") as error:
         verify_discord_interaction_signature(
             raw_body=b'{"id":"2","type":1,"application_id":"app"}',
             timestamp=timestamp,
             signature=private_key.sign(timestamp.encode() + signed_body).hex(),
             public_key=private_key.public_key().public_bytes_raw().hex(),
         )
+    assert error.value.failure_code == "discord_interaction_signature_invalid"
+
+
+def test_classifies_missing_signature_headers_without_retaining_input() -> None:
+    """Missing authentication headers expose one safe operational code."""
+    private_key = Ed25519PrivateKey.generate()
+
+    with pytest.raises(DiscordInteractionUnauthorized) as error:
+        verify_discord_interaction_signature(
+            raw_body=b'{"id":"1","type":1,"application_id":"app"}',
+            timestamp=None,
+            signature=None,
+            public_key=private_key.public_key().public_bytes_raw().hex(),
+        )
+
+    assert error.value.failure_code == "discord_interaction_signature_headers_missing"
 
 
 def test_parses_bounded_routing_facts() -> None:
