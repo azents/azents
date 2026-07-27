@@ -926,11 +926,17 @@ def _network_policy_egress_rule(data: JsonObject) -> NetworkPolicyEgressRule:
         ports=tuple(
             NetworkPolicyPort(
                 protocol=str(item.get("protocol") or "TCP"),
-                port=int(item["port"]),
+                port=_network_policy_port_value(item["port"]),
             )
             for item in data.get("ports", [])
         ),
     )
+
+
+def _network_policy_port_value(value: object) -> int | str:
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        raise ValueError("NetworkPolicy port must be an integer or named port")
+    return value
 
 
 def _network_policy_peer(data: JsonObject) -> NetworkPolicyPeer:

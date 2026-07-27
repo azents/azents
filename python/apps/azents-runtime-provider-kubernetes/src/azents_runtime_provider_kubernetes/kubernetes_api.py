@@ -235,7 +235,7 @@ class NetworkPolicyPort:
     """NetworkPolicy transport port."""
 
     protocol: str
-    port: int
+    port: int | str
 
 
 @dataclasses.dataclass(frozen=True)

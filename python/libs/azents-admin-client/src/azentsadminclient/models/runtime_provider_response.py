@@ -39,13 +39,14 @@ class RuntimeProviderResponse(BaseModel):
     lifecycle_state: RuntimeProviderLifecycleState
     availability_mode: RuntimeProviderAvailabilityMode
     accepted_contract_revision_id: Optional[StrictStr]
+    current_contract_revision_id: Optional[StrictStr]
     active_config_revision_id: Optional[StrictStr]
     admin_version: StrictInt
     capabilities: Dict[str, Any]
     config_schema: Optional[Dict[str, Any]]
     metadata: Optional[Dict[str, Any]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider_id", "scope", "workspace_id", "kind", "display_name", "registration_method", "enabled", "lifecycle_state", "availability_mode", "accepted_contract_revision_id", "active_config_revision_id", "admin_version", "capabilities", "config_schema", "metadata"]
+    __properties: ClassVar[List[str]] = ["id", "provider_id", "scope", "workspace_id", "kind", "display_name", "registration_method", "enabled", "lifecycle_state", "availability_mode", "accepted_contract_revision_id", "current_contract_revision_id", "active_config_revision_id", "admin_version", "capabilities", "config_schema", "metadata"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -103,6 +104,11 @@ class RuntimeProviderResponse(BaseModel):
         if self.accepted_contract_revision_id is None and "accepted_contract_revision_id" in self.model_fields_set:
             _dict['accepted_contract_revision_id'] = None
 
+        # set to None if current_contract_revision_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.current_contract_revision_id is None and "current_contract_revision_id" in self.model_fields_set:
+            _dict['current_contract_revision_id'] = None
+
         # set to None if active_config_revision_id (nullable) is None
         # and model_fields_set contains the field
         if self.active_config_revision_id is None and "active_config_revision_id" in self.model_fields_set:
@@ -141,6 +147,7 @@ class RuntimeProviderResponse(BaseModel):
             "lifecycle_state": obj.get("lifecycle_state"),
             "availability_mode": obj.get("availability_mode"),
             "accepted_contract_revision_id": obj.get("accepted_contract_revision_id"),
+            "current_contract_revision_id": obj.get("current_contract_revision_id"),
             "active_config_revision_id": obj.get("active_config_revision_id"),
             "admin_version": obj.get("admin_version"),
             "capabilities": obj.get("capabilities"),

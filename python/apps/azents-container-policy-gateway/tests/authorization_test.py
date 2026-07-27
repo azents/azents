@@ -1,5 +1,6 @@
 """Closed Docker API authorization tests."""
 
+import dataclasses
 import json
 
 import pytest
@@ -371,6 +372,75 @@ def test_unbounded_pids_values_are_replaced_with_policy_bound(
 
     assert request.requested_pids_limit == 32
     assert json.loads(request.body)["HostConfig"]["PidsLimit"] == 32
+
+
+@pytest.mark.parametrize("pids_limit", [None, 0, -1])
+def test_null_pid_ceiling_preserves_unlimited_engine_semantics(
+    pids_limit: int | None,
+) -> None:
+    runtime_policy = policy(
+        container_run=True,
+        bounded_nested_containers=False,
+    )
+    runtime_policy = dataclasses.replace(
+        runtime_policy,
+        resources=dataclasses.replace(
+            runtime_policy.resources,
+            cpu_limit_millicores=None,
+            memory_limit_bytes=None,
+        ),
+    )
+    body = _docker_cli_create_wire_body()
+    host_config = body["HostConfig"]
+    assert isinstance(host_config, dict)
+    host_config["PidsLimit"] = pids_limit
+
+    request = authorize_request(
+        policy=runtime_policy,
+        runtime_id="runtime-1",
+        method="POST",
+        raw_path="/v1.51/containers/create",
+        query=(),
+        headers=json_headers(),
+        body=json.dumps(body).encode(),
+    )
+
+    assert request.requested_pids_limit is None
+    assert "PidsLimit" not in json.loads(request.body)["HostConfig"]
+
+
+def test_null_resource_ceilings_allow_explicit_container_resources() -> None:
+    runtime_policy = policy(
+        container_run=True,
+        bounded_nested_containers=False,
+    )
+    runtime_policy = dataclasses.replace(
+        runtime_policy,
+        resources=dataclasses.replace(
+            runtime_policy.resources,
+            cpu_limit_millicores=None,
+            memory_limit_bytes=None,
+        ),
+    )
+    body = _authorize(
+        runtime_policy,
+        method="POST",
+        path="/v1.51/containers/create",
+        headers=json_headers(),
+        body={
+            "Image": "busybox",
+            "HostConfig": {
+                "NanoCpus": 4_000_000_000,
+                "Memory": 8_589_934_592,
+                "PidsLimit": 1_024,
+            },
+        },
+    )
+
+    host_config = json.loads(body)["HostConfig"]
+    assert host_config["NanoCpus"] == 4_000_000_000
+    assert host_config["Memory"] == 8_589_934_592
+    assert host_config["PidsLimit"] == 1_024
 
 
 def test_pinned_compose_network_defaults_are_normalized(

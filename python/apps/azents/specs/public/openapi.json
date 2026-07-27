@@ -23050,7 +23050,7 @@
             "const": 1,
             "title": "Version"
           },
-          "cpu_millicores": {
+          "cpu_request_millicores": {
             "anyOf": [
               {
                 "type": "integer",
@@ -23060,9 +23060,9 @@
                 "type": "null"
               }
             ],
-            "title": "Cpu Millicores"
+            "title": "Cpu Request Millicores"
           },
-          "memory_bytes": {
+          "cpu_limit_millicores": {
             "anyOf": [
               {
                 "type": "integer",
@@ -23072,7 +23072,31 @@
                 "type": "null"
               }
             ],
-            "title": "Memory Bytes"
+            "title": "Cpu Limit Millicores"
+          },
+          "memory_request_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Request Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
           },
           "pids": {
             "anyOf": [
@@ -23109,6 +23133,18 @@
               }
             ],
             "title": "Ephemeral Storage Bytes"
+          },
+          "persistent_storage_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persistent Storage Bytes"
           }
         },
         "additionalProperties": false,
@@ -23116,18 +23152,21 @@
         "required": [
           "module_id",
           "version",
-          "cpu_millicores",
-          "memory_bytes",
+          "cpu_request_millicores",
+          "cpu_limit_millicores",
+          "memory_request_bytes",
+          "memory_limit_bytes",
           "pids",
           "container_count",
-          "ephemeral_storage_bytes"
+          "ephemeral_storage_bytes",
+          "persistent_storage_bytes"
         ],
         "title": "RuntimeExecutionResourceModule",
-        "description": "Aggregate Runtime and nested-workload resource ceilings."
+        "description": "Kubernetes resources and nested-workload resource ceilings."
       },
       "RuntimeExecutionResourceRestriction": {
         "properties": {
-          "cpu_millicores": {
+          "cpu_request_millicores": {
             "anyOf": [
               {
                 "type": "integer",
@@ -23137,9 +23176,9 @@
                 "type": "null"
               }
             ],
-            "title": "Cpu Millicores"
+            "title": "Cpu Request Millicores"
           },
-          "memory_bytes": {
+          "cpu_limit_millicores": {
             "anyOf": [
               {
                 "type": "integer",
@@ -23149,7 +23188,31 @@
                 "type": "null"
               }
             ],
-            "title": "Memory Bytes"
+            "title": "Cpu Limit Millicores"
+          },
+          "memory_request_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Request Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
           },
           "pids": {
             "anyOf": [
@@ -23186,16 +23249,31 @@
               }
             ],
             "title": "Ephemeral Storage Bytes"
+          },
+          "persistent_storage_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persistent Storage Bytes"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "cpu_millicores",
-          "memory_bytes",
+          "cpu_request_millicores",
+          "cpu_limit_millicores",
+          "memory_request_bytes",
+          "memory_limit_bytes",
           "pids",
           "container_count",
-          "ephemeral_storage_bytes"
+          "ephemeral_storage_bytes",
+          "persistent_storage_bytes"
         ],
         "title": "RuntimeExecutionResourceRestriction",
         "description": "Optional lower-layer resource ceilings."

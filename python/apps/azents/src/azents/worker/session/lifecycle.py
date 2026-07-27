@@ -227,6 +227,21 @@ class SessionLifecycleService:
             owner_generation=owner_generation,
         )
 
+    async def claim_failed_run_finalization(
+        self,
+        db_session: AsyncSession,
+        *,
+        session_id: str,
+        owner_generation: int,
+    ) -> bool:
+        """Fence failure finalization and give an accepted Stop intent precedence."""
+        agent_session = await self._lock_owned_session(
+            db_session,
+            session_id=session_id,
+            owner_generation=owner_generation,
+        )
+        return agent_session.stop_requested_at is None
+
     async def validate_pending_command(
         self,
         session_id: str,

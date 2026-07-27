@@ -48,6 +48,7 @@ def _provider(*, capabilities: dict[str, Any] | None = None) -> RuntimeProvider:
         lifecycle_state=RuntimeProviderLifecycleState.ACTIVE,
         availability_mode=RuntimeProviderAvailabilityMode.PLATFORM_WIDE,
         accepted_contract_revision_id="contract-1",
+        current_contract_revision_id="contract-1",
         active_config_revision_id=None,
         admin_version=1,
         capabilities=capabilities or {"optional_capabilities": ["files"]},

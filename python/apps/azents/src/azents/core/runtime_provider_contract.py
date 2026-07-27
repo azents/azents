@@ -240,8 +240,7 @@ def canonicalize_runtime_provider_contract(
     )
     execution_policy = canonical_json.get("execution_policy")
     if execution_policy is None:
-        # Preserve existing contract digests when this backwards-compatible
-        # capability section is absent.
+        # An omitted optional section has no semantic JSON representation.
         del canonical_json["execution_policy"]
     elif isinstance(execution_policy, dict):
         supported_modules = execution_policy["supported_modules"]

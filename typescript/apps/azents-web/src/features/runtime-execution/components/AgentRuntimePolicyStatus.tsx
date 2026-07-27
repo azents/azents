@@ -13,7 +13,10 @@ import {
   Text,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { canApplyRuntimeExecution } from "../runtimeExecutionPresentation";
+import {
+  canApplyRuntimeExecution,
+  runtimePolicyReasonMessageKey,
+} from "../runtimeExecutionPresentation";
 import type { AgentRuntimeStatusState } from "../types";
 import type {
   RuntimeExecutionConfiguredSummaryResponse,
@@ -42,6 +45,19 @@ function statusColor(status: RuntimeExecutionPolicyStatus): string {
   }
 }
 
+function formatBytes(bytes: number): string {
+  for (const [unit, divisor] of [
+    ["GiB", 1_073_741_824],
+    ["MiB", 1_048_576],
+    ["KiB", 1_024],
+  ] as const) {
+    if (bytes % divisor === 0) {
+      return `${bytes / divisor} ${unit}`;
+    }
+  }
+  return `${bytes} B`;
+}
+
 function Summary({
   title,
   summary,
@@ -67,6 +83,21 @@ function Summary({
       </Paper>
     );
   }
+  const storageLabel = {
+    none: t("storageModes.none"),
+    ephemeral: t("storageModes.ephemeral"),
+    persistent: t("storageModes.persistent"),
+  }[summary.storage_mode];
+  const networkLabel = {
+    none: t("networkModes.none"),
+    restricted: t("networkModes.restricted"),
+    direct: t("networkModes.direct"),
+  }[summary.network_mode];
+  const capabilityLabels: Record<string, string> = {
+    "container.image_build": t("capabilityLabels.imageBuild"),
+    "container.run": t("capabilityLabels.containerRun"),
+    "container.compose": t("capabilityLabels.compose"),
+  };
   return (
     <Paper withBorder p="md" radius="md">
       <Stack gap="xs">
@@ -85,15 +116,17 @@ function Summary({
         <Text size="sm">
           {t("profileValue", { profile: summary.profile_id })}
         </Text>
-        <Code>{summary.digest.slice(0, 16)}</Code>
         <Text size="xs" c="dimmed">
-          {t("storage")}: {summary.storage_mode}
-          {summary.storage_capacity_bytes === null
-            ? ""
-            : ` · ${summary.storage_capacity_bytes}`}
+          {t("policyFingerprint")}: <Code>{summary.digest.slice(0, 16)}</Code>
         </Text>
         <Text size="xs" c="dimmed">
-          {t("network")}: {summary.network_mode}
+          {t("storage")}: {storageLabel}
+          {summary.storage_capacity_bytes === null
+            ? ""
+            : ` · ${formatBytes(summary.storage_capacity_bytes)}`}
+        </Text>
+        <Text size="xs" c="dimmed">
+          {t("network")}: {networkLabel}
         </Text>
         <Group gap="xs">
           {summary.capabilities.map((capability) => (
@@ -103,7 +136,7 @@ function Summary({
               variant="light"
               size="sm"
             >
-              {capability.module_id}:{" "}
+              {capabilityLabels[capability.module_id] ?? capability.module_id}:{" "}
               {capability.enabled ? t("enabled") : t("disabled")}
             </Badge>
           ))}
@@ -157,6 +190,39 @@ export function AgentRuntimePolicyStatus({
     wait: t("actions.wait"),
     administrator_action: t("actions.administrator_action"),
   }[status.required_action];
+  const reasonMessages = status.reason_codes.map((reason) => {
+    const key = runtimePolicyReasonMessageKey(reason);
+    if (key === "reasonExplanations.runtime_failure") {
+      return t(key, { code: reason });
+    }
+    return t(key);
+  });
+  const fieldLabels: Record<string, string> = {
+    "image_build.enabled": t("fieldLabels.imageBuild"),
+    "container_run.enabled": t("fieldLabels.containerRun"),
+    "compose.enabled": t("fieldLabels.compose"),
+    "resources.cpu_request_millicores": t("fieldLabels.cpuRequest"),
+    "resources.cpu_limit_millicores": t("fieldLabels.cpuLimit"),
+    "resources.memory_request_bytes": t("fieldLabels.memoryRequest"),
+    "resources.memory_limit_bytes": t("fieldLabels.memoryLimit"),
+    "resources.pids": t("fieldLabels.pidLimit"),
+    "resources.container_count": t("fieldLabels.containerCount"),
+    "resources.ephemeral_storage_bytes": t("fieldLabels.ephemeralStorage"),
+    "resources.persistent_storage_bytes": t("fieldLabels.persistentStorage"),
+    "engine_storage.mode": t("fieldLabels.dockerStoragePolicy"),
+    "engine_storage.capacity_bytes": t("fieldLabels.dockerStorageCapacity"),
+    "network_egress.mode": t("fieldLabels.networkPolicy"),
+    "network_egress.allowed_destinations": t("fieldLabels.allowedIpRanges"),
+    "network_egress.denied_destinations": t("fieldLabels.blockedIpRanges"),
+  };
+  const fieldsByLayer = Object.entries(status.governing_layers).reduce<
+    Record<string, string[]>
+  >((groups, [path, layer]) => {
+    const group = groups[layer] ?? [];
+    group.push(fieldLabels[path] ?? path);
+    groups[layer] = group;
+    return groups;
+  }, {});
 
   return (
     <Stack gap="md">
@@ -182,26 +248,43 @@ export function AgentRuntimePolicyStatus({
         </Group>
         {(status.reason_codes.length > 0 ||
           Object.keys(status.governing_layers).length > 0) && (
-          <SimpleGrid cols={{ base: 1, sm: 2 }} mt="md">
-            <Stack gap={3}>
-              <Text size="xs" fw={600} c="dimmed">
-                {t("reasonCodes")}
-              </Text>
-              <Text size="sm">
-                {status.reason_codes.join(", ") || t("none")}
-              </Text>
-            </Stack>
-            <Stack gap={3}>
-              <Text size="xs" fw={600} c="dimmed">
-                {t("governingLayers")}
-              </Text>
-              <Text size="sm">
-                {Object.entries(status.governing_layers)
-                  .map(([path, layer]) => `${path}: ${layer}`)
-                  .join(", ") || t("none")}
-              </Text>
-            </Stack>
-          </SimpleGrid>
+          <Stack gap="md" mt="md">
+            {reasonMessages.length > 0 && (
+              <Stack gap={3}>
+                <Text size="xs" fw={600} c="dimmed">
+                  {t("whyUnavailable")}
+                </Text>
+                {reasonMessages.map((message, index) => (
+                  <Text
+                    key={`${status.reason_codes[index]}-${index}`}
+                    size="sm"
+                  >
+                    {message}
+                  </Text>
+                ))}
+              </Stack>
+            )}
+            {Object.keys(fieldsByLayer).length > 0 && (
+              <Stack gap={3}>
+                <Text size="xs" fw={600} c="dimmed">
+                  {t("governingLayers")}
+                </Text>
+                {Object.entries(fieldsByLayer).map(([layer, fields]) => (
+                  <Text key={layer} size="sm">
+                    <Text component="span" fw={600}>
+                      {{
+                        profile: t("layerLabels.profile"),
+                        workspace: t("layerLabels.workspace"),
+                        agent: t("layerLabels.agent"),
+                      }[layer] ?? layer}
+                      :{" "}
+                    </Text>
+                    {fields.join(", ")}
+                  </Text>
+                ))}
+              </Stack>
+            )}
+          </Stack>
         )}
       </Paper>
       <Text fw={600}>{t("comparisonTitle")}</Text>

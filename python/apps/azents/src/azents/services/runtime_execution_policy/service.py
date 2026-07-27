@@ -1140,7 +1140,10 @@ def _validation_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
     """Return the installation capability ceiling backed by qualified Providers."""
     return RuntimeExecutionProviderCapabilities(
         supported_modules=frozenset(
-            RuntimeExecutionModuleSupport(module_id=module_id, version=1)
+            RuntimeExecutionModuleSupport(
+                module_id=module_id,
+                version=1,
+            )
             for module_id in RuntimeExecutionModuleId
         ),
         privileged_engine=True,
@@ -1153,6 +1156,7 @@ def _validation_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
         network_modes=frozenset(
             {
                 RuntimeExecutionNetworkMode.NONE,
+                RuntimeExecutionNetworkMode.RESTRICTED,
                 RuntimeExecutionNetworkMode.DIRECT,
             }
         ),

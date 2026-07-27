@@ -10,6 +10,7 @@ from azents_runtime_control.execution_policy import (
     JsonValue,
     RuntimeExecutionPolicyEnvelope,
     RuntimeExecutionPolicyEvidence,
+    canonical_effective_policy_json,
     digest_effective_policy,
 )
 from azents_runtime_control.provider import (
@@ -33,10 +34,12 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     EmptyDirVolume,
     IpBlock,
     KubernetesApi,
+    LabelSelector,
     LeaseResource,
     LocalObjectReference,
     NetworkPolicyEgressRule,
     NetworkPolicyPeer,
+    NetworkPolicyPort,
     NetworkPolicyResource,
     PersistentVolumeClaimResource,
     PersistentVolumeClaimVolume,
@@ -80,12 +83,14 @@ class FakeKubernetesApi(KubernetesApi):
         self.pods: dict[tuple[str, str], PodResource] = {}
         self.pvcs: dict[tuple[str, str], PersistentVolumeClaimResource] = {}
         self.network_policies: dict[tuple[str, str], NetworkPolicyResource] = {}
+        self.applied_pods: list[str] = []
         self.deleted_pods: list[str] = []
         self.deleted_pod_grace_periods: list[int | None] = []
         self.deleted_pvcs: list[str] = []
         self.deleted_network_policies: list[str] = []
         self.watch_events: list[PodWatchEvent] = []
         self.fail_pod_deletion = False
+        self.defer_pod_deletion = False
 
     async def get_pod(self, name: str, namespace: str) -> PodResource | None:
         """Return a Pod by name."""
@@ -93,6 +98,7 @@ class FakeKubernetesApi(KubernetesApi):
 
     async def apply_pod(self, pod: PodResource) -> None:
         """Apply a Pod."""
+        self.applied_pods.append(pod.metadata.name)
         self.pods[(pod.metadata.namespace, pod.metadata.name)] = pod
 
     async def delete_pod(
@@ -107,7 +113,8 @@ class FakeKubernetesApi(KubernetesApi):
         self.deleted_pod_grace_periods.append(grace_period_seconds)
         if self.fail_pod_deletion:
             raise RuntimeError("Pod deletion failed")
-        self.pods.pop((namespace, name), None)
+        if not self.defer_pod_deletion:
+            self.pods.pop((namespace, name), None)
 
     async def list_pods(
         self,
@@ -203,13 +210,29 @@ class FakeKubernetesApi(KubernetesApi):
         """Unused by provider tests."""
 
 
-def _provider(api: FakeKubernetesApi) -> KubernetesRuntimeProvider:
-    return _provider_with_runner_env(api, {})
+def _provider(
+    api: FakeKubernetesApi,
+    *,
+    network_hard_cap_allowed_cidrs: tuple[str, ...] = (),
+    network_hard_cap_denied_cidrs: tuple[str, ...] = (),
+    network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = (),
+) -> KubernetesRuntimeProvider:
+    return _provider_with_runner_env(
+        api,
+        {},
+        network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
+        network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
+        network_hard_cap_extra_egress=network_hard_cap_extra_egress,
+    )
 
 
 def _provider_with_runner_env(
     api: FakeKubernetesApi,
     runner_env: Mapping[str, str],
+    *,
+    network_hard_cap_allowed_cidrs: tuple[str, ...] = (),
+    network_hard_cap_denied_cidrs: tuple[str, ...] = (),
+    network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = (),
 ) -> KubernetesRuntimeProvider:
     return KubernetesRuntimeProvider(
         api,
@@ -231,6 +254,9 @@ def _provider_with_runner_env(
                 "app.kubernetes.io/component": "runtime-control",
             },
             runtime_control_port=8030,
+            network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
+            network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
+            network_hard_cap_extra_egress=network_hard_cap_extra_egress,
         ),
     )
 
@@ -339,10 +365,65 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert isinstance(workspace_volume, PersistentVolumeClaimVolume)
     assert workspace_volume.claim_name == pvc.metadata.name
     assert pvc.spec.storage_class_name == "gp3"
+    assert pvc.spec.storage_request == "20Gi"
     assert "azents/workspace-path" not in pod.metadata.labels
     assert "azents/workspace-path" not in pvc.metadata.labels
     assert pod.metadata.annotations["azents/workspace-path"] == "/workspace/agent"
     assert pvc.metadata.annotations["azents/workspace-path"] == "/workspace/agent"
+
+
+@pytest.mark.asyncio
+async def test_start_expands_pvc_but_defers_shrink_until_reset() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            desired_generation=1,
+            execution_policy=_execution_policy(
+                desired_generation=1,
+                persistent_storage_bytes=10_737_418_240,
+            ),
+        )
+    )
+    assert api.pvcs[pvc_key].spec.storage_request == "10737418240"
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            desired_generation=2,
+            execution_policy=_execution_policy(
+                desired_generation=2,
+                persistent_storage_bytes=21_474_836_480,
+            ),
+        )
+    )
+    assert api.pvcs[pvc_key].spec.storage_request == "21474836480"
+
+    shrink_policy = _execution_policy(
+        desired_generation=3,
+        persistent_storage_bytes=5_368_709_120,
+    )
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            desired_generation=3,
+            execution_policy=shrink_policy,
+        )
+    )
+    assert api.pvcs[pvc_key].spec.storage_request == "21474836480"
+
+    await provider.reset(
+        _command(
+            RuntimeLifecycleCommandType.RESET,
+            final_desired_state=RuntimeDesiredState.STOPPED,
+            desired_generation=3,
+            execution_policy=shrink_policy,
+        )
+    )
+    assert api.pvcs[pvc_key].spec.storage_request == "5368709120"
 
 
 @pytest.mark.asyncio
@@ -992,6 +1073,30 @@ async def test_restart_preserves_pvc_and_replaces_pod() -> None:
 
 
 @pytest.mark.asyncio
+async def test_restart_waits_for_asynchronous_pod_deletion_before_recreate() -> None:
+    """Restart never patches immutable fields on a terminating Pod."""
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    api.defer_pod_deletion = True
+
+    result = await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
+
+    assert result.report.observed_state is RuntimeProviderObservedState.STARTING
+    assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    assert api.applied_pods == ["azents-runtime-runtime-1"]
+
+    api.pods.pop(("azents-runtime", "azents-runtime-runtime-1"))
+    api.defer_pod_deletion = False
+    await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
+
+    assert api.applied_pods == [
+        "azents-runtime-runtime-1",
+        "azents-runtime-runtime-1",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_reset_running_deletes_and_recreates_pvc_and_pod() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
@@ -1267,6 +1372,8 @@ async def test_container_execution_policy_creates_fixed_isolated_topology() -> N
     provider = _provider(api)
     execution_policy = _execution_policy(
         image_build=True,
+        cpu_request_millicores=500,
+        memory_request_bytes=1_073_741_824,
         network_mode="restricted",
         allowed_destinations=("203.0.113.0/24",),
         denied_destinations=("203.0.113.128/25",),
@@ -1290,7 +1397,11 @@ async def test_container_execution_policy_creates_fixed_isolated_topology() -> N
     assert gateway.security_context.privileged is False
     assert gateway.security_context.read_only_root_filesystem is True
     assert gateway.resources == ContainerResources(
-        requests=None,
+        requests={
+            "cpu": "125m",
+            "memory": "268435456",
+            "ephemeral-storage": "67108864",
+        },
         limits={
             "cpu": "250m",
             "memory": "536870912",
@@ -1299,7 +1410,11 @@ async def test_container_execution_policy_creates_fixed_isolated_topology() -> N
         claims=None,
     )
     assert engine.resources == ContainerResources(
-        requests=None,
+        requests={
+            "cpu": "375m",
+            "memory": "805306368",
+            "ephemeral-storage": "10670309376",
+        },
         limits={
             "cpu": "750m",
             "memory": "1610612736",
@@ -1391,6 +1506,128 @@ async def test_container_execution_policy_creates_fixed_isolated_topology() -> N
     assert restricted_peer.ip_block.except_cidrs == ("203.0.113.128/25",)
 
 
+@pytest.mark.asyncio
+async def test_direct_network_policy_is_bounded_by_deployment_hard_cap() -> None:
+    api = FakeKubernetesApi()
+    extra_egress = NetworkPolicyEgressRule(
+        peers=(
+            NetworkPolicyPeer(
+                namespace_selector=LabelSelector(
+                    match_labels={"kubernetes.io/metadata.name": "ingress"}
+                ),
+                pod_selector=LabelSelector(
+                    match_labels={"app.kubernetes.io/name": "traefik"}
+                ),
+                ip_block=None,
+            ),
+        ),
+        ports=(NetworkPolicyPort(protocol="TCP", port="websecure"),),
+    )
+    provider = _provider(
+        api,
+        network_hard_cap_allowed_cidrs=("10.10.0.0/16",),
+        network_hard_cap_denied_cidrs=("10.0.0.0/8",),
+        network_hard_cap_extra_egress=(extra_egress,),
+    )
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            execution_policy=_execution_policy(network_mode="direct"),
+        )
+    )
+
+    network_policy = api.network_policies[
+        ("azents-runtime", "azents-runtime-runtime-1-execution")
+    ]
+    optional_rules = network_policy.spec.egress[2:]
+    ipv4 = optional_rules[0].peers[0].ip_block
+    assert ipv4 is not None
+    assert ipv4.cidr == "0.0.0.0/0"
+    assert ipv4.except_cidrs == ("10.0.0.0/8",)
+    exception = optional_rules[2].peers[0].ip_block
+    assert exception is not None
+    assert exception.cidr == "10.10.0.0/16"
+    assert optional_rules[-1] == extra_egress
+
+
+@pytest.mark.asyncio
+async def test_restricted_network_policy_intersects_deployment_hard_cap() -> None:
+    api = FakeKubernetesApi()
+    extra_egress = NetworkPolicyEgressRule(
+        peers=(
+            NetworkPolicyPeer(
+                namespace_selector=LabelSelector(
+                    match_labels={"kubernetes.io/metadata.name": "database"}
+                ),
+                pod_selector=None,
+                ip_block=None,
+            ),
+        ),
+        ports=(NetworkPolicyPort(protocol="TCP", port=5432),),
+    )
+    provider = _provider(
+        api,
+        network_hard_cap_allowed_cidrs=("10.10.0.0/16",),
+        network_hard_cap_denied_cidrs=("10.0.0.0/8",),
+        network_hard_cap_extra_egress=(extra_egress,),
+    )
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            execution_policy=_execution_policy(
+                network_mode="restricted",
+                allowed_destinations=("10.0.0.0/8",),
+                denied_destinations=("10.10.128.0/17",),
+            ),
+        )
+    )
+
+    network_policy = api.network_policies[
+        ("azents-runtime", "azents-runtime-runtime-1-execution")
+    ]
+    optional_rules = network_policy.spec.egress[2:]
+    assert len(optional_rules) == 1
+    allowed = optional_rules[0].peers[0].ip_block
+    assert allowed is not None
+    assert allowed.cidr == "10.10.0.0/16"
+    assert allowed.except_cidrs == ("10.10.128.0/17",)
+
+
+@pytest.mark.asyncio
+async def test_system_only_network_policy_does_not_add_hard_cap_egress() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(
+        api,
+        network_hard_cap_allowed_cidrs=("10.10.0.0/16",),
+        network_hard_cap_extra_egress=(
+            NetworkPolicyEgressRule(
+                peers=(
+                    NetworkPolicyPeer(
+                        namespace_selector=None,
+                        pod_selector=None,
+                        ip_block=IpBlock(cidr="203.0.113.0/24", except_cidrs=()),
+                    ),
+                ),
+                ports=(),
+            ),
+        ),
+    )
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            execution_policy=_execution_policy(network_mode="none"),
+        )
+    )
+
+    network_policy = api.network_policies[
+        ("azents-runtime", "azents-runtime-runtime-1-execution")
+    ]
+    assert len(network_policy.spec.egress) == 2
+
+
 @pytest.mark.parametrize(
     ("gateway_image", "engine_image"),
     [
@@ -1444,7 +1681,7 @@ async def test_authority_policy_rejects_mutable_runner_image_before_mutation() -
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("cpu_millicores", "memory_bytes", "ephemeral_storage_bytes"),
+    ("cpu_limit_millicores", "memory_limit_bytes", "ephemeral_storage_bytes"),
     [
         (199, 2_147_483_648, 10_737_418_240),
         (1000, 256 * 1024 * 1024, 10_737_418_240),
@@ -1452,8 +1689,8 @@ async def test_authority_policy_rejects_mutable_runner_image_before_mutation() -
     ],
 )
 async def test_authority_policy_rejects_too_small_gateway_resource_envelope(
-    cpu_millicores: int,
-    memory_bytes: int,
+    cpu_limit_millicores: int,
+    memory_limit_bytes: int,
     ephemeral_storage_bytes: int,
 ) -> None:
     api = FakeKubernetesApi()
@@ -1465,8 +1702,8 @@ async def test_authority_policy_rejects_too_small_gateway_resource_envelope(
                 RuntimeLifecycleCommandType.START,
                 execution_policy=_execution_policy(
                     image_build=True,
-                    cpu_millicores=cpu_millicores,
-                    memory_bytes=memory_bytes,
+                    cpu_limit_millicores=cpu_limit_millicores,
+                    memory_limit_bytes=memory_limit_bytes,
                     ephemeral_storage_bytes=ephemeral_storage_bytes,
                 ),
             )
@@ -1525,7 +1762,7 @@ async def test_invalid_container_execution_policy_fails_before_resource_mutation
     api = FakeKubernetesApi()
     provider = _provider(api)
 
-    with pytest.raises(ValueError, match="bounded resources"):
+    with pytest.raises(ValueError, match="ephemeral storage"):
         await provider.start(
             _command(
                 RuntimeLifecycleCommandType.START,
@@ -1570,9 +1807,12 @@ def _execution_policy(
     image_build: bool = False,
     desired_generation: int = 1,
     bounded: bool = True,
-    cpu_millicores: int = 1000,
-    memory_bytes: int = 2_147_483_648,
+    cpu_request_millicores: int | None = None,
+    cpu_limit_millicores: int = 1000,
+    memory_request_bytes: int | None = None,
+    memory_limit_bytes: int = 2_147_483_648,
     ephemeral_storage_bytes: int = 10_737_418_240,
+    persistent_storage_bytes: int | None = None,
     network_mode: str = "none",
     allowed_destinations: tuple[str, ...] = (),
     denied_destinations: tuple[str, ...] = (),
@@ -1598,13 +1838,18 @@ def _execution_policy(
         "resources": {
             "module_id": "container.resources",
             "version": 1,
-            "cpu_millicores": cpu_millicores if engine_enabled else None,
-            "memory_bytes": memory_bytes if engine_enabled else None,
+            "cpu_request_millicores": (
+                cpu_request_millicores if engine_enabled else None
+            ),
+            "cpu_limit_millicores": cpu_limit_millicores if engine_enabled else None,
+            "memory_request_bytes": (memory_request_bytes if engine_enabled else None),
+            "memory_limit_bytes": memory_limit_bytes if engine_enabled else None,
             "pids": 256 if engine_enabled else None,
             "container_count": 8 if engine_enabled else None,
             "ephemeral_storage_bytes": (
                 ephemeral_storage_bytes if engine_enabled else None
             ),
+            "persistent_storage_bytes": persistent_storage_bytes,
         },
         "engine_storage": {
             "module_id": "engine.storage",
@@ -1639,5 +1884,5 @@ def _execution_policy(
                 "agent": 1,
             },
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )

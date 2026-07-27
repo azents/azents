@@ -197,6 +197,7 @@ def _kubernetes_provider() -> RuntimeProvider:
         lifecycle_state=RuntimeProviderLifecycleState.ACTIVE,
         availability_mode=RuntimeProviderAvailabilityMode.PLATFORM_WIDE,
         accepted_contract_revision_id=None,
+        current_contract_revision_id=None,
         active_config_revision_id=None,
         admin_version=1,
         capabilities={},

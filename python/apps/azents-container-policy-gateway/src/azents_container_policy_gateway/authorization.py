@@ -353,7 +353,7 @@ def max_request_bytes(policy: RuntimeExecutionPolicy) -> int:
 def max_build_context_bytes(policy: RuntimeExecutionPolicy) -> int:
     """Return the policy-bounded local build-context size."""
     ephemeral_bound = policy.resources.ephemeral_storage_bytes
-    memory_bound = policy.resources.memory_bytes
+    memory_bound = policy.resources.memory_limit_bytes
     if ephemeral_bound is None or memory_bound is None:
         return _MAX_JSON_BODY_BYTES
     gateway_memory = min(_GATEWAY_MEMORY_MAX_BYTES, memory_bound // 4)
@@ -661,7 +661,7 @@ def _validate_body(
         body=encoded,
         required_volumes=_required_named_volumes(sanitized),
         required_networks=_required_networks(sanitized),
-        requested_pids_limit=_required_pids_limit(sanitized),
+        requested_pids_limit=_pids_limit(sanitized),
     )
 
 
@@ -891,24 +891,28 @@ def _host_config(
     _validate_resource_ceiling(
         sanitized.get("NanoCpus"),
         None
-        if policy.resources.cpu_millicores is None
-        else policy.resources.cpu_millicores * 1_000_000,
+        if policy.resources.cpu_limit_millicores is None
+        else policy.resources.cpu_limit_millicores * 1_000_000,
         "NanoCpus",
     )
     _validate_resource_ceiling(
         sanitized.get("Memory"),
-        policy.resources.memory_bytes,
+        policy.resources.memory_limit_bytes,
         "Memory",
     )
-    sanitized["PidsLimit"] = _normalized_pids_limit(
+    pids_limit = _normalized_pids_limit(
         sanitized.get("PidsLimit"),
         policy=policy,
     )
+    if pids_limit is None:
+        sanitized.pop("PidsLimit", None)
+    else:
+        sanitized["PidsLimit"] = pids_limit
     shm_size = sanitized.get("ShmSize")
     if shm_size is not None:
         _validate_resource_ceiling(
             shm_size,
-            policy.resources.memory_bytes,
+            policy.resources.memory_limit_bytes,
             "ShmSize",
         )
     mounts = sanitized.get("Mounts")
@@ -1150,7 +1154,7 @@ def _validate_resource_ceiling(
         )
     if value == 0:
         return
-    if value < 1 or ceiling is None or value > ceiling:
+    if value < 1 or (ceiling is not None and value > ceiling):
         raise GatewayAuthorizationDenied(
             "resource_limit_exceeded",
             f"{name} exceeds the execution-policy ceiling.",
@@ -1161,24 +1165,23 @@ def _normalized_pids_limit(
     value: object,
     *,
     policy: RuntimeExecutionPolicy,
-) -> int:
+) -> int | None:
     ceiling = policy.resources.pids
     container_count = policy.resources.container_count
-    if ceiling is None or container_count is None:
-        raise GatewayAuthorizationDenied(
-            "pids_limit_denied",
-            "The execution policy has no PID or container-count ceiling.",
-        )
     if value is None:
-        return max(1, ceiling // container_count)
+        if ceiling is None:
+            return None
+        return max(1, ceiling // container_count) if container_count else ceiling
     if isinstance(value, bool) or not isinstance(value, int):
         raise GatewayAuthorizationDenied(
             "resource_limit_exceeded",
             "PidsLimit exceeds the execution-policy ceiling.",
         )
     if value in {0, -1}:
-        return max(1, ceiling // container_count)
-    if value < 1 or value > ceiling:
+        if ceiling is None:
+            return None
+        return max(1, ceiling // container_count) if container_count else ceiling
+    if value < 1 or (ceiling is not None and value > ceiling):
         raise GatewayAuthorizationDenied(
             "resource_limit_exceeded",
             "PidsLimit exceeds the execution-policy ceiling.",
@@ -1384,13 +1387,13 @@ def _required_named_volumes(value: Mapping[str, object]) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _required_pids_limit(value: Mapping[str, object]) -> int:
+def _pids_limit(value: Mapping[str, object]) -> int | None:
     host_config = value.get("HostConfig")
     if not isinstance(host_config, dict):
-        raise AssertionError("validated container has no HostConfig")
+        return None
     pids_limit = host_config.get("PidsLimit")
     if isinstance(pids_limit, bool) or not isinstance(pids_limit, int):
-        raise AssertionError("validated container has no positive PidsLimit")
+        return None
     return pids_limit
 
 

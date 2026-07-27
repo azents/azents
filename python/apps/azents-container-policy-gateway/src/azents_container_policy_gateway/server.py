@@ -315,25 +315,19 @@ async def _execute_authorized(
         return await request.app[_ENGINE_EXECUTE_KEY](authorized)
     async with request.app[_CONTAINER_CREATE_LOCK_KEY]:
         ceiling = config.policy.resources.container_count
-        if ceiling is None:
-            raise GatewayAuthorizationDenied(
-                "container_count_denied",
-                "The execution policy has no container-count ceiling.",
-            )
         usage = await request.app[_ENGINE_CONTAINER_USAGE_KEY](config.runtime_id)
-        if usage.count >= ceiling:
+        if ceiling is not None and usage.count >= ceiling:
             raise GatewayAuthorizationDenied(
                 "container_count_exceeded",
                 "The execution-policy container-count ceiling has been reached.",
             )
         pids_ceiling = config.policy.resources.pids
         pids_limit = authorized.requested_pids_limit
-        if pids_ceiling is None or pids_limit is None:
-            raise GatewayAuthorizationDenied(
-                "pids_limit_denied",
-                "The execution policy has no enforceable PID ceiling.",
-            )
-        if usage.pids_limit + pids_limit > pids_ceiling:
+        if (
+            pids_ceiling is not None
+            and pids_limit is not None
+            and usage.pids_limit + pids_limit > pids_ceiling
+        ):
             raise GatewayAuthorizationDenied(
                 "pids_limit_exceeded",
                 "The execution-policy aggregate PID ceiling has been reached.",

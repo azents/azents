@@ -9,6 +9,7 @@ import {
   isRuntimeExecutionPolicySupported,
   RUNTIME_EXECUTION_STATUS_REFETCH_INTERVAL_MS,
   runtimeExecutionStatusRefetchInterval,
+  runtimePolicyReasonMessageKey,
 } from "./runtimeExecutionPresentation.ts";
 import type {
   AgentRuntimeExecutionPolicyStatusResponse,
@@ -45,11 +46,14 @@ const policy: RuntimeExecutionPolicyDocument = {
   resources: {
     module_id: "container.resources",
     version: 1,
-    cpu_millicores: null,
-    memory_bytes: null,
+    cpu_request_millicores: null,
+    cpu_limit_millicores: null,
+    memory_request_bytes: null,
+    memory_limit_bytes: null,
     pids: null,
     container_count: null,
     ephemeral_storage_bytes: null,
+    persistent_storage_bytes: null,
   },
   engine_storage: {
     module_id: "engine.storage",
@@ -215,4 +219,15 @@ void test("status polling follows wait and stops at terminal actions", () => {
     );
   }
   assert.equal(runtimeExecutionStatusRefetchInterval(), false);
+});
+
+void test("every Runtime policy reason has a visible message fallback", () => {
+  assert.equal(
+    runtimePolicyReasonMessageKey("RUNTIME_POLICY_PROVIDER_EVIDENCE_MISMATCH"),
+    "reasonExplanations.provider_evidence_mismatch",
+  );
+  assert.equal(
+    runtimePolicyReasonMessageKey("unexpected_provider_failure"),
+    "reasonExplanations.runtime_failure",
+  );
 });

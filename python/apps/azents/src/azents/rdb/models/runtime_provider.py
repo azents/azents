@@ -131,6 +131,17 @@ class RDBRuntimeProvider(RDBModel):
         nullable=True,
         default=None,
     )
+    current_contract_revision_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "runtime_provider_contract_revisions.id",
+            ondelete="RESTRICT",
+            use_alter=True,
+            name="fk_runtime_providers_current_contract_revision_id",
+        ),
+        nullable=True,
+        default=None,
+    )
     active_config_revision_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey(

@@ -32,11 +32,14 @@ export const Restricted: Story = {
       ...emptyRestriction,
       image_build: { enabled: false },
       resources: {
-        cpu_millicores: 2_000,
-        memory_bytes: 4_294_967_296,
+        cpu_request_millicores: 1_000,
+        cpu_limit_millicores: 2_000,
+        memory_request_bytes: 2_147_483_648,
+        memory_limit_bytes: 4_294_967_296,
         pids: 512,
         container_count: 8,
         ephemeral_storage_bytes: 10_737_418_240,
+        persistent_storage_bytes: 21_474_836_480,
       },
       network_egress: {
         mode: "restricted",

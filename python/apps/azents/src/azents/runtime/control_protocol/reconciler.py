@@ -1,6 +1,7 @@
 """Agent Runtime desired-state reconciliation."""
 
 import dataclasses
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -99,11 +100,6 @@ class RuntimeLifecycleReconciler:
     async def reconcile_once(self, *, limit: int = _DEFAULT_LIMIT) -> int:
         """Dispatch one batch of pending lifecycle commands."""
         async with self._session_manager() as session:
-            timed_out = await self._runtime_repository.mark_start_timeouts(
-                session,
-                stale_threshold=self._config.start_timeout,
-                limit=limit,
-            )
             runtimes = (
                 await self._runtime_repository.find_lifecycle_dispatch_candidates(
                     session,
@@ -119,14 +115,6 @@ class RuntimeLifecycleReconciler:
                 )
             )
 
-        if timed_out:
-            _LOGGER.warning(
-                "Runtime lifecycle start timed out",
-                extra={
-                    "count": len(timed_out),
-                    "start_timeout_seconds": self._config.start_timeout.total_seconds(),
-                },
-            )
         dispatched = 0
         for runtime in runtimes:
             if await self._dispatch_runtime(runtime):
@@ -137,6 +125,27 @@ class RuntimeLifecycleReconciler:
                 continue
             if await self._dispatch_periodic_reconcile(runtime):
                 dispatched += 1
+
+        # A persisted CONNECTED flag can outlive the Control process that owned the
+        # actual Provider stream. Give the current coordination registry a chance to
+        # refresh that cache (or dispatch and refresh the start timer) before turning
+        # an old start attempt into a terminal timeout.
+        async with self._session_manager() as session:
+            timed_out = await self._runtime_repository.mark_start_timeouts(
+                session,
+                stale_threshold=self._config.start_timeout,
+                limit=limit,
+            )
+        if timed_out:
+            _LOGGER.warning(
+                "Runtime lifecycle start timed out",
+                extra={
+                    "count": len(timed_out),
+                    "start_timeout_seconds": (
+                        self._config.start_timeout.total_seconds()
+                    ),
+                },
+            )
         return dispatched
 
     async def _dispatch_runtime(self, runtime: AgentRuntime) -> bool:
@@ -354,11 +363,11 @@ class RuntimeLifecycleReconciler:
             raise ValueError("Runtime execution-policy Provider binding is invalid.")
         if snapshot.target_desired_generation != runtime.desired_generation:
             raise ValueError("Runtime execution-policy target generation is stale.")
-        if snapshot.resolved_execution_policy is None:
+        if snapshot.resolved_execution_policy_json is None:
             raise ValueError("Runtime execution-policy target document is missing.")
         envelope = RuntimeExecutionPolicyEnvelope(
             evidence=_snapshot_policy_evidence(snapshot),
-            effective_policy=snapshot.resolved_execution_policy,
+            effective_policy_json=snapshot.resolved_execution_policy_json,
         )
         parse_execution_policy_envelope(
             envelope,
@@ -417,12 +426,15 @@ def _snapshot_policy_evidence(
     }
     if (
         snapshot.execution_target_digest is None
-        or snapshot.resolved_execution_policy is None
+        or snapshot.resolved_execution_policy_json is None
         or any(version is None for version in source_versions.values())
     ):
         raise ValueError("Runtime execution-policy snapshot evidence is incomplete.")
     module_versions: dict[str, int] = {}
-    for value in snapshot.resolved_execution_policy.values():
+    policy = json.loads(snapshot.resolved_execution_policy_json)
+    if not isinstance(policy, dict):
+        raise ValueError("Runtime execution-policy snapshot must contain an object.")
+    for value in policy.values():
         if not isinstance(value, dict):
             continue
         module_id = value.get("module_id")

@@ -834,11 +834,9 @@ def _provider_command(
     command.execution_policy.evidence.source_versions.update(
         _required_int_mapping(execution_policy, "source_versions")
     )
-    command.execution_policy.effective_policy.update(
-        cast(
-            dict[str, object],
-            _required_mapping(execution_policy, "effective_policy"),
-        )
+    command.execution_policy.effective_policy_json = _required_string(
+        execution_policy,
+        "effective_policy_json",
     )
     if envelope.deadline_at is not None:
         command.deadline_at.CopyFrom(deadline)

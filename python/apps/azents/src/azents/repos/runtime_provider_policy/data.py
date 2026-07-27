@@ -120,7 +120,7 @@ class RuntimePolicySnapshot:
     execution_profile_version: int | None
     execution_workspace_version: int | None
     execution_agent_version: int | None
-    resolved_execution_policy: dict[str, Any] | None
+    resolved_execution_policy_json: str | None
     execution_source_trace: dict[str, Any] | None
     execution_provider_compatibility: dict[str, Any] | None
     execution_target_digest: str | None
@@ -151,7 +151,7 @@ class RuntimePolicySnapshotCreate:
     execution_profile_version: int | None
     execution_workspace_version: int | None
     execution_agent_version: int | None
-    resolved_execution_policy: dict[str, Any] | None
+    resolved_execution_policy_json: str | None
     execution_source_trace: dict[str, Any] | None
     execution_provider_compatibility: dict[str, Any] | None
     execution_target_digest: str | None

@@ -14,11 +14,14 @@ import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
 const resourceRestrictionSchema = z.object({
-  cpu_millicores: z.number().int().nonnegative().nullable(),
-  memory_bytes: z.number().int().nonnegative().nullable(),
-  pids: z.number().int().nonnegative().nullable(),
-  container_count: z.number().int().nonnegative().nullable(),
-  ephemeral_storage_bytes: z.number().int().nonnegative().nullable(),
+  cpu_request_millicores: z.number().int().positive().nullable(),
+  cpu_limit_millicores: z.number().int().positive().nullable(),
+  memory_request_bytes: z.number().int().positive().nullable(),
+  memory_limit_bytes: z.number().int().positive().nullable(),
+  pids: z.number().int().positive().nullable(),
+  container_count: z.number().int().positive().nullable(),
+  ephemeral_storage_bytes: z.number().int().positive().nullable(),
+  persistent_storage_bytes: z.number().int().positive().nullable(),
 });
 
 const restrictionSchema = z.object({
@@ -30,7 +33,7 @@ const restrictionSchema = z.object({
   engine_storage: z
     .object({
       mode: z.enum(["none", "ephemeral", "persistent"]).nullable(),
-      capacity_bytes: z.number().int().nonnegative().nullable(),
+      capacity_bytes: z.number().int().positive().nullable(),
     })
     .nullable(),
   network_egress: z

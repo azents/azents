@@ -10,6 +10,7 @@ from azents_runtime_control.execution_policy import (
     RuntimeExecutionPolicyEnvelope,
     RuntimeExecutionPolicyEvidence,
     RuntimeExecutionStorageMode,
+    canonical_effective_policy_json,
     digest_effective_policy,
     parse_execution_policy_envelope,
     validate_standard_execution_policy_envelope,
@@ -37,11 +38,14 @@ def _policy(*, image_build: bool = False) -> dict[str, JsonValue]:
         "resources": {
             "module_id": "container.resources",
             "version": 1,
-            "cpu_millicores": None,
-            "memory_bytes": None,
+            "cpu_request_millicores": None,
+            "cpu_limit_millicores": None,
+            "memory_request_bytes": None,
+            "memory_limit_bytes": None,
             "pids": None,
             "container_count": None,
             "ephemeral_storage_bytes": None,
+            "persistent_storage_bytes": None,
         },
         "engine_storage": {
             "module_id": "engine.storage",
@@ -68,8 +72,10 @@ def _envelope(*, image_build: bool = False) -> RuntimeExecutionPolicyEnvelope:
         assert isinstance(storage, dict)
         resources.update(
             {
-                "cpu_millicores": 1000,
-                "memory_bytes": 2_147_483_648,
+                "cpu_request_millicores": 500,
+                "cpu_limit_millicores": 1000,
+                "memory_request_bytes": 1_073_741_824,
+                "memory_limit_bytes": 2_147_483_648,
                 "pids": 256,
                 "container_count": 8,
                 "ephemeral_storage_bytes": 10_737_418_240,
@@ -95,7 +101,7 @@ def _envelope(*, image_build: bool = False) -> RuntimeExecutionPolicyEnvelope:
                 "agent": 4,
             },
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
 
@@ -124,7 +130,7 @@ def test_digest_mismatch_is_rejected() -> None:
             module_versions=envelope.evidence.module_versions,
             source_versions=envelope.evidence.source_versions,
         ),
-        effective_policy=envelope.effective_policy,
+        effective_policy_json=envelope.effective_policy_json,
     )
     with pytest.raises(ValueError, match="digest does not match"):
         validate_standard_execution_policy_envelope(
@@ -154,7 +160,7 @@ def test_module_version_evidence_mismatch_is_rejected() -> None:
             },
             source_versions=envelope.evidence.source_versions,
         ),
-        effective_policy=envelope.effective_policy,
+        effective_policy_json=envelope.effective_policy_json,
     )
 
     with pytest.raises(ValueError, match="module evidence does not match"):
@@ -174,8 +180,10 @@ def test_authority_bearing_policy_parses_as_typed_contract() -> None:
     assert isinstance(network, dict)
     resources.update(
         {
-            "cpu_millicores": 1000,
-            "memory_bytes": 2_147_483_648,
+            "cpu_request_millicores": 500,
+            "cpu_limit_millicores": 1000,
+            "memory_request_bytes": 1_073_741_824,
+            "memory_limit_bytes": 2_147_483_648,
             "pids": 256,
             "container_count": 8,
             "ephemeral_storage_bytes": 10_737_418_240,
@@ -193,7 +201,7 @@ def test_authority_bearing_policy_parses_as_typed_contract() -> None:
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
     parsed = parse_execution_policy_envelope(envelope, desired_generation=3)
@@ -214,24 +222,24 @@ def test_removed_proxy_network_mode_is_rejected() -> None:
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
     with pytest.raises(ValueError, match="network mode is invalid"):
         parse_execution_policy_envelope(envelope, desired_generation=3)
 
 
-def test_engine_policy_requires_complete_resource_bounds() -> None:
+def test_engine_policy_requires_ephemeral_storage() -> None:
     policy = _policy(image_build=True)
     envelope = RuntimeExecutionPolicyEnvelope(
         evidence=dataclasses.replace(
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
-    with pytest.raises(ValueError, match="bounded resources"):
+    with pytest.raises(ValueError, match="ephemeral storage"):
         parse_execution_policy_envelope(
             envelope,
             desired_generation=3,
@@ -248,7 +256,7 @@ def test_unknown_module_field_is_rejected() -> None:
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
     with pytest.raises(ValueError, match="module evidence is invalid"):
@@ -263,7 +271,7 @@ def test_boolean_schema_version_is_rejected() -> None:
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
     with pytest.raises(ValueError, match="document shape is invalid"):

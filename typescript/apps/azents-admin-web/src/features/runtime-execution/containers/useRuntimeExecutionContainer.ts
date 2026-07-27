@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { serializers, useQueryState } from "@/hooks/use-query-state";
 import { trpc } from "@/trpc/client";
-import { getRuntimeExecutionPolicyIssue } from "../runtimeExecutionPresentation";
+import {
+  getRuntimeExecutionPolicyIssue,
+  withRuntimeExecutionDockerDefaults,
+} from "../runtimeExecutionPresentation";
 import type {
   RuntimeExecutionPageContentProps,
   RuntimeExecutionProfileDraft,
@@ -35,7 +38,7 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
         id: selectedProfile.id,
         displayName: selectedProfile.display_name,
         description: selectedProfile.description,
-        policy: selectedProfile.policy,
+        policy: withRuntimeExecutionDockerDefaults(selectedProfile.policy),
         expectedVersion: selectedProfile.version,
         reserved: selectedProfile.reserved,
       });
@@ -49,9 +52,9 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
     ]);
   };
   const createProfile = trpc.runtimeExecution.createProfile.useMutation({
-    onSuccess: async (profile) => {
+    onSuccess: async () => {
       setProfileModalOpened(false);
-      setSelectedProfileId(profile.id);
+      setSelectedProfileId(null);
       setActionError(null);
       await invalidateAll();
     },
@@ -59,6 +62,7 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
   });
   const replaceProfile = trpc.runtimeExecution.replaceProfile.useMutation({
     onSuccess: async () => {
+      setSelectedProfileId(null);
       setActionError(null);
       await invalidateAll();
     },
@@ -111,7 +115,7 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
         id: "",
         displayName: "",
         description: "",
-        policy: templatePolicy,
+        policy: withRuntimeExecutionDockerDefaults(templatePolicy),
         expectedVersion: null,
         reserved: false,
       });
@@ -125,7 +129,7 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
           id: selectedProfile.id,
           displayName: selectedProfile.display_name,
           description: selectedProfile.description,
-          policy: selectedProfile.policy,
+          policy: withRuntimeExecutionDockerDefaults(selectedProfile.policy),
           expectedVersion: selectedProfile.version,
           reserved: selectedProfile.reserved,
         });

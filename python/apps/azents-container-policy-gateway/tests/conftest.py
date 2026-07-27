@@ -12,6 +12,7 @@ from azents_runtime_control.execution_policy import (
     RuntimeExecutionPolicy,
     RuntimeExecutionPolicyEnvelope,
     RuntimeExecutionPolicyEvidence,
+    canonical_effective_policy_json,
     digest_effective_policy,
     parse_execution_policy_envelope,
 )
@@ -24,6 +25,7 @@ def policy_document(
     image_build: bool = False,
     container_run: bool = False,
     compose: bool = False,
+    bounded_nested_containers: bool = True,
 ) -> dict[str, JsonValue]:
     """Return one complete policy document."""
     engine = image_build or container_run
@@ -47,11 +49,14 @@ def policy_document(
         "resources": {
             "module_id": "container.resources",
             "version": 1,
-            "cpu_millicores": 1000 if engine else None,
-            "memory_bytes": 2_147_483_648 if engine else None,
-            "pids": 256 if engine else None,
-            "container_count": 8 if engine else None,
+            "cpu_request_millicores": None,
+            "cpu_limit_millicores": 1000 if engine else None,
+            "memory_request_bytes": None,
+            "memory_limit_bytes": 2_147_483_648 if engine else None,
+            "pids": 256 if engine and bounded_nested_containers else None,
+            "container_count": (8 if engine and bounded_nested_containers else None),
             "ephemeral_storage_bytes": 10_737_418_240 if engine else None,
+            "persistent_storage_bytes": None,
         },
         "engine_storage": {
             "module_id": "engine.storage",
@@ -74,12 +79,14 @@ def policy(
     image_build: bool = False,
     container_run: bool = False,
     compose: bool = False,
+    bounded_nested_containers: bool = True,
 ) -> RuntimeExecutionPolicy:
     """Return one parsed policy."""
     document = policy_document(
         image_build=image_build,
         container_run=container_run,
         compose=compose,
+        bounded_nested_containers=bounded_nested_containers,
     )
     envelope = RuntimeExecutionPolicyEnvelope(
         evidence=RuntimeExecutionPolicyEvidence(
@@ -100,7 +107,7 @@ def policy(
                 "agent": 1,
             },
         ),
-        effective_policy=document,
+        effective_policy_json=canonical_effective_policy_json(document),
     )
     return parse_execution_policy_envelope(envelope, desired_generation=3)
 
@@ -110,12 +117,14 @@ def gateway_env(
     image_build: bool = False,
     container_run: bool = False,
     compose: bool = False,
+    bounded_nested_containers: bool = True,
 ) -> dict[str, str]:
     """Return complete gateway environment values."""
     document = policy_document(
         image_build=image_build,
         container_run=container_run,
         compose=compose,
+        bounded_nested_containers=bounded_nested_containers,
     )
     return {
         "AZ_RUNTIME_ID": "runtime-1",
@@ -139,7 +148,9 @@ def gateway_env(
                 "agent": 1,
             }
         ),
-        "AZ_RUNTIME_EXECUTION_POLICY_DOCUMENT": json.dumps(document),
+        "AZ_RUNTIME_EXECUTION_POLICY_DOCUMENT": canonical_effective_policy_json(
+            document
+        ),
         "AZ_RUNTIME_GATEWAY_LISTEN_SOCKET": "/tmp/gateway.sock",
         "AZ_RUNTIME_GATEWAY_ENGINE_SOCKET": "/tmp/engine.sock",
     }

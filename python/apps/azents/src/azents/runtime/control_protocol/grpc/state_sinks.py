@@ -204,6 +204,8 @@ class RuntimeRunnerStateRepositorySink:
                     failure=None,
                 )
                 return
+            if report.execution_policy.desired_generation != runtime.desired_generation:
+                return
             failure = _workspace_failure(
                 provider_workspace_path=runtime.workspace_path,
                 runner_workspace_path=report.workspace_path,

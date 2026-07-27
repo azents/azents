@@ -26,6 +26,7 @@ from azents.core.runtime_execution_policy import (
     classify_runtime_execution_change,
     digest_runtime_execution_policy,
     empty_runtime_execution_restriction,
+    meet_runtime_execution_policies,
     resolve_runtime_execution_policy,
     standard_runtime_execution_policy,
     validate_runtime_execution_restriction,
@@ -37,11 +38,14 @@ def _policy(
     image_build: bool = True,
     container_run: bool = True,
     compose: bool = True,
-    cpu_millicores: int = 2_000,
-    memory_bytes: int = 4_000,
+    cpu_request_millicores: int | None = None,
+    cpu_limit_millicores: int = 2_000,
+    memory_request_bytes: int | None = None,
+    memory_limit_bytes: int = 4_000,
     pids: int = 256,
     container_count: int = 10,
     ephemeral_storage_bytes: int = 8_000,
+    persistent_storage_bytes: int | None = 20_000,
     storage_mode: RuntimeExecutionStorageMode = RuntimeExecutionStorageMode.PERSISTENT,
     storage_capacity: int = 10_000,
     network_mode: RuntimeExecutionNetworkMode = RuntimeExecutionNetworkMode.DIRECT,
@@ -68,11 +72,14 @@ def _policy(
         resources=RuntimeExecutionResourceModule(
             module_id=RuntimeExecutionModuleId.RESOURCES,
             version=1,
-            cpu_millicores=cpu_millicores,
-            memory_bytes=memory_bytes,
+            cpu_request_millicores=cpu_request_millicores,
+            cpu_limit_millicores=cpu_limit_millicores,
+            memory_request_bytes=memory_request_bytes,
+            memory_limit_bytes=memory_limit_bytes,
             pids=pids,
             container_count=container_count,
             ephemeral_storage_bytes=ephemeral_storage_bytes,
+            persistent_storage_bytes=persistent_storage_bytes,
         ),
         engine_storage=RuntimeExecutionStorageModule(
             module_id=RuntimeExecutionModuleId.ENGINE_STORAGE,
@@ -97,7 +104,10 @@ def _policy(
 def _provider() -> RuntimeExecutionProviderCapabilities:
     return RuntimeExecutionProviderCapabilities(
         supported_modules=frozenset(
-            RuntimeExecutionModuleSupport(module_id=module_id, version=1)
+            RuntimeExecutionModuleSupport(
+                module_id=module_id,
+                version=1,
+            )
             for module_id in RuntimeExecutionModuleId
         ),
         privileged_engine=True,
@@ -158,11 +168,14 @@ def test_resolver_applies_monotone_operators_and_explains_sources() -> None:
         container_run=None,
         compose=RuntimeExecutionBooleanRestriction(enabled=False),
         resources=RuntimeExecutionResourceRestriction(
-            cpu_millicores=1_000,
-            memory_bytes=None,
+            cpu_request_millicores=None,
+            cpu_limit_millicores=1_000,
+            memory_request_bytes=None,
+            memory_limit_bytes=None,
             pids=128,
             container_count=None,
             ephemeral_storage_bytes=None,
+            persistent_storage_bytes=None,
         ),
         engine_storage=RuntimeExecutionStorageRestriction(
             mode=RuntimeExecutionStorageMode.EPHEMERAL,
@@ -180,11 +193,14 @@ def test_resolver_applies_monotone_operators_and_explains_sources() -> None:
         container_run=None,
         compose=None,
         resources=RuntimeExecutionResourceRestriction(
-            cpu_millicores=500,
-            memory_bytes=None,
+            cpu_request_millicores=None,
+            cpu_limit_millicores=500,
+            memory_request_bytes=None,
+            memory_limit_bytes=None,
             pids=None,
             container_count=4,
             ephemeral_storage_bytes=None,
+            persistent_storage_bytes=None,
         ),
         engine_storage=None,
         network_egress=RuntimeExecutionNetworkRestriction(
@@ -207,7 +223,7 @@ def test_resolver_applies_monotone_operators_and_explains_sources() -> None:
 
     assert result.available is True
     assert result.effective_policy.compose.enabled is False
-    assert result.effective_policy.resources.cpu_millicores == 500
+    assert result.effective_policy.resources.cpu_limit_millicores == 500
     assert result.effective_policy.resources.pids == 128
     assert result.effective_policy.resources.container_count == 4
     assert (
@@ -222,27 +238,30 @@ def test_resolver_applies_monotone_operators_and_explains_sources() -> None:
         {"metadata", "blocked", "agent-deny"}
     )
     assert (
-        result.governing_layers["resources.cpu_millicores"]
+        result.governing_layers["resources.cpu_limit_millicores"]
         is RuntimeExecutionPolicyLayer.AGENT
     )
 
 
 def test_lower_layer_expansion_is_rejected_with_governing_path() -> None:
     """A numeric or network expansion cannot be represented as authority."""
-    with pytest.raises(ValueError, match="resources.cpu_millicores"):
+    with pytest.raises(ValueError, match="resources.cpu_limit_millicores"):
         validate_runtime_execution_restriction(
-            _policy(cpu_millicores=1_000),
+            _policy(cpu_limit_millicores=1_000),
             RuntimeExecutionPolicyRestriction(
                 schema_version=1,
                 image_build=None,
                 container_run=None,
                 compose=None,
                 resources=RuntimeExecutionResourceRestriction(
-                    cpu_millicores=2_000,
-                    memory_bytes=None,
+                    cpu_request_millicores=None,
+                    cpu_limit_millicores=2_000,
+                    memory_request_bytes=None,
+                    memory_limit_bytes=None,
                     pids=None,
                     container_count=None,
                     ephemeral_storage_bytes=None,
+                    persistent_storage_bytes=None,
                 ),
                 engine_storage=None,
                 network_egress=None,
@@ -375,14 +394,14 @@ def test_retired_or_disallowed_profile_remains_selected_but_unavailable() -> Non
 
 def test_change_classification_distinguishes_restriction_expansion_and_mixed() -> None:
     """Direction derives from canonical fields instead of UI heuristics."""
-    baseline = _policy(compose=False, cpu_millicores=1_000)
+    baseline = _policy(compose=False, cpu_limit_millicores=1_000)
     restrictive = _policy(
         image_build=False,
         compose=False,
-        cpu_millicores=500,
+        cpu_limit_millicores=500,
     )
-    expanding = _policy(compose=True, cpu_millicores=2_000)
-    mixed = _policy(image_build=False, compose=True, cpu_millicores=2_000)
+    expanding = _policy(compose=True, cpu_limit_millicores=2_000)
+    mixed = _policy(image_build=False, compose=True, cpu_limit_millicores=2_000)
 
     assert (
         classify_runtime_execution_change(baseline, restrictive).direction
@@ -395,4 +414,66 @@ def test_change_classification_distinguishes_restriction_expansion_and_mixed() -
     assert (
         classify_runtime_execution_change(baseline, mixed).direction
         is RuntimeExecutionChangeDirection.MIXED
+    )
+
+
+def test_policy_meet_preserves_valid_storage_module() -> None:
+    """Storage mode and capacity narrow as one valid authority module."""
+    disabled = _policy(
+        storage_mode=RuntimeExecutionStorageMode.NONE,
+        network_mode=RuntimeExecutionNetworkMode.DIRECT,
+    )
+    ephemeral = _policy(
+        storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+        storage_capacity=17_179_869_184,
+        network_mode=RuntimeExecutionNetworkMode.DIRECT,
+    )
+
+    result = meet_runtime_execution_policies(disabled, ephemeral)
+
+    assert result.engine_storage.mode is RuntimeExecutionStorageMode.NONE
+    assert result.engine_storage.capacity_bytes is None
+
+
+def test_policy_meet_intersects_restricted_network_authority() -> None:
+    """Direct authority behaves as the universe while restrictions intersect."""
+    direct = _policy(
+        network_mode=RuntimeExecutionNetworkMode.DIRECT,
+        denied=frozenset({"metadata"}),
+    )
+    restricted = _policy(
+        network_mode=RuntimeExecutionNetworkMode.RESTRICTED,
+        allowed=frozenset({"public", "registry"}),
+        denied=frozenset({"private"}),
+    )
+
+    result = meet_runtime_execution_policies(direct, restricted)
+
+    assert result.network_egress.mode is RuntimeExecutionNetworkMode.RESTRICTED
+    assert result.network_egress.allowed_destinations == frozenset(
+        {"public", "registry"}
+    )
+    assert result.network_egress.denied_destinations == frozenset(
+        {"metadata", "private"}
+    )
+
+
+def test_policy_meet_intersects_two_network_allowlists() -> None:
+    """Two restricted policies retain only destinations allowed by both."""
+    left = _policy(
+        network_mode=RuntimeExecutionNetworkMode.RESTRICTED,
+        allowed=frozenset({"public", "registry"}),
+        denied=frozenset({"metadata"}),
+    )
+    right = _policy(
+        network_mode=RuntimeExecutionNetworkMode.RESTRICTED,
+        allowed=frozenset({"registry", "packages"}),
+        denied=frozenset({"private"}),
+    )
+
+    result = meet_runtime_execution_policies(left, right)
+
+    assert result.network_egress.allowed_destinations == frozenset({"registry"})
+    assert result.network_egress.denied_destinations == frozenset(
+        {"metadata", "private"}
     )

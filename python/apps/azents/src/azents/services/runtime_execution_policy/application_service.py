@@ -21,7 +21,6 @@ from azents.core.runtime_execution_policy import (
     JsonValue,
     RuntimeExecutionAuditEventType,
     RuntimeExecutionChangeDirection,
-    RuntimeExecutionChangeSummary,
     RuntimeExecutionManagementLayer,
     RuntimeExecutionModuleId,
     RuntimeExecutionNetworkMode,
@@ -34,9 +33,10 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionResolution,
     RuntimeExecutionSourceVersions,
     RuntimeExecutionStorageMode,
-    canonical_runtime_execution_policy,
+    canonical_runtime_execution_policy_json,
     digest_runtime_execution_policy,
     empty_runtime_execution_restriction,
+    meet_runtime_execution_policies,
     resolve_runtime_execution_policy,
 )
 from azents.core.runtime_provider_contract import (
@@ -357,9 +357,9 @@ class RuntimeExecutionPolicyApplicationService:
         provider_compatibility = resolved.provider_compatibility
 
         next_generation = resolved.runtime.desired_generation + 1
-        canonical_policy = canonical_runtime_execution_policy(effective_policy)
-        if not isinstance(canonical_policy, dict):
-            raise AssertionError("Canonical execution policy must be an object.")
+        canonical_policy_json = canonical_runtime_execution_policy_json(
+            effective_policy
+        )
         execution_digest = digest_runtime_execution_policy(effective_policy)
         snapshot = await self.snapshot_repository.create_and_advance_target_snapshot(
             session,
@@ -374,7 +374,7 @@ class RuntimeExecutionPolicyApplicationService:
                 execution_profile_version=source_versions.profile,
                 execution_workspace_version=source_versions.workspace,
                 execution_agent_version=source_versions.agent,
-                resolved_execution_policy=canonical_policy,
+                resolved_execution_policy_json=canonical_policy_json,
                 execution_source_trace=execution_source_trace,
                 execution_provider_compatibility=provider_compatibility,
                 execution_target_digest=execution_digest,
@@ -464,28 +464,28 @@ class RuntimeExecutionPolicyApplicationService:
                 )
                 return "stopped"
 
-            direction = resolved.resolution.change.direction
-            if direction in {
-                RuntimeExecutionChangeDirection.METADATA_ONLY,
-                RuntimeExecutionChangeDirection.AUTHORITY_EXPANDING,
-            }:
-                return (
-                    "pending_expansion"
-                    if direction is RuntimeExecutionChangeDirection.AUTHORITY_EXPANDING
-                    else "unchanged"
-                )
             applied_policy = _snapshot_policy(resolved.applied_snapshot)
             if applied_policy is None:
-                applied_policy = resolved.resolution.effective_policy
-            effective_policy = (
-                resolved.resolution.effective_policy
-                if direction is RuntimeExecutionChangeDirection.RESTRICTIVE
-                else _restrictive_projection(
-                    applied_policy,
-                    resolved.resolution.effective_policy,
-                    resolved.resolution.change,
+                return (
+                    "pending_expansion"
+                    if resolved.resolution.change.direction
+                    is not RuntimeExecutionChangeDirection.METADATA_ONLY
+                    else "unchanged"
                 )
+            effective_policy = _restrictive_projection(
+                applied_policy,
+                resolved.resolution.effective_policy,
             )
+            if digest_runtime_execution_policy(
+                effective_policy
+            ) == digest_runtime_execution_policy(applied_policy):
+                return (
+                    "pending_expansion"
+                    if resolved.resolution.digest
+                    != digest_runtime_execution_policy(applied_policy)
+                    else "unchanged"
+                )
+            direction = resolved.resolution.change.direction
             result = await self._target_resolution(
                 session,
                 resolved=resolved,
@@ -713,9 +713,9 @@ class RuntimeExecutionPolicyApplicationService:
             if runtime.desired_state is RuntimeDesiredState.RUNNING
             else RuntimeLifecycleCommandType.STOP
         )
-        canonical_policy = canonical_runtime_execution_policy(effective_policy)
-        if not isinstance(canonical_policy, dict):
-            raise AssertionError("Canonical execution policy must be an object.")
+        canonical_policy_json = canonical_runtime_execution_policy_json(
+            effective_policy
+        )
         snapshot = await self.snapshot_repository.create_and_advance_target_snapshot(
             session,
             create=RuntimePolicySnapshotCreate(
@@ -729,7 +729,7 @@ class RuntimeExecutionPolicyApplicationService:
                 execution_profile_version=source_versions.profile,
                 execution_workspace_version=source_versions.workspace,
                 execution_agent_version=source_versions.agent,
-                resolved_execution_policy=canonical_policy,
+                resolved_execution_policy_json=canonical_policy_json,
                 execution_source_trace={
                     "governing_layers": {
                         path: layer.value
@@ -886,10 +886,7 @@ def _build_status_projection(
         desired_generation=runtime.desired_generation,
     )
     if not configured_matches_target:
-        automatic = (
-            resolution.change.direction is RuntimeExecutionChangeDirection.RESTRICTIVE
-            and _automatic_convergence_source_allowed(resolved)
-        )
+        automatic = _has_automatic_restriction(resolved)
         return RuntimeExecutionPolicyStatusProjection(
             status=(
                 RuntimeExecutionPolicyStatus.PENDING
@@ -963,11 +960,6 @@ def _divergence_reasons(resolved: _ResolvedRuntimePolicy) -> tuple[str, ...]:
     if runtime.applied_runtime_policy_snapshot_id is not None:
         if applied is None:
             reasons.append("applied_snapshot_missing")
-        elif (
-            applied.application_state
-            is not RuntimePolicySnapshotApplicationState.APPLIED
-        ):
-            reasons.append("applied_snapshot_unverified")
     if (
         target.application_state is RuntimePolicySnapshotApplicationState.APPLIED
         and runtime.applied_runtime_policy_snapshot_id != target.id
@@ -1030,10 +1022,10 @@ def _capability_summaries(
 def _snapshot_policy(
     snapshot: RuntimePolicySnapshot | None,
 ) -> RuntimeExecutionPolicyDocument | None:
-    if snapshot is None or snapshot.resolved_execution_policy is None:
+    if snapshot is None or snapshot.resolved_execution_policy_json is None:
         return None
-    return RuntimeExecutionPolicyDocument.model_validate(
-        snapshot.resolved_execution_policy
+    return RuntimeExecutionPolicyDocument.model_validate_json(
+        snapshot.resolved_execution_policy_json
     )
 
 
@@ -1122,35 +1114,27 @@ def _automatic_convergence_source_allowed(
     return target.execution_agent_version == source_versions.agent
 
 
+def _has_automatic_restriction(resolved: _ResolvedRuntimePolicy) -> bool:
+    """Report whether the current intent contains authority that must be removed."""
+    applied_policy = _snapshot_policy(resolved.applied_snapshot)
+    return (
+        applied_policy is not None
+        and _automatic_convergence_source_allowed(resolved)
+        and digest_runtime_execution_policy(
+            _restrictive_projection(
+                applied_policy,
+                resolved.resolution.effective_policy,
+            )
+        )
+        != digest_runtime_execution_policy(applied_policy)
+    )
+
+
 def _restrictive_projection(
     applied: RuntimeExecutionPolicyDocument,
     current: RuntimeExecutionPolicyDocument,
-    change: RuntimeExecutionChangeSummary,
 ) -> RuntimeExecutionPolicyDocument:
-    projected = canonical_runtime_execution_policy(applied)
-    current_values = canonical_runtime_execution_policy(current)
-    if not isinstance(projected, dict) or not isinstance(current_values, dict):
-        raise AssertionError("Canonical execution policies must be objects.")
-    for field in change.fields:
-        if field.direction is RuntimeExecutionChangeDirection.RESTRICTIVE:
-            _copy_path(projected, current_values, field.path.split("."))
-    return RuntimeExecutionPolicyDocument.model_validate(projected)
-
-
-def _copy_path(
-    target: dict[str, JsonValue],
-    source: dict[str, JsonValue],
-    path: list[str],
-) -> None:
-    key = path[0]
-    if len(path) == 1:
-        target[key] = source[key]
-        return
-    target_child = target.get(key)
-    source_child = source.get(key)
-    if not isinstance(target_child, dict) or not isinstance(source_child, dict):
-        raise ValueError("Execution-policy change path is invalid.")
-    _copy_path(target_child, source_child, path[1:])
+    return meet_runtime_execution_policies(applied, current)
 
 
 def _snapshot_digest(

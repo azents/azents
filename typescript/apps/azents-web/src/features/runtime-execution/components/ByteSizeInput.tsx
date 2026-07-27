@@ -14,9 +14,9 @@ import type { ByteSizeUnit } from "../byteSize";
 interface ByteSizeInputProps {
   label: string;
   description?: string;
+  unitLabel: string;
   value: number | null;
   disabled: boolean;
-  required?: boolean;
   placeholder?: string;
   onChange: (value: number | null) => void;
 }
@@ -24,9 +24,9 @@ interface ByteSizeInputProps {
 export function ByteSizeInput({
   label,
   description,
+  unitLabel,
   value,
   disabled,
-  required = false,
   placeholder,
   onChange,
 }: ByteSizeInputProps): React.ReactElement {
@@ -47,14 +47,13 @@ export function ByteSizeInput({
           placeholder={placeholder}
           min={bytesInUnit(1, unit)}
           decimalScale={unit === "B" ? 0 : 10}
-          withAsterisk={required}
           disabled={disabled}
           onChange={(nextValue) => onChange(unitValueInBytes(nextValue, unit))}
         />
       </Grid.Col>
       <Grid.Col span={4}>
         <Select
-          label="Unit"
+          label={unitLabel}
           data={[...BYTE_SIZE_UNITS]}
           value={unit}
           allowDeselect={false}

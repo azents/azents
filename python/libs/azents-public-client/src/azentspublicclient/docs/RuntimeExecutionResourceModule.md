@@ -1,6 +1,6 @@
 # RuntimeExecutionResourceModule
 
-Aggregate Runtime and nested-workload resource ceilings.
+Kubernetes resources and nested-workload resource ceilings.
 
 ## Properties
 
@@ -8,11 +8,14 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **module_id** | **str** |  | 
 **version** | **int** |  | 
-**cpu_millicores** | **int** |  | 
-**memory_bytes** | **int** |  | 
+**cpu_request_millicores** | **int** |  | 
+**cpu_limit_millicores** | **int** |  | 
+**memory_request_bytes** | **int** |  | 
+**memory_limit_bytes** | **int** |  | 
 **pids** | **int** |  | 
 **container_count** | **int** |  | 
 **ephemeral_storage_bytes** | **int** |  | 
+**persistent_storage_bytes** | **int** |  | 
 
 ## Example
 

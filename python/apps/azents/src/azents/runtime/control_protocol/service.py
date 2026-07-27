@@ -234,7 +234,9 @@ class RuntimeControlProtocolService:
                 "source_versions": dict(
                     command.execution_policy.evidence.source_versions
                 ),
-                "effective_policy": dict(command.execution_policy.effective_policy),
+                "effective_policy_json": (
+                    command.execution_policy.effective_policy_json
+                ),
             },
         }
         return await self._append_request(

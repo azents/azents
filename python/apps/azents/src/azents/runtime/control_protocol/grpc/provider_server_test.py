@@ -27,7 +27,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.core.runtime_execution_policy import (
-    canonical_runtime_execution_policy,
+    canonical_runtime_execution_policy_json,
     digest_runtime_execution_policy,
     standard_runtime_execution_policy,
 )
@@ -578,8 +578,6 @@ def _report_message() -> runtime_provider_control_pb2.RuntimeProviderReport:
 
 def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
     policy = standard_runtime_execution_policy()
-    canonical_policy = canonical_runtime_execution_policy(policy)
-    assert isinstance(canonical_policy, dict)
     return RuntimeExecutionPolicyEnvelope(
         evidence=RuntimeExecutionPolicyEvidence(
             snapshot_id="snapshot-1",
@@ -599,7 +597,7 @@ def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
                 "agent": 1,
             },
         ),
-        effective_policy=canonical_policy,
+        effective_policy_json=canonical_runtime_execution_policy_json(policy),
     )
 
 

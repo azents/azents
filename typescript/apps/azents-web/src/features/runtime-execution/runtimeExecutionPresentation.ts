@@ -9,6 +9,47 @@ import type {
 
 export const RUNTIME_EXECUTION_STATUS_REFETCH_INTERVAL_MS = 2_000;
 
+const RUNTIME_POLICY_REASON_MESSAGE_KEYS = {
+  profile_retired: "reasonExplanations.profile_retired",
+  profile_not_allowed: "reasonExplanations.profile_not_allowed",
+  dependency_unsatisfied: "reasonExplanations.dependency_unsatisfied",
+  provider_module_unsupported: "reasonExplanations.provider_module_unsupported",
+  provider_engine_unsupported: "reasonExplanations.provider_engine_unsupported",
+  provider_storage_unsupported:
+    "reasonExplanations.provider_storage_unsupported",
+  provider_network_unsupported:
+    "reasonExplanations.provider_network_unsupported",
+  provider_limit_exceeded: "reasonExplanations.provider_limit_exceeded",
+  execution_policy_unavailable:
+    "reasonExplanations.execution_policy_unavailable",
+  automatic_convergence_pending:
+    "reasonExplanations.automatic_convergence_pending",
+  explicit_apply_required: "reasonExplanations.explicit_apply_required",
+  application_pending: "reasonExplanations.application_pending",
+  target_divergent: "reasonExplanations.target_divergent",
+  reported_digest_mismatch: "reasonExplanations.reported_digest_mismatch",
+  target_generation_mismatch: "reasonExplanations.target_generation_mismatch",
+  applied_snapshot_missing: "reasonExplanations.applied_snapshot_missing",
+  applied_pointer_mismatch: "reasonExplanations.applied_pointer_mismatch",
+  RUNTIME_POLICY_PROVIDER_EVIDENCE_MISMATCH:
+    "reasonExplanations.provider_evidence_mismatch",
+} as const;
+
+type RuntimePolicyReasonMessageKey =
+  | (typeof RUNTIME_POLICY_REASON_MESSAGE_KEYS)[keyof typeof RUNTIME_POLICY_REASON_MESSAGE_KEYS]
+  | "reasonExplanations.runtime_failure";
+
+export function runtimePolicyReasonMessageKey(
+  reason: string,
+): RuntimePolicyReasonMessageKey {
+  if (reason in RUNTIME_POLICY_REASON_MESSAGE_KEYS) {
+    return RUNTIME_POLICY_REASON_MESSAGE_KEYS[
+      reason as keyof typeof RUNTIME_POLICY_REASON_MESSAGE_KEYS
+    ];
+  }
+  return "reasonExplanations.runtime_failure";
+}
+
 export function canEditWorkspaceRuntimeExecution(
   role: WorkspaceUserRole,
 ): boolean {

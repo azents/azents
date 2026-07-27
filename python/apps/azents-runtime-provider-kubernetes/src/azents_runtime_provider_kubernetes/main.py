@@ -27,8 +27,13 @@ from azents_runtime_control.provider import (
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ContainerResourceClaim,
     ContainerResources,
+    IpBlock,
     KubernetesResourceQuantity,
+    LabelSelector,
     LocalObjectReference,
+    NetworkPolicyEgressRule,
+    NetworkPolicyPeer,
+    NetworkPolicyPort,
     Toleration,
 )
 from azents_runtime_provider_kubernetes.kubernetes_http import KubernetesHttpApi
@@ -159,6 +164,9 @@ async def _run_control_loop(
             runtime_control_namespace=settings.runtime_control_namespace,
             runtime_control_labels=settings.runtime_control_labels,
             runtime_control_port=settings.runtime_control_port,
+            network_hard_cap_allowed_cidrs=settings.network_hard_cap_allowed_cidrs,
+            network_hard_cap_denied_cidrs=settings.network_hard_cap_denied_cidrs,
+            network_hard_cap_extra_egress=settings.network_hard_cap_extra_egress,
             image_pull_secrets=settings.image_pull_secrets,
             pod_annotations=settings.pod_annotations,
             pod_node_selector=settings.pod_node_selector,
@@ -512,6 +520,15 @@ class ProviderSettings:
             raise RuntimeError(
                 "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT must be between 1 and 65535"
             )
+        self.network_hard_cap_allowed_cidrs = _json_string_tuple_env(
+            "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS"
+        )
+        self.network_hard_cap_denied_cidrs = _json_string_tuple_env(
+            "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_DENIED_CIDRS"
+        )
+        self.network_hard_cap_extra_egress = _json_network_policy_egress_env(
+            "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_EXTRA_EGRESS"
+        )
         self.image_pull_secrets: tuple[LocalObjectReference, ...] = (
             _json_local_object_references_env(
                 "AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS"
@@ -618,6 +635,104 @@ def _json_local_object_references_env(name: str) -> tuple[LocalObjectReference, 
             raise RuntimeError(f"{name}.name must be a non-empty string")
         references.append(LocalObjectReference(name=reference_name))
     return tuple(references)
+
+
+def _json_string_tuple_env(name: str) -> tuple[str, ...]:
+    value = _required_env(name)
+    parsed = json.loads(value)
+    if not isinstance(parsed, list) or not all(
+        isinstance(item, str) and item for item in parsed
+    ):
+        raise RuntimeError(f"{name} must be a JSON array of non-empty strings")
+    return tuple(parsed)
+
+
+def _json_network_policy_egress_env(
+    name: str,
+) -> tuple[NetworkPolicyEgressRule, ...]:
+    value = _required_env(name)
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        raise RuntimeError(f"{name} must be a JSON array")
+    return tuple(_network_policy_egress_rule(item, name) for item in parsed)
+
+
+def _network_policy_egress_rule(
+    value: object,
+    env_name: str,
+) -> NetworkPolicyEgressRule:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{env_name} must contain JSON objects")
+    to = value.get("to", [])
+    ports = value.get("ports", [])
+    if not isinstance(to, list) or not isinstance(ports, list):
+        raise RuntimeError(f"{env_name} rules require array to/ports fields")
+    return NetworkPolicyEgressRule(
+        peers=tuple(_network_policy_peer(item, env_name) for item in to),
+        ports=tuple(_network_policy_port(item, env_name) for item in ports),
+    )
+
+
+def _network_policy_peer(value: object, env_name: str) -> NetworkPolicyPeer:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{env_name}.to must contain JSON objects")
+    namespace_selector = _network_policy_selector(
+        value.get("namespaceSelector"), env_name
+    )
+    pod_selector = _network_policy_selector(value.get("podSelector"), env_name)
+    ip_block_value = value.get("ipBlock")
+    ip_block: IpBlock | None = None
+    if ip_block_value is not None:
+        if not isinstance(ip_block_value, dict):
+            raise RuntimeError(f"{env_name}.ipBlock must be a JSON object")
+        cidr = ip_block_value.get("cidr")
+        except_cidrs = ip_block_value.get("except", [])
+        if not isinstance(cidr, str) or not cidr or not isinstance(except_cidrs, list):
+            raise RuntimeError(f"{env_name}.ipBlock requires CIDR and except fields")
+        if not all(isinstance(item, str) and item for item in except_cidrs):
+            raise RuntimeError(f"{env_name}.ipBlock.except must contain CIDRs")
+        ip_block = IpBlock(cidr=cidr, except_cidrs=tuple(except_cidrs))
+    if namespace_selector is None and pod_selector is None and ip_block is None:
+        raise RuntimeError(f"{env_name}.to entries must select a destination")
+    if ip_block is not None and (
+        namespace_selector is not None or pod_selector is not None
+    ):
+        raise RuntimeError(f"{env_name}.ipBlock cannot be combined with selectors")
+    return NetworkPolicyPeer(
+        namespace_selector=namespace_selector,
+        pod_selector=pod_selector,
+        ip_block=ip_block,
+    )
+
+
+def _network_policy_selector(value: object, env_name: str) -> LabelSelector | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{env_name} selectors must be JSON objects")
+    match_labels = value.get("matchLabels", {})
+    if not isinstance(match_labels, dict) or not all(
+        isinstance(key, str) and isinstance(item, str)
+        for key, item in match_labels.items()
+    ):
+        raise RuntimeError(f"{env_name} selector labels must map strings to strings")
+    return LabelSelector(match_labels=dict(match_labels))
+
+
+def _network_policy_port(value: object, env_name: str) -> NetworkPolicyPort:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{env_name}.ports must contain JSON objects")
+    protocol = value.get("protocol", "TCP")
+    port = value.get("port")
+    if not isinstance(protocol, str) or protocol not in {"TCP", "UDP", "SCTP"}:
+        raise RuntimeError(f"{env_name}.ports protocol is invalid")
+    if isinstance(port, bool) or not isinstance(port, int | str):
+        raise RuntimeError(f"{env_name}.ports port must be an integer or name")
+    if isinstance(port, int) and not 1 <= port <= 65_535:
+        raise RuntimeError(f"{env_name}.ports integer port is invalid")
+    if isinstance(port, str) and not port:
+        raise RuntimeError(f"{env_name}.ports named port is invalid")
+    return NetworkPolicyPort(protocol=protocol, port=port)
 
 
 def _resource_quantity_map(

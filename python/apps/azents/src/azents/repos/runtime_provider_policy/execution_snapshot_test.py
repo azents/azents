@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import RuntimePolicySnapshotApplicationState
 from azents.core.runtime_execution_policy import (
     canonical_runtime_execution_policy,
+    canonical_runtime_execution_policy_json,
     digest_runtime_execution_policy,
     standard_runtime_execution_policy,
 )
@@ -23,11 +24,11 @@ from .repository import (
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 _POLICY = standard_runtime_execution_policy()
-_POLICY_JSON = canonical_runtime_execution_policy(_POLICY)
-assert isinstance(_POLICY_JSON, dict)
+_POLICY_DOCUMENT = canonical_runtime_execution_policy(_POLICY)
+_POLICY_JSON = canonical_runtime_execution_policy_json(_POLICY)
 _DIGEST = digest_runtime_execution_policy(_POLICY)
 _MODULE_VERSIONS: dict[str, int] = {}
-for _value in _POLICY_JSON.values():
+for _value in _POLICY_DOCUMENT.values():
     if not isinstance(_value, dict):
         continue
     _module_id = _value.get("module_id")
@@ -51,7 +52,7 @@ def _snapshot(
         execution_profile_version=2,
         execution_workspace_version=3,
         execution_agent_version=4,
-        resolved_execution_policy=_POLICY_JSON,
+        resolved_execution_policy_json=_POLICY_JSON,
         execution_source_trace={},
         execution_provider_compatibility={},
         execution_target_digest=_DIGEST,

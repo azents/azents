@@ -109,7 +109,17 @@ class RuntimeProviderContractService:
                 digest=canonical.digest,
                 for_update=False,
             )
-            if existing is not None:
+            if existing is not None and (
+                existing.status is RuntimeProviderContractStatus.CANDIDATE
+                or provider.accepted_contract_revision_id == existing.id
+            ):
+                updated = await self.policy_repository.set_current_contract_revision(
+                    session,
+                    provider_id=provider.id,
+                    contract_revision_id=existing.id,
+                )
+                if not updated:
+                    raise AssertionError("Runtime Provider disappeared while locked.")
                 return existing
             return await self.policy_repository.create_contract(
                 session,

@@ -83,15 +83,18 @@ def _empty_restriction() -> dict[str, object]:
     }
 
 
-def _resource_restriction(cpu_millicores: int) -> dict[str, object]:
+def _resource_restriction(cpu_limit_millicores: int) -> dict[str, object]:
     """Return a complete restriction with one finite CPU ceiling."""
     restriction = _empty_restriction()
     restriction["resources"] = {
-        "cpu_millicores": cpu_millicores,
-        "memory_bytes": None,
+        "cpu_request_millicores": None,
+        "cpu_limit_millicores": cpu_limit_millicores,
+        "memory_request_bytes": None,
+        "memory_limit_bytes": None,
         "pids": None,
         "container_count": None,
         "ephemeral_storage_bytes": None,
+        "persistent_storage_bytes": None,
     }
     return restriction
 
@@ -282,7 +285,7 @@ def test_capability_gate_accepts_qualified_typed_policy(
         "container_run": True,
         "compose": True,
         "storage_modes": ["ephemeral", "none"],
-        "network_modes": ["direct", "none"],
+        "network_modes": ["direct", "none", "restricted"],
     }
     standard_policy = _JSON_OBJECT.validate_python(standard["policy"])
 
@@ -309,17 +312,27 @@ def test_capability_gate_accepts_qualified_typed_policy(
     authority_policy["resources"] = {
         "module_id": "container.resources",
         "version": 1,
-        "cpu_millicores": 1000,
-        "memory_bytes": 536870912,
+        "cpu_request_millicores": 500,
+        "cpu_limit_millicores": 1000,
+        "memory_request_bytes": 268435456,
+        "memory_limit_bytes": 536870912,
         "pids": 128,
         "container_count": 4,
         "ephemeral_storage_bytes": 1073741824,
+        "persistent_storage_bytes": 21474836480,
     }
     authority_policy["engine_storage"] = {
         "module_id": "engine.storage",
         "version": 1,
         "mode": "ephemeral",
         "capacity_bytes": 1073741824,
+    }
+    authority_policy["network_egress"] = {
+        "module_id": "network.egress",
+        "version": 1,
+        "mode": "restricted",
+        "allowed_destinations": ["140.82.112.0/20"],
+        "denied_destinations": ["140.82.120.0/24"],
     }
     created = _request_object(
         "POST",
@@ -480,7 +493,7 @@ def test_hierarchy_profile_override_apply_status_and_audit(
     assert preview["available"] is True
     reductions = _JSON_OBJECT_LIST.validate_python(preview["reductions"])
     assert any(
-        reduction["path"] == "resources.cpu_millicores"
+        reduction["path"] == "resources.cpu_limit_millicores"
         and reduction["governing_layer"] == "agent"
         for reduction in reductions
     )
@@ -529,7 +542,7 @@ def test_hierarchy_profile_override_apply_status_and_audit(
     assert expansion == {
         "detail": {
             "code": "execution_policy_expansion_rejected",
-            "path": "resources.cpu_millicores",
+            "path": "resources.cpu_limit_millicores",
             "governing_layer": "workspace",
         }
     }
@@ -649,10 +662,10 @@ def test_hierarchy_profile_override_apply_status_and_audit(
         effective_resources = _JSON_OBJECT.validate_python(
             effective_policy["resources"]
         )
-        assert effective_resources["cpu_millicores"] == 250
+        assert effective_resources["cpu_limit_millicores"] == 250
         assert (
             _JSON_OBJECT.validate_python(tightened_preview["governing_layers"])[
-                "resources.cpu_millicores"
+                "resources.cpu_limit_millicores"
             ]
             == "workspace"
         )

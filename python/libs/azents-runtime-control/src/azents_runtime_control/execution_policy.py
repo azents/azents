@@ -28,7 +28,7 @@ class RuntimeExecutionPolicyEnvelope:
     """Validated effective execution policy sent to a bound Provider."""
 
     evidence: RuntimeExecutionPolicyEvidence
-    effective_policy: Mapping[str, JsonValue]
+    effective_policy_json: str
 
 
 class RuntimeExecutionStorageMode(enum.StrEnum):
@@ -49,13 +49,16 @@ class RuntimeExecutionNetworkMode(enum.StrEnum):
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeExecutionResources:
-    """Typed aggregate resource ceilings from one effective policy."""
+    """Typed Kubernetes and nested-container resources from one policy."""
 
-    cpu_millicores: int | None
-    memory_bytes: int | None
+    cpu_request_millicores: int | None
+    cpu_limit_millicores: int | None
+    memory_request_bytes: int | None
+    memory_limit_bytes: int | None
     pids: int | None
     container_count: int | None
     ephemeral_storage_bytes: int | None
+    persistent_storage_bytes: int | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,13 +92,30 @@ class RuntimeExecutionPolicy:
 
 def digest_effective_policy(policy: Mapping[str, JsonValue]) -> str:
     """Return the canonical SHA-256 digest for an effective policy document."""
-    encoded = json.dumps(
+    return hashlib.sha256(canonical_effective_policy_json(policy).encode()).hexdigest()
+
+
+def canonical_effective_policy_json(policy: Mapping[str, JsonValue]) -> str:
+    """Serialize an effective policy as deterministic JSON for storage and transport."""
+    return json.dumps(
         policy,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    )
+
+
+def effective_policy_from_json(value: str) -> dict[str, JsonValue]:
+    """Parse one canonical effective-policy JSON object."""
+    try:
+        parsed: JsonValue = json.loads(value)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise ValueError("Runtime execution-policy JSON is invalid.") from error
+    if not isinstance(parsed, dict):
+        raise ValueError("Runtime execution-policy JSON must contain an object.")
+    if canonical_effective_policy_json(parsed) != value:
+        raise ValueError("Runtime execution-policy JSON is not canonical.")
+    return parsed
 
 
 def validate_execution_policy_envelope(
@@ -109,7 +129,8 @@ def validate_execution_policy_envelope(
         raise ValueError("Runtime execution-policy desired generation is invalid.")
     if len(evidence.digest) != 64:
         raise ValueError("Runtime execution-policy digest is invalid.")
-    if digest_effective_policy(envelope.effective_policy) != evidence.digest:
+    policy = effective_policy_from_json(envelope.effective_policy_json)
+    if digest_effective_policy(policy) != evidence.digest:
         raise ValueError("Runtime execution-policy digest does not match its document.")
     if not evidence.module_versions or any(
         not module_id or isinstance(version, bool) or version < 1
@@ -165,7 +186,7 @@ def parse_execution_policy_envelope(
         raise ValueError(
             "Runtime execution-policy evidence generation does not match the command."
         )
-    policy = envelope.effective_policy
+    policy = effective_policy_from_json(envelope.effective_policy_json)
     expected_modules = {
         "image_build": "container.image_build",
         "container_run": "container.run",
@@ -191,11 +212,14 @@ def parse_execution_policy_envelope(
         "container_run": {"enabled"},
         "compose": {"enabled"},
         "resources": {
-            "cpu_millicores",
-            "memory_bytes",
+            "cpu_request_millicores",
+            "cpu_limit_millicores",
+            "memory_request_bytes",
+            "memory_limit_bytes",
             "pids",
             "container_count",
             "ephemeral_storage_bytes",
+            "persistent_storage_bytes",
         },
         "engine_storage": {"mode", "capacity_bytes"},
         "network_egress": {
@@ -209,6 +233,7 @@ def parse_execution_policy_envelope(
             policy,
             field,
             module_id,
+            expected_version=1,
             expected_fields=module_fields[field],
         )
         for field, module_id in expected_modules.items()
@@ -226,11 +251,14 @@ def parse_execution_policy_envelope(
             **{
                 field: _optional_positive_int(modules["resources"], field)
                 for field in (
-                    "cpu_millicores",
-                    "memory_bytes",
+                    "cpu_request_millicores",
+                    "cpu_limit_millicores",
+                    "memory_request_bytes",
+                    "memory_limit_bytes",
                     "pids",
                     "container_count",
                     "ephemeral_storage_bytes",
+                    "persistent_storage_bytes",
                 )
             }
         ),
@@ -240,10 +268,21 @@ def parse_execution_policy_envelope(
     if parsed.compose and not parsed.container_run:
         raise ValueError("container.compose/v1 requires container.run/v1.")
     engine_required = parsed.image_build or parsed.container_run
-    if engine_required and any(
-        value is None for value in dataclasses.astuple(parsed.resources)
+    if engine_required and parsed.resources.ephemeral_storage_bytes is None:
+        raise ValueError("Container execution requires ephemeral storage.")
+    if (
+        parsed.resources.cpu_request_millicores is not None
+        and parsed.resources.cpu_limit_millicores is not None
+        and parsed.resources.cpu_request_millicores
+        > parsed.resources.cpu_limit_millicores
     ):
-        raise ValueError("Container execution requires bounded resources.")
+        raise ValueError("CPU request cannot exceed CPU limit.")
+    if (
+        parsed.resources.memory_request_bytes is not None
+        and parsed.resources.memory_limit_bytes is not None
+        and parsed.resources.memory_request_bytes > parsed.resources.memory_limit_bytes
+    ):
+        raise ValueError("Memory request cannot exceed memory limit.")
     if (
         engine_required
         and parsed.engine_storage.mode is RuntimeExecutionStorageMode.NONE
@@ -257,6 +296,7 @@ def _module(
     field: str,
     module_id: str,
     *,
+    expected_version: int,
     expected_fields: set[str],
 ) -> dict[str, JsonValue]:
     value = policy.get(field)
@@ -266,7 +306,7 @@ def _module(
         or value.get("module_id") != module_id
         or isinstance(version, bool)
         or not isinstance(version, int)
-        or version != 1
+        or version != expected_version
         or set(value) != {"module_id", "version", *expected_fields}
     ):
         raise ValueError("Runtime execution-policy module evidence is invalid.")
