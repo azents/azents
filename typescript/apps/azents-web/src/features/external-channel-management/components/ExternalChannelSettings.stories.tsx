@@ -49,6 +49,8 @@ const connection: ManagedConnection = {
   provider_app_id: "A0123456789",
   provider_tenant_id: "Engineering Workspace",
   provider_bot_user_id: "U0123456789",
+  open_access_enabled: true,
+  allow_bot_messages: false,
   credentials_configured: true,
   capabilities: {
     inbound_events: true,
@@ -175,6 +177,7 @@ const meta = {
     onSubmitDiscordDialog: noop,
     onValidate: noop,
     onDisconnect: noop,
+    onUpdateAccessPolicy: noop,
     onRevokeGrant: noop,
     onRemoveBlock: noop,
   },

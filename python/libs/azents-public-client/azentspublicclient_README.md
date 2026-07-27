@@ -186,6 +186,7 @@ Class | Method | HTTP request | Description
 *ExternalChannelV1Api* | [**external_channel_v1_setup_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi | Setup Multi Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
+*ExternalChannelV1Api* | [**external_channel_v1_update_connection_access_policy**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_connection_access_policy) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/access-policy | Update Connection Access Policy
 *ExternalChannelV1Api* | [**external_channel_v1_update_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_discord_connection) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord | Update Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_update_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_multi_discord_connection) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id} | Update Multi Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_update_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_multi_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Update Multi Slack Connection
@@ -390,6 +391,7 @@ Class | Method | HTTP request | Description
  - [CleanupOrphanGitWorktreesAction](azentspublicclient/docs/CleanupOrphanGitWorktreesAction.md)
  - [CleanupSessionGitWorktreeRequest](azentspublicclient/docs/CleanupSessionGitWorktreeRequest.md)
  - [CommandAction](azentspublicclient/docs/CommandAction.md)
+ - [ConnectionAccessPolicyRequest](azentspublicclient/docs/ConnectionAccessPolicyRequest.md)
  - [CreateGitWorktreeAction](azentspublicclient/docs/CreateGitWorktreeAction.md)
  - [CreateInvitationRequest](azentspublicclient/docs/CreateInvitationRequest.md)
  - [CreateJoinRequestRequest](azentspublicclient/docs/CreateJoinRequestRequest.md)

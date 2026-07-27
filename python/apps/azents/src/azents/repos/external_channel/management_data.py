@@ -37,6 +37,8 @@ class ManagedConnection(_Projection):
     provider_app_id: str | None
     provider_tenant_id: str | None
     provider_bot_user_id: str | None
+    open_access_enabled: bool
+    allow_bot_messages: bool
     credentials_configured: bool
     capabilities: dict[str, Any] | None
     provider_config: dict[str, Any] | None

@@ -248,6 +248,13 @@ class DiscordGatewayClient:
                     reason=terminal_reasons[close_code],
                     checkpoint=active_checkpoint,
                 )
+            if close_code == 4008:
+                return DiscordGatewayConnectionResult(
+                    reconnect=True,
+                    can_resume=active_checkpoint is not None,
+                    reason="gateway_rate_limited",
+                    checkpoint=active_checkpoint,
+                )
             return DiscordGatewayConnectionResult(
                 reconnect=True,
                 can_resume=active_checkpoint is not None,

@@ -22,7 +22,11 @@ from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.data import DiscordConnectionCredentials
-from azents.services.external_channel.discord_gateway import DiscordGatewayDispatch
+from azents.services.external_channel.discord_gateway import (
+    DiscordGatewayConnectionResult,
+    DiscordGatewayDispatch,
+    DiscordGatewayInvalidPayload,
+)
 from azents.services.external_channel.discord_gateway_manager import (
     DiscordGatewayLeaseLost,
     DiscordGatewayManagerService,
@@ -73,6 +77,7 @@ class _CredentialFailureRepository(_Repository):
 
     def __init__(self) -> None:
         super().__init__(admission=object())
+        self.gap_calls: list[dict[str, object]] = []
         self.release_calls: list[dict[str, object]] = []
 
     async def claim_discord_gateway_lease(
@@ -104,6 +109,47 @@ class _CredentialFailureRepository(_Repository):
         self.release_calls.append(kwargs)
         return True
 
+    async def record_discord_gateway_gap(
+        self,
+        _session: object,
+        **kwargs: object,
+    ) -> bool:
+        """Capture a retryable Gateway gap without mutating authority."""
+        self.gap_calls.append(kwargs)
+        return True
+
+
+class _ReconnectGatewayClient:
+    """Return a repeated reconnect result without opening a WebSocket."""
+
+    def __init__(self, *, reason: str = "connection_closed") -> None:
+        self.calls = 0
+        self.reason = reason
+
+    async def run_connection(
+        self,
+        **_kwargs: object,
+    ) -> DiscordGatewayConnectionResult:
+        self.calls += 1
+        return DiscordGatewayConnectionResult(
+            reconnect=True,
+            can_resume=False,
+            reason=self.reason,
+            checkpoint=None,
+        )
+
+
+class _ErrorGatewayClient:
+    """Raise one controlled Gateway protocol error before a session starts."""
+
+    def __init__(self, error: DiscordGatewayInvalidPayload) -> None:
+        self.calls = 0
+        self.error = error
+
+    async def run_connection(self, **_kwargs: object) -> DiscordGatewayConnectionResult:
+        self.calls += 1
+        raise self.error
+
 
 def _service(
     *,
@@ -111,6 +157,7 @@ def _service(
     session_manager: _SessionManager,
     credentials_codec: MagicMock | None = None,
     http_client: MagicMock | None = None,
+    gateway_client: MagicMock | None = None,
 ) -> DiscordGatewayManagerService:
     """Build a manager with only its admission dependencies exercised."""
     return DiscordGatewayManagerService(
@@ -121,6 +168,7 @@ def _service(
         cipher=MagicMock(),
         http_client=http_client or MagicMock(),
         manager_id="manager-1",
+        gateway_client=gateway_client or MagicMock(),
     )
 
 
@@ -316,3 +364,190 @@ async def test_gateway_discovery_credential_rejection_terminalizes_current_lease
     assert call["lease_generation"] == 3
     assert call["reason"] == "gateway_credentials_invalid"
     assert repository.release_calls == []
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_gateway_retries_with_backoff_without_terminalizing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rate limiting preserves the fenced lease and never requires reconnect."""
+    sessions = _SessionManager()
+    repository = _CredentialFailureRepository()
+    credentials_codec = MagicMock()
+    credentials_codec.decrypt = MagicMock(
+        return_value=DiscordConnectionCredentials(bot_token="test-token")
+    )
+    http_client = MagicMock()
+    http_client.get = AsyncMock(
+        return_value=MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"url": "wss://gateway.discord.gg"}),
+        )
+    )
+    gateway_client = _ReconnectGatewayClient(reason="gateway_rate_limited")
+    service = _service(
+        repository=repository,
+        session_manager=sessions,
+        credentials_codec=credentials_codec,
+        http_client=http_client,
+        gateway_client=gateway_client,  # type: ignore[arg-type]
+    )
+    delays: list[datetime.timedelta] = []
+
+    async def sleep_and_stop(
+        shutdown_event: asyncio.Event,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+        delay: datetime.timedelta,
+    ) -> bool:
+        assert connection_id == "connection-1"
+        assert lease == _lease()
+        delays.append(delay)
+        shutdown_event.set()
+        return True
+
+    monkeypatch.setattr(service, "_sleep_or_shutdown", sleep_and_stop)
+
+    await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]  # Exercise the lease-owned reconnect budget.
+        connection_id="connection-1",
+        shutdown_event=asyncio.Event(),
+    )
+
+    assert gateway_client.calls == 1
+    assert len(repository.gap_calls) == 1
+    assert repository.reconnect_required_calls == []
+    assert delays == [datetime.timedelta(minutes=1)]
+    assert len(repository.release_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_gateway_payload_retries_with_backoff_without_terminalizing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed retryable frame is observable without forcing reconnection."""
+    sessions = _SessionManager()
+    repository = _CredentialFailureRepository()
+    credentials_codec = MagicMock()
+    credentials_codec.decrypt = MagicMock(
+        return_value=DiscordConnectionCredentials(bot_token="test-token")
+    )
+    http_client = MagicMock()
+    http_client.get = AsyncMock(
+        return_value=MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"url": "wss://gateway.discord.gg"}),
+        )
+    )
+    gateway_client = _ErrorGatewayClient(DiscordGatewayInvalidPayload("invalid"))
+    service = _service(
+        repository=repository,
+        session_manager=sessions,
+        credentials_codec=credentials_codec,
+        http_client=http_client,
+        gateway_client=gateway_client,  # type: ignore[arg-type]
+    )
+    delays: list[datetime.timedelta] = []
+
+    async def sleep_and_stop(
+        shutdown_event: asyncio.Event,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+        delay: datetime.timedelta,
+    ) -> bool:
+        assert connection_id == "connection-1"
+        assert lease == _lease()
+        delays.append(delay)
+        shutdown_event.set()
+        return True
+
+    monkeypatch.setattr(service, "_sleep_or_shutdown", sleep_and_stop)
+
+    await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]  # Exercise recoverable protocol handling.
+        connection_id="connection-1",
+        shutdown_event=asyncio.Event(),
+    )
+
+    assert gateway_client.calls == 1
+    assert len(repository.gap_calls) == 1
+    assert repository.gap_calls[0]["reason"] == "gateway_protocol_invalid"
+    assert repository.reconnect_required_calls == []
+    assert delays == [datetime.timedelta(seconds=5)]
+    assert len(repository.release_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_discovery_retries_with_backoff_without_terminalizing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discovery rate limits stay under the fenced lease and do not terminalize."""
+    sessions = _SessionManager()
+    repository = _CredentialFailureRepository()
+    credentials_codec = MagicMock()
+    credentials_codec.decrypt = MagicMock(
+        return_value=DiscordConnectionCredentials(bot_token="test-token")
+    )
+    http_client = MagicMock()
+    http_client.get = AsyncMock(
+        return_value=MagicMock(
+            status_code=429,
+            headers={"Retry-After": "120"},
+        )
+    )
+    gateway_client = _ReconnectGatewayClient()
+    service = _service(
+        repository=repository,
+        session_manager=sessions,
+        credentials_codec=credentials_codec,
+        http_client=http_client,
+        gateway_client=gateway_client,  # type: ignore[arg-type]
+    )
+    delays: list[datetime.timedelta] = []
+
+    async def sleep_and_stop(
+        shutdown_event: asyncio.Event,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+        delay: datetime.timedelta,
+    ) -> bool:
+        assert connection_id == "connection-1"
+        assert lease == _lease()
+        delays.append(delay)
+        shutdown_event.set()
+        return True
+
+    monkeypatch.setattr(service, "_sleep_or_shutdown", sleep_and_stop)
+
+    await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]  # Exercise the lease-owned discovery retry.
+        connection_id="connection-1",
+        shutdown_event=asyncio.Event(),
+    )
+
+    assert gateway_client.calls == 0
+    assert len(repository.gap_calls) == 1
+    assert repository.gap_calls[0]["reason"] == "gateway_rate_limited"
+    assert repository.reconnect_required_calls == []
+    assert delays == [datetime.timedelta(minutes=2)]
+    assert len(repository.release_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_reconnect_backoff_renews_gateway_lease() -> None:
+    """Backoff keeps its current lease instead of allowing a competing owner."""
+    sessions = _SessionManager()
+    repository = _CredentialFailureRepository()
+    service = _service(repository=repository, session_manager=sessions)
+    service.renew_interval = datetime.timedelta(milliseconds=1)
+    service._renew = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+    retained = await service._sleep_or_shutdown(  # pyright: ignore[reportPrivateUsage]  # Exercise lease retention during retry backoff.
+        asyncio.Event(),
+        connection_id="connection-1",
+        lease=_lease(),
+        delay=datetime.timedelta(milliseconds=5),
+    )
+
+    assert retained is True
+    service._renew.assert_awaited()  # pyright: ignore[reportPrivateUsage]

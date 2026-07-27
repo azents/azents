@@ -5,6 +5,7 @@ import dataclasses
 import datetime
 import json
 import logging
+import math
 from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import uuid4
@@ -45,18 +46,31 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayConnectionResult,
     DiscordGatewayDispatch,
     DiscordGatewayError,
+    DiscordGatewayInvalidPayload,
 )
 
 logger = logging.getLogger(__name__)
 _POLL_INTERVAL = datetime.timedelta(seconds=5)
 _LEASE_DURATION = datetime.timedelta(seconds=45)
 _RENEW_INTERVAL = datetime.timedelta(seconds=15)
-_RECONNECT_DELAY = datetime.timedelta(seconds=1)
+_RECONNECT_DELAY = datetime.timedelta(seconds=5)
+_RATE_LIMIT_RECONNECT_DELAY = datetime.timedelta(minutes=1)
+_MAX_RECONNECT_DELAY = datetime.timedelta(minutes=5)
+_MAX_RATE_LIMIT_RETRY_AFTER = datetime.timedelta(days=1)
 _CHECKPOINT_VERSION = 1
 
 
 class DiscordGatewayCredentialError(RuntimeError):
     """Persisted Discord credentials cannot establish a Gateway session."""
+
+
+class DiscordGatewayRateLimitError(DiscordGatewayError):
+    """Discord Gateway discovery explicitly asked the client to slow down."""
+
+    def __init__(self, retry_after: datetime.timedelta | None) -> None:
+        """Initialize one discovery rate-limit result with bounded delay metadata."""
+        super().__init__("Discord Gateway discovery is rate limited.")
+        self.retry_after = retry_after
 
 
 class DiscordGatewayLeaseLost(RuntimeError):
@@ -160,6 +174,7 @@ class DiscordGatewayManagerService:
             return
         lease = claim.lease
         lease_released = False
+        reconnect_attempts = 0
         try:
             configuration = await self._owned_configuration(
                 connection_id=connection_id,
@@ -176,21 +191,45 @@ class DiscordGatewayManagerService:
                 version=lease.checkpoint_version,
             )
             while not shutdown_event.is_set():
-                endpoint_url = (
-                    checkpoint.resume_gateway_url
-                    if checkpoint is not None
-                    else await self._discover_gateway_url(credentials.bot_token)
-                )
-                result = await self._run_connection_with_lease(
-                    connection_id=connection_id,
-                    lease=lease,
-                    endpoint_url=endpoint_url,
-                    bot_token=credentials.bot_token,
-                    provider_app_id=configuration.provider_app_id,
-                    target_guild_id=configuration.provider_tenant_id,
-                    checkpoint=checkpoint,
-                    shutdown_event=shutdown_event,
-                )
+                retry_after: datetime.timedelta | None = None
+                try:
+                    endpoint_url = (
+                        checkpoint.resume_gateway_url
+                        if checkpoint is not None
+                        else await self._discover_gateway_url(credentials.bot_token)
+                    )
+                    result = await self._run_connection_with_lease(
+                        connection_id=connection_id,
+                        lease=lease,
+                        endpoint_url=endpoint_url,
+                        bot_token=credentials.bot_token,
+                        provider_app_id=configuration.provider_app_id,
+                        target_guild_id=configuration.provider_tenant_id,
+                        checkpoint=checkpoint,
+                        shutdown_event=shutdown_event,
+                    )
+                except DiscordGatewayRateLimitError as error:
+                    retry_after = error.retry_after
+                    result = DiscordGatewayConnectionResult(
+                        reconnect=True,
+                        can_resume=checkpoint is not None,
+                        reason="gateway_rate_limited",
+                        checkpoint=checkpoint,
+                    )
+                except DiscordGatewayInvalidPayload:
+                    result = DiscordGatewayConnectionResult(
+                        reconnect=True,
+                        can_resume=checkpoint is not None,
+                        reason="gateway_protocol_invalid",
+                        checkpoint=checkpoint,
+                    )
+                except DiscordGatewayError, httpx.RequestError, OSError:
+                    result = DiscordGatewayConnectionResult(
+                        reconnect=True,
+                        can_resume=checkpoint is not None,
+                        reason="gateway_transport_unavailable",
+                        checkpoint=checkpoint,
+                    )
                 if result is None:
                     return
                 checkpoint = result.checkpoint if result.can_resume else None
@@ -202,15 +241,24 @@ class DiscordGatewayManagerService:
                     )
                     lease_released = True
                     return
+                reconnect_attempts += 1
                 if not await self._record_gap(
                     connection_id=connection_id,
                     lease=lease,
                     reason=result.reason,
                 ):
                     return
-                if not result.reconnect:
+                if not await self._sleep_or_shutdown(
+                    shutdown_event,
+                    connection_id=connection_id,
+                    lease=lease,
+                    delay=self._reconnect_delay(
+                        reason=result.reason,
+                        attempt=reconnect_attempts,
+                        retry_after=retry_after,
+                    ),
+                ):
                     return
-                await self._sleep_or_shutdown(shutdown_event)
         except asyncio.CancelledError:
             await asyncio.shield(
                 self._release(connection_id=connection_id, lease=lease)
@@ -501,7 +549,9 @@ class DiscordGatewayManagerService:
         )
         if response.status_code in {401, 403}:
             raise DiscordGatewayCredentialError
-        if response.status_code == 429 or response.status_code >= 500:
+        if response.status_code == 429:
+            raise DiscordGatewayRateLimitError(_retry_after_from_response(response))
+        if response.status_code >= 500:
             raise DiscordGatewayError("Discord Gateway discovery is unavailable.")
         try:
             payload: object = response.json()
@@ -533,14 +583,54 @@ class DiscordGatewayManagerService:
             raise DiscordGatewayCredentialError
         return credentials
 
-    async def _sleep_or_shutdown(self, shutdown_event: asyncio.Event) -> None:
-        try:
-            await asyncio.wait_for(
-                shutdown_event.wait(),
-                timeout=self.reconnect_delay.total_seconds(),
-            )
-        except TimeoutError:
-            return
+    async def _sleep_or_shutdown(
+        self,
+        shutdown_event: asyncio.Event,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+        delay: datetime.timedelta,
+    ) -> bool:
+        """Wait with periodic lease renewal so a long backoff retains authority."""
+        deadline = asyncio.get_running_loop().time() + delay.total_seconds()
+        while not shutdown_event.is_set():
+            remaining_seconds = deadline - asyncio.get_running_loop().time()
+            if remaining_seconds <= 0:
+                return True
+            try:
+                await asyncio.wait_for(
+                    shutdown_event.wait(),
+                    timeout=min(
+                        remaining_seconds,
+                        self.renew_interval.total_seconds(),
+                    ),
+                )
+            except TimeoutError:
+                if asyncio.get_running_loop().time() >= deadline:
+                    return True
+                if not await self._renew(
+                    connection_id=connection_id,
+                    lease=lease,
+                ):
+                    return False
+        return True
+
+    def _reconnect_delay(
+        self,
+        *,
+        reason: str,
+        attempt: int,
+        retry_after: datetime.timedelta | None,
+    ) -> datetime.timedelta:
+        """Return bounded backoff for retryable Gateway outcomes."""
+        base_delay = self.reconnect_delay
+        if reason == "gateway_rate_limited":
+            base_delay = max(base_delay, _RATE_LIMIT_RECONNECT_DELAY)
+        delay = min(
+            base_delay * 2 ** (attempt - 1),
+            _MAX_RECONNECT_DELAY,
+        )
+        return max(delay, retry_after) if retry_after is not None else delay
 
 
 def _decode_checkpoint(
@@ -577,6 +667,39 @@ def _decode_checkpoint(
         session_id=session_id,
         resume_gateway_url=resume_gateway_url,
         sequence=sequence,
+    )
+
+
+def _retry_after_from_response(
+    response: httpx.Response,
+) -> datetime.timedelta | None:
+    """Extract a bounded numeric retry delay without retaining provider payloads."""
+    header_value = response.headers.get("Retry-After")
+    header_delay = _retry_after_duration(header_value)
+    if header_delay is not None:
+        return header_delay
+    try:
+        payload: object = response.json()
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return _retry_after_duration(payload.get("retry_after"))
+
+
+def _retry_after_duration(value: object) -> datetime.timedelta | None:
+    """Validate one numeric provider retry delay."""
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(seconds) or seconds <= 0:
+        return None
+    return min(
+        datetime.timedelta(seconds=seconds),
+        _MAX_RATE_LIMIT_RETRY_AFTER,
     )
 
 

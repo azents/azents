@@ -25,6 +25,9 @@ from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.connection_access_policy_request import (
+    ConnectionAccessPolicyRequest,
+)
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.discord_connection_configuration import (
@@ -566,6 +569,20 @@ def test_http_admission_unknown_participant_and_approval_journey(
     setup_json = setup.model_dump_json(by_alias=True)
     assert _BOT_TOKEN not in setup_json
     assert _SIGNING_SECRET not in setup_json
+    restricted_policy = (
+        external_api.external_channel_v1_update_connection_access_policy(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            connection_access_policy_request=ConnectionAccessPolicyRequest(
+                open_access_enabled=False,
+                allow_bot_messages=False,
+            ),
+            _headers=headers,
+        )
+    )
+    assert restricted_policy.open_access_enabled is False
+    assert restricted_policy.allow_bot_messages is False
 
     validated = external_api.external_channel_v1_validate_connection(
         agent_id=agent_id,
@@ -1436,6 +1453,20 @@ def test_provider_native_channel_work_progress_journey(
         ),
         _headers=headers,
     )
+    restricted_policy = (
+        external_api.external_channel_v1_update_connection_access_policy(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            connection_access_policy_request=ConnectionAccessPolicyRequest(
+                open_access_enabled=False,
+                allow_bot_messages=False,
+            ),
+            _headers=headers,
+        )
+    )
+    assert restricted_policy.open_access_enabled is False
+    assert restricted_policy.allow_bot_messages is False
 
     def disconnect_connection() -> None:
         external_api.external_channel_v1_disconnect_connection(
@@ -1793,6 +1824,20 @@ def test_external_channel_file_transfer_journey(
         ),
         _headers=headers,
     )
+    restricted_policy = (
+        external_api.external_channel_v1_update_connection_access_policy(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            connection_access_policy_request=ConnectionAccessPolicyRequest(
+                open_access_enabled=False,
+                allow_bot_messages=False,
+            ),
+            _headers=headers,
+        )
+    )
+    assert restricted_policy.open_access_enabled is False
+    assert restricted_policy.allow_bot_messages is False
 
     def disconnect_connection() -> None:
         external_api.external_channel_v1_disconnect_connection(

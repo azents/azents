@@ -211,8 +211,8 @@ def test_normalizes_nested_user_visible_message_subtype() -> None:
     assert normalized.normalized_body == "Visible threaded reply"
 
 
-def test_bot_mention_is_context_only_and_never_invokes() -> None:
-    """Bot-authored mentions remain context even when Slack labels them mentions."""
+def test_bot_mention_remains_a_route_policy_candidate() -> None:
+    """Route policy, not Slack normalization, decides whether a bot may invoke."""
     normalized = normalize_slack_event(
         event_type="app_mention",
         tenant_id="T1",
@@ -230,7 +230,7 @@ def test_bot_mention_is_context_only_and_never_invokes() -> None:
     )
 
     assert isinstance(normalized, SlackNormalizedMessage)
-    assert normalized.invocation is False
+    assert normalized.invocation is True
     assert normalized.author_type is ExternalChannelPrincipalAuthorType.BOT
     assert normalized.provider_user_id == "bot:B9"
 

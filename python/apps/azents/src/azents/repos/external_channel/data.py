@@ -154,6 +154,8 @@ class ExternalChannelAgentRoute(_Record):
     catalog_status: ExternalChannelRouteCatalogStatus
     catalog_removed_at: datetime.datetime | None
     catalog_removed_by_user_id: str | None
+    open_access_enabled: bool = True
+    allow_bot_messages: bool = False
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -177,6 +179,8 @@ class ExternalChannelAgentRouteCreate(_Record):
     catalog_status: ExternalChannelRouteCatalogStatus
     catalog_removed_at: datetime.datetime | None
     catalog_removed_by_user_id: str | None
+    open_access_enabled: bool = True
+    allow_bot_messages: bool = False
 
 
 class ExternalChannelCatalogRoute(_Record):

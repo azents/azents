@@ -20,6 +20,7 @@ import {
 } from "@mantine/core";
 import {
   IconBan,
+  IconBrandDiscord,
   IconBrandSlack,
   IconCheck,
   IconCopy,
@@ -210,6 +211,8 @@ function ReadyApproval({
   const status = statusPresentation(state.request, t);
   const originalUrl = validHttpUrl(state.request.original_url);
   const pending = state.request.status === "pending";
+  const ProviderIcon =
+    state.request.provider === "discord" ? IconBrandDiscord : IconBrandSlack;
 
   return (
     <Container size="sm" py={{ base: "lg", sm: "xl" }}>
@@ -218,7 +221,7 @@ function ReadyApproval({
           <Group justify="space-between" align="flex-start" wrap="wrap">
             <Group gap="sm" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
               <ThemeIcon variant="light" size="lg" radius="md">
-                <IconBrandSlack aria-hidden="true" size={20} />
+                <ProviderIcon aria-hidden="true" size={20} />
               </ThemeIcon>
               <Stack gap={rem(2)}>
                 <Title order={1} size="h3">

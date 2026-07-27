@@ -118,6 +118,15 @@ class ExternalChannelDecisionInput(BaseModel):
     summary: str | None = Field(default=None, max_length=1000)
 
 
+class ExternalChannelAccessPolicyInput(BaseModel):
+    """Non-secret ingress policy for one dedicated External Channel route."""
+
+    model_config = ConfigDict(frozen=True)
+
+    open_access_enabled: bool = True
+    allow_bot_messages: bool = False
+
+
 @dataclass
 class ExternalChannelManagementService:
     """Authorize and orchestrate External Channel management boundaries."""
@@ -1022,6 +1031,36 @@ class ExternalChannelManagementService:
             await session.commit()
         for target in cleanup_targets:
             await self.action_service.attempt_prepared_delivery(target)
+        return connection
+
+    async def update_connection_access_policy(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+        connection_id: str,
+        policy: ExternalChannelAccessPolicyInput,
+    ) -> ManagedConnection:
+        """Update one dedicated connection's route-scoped ingress policy."""
+        await self._require_owned_connection(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            connection_id=connection_id,
+        )
+        async with self.session_manager() as session:
+            connection = await self.repository.update_connection_access_policy(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                connection_id=connection_id,
+                open_access_enabled=policy.open_access_enabled,
+                allow_bot_messages=policy.allow_bot_messages,
+            )
+            if connection is None:
+                raise ExternalChannelManagementNotFound(connection_id)
+            await session.commit()
         return connection
 
     async def list_bindings(

@@ -6563,6 +6563,82 @@
         }
       }
     },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/access-policy": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Update Connection Access Policy",
+        "description": "Update open human access and external bot-message admission.",
+        "operationId": "external_channel_v1_update_connection_access_policy",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionAccessPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnection"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access": {
       "get": {
         "tags": [
@@ -15754,6 +15830,23 @@
         "title": "CommandAction",
         "description": "Idle-only prioritized command action."
       },
+      "ConnectionAccessPolicyRequest": {
+        "properties": {
+          "open_access_enabled": {
+            "type": "boolean",
+            "title": "Open Access Enabled",
+            "default": true
+          },
+          "allow_bot_messages": {
+            "type": "boolean",
+            "title": "Allow Bot Messages",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ConnectionAccessPolicyRequest",
+        "description": "Dedicated External Channel ingress policy request."
+      },
       "CreateGitWorktreeAction": {
         "properties": {
           "type": {
@@ -18991,6 +19084,14 @@
             ],
             "title": "Provider Bot User Id"
           },
+          "open_access_enabled": {
+            "type": "boolean",
+            "title": "Open Access Enabled"
+          },
+          "allow_bot_messages": {
+            "type": "boolean",
+            "title": "Allow Bot Messages"
+          },
           "credentials_configured": {
             "type": "boolean",
             "title": "Credentials Configured"
@@ -19101,6 +19202,8 @@
           "provider_app_id",
           "provider_tenant_id",
           "provider_bot_user_id",
+          "open_access_enabled",
+          "allow_bot_messages",
           "credentials_configured",
           "capabilities",
           "provider_config",

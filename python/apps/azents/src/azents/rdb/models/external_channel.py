@@ -667,6 +667,18 @@ class RDBExternalChannelAgentRoute(RDBModel):
         nullable=True,
         default=None,
     )
+    open_access_enabled: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        nullable=False,
+        default=True,
+        server_default=sa.true(),
+    )
+    allow_bot_messages: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
