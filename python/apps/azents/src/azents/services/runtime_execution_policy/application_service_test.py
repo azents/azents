@@ -248,8 +248,8 @@ def _upper_layer_change_resolved(
         update={
             "resources": baseline.resources.model_copy(
                 update={
-                    "cpu_millicores": 500,
-                    "memory_bytes": 1_000,
+                    "cpu_limit_millicores": 500,
+                    "memory_limit_bytes": 1_000,
                 }
             )
         }
@@ -258,8 +258,8 @@ def _upper_layer_change_resolved(
         update={
             "resources": baseline.resources.model_copy(
                 update={
-                    "cpu_millicores": current_cpu,
-                    "memory_bytes": current_memory,
+                    "cpu_limit_millicores": current_cpu,
+                    "memory_limit_bytes": current_memory,
                 }
             )
         }
@@ -447,8 +447,8 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
             "container_run": base.container_run.model_copy(update={"enabled": True}),
             "resources": base.resources.model_copy(
                 update={
-                    "cpu_millicores": 1_000,
-                    "memory_bytes": 1_073_741_824,
+                    "cpu_limit_millicores": 1_000,
+                    "memory_limit_bytes": 1_073_741_824,
                     "pids": 256,
                     "container_count": 8,
                     "ephemeral_storage_bytes": 8_589_934_592,
@@ -517,7 +517,12 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
         "execution_policy": {
             "schema_version": 1,
             "supported_modules": [
-                {"module_id": module_id.value, "version": 1}
+                {
+                    "module_id": module_id.value,
+                    "version": (
+                        2 if module_id is RuntimeExecutionModuleId.RESOURCES else 1
+                    ),
+                }
                 for module_id in RuntimeExecutionModuleId
             ],
             "privileged_engine": True,

@@ -189,6 +189,9 @@ class KubernetesRuntimeProviderConfig:
     runtime_control_namespace: str
     runtime_control_labels: Mapping[str, str]
     runtime_control_port: int
+    network_hard_cap_allowed_cidrs: tuple[str, ...] = ()
+    network_hard_cap_denied_cidrs: tuple[str, ...] = ()
+    network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
     image_pull_secrets: tuple[LocalObjectReference, ...] = ()
     pod_annotations: Mapping[str, str] = dataclasses.field(default_factory=dict)
     pod_node_selector: Mapping[str, str] = dataclasses.field(default_factory=dict)
@@ -215,6 +218,11 @@ class KubernetesRuntimeProvider:
             raise ValueError("Runtime Control NetworkPolicy labels are required.")
         if not 1 <= config.runtime_control_port <= 65_535:
             raise ValueError("Runtime Control NetworkPolicy port is invalid.")
+        for cidr in (
+            *config.network_hard_cap_allowed_cidrs,
+            *config.network_hard_cap_denied_cidrs,
+        ):
+            _ip_network(cidr)
         _immutable_image_reference(config.gateway_image, "gateway image")
         _immutable_image_reference(config.engine_image, "engine image")
         self._api = api
@@ -232,7 +240,7 @@ class KubernetesRuntimeProvider:
             "Kubernetes Runtime start requested",
             extra=_log_context(command, self._config),
         )
-        await self._ensure_pvc(command)
+        await self._ensure_pvc(command, policy)
         await self._ensure_network_policy(command, policy)
         await self._ensure_pod(command, policy, replace=False)
         return RuntimeLifecycleResult(
@@ -273,7 +281,7 @@ class KubernetesRuntimeProvider:
             "Kubernetes Runtime restart requested",
             extra=_log_context(command, self._config),
         )
-        await self._ensure_pvc(command)
+        await self._ensure_pvc(command, policy)
         await self._ensure_network_policy(command, policy)
         await self._ensure_pod(command, policy, replace=True)
         return RuntimeLifecycleResult(
@@ -312,7 +320,7 @@ class KubernetesRuntimeProvider:
             _pvc_name(command.identity.runtime_id),
             self._config.namespace,
         )
-        await self._ensure_pvc(command)
+        await self._ensure_pvc(command, policy)
         if command.reset_final_desired_state is RuntimeDesiredState.RUNNING:
             await self._ensure_network_policy(command, policy)
             await self._ensure_pod(command, policy, replace=False)
@@ -483,15 +491,40 @@ class KubernetesRuntimeProvider:
                     report = _fail_closed_without_command_policy(report)
                 yield report
 
-    async def _ensure_pvc(self, command: RuntimeLifecycleCommand) -> None:
+    async def _ensure_pvc(
+        self,
+        command: RuntimeLifecycleCommand,
+        policy: RuntimeExecutionPolicy,
+    ) -> None:
+        desired = self._pvc(command, policy)
+        existing = await self._api.get_pvc(
+            desired.metadata.name,
+            desired.metadata.namespace,
+        )
+        if existing is not None:
+            existing_size = _quantity_value(existing.spec.storage_request)
+            desired_size = _quantity_value(desired.spec.storage_request)
+            if (
+                existing_size is not None
+                and desired_size is not None
+                and existing_size > desired_size
+            ):
+                desired = dataclasses.replace(
+                    desired,
+                    spec=dataclasses.replace(
+                        desired.spec,
+                        storage_request=existing.spec.storage_request,
+                    ),
+                )
         _LOGGER.info(
             "Kubernetes Runtime ensuring PVC",
             extra={
                 **_log_context(command, self._config),
                 "pvc_name": _pvc_name(command.identity.runtime_id),
+                "storage_request": desired.spec.storage_request,
             },
         )
-        await self._api.apply_pvc(self._pvc(command))
+        await self._api.apply_pvc(desired)
 
     async def _ensure_network_policy(
         self,
@@ -589,7 +622,12 @@ class KubernetesRuntimeProvider:
             return False
         return True
 
-    def _pvc(self, command: RuntimeLifecycleCommand) -> PersistentVolumeClaimResource:
+    def _pvc(
+        self,
+        command: RuntimeLifecycleCommand,
+        policy: RuntimeExecutionPolicy,
+    ) -> PersistentVolumeClaimResource:
+        persistent_storage_bytes = policy.resources.persistent_storage_bytes
         return PersistentVolumeClaimResource(
             metadata=ObjectMeta(
                 name=_pvc_name(command.identity.runtime_id),
@@ -603,7 +641,11 @@ class KubernetesRuntimeProvider:
             spec=PersistentVolumeClaimSpec(
                 storage_class_name=self._config.storage_class_name,
                 access_modes=("ReadWriteOnce",),
-                storage_request=self._config.pvc_storage_request,
+                storage_request=(
+                    str(persistent_storage_bytes)
+                    if persistent_storage_bytes is not None
+                    else self._config.pvc_storage_request
+                ),
             ),
         )
 
@@ -815,7 +857,7 @@ class KubernetesRuntimeProvider:
                 egress=(
                     _dns_egress_rule(),
                     _runtime_control_egress_rule(self._config),
-                    *_optional_egress_rules(policy),
+                    *_optional_egress_rules(policy, self._config),
                 ),
             ),
         )
@@ -1169,50 +1211,127 @@ def _execution_resource_partition(
     policy: RuntimeExecutionPolicy,
 ) -> _ExecutionResourcePartition:
     resources = policy.resources
-    cpu_millicores = resources.cpu_millicores
-    memory_bytes = resources.memory_bytes
+    cpu_request_millicores = resources.cpu_request_millicores
+    cpu_limit_millicores = resources.cpu_limit_millicores
+    memory_request_bytes = resources.memory_request_bytes
+    memory_limit_bytes = resources.memory_limit_bytes
     ephemeral_storage_bytes = resources.ephemeral_storage_bytes
-    if (
-        cpu_millicores is None
-        or memory_bytes is None
-        or ephemeral_storage_bytes is None
-    ):
-        raise AssertionError("execution resource limits are required")
-    gateway_cpu = min(_GATEWAY_CPU_MAX_MILLICORES, cpu_millicores // 4)
-    gateway_memory = min(_GATEWAY_MEMORY_MAX_BYTES, memory_bytes // 4)
+    if ephemeral_storage_bytes is None:
+        raise AssertionError("execution ephemeral storage is required")
+    gateway_cpu_request = _gateway_resource_share(
+        cpu_request_millicores,
+        maximum=_GATEWAY_CPU_MAX_MILLICORES,
+        divisor=4,
+    )
+    gateway_cpu_limit = _gateway_resource_share(
+        cpu_limit_millicores,
+        maximum=_GATEWAY_CPU_MAX_MILLICORES,
+        divisor=4,
+    )
+    gateway_memory_request = _gateway_resource_share(
+        memory_request_bytes,
+        maximum=_GATEWAY_MEMORY_MAX_BYTES,
+        divisor=4,
+    )
+    gateway_memory_limit = _gateway_resource_share(
+        memory_limit_bytes,
+        maximum=_GATEWAY_MEMORY_MAX_BYTES,
+        divisor=4,
+    )
     gateway_ephemeral = min(
         _GATEWAY_EPHEMERAL_MAX_BYTES,
         ephemeral_storage_bytes // 16,
     )
     if (
-        gateway_cpu < _GATEWAY_CPU_MIN_MILLICORES
-        or gateway_memory < _GATEWAY_MEMORY_MIN_BYTES
+        (
+            gateway_cpu_limit is not None
+            and gateway_cpu_limit < _GATEWAY_CPU_MIN_MILLICORES
+        )
+        or (
+            gateway_memory_limit is not None
+            and gateway_memory_limit < _GATEWAY_MEMORY_MIN_BYTES
+        )
         or gateway_ephemeral < _GATEWAY_EPHEMERAL_MIN_BYTES
     ):
         raise UnsupportedExecutionPolicy(
             "Container execution policy resources are too small for the "
             "fixed policy gateway."
         )
+    gateway_requests = _kubernetes_resource_values(
+        cpu_millicores=gateway_cpu_request,
+        memory_bytes=gateway_memory_request,
+        ephemeral_storage_bytes=gateway_ephemeral,
+    )
+    gateway_limits = _kubernetes_resource_values(
+        cpu_millicores=gateway_cpu_limit,
+        memory_bytes=gateway_memory_limit,
+        ephemeral_storage_bytes=gateway_ephemeral,
+    )
+    engine_requests = _kubernetes_resource_values(
+        cpu_millicores=_remaining_resource(
+            cpu_request_millicores,
+            gateway_cpu_request,
+        ),
+        memory_bytes=_remaining_resource(
+            memory_request_bytes,
+            gateway_memory_request,
+        ),
+        ephemeral_storage_bytes=ephemeral_storage_bytes - gateway_ephemeral,
+    )
+    engine_limits = _kubernetes_resource_values(
+        cpu_millicores=_remaining_resource(
+            cpu_limit_millicores,
+            gateway_cpu_limit,
+        ),
+        memory_bytes=_remaining_resource(
+            memory_limit_bytes,
+            gateway_memory_limit,
+        ),
+        ephemeral_storage_bytes=ephemeral_storage_bytes - gateway_ephemeral,
+    )
     return _ExecutionResourcePartition(
         gateway=ContainerResources(
-            requests=None,
-            limits={
-                "cpu": _canonical_millicores(gateway_cpu),
-                "memory": str(gateway_memory),
-                "ephemeral-storage": str(gateway_ephemeral),
-            },
+            requests=gateway_requests,
+            limits=gateway_limits,
             claims=None,
         ),
         engine=ContainerResources(
-            requests=None,
-            limits={
-                "cpu": _canonical_millicores(cpu_millicores - gateway_cpu),
-                "memory": str(memory_bytes - gateway_memory),
-                "ephemeral-storage": str(ephemeral_storage_bytes - gateway_ephemeral),
-            },
+            requests=engine_requests,
+            limits=engine_limits,
             claims=None,
         ),
     )
+
+
+def _gateway_resource_share(
+    value: int | None,
+    *,
+    maximum: int,
+    divisor: int,
+) -> int | None:
+    if value is None:
+        return None
+    return min(maximum, value // divisor)
+
+
+def _remaining_resource(total: int | None, allocated: int | None) -> int | None:
+    if total is None or allocated is None:
+        return None
+    return total - allocated
+
+
+def _kubernetes_resource_values(
+    *,
+    cpu_millicores: int | None,
+    memory_bytes: int | None,
+    ephemeral_storage_bytes: int,
+) -> dict[str, str]:
+    values = {"ephemeral-storage": str(ephemeral_storage_bytes)}
+    if cpu_millicores is not None and cpu_millicores > 0:
+        values["cpu"] = _canonical_millicores(cpu_millicores)
+    if memory_bytes is not None and memory_bytes > 0:
+        values["memory"] = str(memory_bytes)
+    return values
 
 
 def _dns_egress_rule() -> NetworkPolicyEgressRule:
@@ -1261,36 +1380,69 @@ def _runtime_control_egress_rule(
 
 def _optional_egress_rules(
     policy: RuntimeExecutionPolicy,
+    config: KubernetesRuntimeProviderConfig,
 ) -> tuple[NetworkPolicyEgressRule, ...]:
     network = policy.network_egress
     if network.mode is RuntimeExecutionNetworkMode.NONE:
         return ()
-    denied = tuple(_ip_network(value) for value in network.denied_destinations)
+    profile_denied = tuple(_ip_network(value) for value in network.denied_destinations)
+    hard_cap_denied = tuple(
+        _ip_network(value) for value in config.network_hard_cap_denied_cidrs
+    )
+    hard_cap_allowed = tuple(
+        _ip_network(value) for value in config.network_hard_cap_allowed_cidrs
+    )
     if network.mode is RuntimeExecutionNetworkMode.DIRECT:
         rules: list[NetworkPolicyEgressRule] = []
-        for public_network in (
+        for internet in (
             ipaddress.ip_network("0.0.0.0/0"),
             ipaddress.ip_network("::/0"),
         ):
-            if any(
-                _subnet_of_same_family(public_network, denied_network)
-                for denied_network in denied
-            ):
-                continue
-            rules.append(_ip_block_rule(public_network, denied=denied))
-        return tuple(rules)
+            rule = _bounded_ip_block_rule(
+                internet,
+                denied=(*hard_cap_denied, *profile_denied),
+            )
+            if rule is not None:
+                rules.append(rule)
+        for allowed in hard_cap_allowed:
+            rule = _bounded_ip_block_rule(allowed, denied=profile_denied)
+            if rule is not None:
+                rules.append(rule)
+        return (*rules, *config.network_hard_cap_extra_egress)
     if network.mode is RuntimeExecutionNetworkMode.RESTRICTED:
-        rules = []
+        rules: list[NetworkPolicyEgressRule] = []
         for allowed_value in network.allowed_destinations:
             allowed = _ip_network(allowed_value)
-            if any(
-                _subnet_of_same_family(allowed, denied_network)
-                for denied_network in denied
-            ):
-                continue
-            rules.append(_ip_block_rule(allowed, denied=denied))
+            rule = _bounded_ip_block_rule(
+                allowed,
+                denied=(*hard_cap_denied, *profile_denied),
+            )
+            if rule is not None:
+                rules.append(rule)
+            for exception in hard_cap_allowed:
+                intersection = _network_intersection(allowed, exception)
+                if intersection is None:
+                    continue
+                exception_rule = _bounded_ip_block_rule(
+                    intersection,
+                    denied=profile_denied,
+                )
+                if exception_rule is not None:
+                    rules.append(exception_rule)
         return tuple(rules)
     raise AssertionError(f"unsupported network mode: {network.mode}")
+
+
+def _bounded_ip_block_rule(
+    network: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    *,
+    denied: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...],
+) -> NetworkPolicyEgressRule | None:
+    if any(
+        _subnet_of_same_family(network, denied_network) for denied_network in denied
+    ):
+        return None
+    return _ip_block_rule(network, denied=denied)
 
 
 def _ip_block_rule(
@@ -1342,6 +1494,17 @@ def _subnet_of_same_family(
     ):
         return candidate.subnet_of(container)
     return False
+
+
+def _network_intersection(
+    left: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    right: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> ipaddress.IPv4Network | ipaddress.IPv6Network | None:
+    if _subnet_of_same_family(left, right):
+        return left
+    if _subnet_of_same_family(right, left):
+        return right
+    return None
 
 
 def _fail_closed_without_command_policy(

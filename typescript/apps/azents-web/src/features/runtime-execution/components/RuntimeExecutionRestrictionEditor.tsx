@@ -38,11 +38,14 @@ export function RuntimeExecutionRestrictionEditor({
 }: RuntimeExecutionRestrictionEditorProps): React.ReactElement {
   const t = useTranslations("workspace.runtimeExecution.restrictions");
   const resources = restriction.resources ?? {
-    cpu_millicores: null,
-    memory_bytes: null,
+    cpu_request_millicores: null,
+    cpu_limit_millicores: null,
+    memory_request_bytes: null,
+    memory_limit_bytes: null,
     pids: null,
     container_count: null,
     ephemeral_storage_bytes: null,
+    persistent_storage_bytes: null,
   };
   const storage = restriction.engine_storage ?? {
     mode: null,
@@ -122,16 +125,16 @@ export function RuntimeExecutionRestrictionEditor({
           <Grid>
             <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
               <NumberInput
-                label={t("cpuMillicores")}
-                value={resources.cpu_millicores ?? ""}
-                min={0}
+                label={t("cpuRequestMillicores")}
+                value={resources.cpu_request_millicores ?? ""}
+                min={1}
                 disabled={readOnly || restriction.resources === null}
                 onChange={(value) =>
                   onChange({
                     ...restriction,
                     resources: {
                       ...resources,
-                      cpu_millicores: optionalNumber(value),
+                      cpu_request_millicores: optionalNumber(value),
                     },
                   })
                 }
@@ -139,16 +142,50 @@ export function RuntimeExecutionRestrictionEditor({
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
               <NumberInput
-                label={t("memoryBytes")}
-                value={resources.memory_bytes ?? ""}
-                min={0}
+                label={t("cpuLimitMillicores")}
+                value={resources.cpu_limit_millicores ?? ""}
+                min={1}
                 disabled={readOnly || restriction.resources === null}
                 onChange={(value) =>
                   onChange({
                     ...restriction,
                     resources: {
                       ...resources,
-                      memory_bytes: optionalNumber(value),
+                      cpu_limit_millicores: optionalNumber(value),
+                    },
+                  })
+                }
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
+              <NumberInput
+                label={t("memoryRequestBytes")}
+                value={resources.memory_request_bytes ?? ""}
+                min={1}
+                disabled={readOnly || restriction.resources === null}
+                onChange={(value) =>
+                  onChange({
+                    ...restriction,
+                    resources: {
+                      ...resources,
+                      memory_request_bytes: optionalNumber(value),
+                    },
+                  })
+                }
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
+              <NumberInput
+                label={t("memoryLimitBytes")}
+                value={resources.memory_limit_bytes ?? ""}
+                min={1}
+                disabled={readOnly || restriction.resources === null}
+                onChange={(value) =>
+                  onChange({
+                    ...restriction,
+                    resources: {
+                      ...resources,
+                      memory_limit_bytes: optionalNumber(value),
                     },
                   })
                 }
@@ -158,7 +195,7 @@ export function RuntimeExecutionRestrictionEditor({
               <NumberInput
                 label={t("pids")}
                 value={resources.pids ?? ""}
-                min={0}
+                min={1}
                 disabled={readOnly || restriction.resources === null}
                 onChange={(value) =>
                   onChange({
@@ -172,7 +209,7 @@ export function RuntimeExecutionRestrictionEditor({
               <NumberInput
                 label={t("containerCount")}
                 value={resources.container_count ?? ""}
-                min={0}
+                min={1}
                 disabled={readOnly || restriction.resources === null}
                 onChange={(value) =>
                   onChange({
@@ -189,7 +226,7 @@ export function RuntimeExecutionRestrictionEditor({
               <NumberInput
                 label={t("ephemeralStorageBytes")}
                 value={resources.ephemeral_storage_bytes ?? ""}
-                min={0}
+                min={1}
                 disabled={readOnly || restriction.resources === null}
                 onChange={(value) =>
                   onChange({
@@ -197,6 +234,23 @@ export function RuntimeExecutionRestrictionEditor({
                     resources: {
                       ...resources,
                       ephemeral_storage_bytes: optionalNumber(value),
+                    },
+                  })
+                }
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
+              <NumberInput
+                label={t("persistentStorageBytes")}
+                value={resources.persistent_storage_bytes ?? ""}
+                min={1}
+                disabled={readOnly || restriction.resources === null}
+                onChange={(value) =>
+                  onChange({
+                    ...restriction,
+                    resources: {
+                      ...resources,
+                      persistent_storage_bytes: optionalNumber(value),
                     },
                   })
                 }
@@ -246,7 +300,7 @@ export function RuntimeExecutionRestrictionEditor({
             <NumberInput
               label={t("capacityBytes")}
               value={storage.capacity_bytes ?? ""}
-              min={0}
+              min={1}
               disabled={readOnly || restriction.engine_storage === null}
               onChange={(value) =>
                 onChange({

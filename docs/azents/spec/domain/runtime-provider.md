@@ -40,9 +40,11 @@ code_paths:
   - infra/charts/azents/values.schema.json
   - typescript/apps/azents-admin-web/src/app/runtime-providers/**
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
+  - typescript/apps/azents-admin-web/src/features/runtime-execution/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
+  - typescript/apps/azents-admin-web/src/trpc/routers/runtimeExecution.ts
 last_verified_at: 2026-07-27
-spec_version: 8
+spec_version: 9
 ---
 
 # Runtime Provider
@@ -119,13 +121,27 @@ preserves Agent Workspace storage and does not invoke reset or terminal delete. 
 layers, digests, and generations.
 
 The installation management gate exposes image build, container run, Compose, `none` or
-`ephemeral` engine storage, and `none` or `direct` network egress. The Kubernetes Provider declares
-those exact capabilities in its Admin-accepted typed contract and enforces them with the fixed
-Runner, policy-gateway, and engine topology plus a generation-fenced Runtime NetworkPolicy.
-Persistent engine storage, proxy-required egress, and restricted-destination egress remain
-unavailable because this Provider contract does not advertise them. A legacy accepted contract
-without the typed section remains usable for the non-engine baseline but cannot grant nested-engine
-authority.
+`ephemeral` Docker storage, and all three implemented network policies: system traffic only,
+allowlisted IP CIDRs, and all IP addresses. These network policies are always advertised without a
+deployment-owned capability filter. The Kubernetes Provider enforces the selected mode with a
+generation-fenced NetworkPolicy that always permits required DNS and Runtime Control traffic,
+adds only the selected allowlisted IPv4/IPv6 CIDRs in allowlist mode, or adds IPv4/IPv6 default
+routes in all-address mode. Denied CIDRs are subtracted from otherwise allowed IP blocks. The Helm
+deployment NetworkPolicy remains a separate hard cap: its denied CIDRs, explicit CIDR exceptions,
+and selector/port egress rules are passed into the Provider and intersected with each generated
+Runtime policy. Deployment-only selector/port exceptions are added only to all-address mode, never
+to a Profile allowlist or system-only policy.
+
+`container.resources/v2` separates optional Kubernetes CPU and memory requests from optional
+limits. Ephemeral storage is one fixed allocation applied as the same request and limit. Optional
+PID and container-count values bound nested Docker workloads when set; `null` means unlimited and
+skips the corresponding aggregate Gateway check. Temporary Docker image/container data uses a
+separate bounded engine-only `emptyDir`. Persistent workspace storage configures the Runtime
+PVC request: expansion is applied in place, but a smaller configured value is retained until an
+explicit operation deletes and recreates the PVC. Persistent Docker engine storage and
+proxy-required egress remain unavailable because the Provider does not advertise them. A legacy
+accepted contract without the typed section remains usable for the non-engine baseline but cannot
+grant nested-engine authority.
 Admin/Public surfaces must not expose Provider credentials, socket paths, raw manifests, Kubernetes
 resource names, or generic privileged controls.
 
@@ -166,6 +182,7 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **9 (2026-07-27):** Advertised all implemented network modes, defined resource module v2 request/limit semantics, and added Profile-controlled persistent workspace capacity with deferred shrink.
 - **8 (2026-07-27):** Removed the installation-wide execution-policy ceiling and made each editable Profile the complete authority ceiling.
 - **7 (2026-07-27):** Made unrestricted direct outbound networking the installation and reserved Standard default while leaving nested container authority disabled.
 - **6 (2026-07-27):** Added accepted typed execution-policy capabilities as the authority source for Kubernetes engine features.

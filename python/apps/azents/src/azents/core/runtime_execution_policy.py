@@ -146,15 +146,37 @@ class RuntimeExecutionBooleanModule(_FrozenPolicyModel):
 
 
 class RuntimeExecutionResourceModule(_FrozenPolicyModel):
-    """Aggregate Runtime and nested-workload resource ceilings."""
+    """Kubernetes resources and nested-workload resource ceilings."""
 
     module_id: Literal[RuntimeExecutionModuleId.RESOURCES]
-    version: Literal[1]
-    cpu_millicores: int | None = Field(ge=1)
-    memory_bytes: int | None = Field(ge=1)
+    version: Literal[2]
+    cpu_request_millicores: int | None = Field(ge=1)
+    cpu_limit_millicores: int | None = Field(ge=1)
+    memory_request_bytes: int | None = Field(ge=1)
+    memory_limit_bytes: int | None = Field(ge=1)
     pids: int | None = Field(ge=1)
     container_count: int | None = Field(ge=1)
     ephemeral_storage_bytes: int | None = Field(ge=1)
+    persistent_storage_bytes: int | None = Field(ge=1)
+
+    @model_validator(mode="after")
+    def validate_requests_do_not_exceed_limits(
+        self,
+    ) -> "RuntimeExecutionResourceModule":
+        """Keep optional Kubernetes requests within their matching limits."""
+        if (
+            self.cpu_request_millicores is not None
+            and self.cpu_limit_millicores is not None
+            and self.cpu_request_millicores > self.cpu_limit_millicores
+        ):
+            raise ValueError("CPU request cannot exceed CPU limit.")
+        if (
+            self.memory_request_bytes is not None
+            and self.memory_limit_bytes is not None
+            and self.memory_request_bytes > self.memory_limit_bytes
+        ):
+            raise ValueError("Memory request cannot exceed memory limit.")
+        return self
 
 
 class RuntimeExecutionStorageModule(_FrozenPolicyModel):
@@ -230,11 +252,14 @@ class RuntimeExecutionBooleanRestriction(_FrozenPolicyModel):
 class RuntimeExecutionResourceRestriction(_FrozenPolicyModel):
     """Optional lower-layer resource ceilings."""
 
-    cpu_millicores: int | None = Field(ge=1)
-    memory_bytes: int | None = Field(ge=1)
+    cpu_request_millicores: int | None = Field(ge=1)
+    cpu_limit_millicores: int | None = Field(ge=1)
+    memory_request_bytes: int | None = Field(ge=1)
+    memory_limit_bytes: int | None = Field(ge=1)
     pids: int | None = Field(ge=1)
     container_count: int | None = Field(ge=1)
     ephemeral_storage_bytes: int | None = Field(ge=1)
+    persistent_storage_bytes: int | None = Field(ge=1)
 
 
 class RuntimeExecutionStorageRestriction(_FrozenPolicyModel):
@@ -270,7 +295,7 @@ class RuntimeExecutionModuleSupport(_FrozenPolicyModel):
     """One exact application-owned module version implemented by a Provider."""
 
     module_id: RuntimeExecutionModuleId
-    version: Literal[1]
+    version: int = Field(ge=1)
 
 
 class RuntimeExecutionProviderCapabilities(_FrozenPolicyModel):
@@ -357,11 +382,14 @@ _NETWORK_RANK = {
     RuntimeExecutionNetworkMode.DIRECT: 2,
 }
 _RESOURCE_PATHS = (
-    "cpu_millicores",
-    "memory_bytes",
+    "cpu_request_millicores",
+    "cpu_limit_millicores",
+    "memory_request_bytes",
+    "memory_limit_bytes",
     "pids",
     "container_count",
     "ephemeral_storage_bytes",
+    "persistent_storage_bytes",
 )
 
 
@@ -386,12 +414,15 @@ def standard_runtime_execution_policy() -> RuntimeExecutionPolicyDocument:
         ),
         resources=RuntimeExecutionResourceModule(
             module_id=RuntimeExecutionModuleId.RESOURCES,
-            version=1,
-            cpu_millicores=None,
-            memory_bytes=None,
+            version=2,
+            cpu_request_millicores=None,
+            cpu_limit_millicores=None,
+            memory_request_bytes=None,
+            memory_limit_bytes=None,
             pids=None,
             container_count=None,
             ephemeral_storage_bytes=None,
+            persistent_storage_bytes=None,
         ),
         engine_storage=RuntimeExecutionStorageModule(
             module_id=RuntimeExecutionModuleId.ENGINE_STORAGE,
@@ -650,7 +681,7 @@ def _apply_restriction(
     if restriction.resources is not None:
         resources = RuntimeExecutionResourceModule(
             module_id=RuntimeExecutionModuleId.RESOURCES,
-            version=1,
+            version=2,
             **{
                 name: _minimum_bound(
                     getattr(policy.resources, name),
@@ -747,10 +778,8 @@ def _dependency_error(policy: RuntimeExecutionPolicyDocument) -> str | None:
     engine_needed = policy.image_build.enabled or policy.container_run.enabled
     if engine_needed and policy.engine_storage.mode is RuntimeExecutionStorageMode.NONE:
         return "Container execution capabilities require engine.storage/v1."
-    if engine_needed and any(
-        getattr(policy.resources, name) is None for name in _RESOURCE_PATHS
-    ):
-        return "Container execution capabilities require bounded resources."
+    if engine_needed and policy.resources.ephemeral_storage_bytes is None:
+        return "Container execution capabilities require ephemeral storage."
     return None
 
 
@@ -764,7 +793,8 @@ def _provider_compatibility_error(
         module = sorted(missing, key=lambda item: item.module_id.value)[0]
         return (
             RuntimeExecutionAvailabilityReason.PROVIDER_MODULE_UNSUPPORTED,
-            f"The bound Provider does not support {module.module_id.value}/v1.",
+            "The bound Provider does not support "
+            f"{module.module_id.value}/v{module.version}.",
         )
     engine_needed = policy.image_build.enabled or policy.container_run.enabled
     if engine_needed and not provider.privileged_engine:
@@ -820,7 +850,10 @@ def _required_module_support(
     if policy.network_egress.mode is not RuntimeExecutionNetworkMode.NONE:
         module_ids.add(RuntimeExecutionModuleId.NETWORK_EGRESS)
     return frozenset(
-        RuntimeExecutionModuleSupport(module_id=module_id, version=1)
+        RuntimeExecutionModuleSupport(
+            module_id=module_id,
+            version=(2 if module_id is RuntimeExecutionModuleId.RESOURCES else 1),
+        )
         for module_id in module_ids
     )
 

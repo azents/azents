@@ -24,6 +24,7 @@ def policy_document(
     image_build: bool = False,
     container_run: bool = False,
     compose: bool = False,
+    bounded_nested_containers: bool = True,
 ) -> dict[str, JsonValue]:
     """Return one complete policy document."""
     engine = image_build or container_run
@@ -46,12 +47,15 @@ def policy_document(
         },
         "resources": {
             "module_id": "container.resources",
-            "version": 1,
-            "cpu_millicores": 1000 if engine else None,
-            "memory_bytes": 2_147_483_648 if engine else None,
-            "pids": 256 if engine else None,
-            "container_count": 8 if engine else None,
+            "version": 2,
+            "cpu_request_millicores": None,
+            "cpu_limit_millicores": 1000 if engine else None,
+            "memory_request_bytes": None,
+            "memory_limit_bytes": 2_147_483_648 if engine else None,
+            "pids": 256 if engine and bounded_nested_containers else None,
+            "container_count": (8 if engine and bounded_nested_containers else None),
             "ephemeral_storage_bytes": 10_737_418_240 if engine else None,
+            "persistent_storage_bytes": None,
         },
         "engine_storage": {
             "module_id": "engine.storage",
@@ -74,12 +78,14 @@ def policy(
     image_build: bool = False,
     container_run: bool = False,
     compose: bool = False,
+    bounded_nested_containers: bool = True,
 ) -> RuntimeExecutionPolicy:
     """Return one parsed policy."""
     document = policy_document(
         image_build=image_build,
         container_run=container_run,
         compose=compose,
+        bounded_nested_containers=bounded_nested_containers,
     )
     envelope = RuntimeExecutionPolicyEnvelope(
         evidence=RuntimeExecutionPolicyEvidence(
@@ -90,7 +96,7 @@ def policy(
                 "container.image_build": 1,
                 "container.run": 1,
                 "container.compose": 1,
-                "container.resources": 1,
+                "container.resources": 2,
                 "engine.storage": 1,
                 "network.egress": 1,
             },
@@ -110,12 +116,14 @@ def gateway_env(
     image_build: bool = False,
     container_run: bool = False,
     compose: bool = False,
+    bounded_nested_containers: bool = True,
 ) -> dict[str, str]:
     """Return complete gateway environment values."""
     document = policy_document(
         image_build=image_build,
         container_run=container_run,
         compose=compose,
+        bounded_nested_containers=bounded_nested_containers,
     )
     return {
         "AZ_RUNTIME_ID": "runtime-1",
@@ -127,7 +135,7 @@ def gateway_env(
                 "container.image_build": 1,
                 "container.run": 1,
                 "container.compose": 1,
-                "container.resources": 1,
+                "container.resources": 2,
                 "engine.storage": 1,
                 "network.egress": 1,
             }

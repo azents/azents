@@ -25,16 +25,19 @@ from typing_extensions import Self
 
 class RuntimeExecutionResourceModule(BaseModel):
     """
-    Aggregate Runtime and nested-workload resource ceilings.
+    Kubernetes resources and nested-workload resource ceilings.
     """ # noqa: E501
     module_id: StrictStr
     version: StrictInt
-    cpu_millicores: Optional[Annotated[int, Field(strict=True, ge=1)]]
-    memory_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
+    cpu_request_millicores: Optional[Annotated[int, Field(strict=True, ge=1)]]
+    cpu_limit_millicores: Optional[Annotated[int, Field(strict=True, ge=1)]]
+    memory_request_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
+    memory_limit_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
     pids: Optional[Annotated[int, Field(strict=True, ge=1)]]
     container_count: Optional[Annotated[int, Field(strict=True, ge=1)]]
     ephemeral_storage_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
-    __properties: ClassVar[List[str]] = ["module_id", "version", "cpu_millicores", "memory_bytes", "pids", "container_count", "ephemeral_storage_bytes"]
+    persistent_storage_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
+    __properties: ClassVar[List[str]] = ["module_id", "version", "cpu_request_millicores", "cpu_limit_millicores", "memory_request_bytes", "memory_limit_bytes", "pids", "container_count", "ephemeral_storage_bytes", "persistent_storage_bytes"]
 
     @field_validator('module_id')
     def module_id_validate_enum(cls, value):
@@ -46,8 +49,8 @@ class RuntimeExecutionResourceModule(BaseModel):
     @field_validator('version')
     def version_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set([1]):
-            raise ValueError("must be one of enum values (1)")
+        if value not in set([2]):
+            raise ValueError("must be one of enum values (2)")
         return value
 
     model_config = ConfigDict(
@@ -89,15 +92,25 @@ class RuntimeExecutionResourceModule(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # set to None if cpu_millicores (nullable) is None
+        # set to None if cpu_request_millicores (nullable) is None
         # and model_fields_set contains the field
-        if self.cpu_millicores is None and "cpu_millicores" in self.model_fields_set:
-            _dict['cpu_millicores'] = None
+        if self.cpu_request_millicores is None and "cpu_request_millicores" in self.model_fields_set:
+            _dict['cpu_request_millicores'] = None
 
-        # set to None if memory_bytes (nullable) is None
+        # set to None if cpu_limit_millicores (nullable) is None
         # and model_fields_set contains the field
-        if self.memory_bytes is None and "memory_bytes" in self.model_fields_set:
-            _dict['memory_bytes'] = None
+        if self.cpu_limit_millicores is None and "cpu_limit_millicores" in self.model_fields_set:
+            _dict['cpu_limit_millicores'] = None
+
+        # set to None if memory_request_bytes (nullable) is None
+        # and model_fields_set contains the field
+        if self.memory_request_bytes is None and "memory_request_bytes" in self.model_fields_set:
+            _dict['memory_request_bytes'] = None
+
+        # set to None if memory_limit_bytes (nullable) is None
+        # and model_fields_set contains the field
+        if self.memory_limit_bytes is None and "memory_limit_bytes" in self.model_fields_set:
+            _dict['memory_limit_bytes'] = None
 
         # set to None if pids (nullable) is None
         # and model_fields_set contains the field
@@ -114,6 +127,11 @@ class RuntimeExecutionResourceModule(BaseModel):
         if self.ephemeral_storage_bytes is None and "ephemeral_storage_bytes" in self.model_fields_set:
             _dict['ephemeral_storage_bytes'] = None
 
+        # set to None if persistent_storage_bytes (nullable) is None
+        # and model_fields_set contains the field
+        if self.persistent_storage_bytes is None and "persistent_storage_bytes" in self.model_fields_set:
+            _dict['persistent_storage_bytes'] = None
+
         return _dict
 
     @classmethod
@@ -128,11 +146,14 @@ class RuntimeExecutionResourceModule(BaseModel):
         _obj = cls.model_validate({
             "module_id": obj.get("module_id"),
             "version": obj.get("version"),
-            "cpu_millicores": obj.get("cpu_millicores"),
-            "memory_bytes": obj.get("memory_bytes"),
+            "cpu_request_millicores": obj.get("cpu_request_millicores"),
+            "cpu_limit_millicores": obj.get("cpu_limit_millicores"),
+            "memory_request_bytes": obj.get("memory_request_bytes"),
+            "memory_limit_bytes": obj.get("memory_limit_bytes"),
             "pids": obj.get("pids"),
             "container_count": obj.get("container_count"),
-            "ephemeral_storage_bytes": obj.get("ephemeral_storage_bytes")
+            "ephemeral_storage_bytes": obj.get("ephemeral_storage_bytes"),
+            "persistent_storage_bytes": obj.get("persistent_storage_bytes")
         })
         return _obj
 

@@ -81,6 +81,12 @@ spec:
               value: {{ dict "app.kubernetes.io/component" "runtime-control" "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/name" (include "azents.name" .) | toJson | quote }}
             - name: AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT
               value: "8030"
+            - name: AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS
+              value: {{ ternary .Values.runtimeProviderKubernetes.networkPolicy.allowedCidrs (list) .Values.runtimeProviderKubernetes.networkPolicy.enabled | toJson | quote }}
+            - name: AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_DENIED_CIDRS
+              value: {{ ternary .Values.runtimeProviderKubernetes.networkPolicy.deniedCidrs (list) .Values.runtimeProviderKubernetes.networkPolicy.enabled | toJson | quote }}
+            - name: AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_EXTRA_EGRESS
+              value: {{ ternary .Values.runtimeProviderKubernetes.networkPolicy.extraEgress (list) .Values.runtimeProviderKubernetes.networkPolicy.enabled | toJson | quote }}
             - name: AZ_RUNTIME_RUNNER_RESOURCES
               value: {{ .Values.runtimeProviderKubernetes.runnerResources | toJson | quote }}
             - name: AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION

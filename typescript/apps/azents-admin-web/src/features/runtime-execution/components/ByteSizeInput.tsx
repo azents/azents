@@ -1,7 +1,7 @@
 "use client";
 
 import { Grid, NumberInput, Select } from "@mantine/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   BYTE_SIZE_UNITS,
   bytesInUnit,
@@ -33,6 +33,9 @@ export function ByteSizeInput({
   const [unit, setUnit] = useState<ByteSizeUnit>(() =>
     preferredByteSizeUnit(value),
   );
+  useEffect(() => {
+    setUnit(preferredByteSizeUnit(value));
+  }, [value]);
 
   return (
     <Grid align="flex-end">

@@ -103,6 +103,18 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         '{"app.kubernetes.io/component":"runtime-control"}',
     )
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT", "8030")
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS",
+        "[]",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_DENIED_CIDRS",
+        "[]",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_EXTRA_EGRESS",
+        "[]",
+    )
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_ANNOTATIONS", "{}")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_NODE_SELECTOR", "{}")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_TOLERATIONS", "[]")
@@ -131,8 +143,39 @@ def test_provider_settings_defaults_runner_resources_to_none(
         "app.kubernetes.io/component": "runtime-control"
     }
     assert settings.runtime_control_port == 8030
+    assert settings.network_hard_cap_allowed_cidrs == ()
+    assert settings.network_hard_cap_denied_cidrs == ()
+    assert settings.network_hard_cap_extra_egress == ()
     assert settings.service_account_token_file == provider_env
     assert read_service_account_token(provider_env) == "test-provider-credential"
+
+
+def test_provider_settings_parse_network_hard_cap(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS",
+        '["10.10.0.0/16"]',
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_DENIED_CIDRS",
+        '["10.0.0.0/8"]',
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_EXTRA_EGRESS",
+        (
+            '[{"to":[{"namespaceSelector":{"matchLabels":'
+            '{"kubernetes.io/metadata.name":"ingress"}}}],'
+            '"ports":[{"protocol":"TCP","port":"websecure"}]}]'
+        ),
+    )
+
+    settings = ProviderSettings()
+
+    assert settings.network_hard_cap_allowed_cidrs == ("10.10.0.0/16",)
+    assert settings.network_hard_cap_denied_cidrs == ("10.0.0.0/8",)
+    assert settings.network_hard_cap_extra_egress[0].ports[0].port == "websecure"
 
 
 @pytest.mark.asyncio
@@ -323,17 +366,19 @@ def test_capability_contract_declares_qualified_execution_support() -> None:
     assert execution_policy["network_modes"] == ["none", "restricted", "direct"]
     supported_modules = execution_policy["supported_modules"]
     assert isinstance(supported_modules, list)
-    module_ids: list[str] = []
+    module_versions: dict[str, int] = {}
     for module in supported_modules:
         assert isinstance(module, dict)
         module_id = module["module_id"]
+        version = module["version"]
         assert isinstance(module_id, str)
-        module_ids.append(module_id)
-    assert set(module_ids) == {
-        "container.image_build",
-        "container.run",
-        "container.compose",
-        "container.resources",
-        "engine.storage",
-        "network.egress",
+        assert isinstance(version, int)
+        module_versions[module_id] = version
+    assert module_versions == {
+        "container.image_build": 1,
+        "container.run": 1,
+        "container.compose": 1,
+        "container.resources": 2,
+        "engine.storage": 1,
+        "network.egress": 1,
     }

@@ -36,12 +36,15 @@ def _policy(*, image_build: bool = False) -> dict[str, JsonValue]:
         },
         "resources": {
             "module_id": "container.resources",
-            "version": 1,
-            "cpu_millicores": None,
-            "memory_bytes": None,
+            "version": 2,
+            "cpu_request_millicores": None,
+            "cpu_limit_millicores": None,
+            "memory_request_bytes": None,
+            "memory_limit_bytes": None,
             "pids": None,
             "container_count": None,
             "ephemeral_storage_bytes": None,
+            "persistent_storage_bytes": None,
         },
         "engine_storage": {
             "module_id": "engine.storage",
@@ -68,8 +71,10 @@ def _envelope(*, image_build: bool = False) -> RuntimeExecutionPolicyEnvelope:
         assert isinstance(storage, dict)
         resources.update(
             {
-                "cpu_millicores": 1000,
-                "memory_bytes": 2_147_483_648,
+                "cpu_request_millicores": 500,
+                "cpu_limit_millicores": 1000,
+                "memory_request_bytes": 1_073_741_824,
+                "memory_limit_bytes": 2_147_483_648,
                 "pids": 256,
                 "container_count": 8,
                 "ephemeral_storage_bytes": 10_737_418_240,
@@ -85,7 +90,7 @@ def _envelope(*, image_build: bool = False) -> RuntimeExecutionPolicyEnvelope:
                 "container.image_build": 1,
                 "container.run": 1,
                 "container.compose": 1,
-                "container.resources": 1,
+                "container.resources": 2,
                 "engine.storage": 1,
                 "network.egress": 1,
             },
@@ -174,8 +179,10 @@ def test_authority_bearing_policy_parses_as_typed_contract() -> None:
     assert isinstance(network, dict)
     resources.update(
         {
-            "cpu_millicores": 1000,
-            "memory_bytes": 2_147_483_648,
+            "cpu_request_millicores": 500,
+            "cpu_limit_millicores": 1000,
+            "memory_request_bytes": 1_073_741_824,
+            "memory_limit_bytes": 2_147_483_648,
             "pids": 256,
             "container_count": 8,
             "ephemeral_storage_bytes": 10_737_418_240,
@@ -221,7 +228,7 @@ def test_removed_proxy_network_mode_is_rejected() -> None:
         parse_execution_policy_envelope(envelope, desired_generation=3)
 
 
-def test_engine_policy_requires_complete_resource_bounds() -> None:
+def test_engine_policy_requires_ephemeral_storage() -> None:
     policy = _policy(image_build=True)
     envelope = RuntimeExecutionPolicyEnvelope(
         evidence=dataclasses.replace(
@@ -231,7 +238,7 @@ def test_engine_policy_requires_complete_resource_bounds() -> None:
         effective_policy=policy,
     )
 
-    with pytest.raises(ValueError, match="bounded resources"):
+    with pytest.raises(ValueError, match="ephemeral storage"):
         parse_execution_policy_envelope(
             envelope,
             desired_generation=3,

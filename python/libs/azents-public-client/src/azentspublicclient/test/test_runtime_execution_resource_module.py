@@ -36,22 +36,28 @@ class TestRuntimeExecutionResourceModule(unittest.TestCase):
         if include_optional:
             return RuntimeExecutionResourceModule(
                 module_id = 'container.resources',
-                version = 1,
-                cpu_millicores = 1.0,
-                memory_bytes = 1.0,
+                version = 2,
+                cpu_request_millicores = 1.0,
+                cpu_limit_millicores = 1.0,
+                memory_request_bytes = 1.0,
+                memory_limit_bytes = 1.0,
                 pids = 1.0,
                 container_count = 1.0,
-                ephemeral_storage_bytes = 1.0
+                ephemeral_storage_bytes = 1.0,
+                persistent_storage_bytes = 1.0
             )
         else:
             return RuntimeExecutionResourceModule(
                 module_id = 'container.resources',
-                version = 1,
-                cpu_millicores = 1.0,
-                memory_bytes = 1.0,
+                version = 2,
+                cpu_request_millicores = 1.0,
+                cpu_limit_millicores = 1.0,
+                memory_request_bytes = 1.0,
+                memory_limit_bytes = 1.0,
                 pids = 1.0,
                 container_count = 1.0,
                 ephemeral_storage_bytes = 1.0,
+                persistent_storage_bytes = 1.0,
         )
         """
 
