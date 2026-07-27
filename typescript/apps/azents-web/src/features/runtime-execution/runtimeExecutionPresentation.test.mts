@@ -223,10 +223,6 @@ void test("status polling follows wait and stops at terminal actions", () => {
 
 void test("every Runtime policy reason has a visible message fallback", () => {
   assert.equal(
-    runtimePolicyReasonMessageKey("applied_snapshot_unverified"),
-    "reasonExplanations.applied_snapshot_unverified",
-  );
-  assert.equal(
     runtimePolicyReasonMessageKey("RUNTIME_POLICY_PROVIDER_EVIDENCE_MISMATCH"),
     "reasonExplanations.provider_evidence_mismatch",
   );

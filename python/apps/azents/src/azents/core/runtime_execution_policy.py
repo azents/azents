@@ -669,6 +669,97 @@ def classify_runtime_execution_change(
     )
 
 
+def meet_runtime_execution_policies(
+    left: RuntimeExecutionPolicyDocument,
+    right: RuntimeExecutionPolicyDocument,
+) -> RuntimeExecutionPolicyDocument:
+    """Return the greatest valid policy no broader than either input."""
+    resource_values = {
+        name: _minimum_bound(
+            getattr(left.resources, name),
+            getattr(right.resources, name),
+        )
+        for name in _RESOURCE_PATHS
+    }
+    for request_name, limit_name in (
+        ("cpu_request_millicores", "cpu_limit_millicores"),
+        ("memory_request_bytes", "memory_limit_bytes"),
+    ):
+        request = resource_values[request_name]
+        limit = resource_values[limit_name]
+        if request is not None and limit is not None and request > limit:
+            resource_values[request_name] = limit
+
+    storage_mode = min(
+        left.engine_storage.mode,
+        right.engine_storage.mode,
+        key=_STORAGE_RANK.__getitem__,
+    )
+    storage_capacity = (
+        None
+        if storage_mode is RuntimeExecutionStorageMode.NONE
+        else _minimum_bound(
+            left.engine_storage.capacity_bytes,
+            right.engine_storage.capacity_bytes,
+        )
+    )
+
+    network_mode = min(
+        left.network_egress.mode,
+        right.network_egress.mode,
+        key=_NETWORK_RANK.__getitem__,
+    )
+    denied_destinations = (
+        left.network_egress.denied_destinations
+        | right.network_egress.denied_destinations
+    )
+    restricted_allow_sets = [
+        policy.network_egress.allowed_destinations
+        for policy in (left, right)
+        if policy.network_egress.mode is RuntimeExecutionNetworkMode.RESTRICTED
+    ]
+    if network_mode is RuntimeExecutionNetworkMode.RESTRICTED:
+        allowed_destinations = restricted_allow_sets[0]
+        for destinations in restricted_allow_sets[1:]:
+            allowed_destinations &= destinations
+        allowed_destinations -= denied_destinations
+    else:
+        allowed_destinations = frozenset()
+
+    return RuntimeExecutionPolicyDocument(
+        schema_version=1,
+        image_build=left.image_build.model_copy(
+            update={"enabled": left.image_build.enabled and right.image_build.enabled}
+        ),
+        container_run=left.container_run.model_copy(
+            update={
+                "enabled": left.container_run.enabled and right.container_run.enabled
+            }
+        ),
+        compose=left.compose.model_copy(
+            update={"enabled": left.compose.enabled and right.compose.enabled}
+        ),
+        resources=RuntimeExecutionResourceModule(
+            module_id=RuntimeExecutionModuleId.RESOURCES,
+            version=1,
+            **resource_values,
+        ),
+        engine_storage=RuntimeExecutionStorageModule(
+            module_id=RuntimeExecutionModuleId.ENGINE_STORAGE,
+            version=1,
+            mode=storage_mode,
+            capacity_bytes=storage_capacity,
+        ),
+        network_egress=RuntimeExecutionNetworkModule(
+            module_id=RuntimeExecutionModuleId.NETWORK_EGRESS,
+            version=1,
+            mode=network_mode,
+            allowed_destinations=allowed_destinations,
+            denied_destinations=denied_destinations,
+        ),
+    )
+
+
 def _apply_restriction(
     policy: RuntimeExecutionPolicyDocument,
     restriction: RuntimeExecutionPolicyRestriction,
