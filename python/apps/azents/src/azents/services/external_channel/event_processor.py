@@ -1215,9 +1215,12 @@ class ExternalChannelEventProcessorService:
                         binding.agent_session_id if binding is not None else None
                     ),
                 )
-            authorized = grant is not None or _route_has_automatic_access(
-                route,
-                message.author_type,
+            authorized = not blocked and (
+                grant is not None
+                or _route_has_automatic_access(
+                    route,
+                    message.author_type,
+                )
             )
             if (
                 binding is not None
@@ -1773,9 +1776,12 @@ class ExternalChannelEventProcessorService:
                             binding.agent_session_id if binding is not None else None
                         ),
                     )
-                authorized = grant is not None or _route_has_automatic_access(
-                    route,
-                    message.author_type,
+                authorized = not blocked and (
+                    grant is not None
+                    or _route_has_automatic_access(
+                        route,
+                        message.author_type,
+                    )
                 )
                 if (
                     binding is not None

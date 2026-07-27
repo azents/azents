@@ -1840,7 +1840,10 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
 ) -> None:
     """Unknown participants remain pending and do not create AgentSession state."""
     async with rdb_session_manager() as session:
-        connection_id, _, agent_id, repository = await _setup_route(session)
+        connection_id, route_id, agent_id, repository = await _setup_route(session)
+        route = await session.get(RDBExternalChannelAgentRoute, route_id)
+        assert route is not None
+        route.open_access_enabled = False
         admission = await repository.admit_event(
             session,
             ExternalChannelEventCreate(
@@ -2338,6 +2341,9 @@ async def test_multi_channel_default_projects_only_selected_route(
     """A Multi channel default selects exactly its configured route."""
     async with rdb_session_manager() as session:
         connection_id, routes, _, repository = await _setup_multi_routes(session)
+        selected_route = await session.get(RDBExternalChannelAgentRoute, routes[1].id)
+        assert selected_route is not None
+        selected_route.open_access_enabled = False
         configured_by = await UserRepository().create(
             session,
             UserCreate(email="multi-default-configurer@example.com"),

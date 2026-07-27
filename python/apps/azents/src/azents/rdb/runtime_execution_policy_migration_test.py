@@ -75,6 +75,14 @@ _CURRENT_CONTRACT_MIGRATION = (
     / "versions"
     / "c1d4e7f2a9b0_track_current_provider_contract.py"
 )
+_EXTERNAL_CHANNEL_ROUTE_ACCESS_POLICY_MIGRATION = (
+    PROJECT_ROOT
+    / "db-schemas"
+    / "rdb"
+    / "migrations"
+    / "versions"
+    / "f17b4c8d6a21_add_external_channel_route_access_policy.py"
+)
 
 
 def _migration_values(path: Path) -> dict[str, Any]:
@@ -190,10 +198,17 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     resource_v2_source = _RESOURCE_V2_MIGRATION.read_text()
     json_text_source = _JSON_TEXT_MIGRATION.read_text()
     current_contract_source = _CURRENT_CONTRACT_MIGRATION.read_text()
+    route_access_policy_source = (
+        _EXTERNAL_CHANNEL_ROUTE_ACCESS_POLICY_MIGRATION.read_text()
+    )
     resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
+    route_access_policy_values = _migration_values(
+        _EXTERNAL_CHANNEL_ROUTE_ACCESS_POLICY_MIGRATION
+    )
 
-    assert revision_file.read_text().strip() == "c1d4e7f2a9b0"
+    assert revision_file.read_text().strip() == "f17b4c8d6a21"
     assert resource_values["down_revision"] == "e0615474dc27"
+    assert route_access_policy_values["down_revision"] == "c1d4e7f2a9b0"
     assert "INSERT INTO workspace_runtime_execution_policies" in seed_source
     assert "INSERT INTO workspace_runtime_execution_profile_allowances" in seed_source
     assert "INSERT INTO agent_runtime_execution_settings" in seed_source
@@ -219,6 +234,8 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     assert (
         '"fk_runtime_providers_current_contract_revision_id"' in current_contract_source
     )
+    assert '"open_access_enabled"' in route_access_policy_source
+    assert '"allow_bot_messages"' in route_access_policy_source
 
 
 def test_generated_revisions_render_valid_incremental_postgresql_sql() -> None:

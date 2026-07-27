@@ -374,6 +374,8 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
         SimpleNamespace(
             id="route-1",
             agent_id="agent-1",
+            open_access_enabled=True,
+            allow_bot_messages=False,
         ),
     )
     session = AsyncMock(spec=AsyncSession)

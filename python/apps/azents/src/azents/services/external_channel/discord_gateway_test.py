@@ -233,6 +233,33 @@ async def test_authentication_close_terminalizes_gateway_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rate_limited_close_reconnects_gateway_session() -> None:
+    """Discord rate limiting must reconnect only after manager backoff."""
+    socket = _Socket(
+        [
+            {"op": 10, "d": {"heartbeat_interval": 60_000}},
+            ConnectionClosedError(Close(4008, "rate limited"), None),
+        ]
+    )
+    client = DiscordGatewayClient(
+        connector=lambda *args: _connector(socket, *args),
+    )
+
+    result = await client.run_connection(
+        endpoint_url="wss://gateway.discord.gg",
+        bot_token="redacted-token",
+        checkpoint=None,
+        persist_checkpoint=_checkpoint_sink([]),
+        handle_dispatch=_dispatch_sink([]),
+    )
+
+    assert result.reconnect is True
+    assert result.can_resume is False
+    assert result.reason == "gateway_rate_limited"
+    assert socket.closed is True
+
+
+@pytest.mark.asyncio
 async def test_dispatch_handler_finishes_before_checkpoint_persistence() -> None:
     """A dispatched event is admitted by its callback before resume state advances."""
     socket = _Socket(

@@ -19,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
@@ -149,6 +150,24 @@ class ExternalChannelManagementRepository:
         if row is None:
             return None
         connection, route = row
+        if route.allow_bot_messages and not allow_bot_messages:
+            await session.execute(
+                sa.delete(RDBExternalChannelPendingContext).where(
+                    RDBExternalChannelPendingContext.route_id == route.id,
+                    RDBExternalChannelPendingContext.message_revision_id.in_(
+                        sa.select(RDBExternalChannelMessageRevision.id)
+                        .join(
+                            RDBExternalChannelMessage,
+                            RDBExternalChannelMessage.id
+                            == RDBExternalChannelMessageRevision.message_id,
+                        )
+                        .where(
+                            RDBExternalChannelMessage.author_type
+                            == ExternalChannelPrincipalAuthorType.BOT
+                        )
+                    ),
+                )
+            )
         route.open_access_enabled = open_access_enabled
         route.allow_bot_messages = allow_bot_messages
         await session.flush()
