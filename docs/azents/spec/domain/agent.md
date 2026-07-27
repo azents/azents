@@ -69,8 +69,8 @@ api_routes:
   - /chat/v1
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-07-26
-spec_version: 57
+last_verified_at: 2026-07-27
+spec_version: 58
 ---
 
 # Agent Domain Spec
@@ -111,7 +111,7 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 
 ### 1.2 Runtime execution intent
 
-Each Agent has versioned Runtime execution intent: an allowed Profile plus optional restrictive
+Each Agent has versioned Runtime execution intent: an allowed complete-ceiling Profile plus optional restrictive
 typed overrides. Saving intent changes configured policy only and never advances Runtime desired
 generation. A Workspace owner or Agent administrator explicitly applies intent to attach the next
 immutable target. Runtime status is server-authoritative as `configured`, `pending`, `applied`,
@@ -456,6 +456,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-27 | 58 | Made the selected Profile the complete Runtime execution ceiling without a separate Platform policy. |
 | 2026-07-26 | 57 | Added Agent Runtime execution intent, explicit Apply, and server-authoritative status projection. |
 | 2026-07-26 | 55 | Added Agent-admin Single App ownership, read-only Multi App association context, and mode-aware decommission behavior |
 | 2026-07-24 | 54 | Added AgentAdmin-managed revisioned automatic root Session Project policy, Runtime-backed non-empty replacement validation, empty clear, and stable conflict semantics |

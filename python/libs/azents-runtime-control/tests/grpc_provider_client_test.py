@@ -87,7 +87,6 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                             "network.egress": 1,
                         },
                         source_versions={
-                            "platform": 1,
                             "profile": 1,
                             "workspace": 1,
                             "agent": 1,
@@ -285,7 +284,7 @@ def _execution_policy_evidence() -> RuntimeExecutionPolicyEvidence:
         digest="d" * 64,
         desired_generation=5,
         module_versions={"container.run": 1},
-        source_versions={"platform": 1, "profile": 1, "workspace": 1, "agent": 1},
+        source_versions={"profile": 1, "workspace": 1, "agent": 1},
     )
 
 

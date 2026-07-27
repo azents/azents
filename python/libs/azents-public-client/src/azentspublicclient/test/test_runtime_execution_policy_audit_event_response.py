@@ -36,8 +36,8 @@ class TestRuntimeExecutionPolicyAuditEventResponse(unittest.TestCase):
         if include_optional:
             return RuntimeExecutionPolicyAuditEventResponse(
                 id = '',
-                event_type = 'platform_policy_replaced',
-                management_layer = 'platform',
+                event_type = 'profile_created',
+                management_layer = 'profile',
                 target_id = '',
                 correlation_id = '',
                 classification = 'metadata_only',
@@ -59,8 +59,8 @@ class TestRuntimeExecutionPolicyAuditEventResponse(unittest.TestCase):
         else:
             return RuntimeExecutionPolicyAuditEventResponse(
                 id = '',
-                event_type = 'platform_policy_replaced',
-                management_layer = 'platform',
+                event_type = 'profile_created',
+                management_layer = 'profile',
                 target_id = '',
                 correlation_id = '',
                 classification = 'metadata_only',

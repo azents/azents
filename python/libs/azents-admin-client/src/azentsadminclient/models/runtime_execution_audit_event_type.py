@@ -26,7 +26,6 @@ class RuntimeExecutionAuditEventType(str, Enum):
     """
     allowed enum values
     """
-    PLATFORM_POLICY_REPLACED = 'platform_policy_replaced'
     PROFILE_CREATED = 'profile_created'
     PROFILE_REPLACED = 'profile_replaced'
     PROFILE_RETIRED = 'profile_retired'

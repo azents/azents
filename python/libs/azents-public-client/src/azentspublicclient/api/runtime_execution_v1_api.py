@@ -1500,7 +1500,7 @@ class RuntimeExecutionV1Api:
     ) -> WorkspaceRuntimeExecutionProfileListResponse:
         """List Workspace Profiles
 
-        List Platform Profiles with Workspace-level availability reasons.
+        List Profiles with Workspace-level availability reasons.
 
         :param handle: (required)
         :type handle: str
@@ -1580,7 +1580,7 @@ class RuntimeExecutionV1Api:
     ) -> ApiResponse[WorkspaceRuntimeExecutionProfileListResponse]:
         """List Workspace Profiles
 
-        List Platform Profiles with Workspace-level availability reasons.
+        List Profiles with Workspace-level availability reasons.
 
         :param handle: (required)
         :type handle: str
@@ -1660,7 +1660,7 @@ class RuntimeExecutionV1Api:
     ) -> RESTResponseType:
         """List Workspace Profiles
 
-        List Platform Profiles with Workspace-level availability reasons.
+        List Profiles with Workspace-level availability reasons.
 
         :param handle: (required)
         :type handle: str

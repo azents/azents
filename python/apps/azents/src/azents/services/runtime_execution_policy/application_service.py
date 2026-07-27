@@ -17,7 +17,6 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.runtime_execution_policy import (
-    RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
     SYSTEM_STANDARD_PROFILE_ID,
     JsonValue,
     RuntimeExecutionAuditEventType,
@@ -372,7 +371,6 @@ class RuntimeExecutionPolicyApplicationService:
                 override_provider_id=target.override_provider_id,
                 override_version=target.override_version,
                 execution_profile_id=profile_id,
-                execution_platform_version=source_versions.platform,
                 execution_profile_version=source_versions.profile,
                 execution_workspace_version=source_versions.workspace,
                 execution_agent_version=source_versions.agent,
@@ -588,10 +586,6 @@ class RuntimeExecutionPolicyApplicationService:
         provider_capabilities = runtime_execution_capabilities_from_provider_contract(
             provider_contract
         )
-        platform = await self.policy_repository.get_platform(
-            session,
-            for_update=for_update,
-        )
         setting = await self.policy_repository.get_agent_setting(
             session,
             agent_id=agent_id,
@@ -602,10 +596,10 @@ class RuntimeExecutionPolicyApplicationService:
             workspace_id=runtime.workspace_id,
             for_update=for_update,
         )
-        if platform is None or setting is None:
+        if setting is None:
             raise RuntimeExecutionPolicyApplicationUnavailable(
                 "execution_policy_state_missing",
-                RUNTIME_EXECUTION_PLATFORM_POLICY_ID if platform is None else agent_id,
+                agent_id,
             )
         profile = await self.policy_repository.get_profile(
             session,
@@ -658,12 +652,10 @@ class RuntimeExecutionPolicyApplicationService:
             else frozenset({SYSTEM_STANDARD_PROFILE_ID})
         )
         resolution = resolve_runtime_execution_policy(
-            platform_policy=platform.policy,
             profile_policy=profile.policy,
             workspace_restriction=workspace_restriction,
             agent_restriction=setting.restriction,
             source_versions=RuntimeExecutionSourceVersions(
-                platform=platform.version,
                 profile=profile.version,
                 workspace=workspace.version if workspace is not None else 1,
                 agent=setting.version,
@@ -734,7 +726,6 @@ class RuntimeExecutionPolicyApplicationService:
                 override_provider_id=resolved.target_snapshot.override_provider_id,
                 override_version=resolved.target_snapshot.override_version,
                 execution_profile_id=resolved.profile_id,
-                execution_platform_version=source_versions.platform,
                 execution_profile_version=source_versions.profile,
                 execution_workspace_version=source_versions.workspace,
                 execution_agent_version=source_versions.agent,
@@ -1050,7 +1041,6 @@ def _snapshot_source_versions(
     snapshot: RuntimePolicySnapshot,
 ) -> RuntimeExecutionSourceVersions:
     values = (
-        snapshot.execution_platform_version,
         snapshot.execution_profile_version,
         snapshot.execution_workspace_version,
         snapshot.execution_agent_version,
@@ -1060,13 +1050,11 @@ def _snapshot_source_versions(
             "runtime_policy_target_incomplete",
             snapshot.id,
         )
-    platform, profile, workspace, agent = values
-    assert platform is not None
+    profile, workspace, agent = values
     assert profile is not None
     assert workspace is not None
     assert agent is not None
     return RuntimeExecutionSourceVersions(
-        platform=platform,
         profile=profile,
         workspace=workspace,
         agent=agent,
@@ -1085,7 +1073,6 @@ def _snapshot_matches_target(
         snapshot.contract_revision_id == contract_revision_id
         and snapshot.execution_target_digest == execution_digest
         and snapshot.target_desired_generation == desired_generation
-        and snapshot.execution_platform_version == source_versions.platform
         and snapshot.execution_profile_version == source_versions.profile
         and snapshot.execution_workspace_version == source_versions.workspace
         and snapshot.execution_agent_version == source_versions.agent
@@ -1129,13 +1116,10 @@ def _provider_compatibility(
 def _automatic_convergence_source_allowed(
     resolved: _ResolvedRuntimePolicy,
 ) -> bool:
-    """Allow automatic targeting only when Profile and Agent intent are unchanged."""
+    """Allow system convergence while the Agent's selected intent is unchanged."""
     source_versions = resolved.resolution.source_versions
     target = resolved.target_snapshot
-    return (
-        target.execution_profile_version == source_versions.profile
-        and target.execution_agent_version == source_versions.agent
-    )
+    return target.execution_agent_version == source_versions.agent
 
 
 def _restrictive_projection(

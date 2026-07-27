@@ -100,7 +100,7 @@ async def list_workspace_profiles(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> WorkspaceRuntimeExecutionProfileListResponse:
-    """List Platform Profiles with Workspace-level availability reasons."""
+    """List Profiles with Workspace-level availability reasons."""
     _require_workspace_permission(
         member,
         Permissions.RUNTIME_EXECUTION_POLICY_READ,

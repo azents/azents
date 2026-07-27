@@ -26,7 +26,6 @@ class RuntimeExecutionManagementLayer(str, Enum):
     """
     allowed enum values
     """
-    PLATFORM = 'platform'
     PROFILE = 'profile'
     WORKSPACE = 'workspace'
     AGENT = 'agent'

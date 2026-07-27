@@ -109,7 +109,6 @@ def _provider() -> RuntimeExecutionProviderCapabilities:
 
 def _versions() -> RuntimeExecutionSourceVersions:
     return RuntimeExecutionSourceVersions(
-        platform=1,
         profile=2,
         workspace=3,
         agent=4,
@@ -196,7 +195,6 @@ def test_resolver_applies_monotone_operators_and_explains_sources() -> None:
     )
 
     result = resolve_runtime_execution_policy(
-        platform_policy=_policy(),
         profile_policy=_policy(),
         workspace_restriction=workspace,
         agent_restriction=agent,
@@ -249,14 +247,49 @@ def test_lower_layer_expansion_is_rejected_with_governing_path() -> None:
                 engine_storage=None,
                 network_egress=None,
             ),
-            governing_layer=RuntimeExecutionPolicyLayer.PLATFORM,
+            governing_layer=RuntimeExecutionPolicyLayer.PROFILE,
         )
+
+
+def test_profile_tightening_safely_meets_stale_lower_restrictions() -> None:
+    """Stored lower restrictions cannot broaden a newly narrowed Profile."""
+    profile = standard_runtime_execution_policy()
+    stale_workspace = empty_runtime_execution_restriction().model_copy(
+        update={
+            "network_egress": RuntimeExecutionNetworkRestriction(
+                mode=RuntimeExecutionNetworkMode.DIRECT,
+                allowed_destinations=None,
+                denied_destinations=frozenset(),
+            )
+        }
+    )
+
+    result = resolve_runtime_execution_policy(
+        profile_policy=profile.model_copy(
+            update={
+                "network_egress": profile.network_egress.model_copy(
+                    update={"mode": RuntimeExecutionNetworkMode.NONE}
+                )
+            }
+        ),
+        workspace_restriction=stale_workspace,
+        agent_restriction=empty_runtime_execution_restriction(),
+        source_versions=_versions(),
+        provider_capabilities=_provider(),
+        profile_active=True,
+        profile_allowed=True,
+        applied_policy=profile,
+    )
+
+    assert result.available
+    assert (
+        result.effective_policy.network_egress.mode is RuntimeExecutionNetworkMode.NONE
+    )
 
 
 def test_dependency_failure_is_unavailable_without_profile_fallback() -> None:
     """Compose cannot remain enabled after container run is removed."""
     result = resolve_runtime_execution_policy(
-        platform_policy=_policy(),
         profile_policy=_policy(),
         workspace_restriction=RuntimeExecutionPolicyRestriction(
             schema_version=1,
@@ -286,7 +319,6 @@ def test_dependency_failure_is_unavailable_without_profile_fallback() -> None:
 def test_provider_support_is_typed_and_fails_closed() -> None:
     """An enabled module requires an exact application-owned Provider projection."""
     result = resolve_runtime_execution_policy(
-        platform_policy=_policy(),
         profile_policy=_policy(),
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),
@@ -313,7 +345,6 @@ def test_provider_support_is_typed_and_fails_closed() -> None:
 def test_retired_or_disallowed_profile_remains_selected_but_unavailable() -> None:
     """Resolution reports the selected Profile failure instead of substituting one."""
     retired = resolve_runtime_execution_policy(
-        platform_policy=standard_runtime_execution_policy(),
         profile_policy=standard_runtime_execution_policy(),
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),

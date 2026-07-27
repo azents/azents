@@ -1,9 +1,7 @@
 import {
   runtimeExecutionV1CreateProfile,
-  runtimeExecutionV1GetPlatformPolicy,
   runtimeExecutionV1ListAuditEvents,
   runtimeExecutionV1ListProfiles,
-  runtimeExecutionV1ReplacePlatformPolicy,
   runtimeExecutionV1ReplaceProfile,
   runtimeExecutionV1RetireProfile,
 } from "@azents/admin-client";
@@ -51,14 +49,6 @@ const policySchema = z.object({
 });
 
 export const runtimeExecutionRouter = router({
-  getPlatformPolicy: protectedProcedure.query(async ({ ctx }) => {
-    const { data } = await runtimeExecutionV1GetPlatformPolicy({
-      client: ctx.adminApiClient,
-      throwOnError: true,
-    });
-    return data;
-  }),
-
   listProfiles: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await runtimeExecutionV1ListProfiles({
       client: ctx.adminApiClient,
@@ -76,32 +66,6 @@ export const runtimeExecutionRouter = router({
     });
     return data;
   }),
-
-  replacePlatformPolicy: protectedProcedure
-    .input(
-      z.object({
-        expectedVersion: z.number().int().positive(),
-        policy: policySchema,
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await runtimeExecutionV1ReplacePlatformPolicy({
-          client: ctx.adminApiClient,
-          body: {
-            expected_version: input.expectedVersion,
-            policy: input.policy,
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (error) {
-        throw mapExpectedError(error, {
-          409: "CONFLICT",
-          422: "BAD_REQUEST",
-        });
-      }
-    }),
 
   createProfile: protectedProcedure
     .input(

@@ -6,7 +6,6 @@ Current mutable source versions captured by one resolution.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**platform** | **int** |  | 
 **profile** | **int** |  | 
 **workspace** | **int** |  | 
 **agent** | **int** |  | 

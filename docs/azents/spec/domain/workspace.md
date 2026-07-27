@@ -78,8 +78,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-26
-spec_version: 49
+last_verified_at: 2026-07-27
+spec_version: 51
 ---
 
 # Workspace & Membership
@@ -224,7 +224,7 @@ Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/r
 ### Runtime execution policy
 
 Workspace controls the Profiles its Agents may use and may add only restrictive typed limits to
-the Platform envelope. Expected-version writes prevent stale replacement. A Workspace tightening
+every allowed Profile ceiling. Expected-version writes prevent stale replacement. A Workspace tightening
 automatically attaches a narrower Runtime target without an Agent Apply; it preserves Agent
 Workspace data and may restart compute but never resets or terminal-deletes it. Workspace and Agent
 views expose only server-computed availability, governing layer, reductions, audit metadata, and
@@ -556,6 +556,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-27 (spec_version=51)** — Made allowed Profiles the complete Runtime execution ceilings and removed the separate Platform envelope.
 - **2026-07-26 (spec_version=50)** — Added Workspace Profile allowance, restrictive Runtime execution policy, and reset-free automatic tightening convergence.
 - **2026-07-26 (spec_version=49)** — Added the manual orphan Git-worktree cleanup TurnAction,
   Runtime/path claim coordination with Project attachment and allocation, active-root protection,

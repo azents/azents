@@ -594,7 +594,6 @@ def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
                 "network.egress": 1,
             },
             source_versions={
-                "platform": 1,
                 "profile": 1,
                 "workspace": 1,
                 "agent": 1,

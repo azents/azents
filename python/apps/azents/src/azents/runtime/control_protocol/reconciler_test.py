@@ -496,7 +496,6 @@ async def _attach_execution_policy(
         target_desired_generation=target_desired_generation,
         application_state=RuntimePolicySnapshotApplicationState.PENDING,
         execution_profile_id=None,
-        execution_platform_version=1,
         execution_profile_version=1,
         execution_workspace_version=1,
         execution_agent_version=1,

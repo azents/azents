@@ -5,11 +5,9 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**runtime_execution_v1_create_profile**](RuntimeExecutionV1Api.md#runtime_execution_v1_create_profile) | **POST** /runtime-execution/v1/profiles | Create Profile
-[**runtime_execution_v1_get_platform_policy**](RuntimeExecutionV1Api.md#runtime_execution_v1_get_platform_policy) | **GET** /runtime-execution/v1/platform-policy | Get Platform Policy
 [**runtime_execution_v1_get_profile**](RuntimeExecutionV1Api.md#runtime_execution_v1_get_profile) | **GET** /runtime-execution/v1/profiles/{profile_id} | Get Profile
 [**runtime_execution_v1_list_audit_events**](RuntimeExecutionV1Api.md#runtime_execution_v1_list_audit_events) | **GET** /runtime-execution/v1/audit-events | List Audit Events
 [**runtime_execution_v1_list_profiles**](RuntimeExecutionV1Api.md#runtime_execution_v1_list_profiles) | **GET** /runtime-execution/v1/profiles | List Profiles
-[**runtime_execution_v1_replace_platform_policy**](RuntimeExecutionV1Api.md#runtime_execution_v1_replace_platform_policy) | **PUT** /runtime-execution/v1/platform-policy | Replace Platform Policy
 [**runtime_execution_v1_replace_profile**](RuntimeExecutionV1Api.md#runtime_execution_v1_replace_profile) | **PUT** /runtime-execution/v1/profiles/{profile_id} | Replace Profile
 [**runtime_execution_v1_retire_profile**](RuntimeExecutionV1Api.md#runtime_execution_v1_retire_profile) | **POST** /runtime-execution/v1/profiles/{profile_id}/retire | Retire Profile
 
@@ -91,80 +89,6 @@ Name | Type | Description  | Notes
 |-------------|-------------|------------------|
 **201** | Successful Response |  -  |
 **422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-# **runtime_execution_v1_get_platform_policy**
-> RuntimeExecutionPlatformPolicyResponse runtime_execution_v1_get_platform_policy()
-
-Get Platform Policy
-
-Return the installation-wide execution-policy ceiling.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentsadminclient
-from azentsadminclient.models.runtime_execution_platform_policy_response import RuntimeExecutionPlatformPolicyResponse
-from azentsadminclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentsadminclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentsadminclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentsadminclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentsadminclient.RuntimeExecutionV1Api(api_client)
-
-    try:
-        # Get Platform Policy
-        api_response = api_instance.runtime_execution_v1_get_platform_policy()
-        print("The response of RuntimeExecutionV1Api->runtime_execution_v1_get_platform_policy:\n")
-        pprint(api_response)
-    except Exception as e:
-        print("Exception when calling RuntimeExecutionV1Api->runtime_execution_v1_get_platform_policy: %s\n" % e)
-```
-
-
-
-### Parameters
-
-This endpoint does not need any parameter.
-
-### Return type
-
-[**RuntimeExecutionPlatformPolicyResponse**](RuntimeExecutionPlatformPolicyResponse.md)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**200** | Successful Response |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
@@ -409,86 +333,6 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: Not defined
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**200** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-# **runtime_execution_v1_replace_platform_policy**
-> RuntimeExecutionPlatformPolicyResponse runtime_execution_v1_replace_platform_policy(runtime_execution_platform_policy_replace_request)
-
-Replace Platform Policy
-
-Replace the Platform execution-policy ceiling.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentsadminclient
-from azentsadminclient.models.runtime_execution_platform_policy_replace_request import RuntimeExecutionPlatformPolicyReplaceRequest
-from azentsadminclient.models.runtime_execution_platform_policy_response import RuntimeExecutionPlatformPolicyResponse
-from azentsadminclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentsadminclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentsadminclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentsadminclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentsadminclient.RuntimeExecutionV1Api(api_client)
-    runtime_execution_platform_policy_replace_request = azentsadminclient.RuntimeExecutionPlatformPolicyReplaceRequest() # RuntimeExecutionPlatformPolicyReplaceRequest | 
-
-    try:
-        # Replace Platform Policy
-        api_response = api_instance.runtime_execution_v1_replace_platform_policy(runtime_execution_platform_policy_replace_request)
-        print("The response of RuntimeExecutionV1Api->runtime_execution_v1_replace_platform_policy:\n")
-        pprint(api_response)
-    except Exception as e:
-        print("Exception when calling RuntimeExecutionV1Api->runtime_execution_v1_replace_platform_policy: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **runtime_execution_platform_policy_replace_request** | [**RuntimeExecutionPlatformPolicyReplaceRequest**](RuntimeExecutionPlatformPolicyReplaceRequest.md)|  | 
-
-### Return type
-
-[**RuntimeExecutionPlatformPolicyResponse**](RuntimeExecutionPlatformPolicyResponse.md)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: application/json
  - **Accept**: application/json
 
 ### HTTP response details

@@ -4,8 +4,6 @@ Append-only execution-policy management event vocabulary.
 
 ## Enum
 
-* `PLATFORM_POLICY_REPLACED` (value: `'platform_policy_replaced'`)
-
 * `PROFILE_CREATED` (value: `'profile_created'`)
 
 * `PROFILE_REPLACED` (value: `'profile_replaced'`)

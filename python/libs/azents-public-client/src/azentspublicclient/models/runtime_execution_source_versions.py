@@ -27,12 +27,11 @@ class RuntimeExecutionSourceVersions(BaseModel):
     """
     Current mutable source versions captured by one resolution.
     """ # noqa: E501
-    platform: Annotated[int, Field(strict=True, ge=1)]
     profile: Annotated[int, Field(strict=True, ge=1)]
     workspace: Annotated[int, Field(strict=True, ge=1)]
     agent: Annotated[int, Field(strict=True, ge=1)]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["platform", "profile", "workspace", "agent"]
+    __properties: ClassVar[List[str]] = ["profile", "workspace", "agent"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -92,7 +91,6 @@ class RuntimeExecutionSourceVersions(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "platform": obj.get("platform"),
             "profile": obj.get("profile"),
             "workspace": obj.get("workspace"),
             "agent": obj.get("agent")

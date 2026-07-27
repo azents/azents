@@ -117,7 +117,6 @@ class RuntimePolicySnapshot:
     override_provider_id: str | None
     override_version: int | None
     execution_profile_id: str | None
-    execution_platform_version: int | None
     execution_profile_version: int | None
     execution_workspace_version: int | None
     execution_agent_version: int | None
@@ -149,7 +148,6 @@ class RuntimePolicySnapshotCreate:
     override_provider_id: str | None
     override_version: int | None
     execution_profile_id: str | None
-    execution_platform_version: int | None
     execution_profile_version: int | None
     execution_workspace_version: int | None
     execution_agent_version: int | None

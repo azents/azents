@@ -93,7 +93,7 @@ class WorkspaceRuntimeExecutionPolicyReplaceRequest(BaseModel):
 
 
 class WorkspaceRuntimeExecutionProfileResponse(BaseModel):
-    """Workspace availability of one Platform Profile."""
+    """Workspace availability of one execution Profile."""
 
     id: str
     display_name: str

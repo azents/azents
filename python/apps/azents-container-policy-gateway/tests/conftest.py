@@ -95,7 +95,6 @@ def policy(
                 "network.egress": 1,
             },
             source_versions={
-                "platform": 1,
                 "profile": 1,
                 "workspace": 1,
                 "agent": 1,
@@ -135,7 +134,6 @@ def gateway_env(
         ),
         "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS": json.dumps(
             {
-                "platform": 1,
                 "profile": 1,
                 "workspace": 1,
                 "agent": 1,

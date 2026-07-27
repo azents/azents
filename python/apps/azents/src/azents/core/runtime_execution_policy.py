@@ -9,7 +9,6 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SYSTEM_STANDARD_PROFILE_ID = "system-standard"
-RUNTIME_EXECUTION_PLATFORM_POLICY_ID = "platform"
 
 type JsonValue = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -19,9 +18,8 @@ type JsonValue = (
 class RuntimeExecutionPolicyLayer(enum.StrEnum):
     """Authority layer contributing one effective execution policy value."""
 
-    PLATFORM = "platform"
-    WORKSPACE = "workspace"
     PROFILE = "profile"
+    WORKSPACE = "workspace"
     AGENT = "agent"
 
 
@@ -81,7 +79,6 @@ class RuntimeExecutionRequiredAction(enum.StrEnum):
 class RuntimeExecutionManagementLayer(enum.StrEnum):
     """Management authority that produced one metadata audit event."""
 
-    PLATFORM = "platform"
     PROFILE = "profile"
     WORKSPACE = "workspace"
     AGENT = "agent"
@@ -91,7 +88,6 @@ class RuntimeExecutionManagementLayer(enum.StrEnum):
 class RuntimeExecutionAuditEventType(enum.StrEnum):
     """Append-only execution-policy management event vocabulary."""
 
-    PLATFORM_POLICY_REPLACED = "platform_policy_replaced"
     PROFILE_CREATED = "profile_created"
     PROFILE_REPLACED = "profile_replaced"
     PROFILE_RETIRED = "profile_retired"
@@ -290,7 +286,6 @@ class RuntimeExecutionProviderCapabilities(_FrozenPolicyModel):
 class RuntimeExecutionSourceVersions(_FrozenPolicyModel):
     """Current mutable source versions captured by one resolution."""
 
-    platform: int = Field(ge=1)
     profile: int = Field(ge=1)
     workspace: int = Field(ge=1)
     agent: int = Field(ge=1)
@@ -515,7 +510,6 @@ def validate_runtime_execution_restriction(
 
 def resolve_runtime_execution_policy(
     *,
-    platform_policy: RuntimeExecutionPolicyDocument,
     profile_policy: RuntimeExecutionPolicyDocument,
     workspace_restriction: RuntimeExecutionPolicyRestriction,
     agent_restriction: RuntimeExecutionPolicyRestriction,
@@ -525,16 +519,11 @@ def resolve_runtime_execution_policy(
     profile_allowed: bool,
     applied_policy: RuntimeExecutionPolicyDocument | None,
 ) -> RuntimeExecutionResolution:
-    """Resolve Platform, Workspace, Profile, and Agent authority fail closed."""
-    validate_runtime_execution_restriction(
-        platform_policy,
-        workspace_restriction,
-        governing_layer=RuntimeExecutionPolicyLayer.PLATFORM,
-    )
-    policy = platform_policy
+    """Resolve Profile, Workspace, and Agent authority fail closed."""
+    policy = profile_policy
     governing = {
-        path: RuntimeExecutionPolicyLayer.PLATFORM
-        for path in _flatten_policy(platform_policy)
+        path: RuntimeExecutionPolicyLayer.PROFILE
+        for path in _flatten_policy(profile_policy)
     }
     reductions: list[RuntimeExecutionReduction] = []
     policy = _apply_restriction(
@@ -543,18 +532,6 @@ def resolve_runtime_execution_policy(
         layer=RuntimeExecutionPolicyLayer.WORKSPACE,
         governing=governing,
         reductions=reductions,
-    )
-    policy = _meet_complete_policy(
-        policy,
-        profile_policy,
-        layer=RuntimeExecutionPolicyLayer.PROFILE,
-        governing=governing,
-        reductions=reductions,
-    )
-    validate_runtime_execution_restriction(
-        policy,
-        agent_restriction,
-        governing_layer=_dominant_governing_layer(governing),
     )
     policy = _apply_restriction(
         policy,
@@ -738,53 +715,6 @@ def _apply_restriction(
     )
     _record_reductions(policy, result, layer, governing, reductions)
     return result
-
-
-def _meet_complete_policy(
-    parent: RuntimeExecutionPolicyDocument,
-    child: RuntimeExecutionPolicyDocument,
-    *,
-    layer: RuntimeExecutionPolicyLayer,
-    governing: dict[str, RuntimeExecutionPolicyLayer],
-    reductions: list[RuntimeExecutionReduction],
-) -> RuntimeExecutionPolicyDocument:
-    restriction = RuntimeExecutionPolicyRestriction(
-        schema_version=1,
-        image_build=(
-            RuntimeExecutionBooleanRestriction(enabled=False)
-            if not child.image_build.enabled
-            else None
-        ),
-        container_run=(
-            RuntimeExecutionBooleanRestriction(enabled=False)
-            if not child.container_run.enabled
-            else None
-        ),
-        compose=(
-            RuntimeExecutionBooleanRestriction(enabled=False)
-            if not child.compose.enabled
-            else None
-        ),
-        resources=RuntimeExecutionResourceRestriction(
-            **{name: getattr(child.resources, name) for name in _RESOURCE_PATHS}
-        ),
-        engine_storage=RuntimeExecutionStorageRestriction(
-            mode=child.engine_storage.mode,
-            capacity_bytes=child.engine_storage.capacity_bytes,
-        ),
-        network_egress=RuntimeExecutionNetworkRestriction(
-            mode=child.network_egress.mode,
-            allowed_destinations=child.network_egress.allowed_destinations,
-            denied_destinations=child.network_egress.denied_destinations,
-        ),
-    )
-    return _apply_restriction(
-        parent,
-        restriction,
-        layer=layer,
-        governing=governing,
-        reductions=reductions,
-    )
 
 
 def _record_reductions(
@@ -983,14 +913,6 @@ def _value_grants_authority(path: str, value: JsonValue) -> bool:
     if path == "network_egress.allowed_destinations":
         return bool(value)
     return False
-
-
-def _dominant_governing_layer(
-    governing: Mapping[str, RuntimeExecutionPolicyLayer],
-) -> RuntimeExecutionPolicyLayer:
-    if RuntimeExecutionPolicyLayer.WORKSPACE in governing.values():
-        return RuntimeExecutionPolicyLayer.WORKSPACE
-    return RuntimeExecutionPolicyLayer.PLATFORM
 
 
 def _minimum_bound(left: int | None, right: int | None) -> int | None:

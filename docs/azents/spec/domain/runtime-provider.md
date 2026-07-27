@@ -42,7 +42,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
 last_verified_at: 2026-07-27
-spec_version: 7
+spec_version: 8
 ---
 
 # Runtime Provider
@@ -85,16 +85,16 @@ When no eligible Provider exists, Public Agent Runtime lifecycle endpoints retur
 
 ## Runtime execution policy compatibility
 
-Runtime execution policy is Provider-neutral typed product intent. Platform publishes the upper
-authority envelope and named Profiles; Workspace may only tighten that envelope and allow a subset
-of Profiles; Agent may select an allowed Profile and add only supported restrictive overrides.
-`system-standard` is the reserved immutable baseline Profile. Ordinary Profiles are active or
+Runtime execution policy is Provider-neutral typed product intent. Each Profile is a complete
+authority ceiling; Workspace may only tighten every Profile it allows, and Agent may select an
+allowed Profile and add only supported restrictive overrides. There is no separate installation-wide
+execution-policy layer. `system-standard` is the reserved, editable baseline Profile. Ordinary Profiles are active or
 retired and use expected-version mutation. Retiring an ordinary Profile preserves existing Agent
-intent but makes affected selection unavailable until a valid Profile is chosen. Platform/Profile
-writes are capability-gated, so unsupported authority cannot be introduced by profile creation or
+intent but makes affected selection unavailable until a valid Profile is chosen. Profile writes are
+capability-gated, so unsupported authority cannot be introduced by profile creation or
 replacement.
 
-The installation and reserved `system-standard` defaults permit unrestricted direct outbound
+The reserved `system-standard` default permits unrestricted direct outbound
 networking, represented by `network.egress=direct` with empty allow and deny destination sets.
 This default applies to both the Runner and nested engine containers because the Kubernetes
 NetworkPolicy selects the complete Runtime Pod. Image build, nested container execution, Compose,
@@ -113,9 +113,9 @@ it is validated against the newly accepted contract.
 
 Agent intent is independent from a physical Runtime. Saving Agent Profile/override intent does not
 advance Runtime desired generation. Explicit Apply attaches an immutable target snapshot and
-generation. Platform or Workspace tightening automatically creates a narrower target without a
-second Agent Apply; it preserves Agent Workspace storage and does not invoke reset or terminal
-delete. Audit and public projections contain only bounded policy metadata, reason codes, source
+generation. Profile or Workspace tightening automatically creates a narrower target without a
+second Agent Apply, while authority expansion remains pending until explicit Apply; convergence
+preserves Agent Workspace storage and does not invoke reset or terminal delete. Audit and public projections contain only bounded policy metadata, reason codes, source
 layers, digests, and generations.
 
 The installation management gate exposes image build, container run, Compose, `none` or
@@ -166,6 +166,7 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **8 (2026-07-27):** Removed the installation-wide execution-policy ceiling and made each editable Profile the complete authority ceiling.
 - **7 (2026-07-27):** Made unrestricted direct outbound networking the installation and reserved Standard default while leaving nested container authority disabled.
 - **6 (2026-07-27):** Added accepted typed execution-policy capabilities as the authority source for Kubernetes engine features.
 - **5 (2026-07-27):** Connected authenticated Provider contract proposal, immutable candidate persistence, explicit Admin acceptance, and storage-preserving legacy Runtime policy binding.

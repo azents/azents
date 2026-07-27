@@ -15,7 +15,6 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionStorageMode,
 )
 from azents.repos.runtime_execution_policy.data import (
-    RuntimeExecutionPlatformPolicy,
     RuntimeExecutionPolicyAuditEvent,
     RuntimeExecutionProfile,
 )
@@ -43,47 +42,6 @@ class RuntimeExecutionManagementCapabilitiesResponse(BaseModel):
             storage_modes=list(data.storage_modes),
             network_modes=list(data.network_modes),
         )
-
-
-class RuntimeExecutionPlatformPolicyResponse(BaseModel):
-    """Current Platform execution-policy ceiling."""
-
-    id: str
-    version: int
-    policy: RuntimeExecutionPolicyDocument
-    digest: str
-    updated_by_user_id: str | None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-    capabilities: RuntimeExecutionManagementCapabilitiesResponse
-
-    @classmethod
-    def convert_from(
-        cls,
-        data: RuntimeExecutionPlatformPolicy,
-        *,
-        capabilities: RuntimeExecutionManagementCapabilities,
-    ) -> Self:
-        """Convert the persistence projection to a safe API response."""
-        return cls(
-            id=data.id,
-            version=data.version,
-            policy=data.policy,
-            digest=data.digest,
-            updated_by_user_id=data.updated_by_user_id,
-            created_at=data.created_at,
-            updated_at=data.updated_at,
-            capabilities=RuntimeExecutionManagementCapabilitiesResponse.convert_from(
-                capabilities
-            ),
-        )
-
-
-class RuntimeExecutionPlatformPolicyReplaceRequest(BaseModel):
-    """Complete optimistic replacement of the Platform policy."""
-
-    expected_version: int = Field(ge=1)
-    policy: RuntimeExecutionPolicyDocument
 
 
 class RuntimeExecutionProfileResponse(BaseModel):

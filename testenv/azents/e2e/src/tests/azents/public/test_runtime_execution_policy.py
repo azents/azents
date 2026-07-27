@@ -245,19 +245,34 @@ def _create_standard_profile(
     return profile_id
 
 
+def _get_standard_profile(
+    *,
+    admin_server_url: str,
+    admin_token: str,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Return the reserved Standard Profile and Profile management capabilities."""
+    profiles = _request_object(
+        "GET",
+        f"{admin_server_url}/runtime-execution/v1/profiles",
+        token=admin_token,
+        expected_status=200,
+    )
+    items = _JSON_OBJECT_LIST.validate_python(profiles["items"])
+    standard = next(item for item in items if item["system_key"] == "system-standard")
+    capabilities = _JSON_OBJECT.validate_python(profiles["capabilities"])
+    return standard, capabilities
+
+
 def test_capability_gate_accepts_qualified_typed_policy(
     azents_admin_server_url: str,
     system_bootstrap_evidence: SystemBootstrapEvidence,
 ) -> None:
     """Reject unknown fields and accept qualified typed engine authority."""
     token = system_bootstrap_evidence.access_token
-    platform = _request_object(
-        "GET",
-        f"{azents_admin_server_url}/runtime-execution/v1/platform-policy",
-        token=token,
-        expected_status=200,
+    standard, capabilities = _get_standard_profile(
+        admin_server_url=azents_admin_server_url,
+        admin_token=token,
     )
-    capabilities = _JSON_OBJECT.validate_python(platform["capabilities"])
     _assert_safe_projection(
         capabilities,
         known_sensitive_values=_known_sensitive_values(token),
@@ -269,7 +284,7 @@ def test_capability_gate_accepts_qualified_typed_policy(
         "storage_modes": ["ephemeral", "none"],
         "network_modes": ["direct", "none"],
     }
-    standard_policy = _JSON_OBJECT.validate_python(platform["policy"])
+    standard_policy = _JSON_OBJECT.validate_python(standard["policy"])
 
     unknown_policy = copy.deepcopy(standard_policy)
     unknown_policy["raw_provider_field"] = {"kind": "Pod"}
@@ -336,13 +351,11 @@ def test_hierarchy_profile_override_apply_status_and_audit(
 ) -> None:
     """Exercise hierarchy, availability, explicit Apply, and safe projections."""
     admin_token = system_bootstrap_evidence.access_token
-    platform = _request_object(
-        "GET",
-        f"{azents_admin_server_url}/runtime-execution/v1/platform-policy",
-        token=admin_token,
-        expected_status=200,
+    standard, _ = _get_standard_profile(
+        admin_server_url=azents_admin_server_url,
+        admin_token=admin_token,
     )
-    standard_policy = _JSON_OBJECT.validate_python(platform["policy"])
+    standard_policy = _JSON_OBJECT.validate_python(standard["policy"])
     profile_id = _create_standard_profile(
         admin_server_url=azents_admin_server_url,
         admin_token=admin_token,

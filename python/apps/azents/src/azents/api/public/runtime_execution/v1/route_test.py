@@ -83,12 +83,10 @@ def _agent_policy_view() -> AgentRuntimeExecutionPolicyView:
         updated_at=now,
     )
     resolution = resolve_runtime_execution_policy(
-        platform_policy=policy,
         profile_policy=policy,
         workspace_restriction=restriction,
         agent_restriction=restriction,
         source_versions=RuntimeExecutionSourceVersions(
-            platform=1,
             profile=1,
             workspace=1,
             agent=2,

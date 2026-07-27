@@ -1,6 +1,6 @@
 # WorkspaceRuntimeExecutionProfileResponse
 
-Workspace availability of one Platform Profile.
+Workspace availability of one execution Profile.
 
 ## Properties
 

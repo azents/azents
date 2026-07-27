@@ -38,8 +38,8 @@ class TestRuntimeExecutionPolicyAuditListResponse(unittest.TestCase):
                 items = [
                     azentsadminclient.models.runtime_execution_policy_audit_event_response.RuntimeExecutionPolicyAuditEventResponse(
                         id = '', 
-                        event_type = 'platform_policy_replaced', 
-                        management_layer = 'platform', 
+                        event_type = 'profile_created', 
+                        management_layer = 'profile', 
                         target_id = '', 
                         correlation_id = '', 
                         classification = 'metadata_only', 
@@ -67,8 +67,8 @@ class TestRuntimeExecutionPolicyAuditListResponse(unittest.TestCase):
                 items = [
                     azentsadminclient.models.runtime_execution_policy_audit_event_response.RuntimeExecutionPolicyAuditEventResponse(
                         id = '', 
-                        event_type = 'platform_policy_replaced', 
-                        management_layer = 'platform', 
+                        event_type = 'profile_created', 
+                        management_layer = 'profile', 
                         target_id = '', 
                         correlation_id = '', 
                         classification = 'metadata_only', 

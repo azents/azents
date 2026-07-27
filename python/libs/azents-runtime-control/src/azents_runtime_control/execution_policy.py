@@ -117,7 +117,6 @@ def validate_execution_policy_envelope(
     ):
         raise ValueError("Runtime execution-policy module evidence is incomplete.")
     if set(evidence.source_versions) != {
-        "platform",
         "profile",
         "workspace",
         "agent",

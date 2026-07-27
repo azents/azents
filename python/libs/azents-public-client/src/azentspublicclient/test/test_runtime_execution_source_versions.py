@@ -35,14 +35,12 @@ class TestRuntimeExecutionSourceVersions(unittest.TestCase):
         model = RuntimeExecutionSourceVersions()
         if include_optional:
             return RuntimeExecutionSourceVersions(
-                platform = 1.0,
                 profile = 1.0,
                 workspace = 1.0,
                 agent = 1.0
             )
         else:
             return RuntimeExecutionSourceVersions(
-                platform = 1.0,
                 profile = 1.0,
                 workspace = 1.0,
                 agent = 1.0,

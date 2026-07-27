@@ -61,7 +61,7 @@ def _projection() -> RuntimeExecutionPolicyStatusProjection:
         applied=applied,
         desired_generation=3,
         governing_layers={
-            "image_build.enabled": RuntimeExecutionPolicyLayer.PLATFORM,
+            "image_build.enabled": RuntimeExecutionPolicyLayer.PROFILE,
         },
         reason_codes=(),
         required_action=RuntimeExecutionRequiredAction.NONE,

@@ -470,7 +470,6 @@ def _initial_snapshot_create(
         override_provider_id=None,
         override_version=None,
         execution_profile_id=None,
-        execution_platform_version=None,
         execution_profile_version=None,
         execution_workspace_version=None,
         execution_agent_version=None,

@@ -46,7 +46,6 @@ function ProfileEditor({
   onSave: () => void;
   onRetire: () => void;
 }): React.ReactElement {
-  const readOnly = draft.reserved;
   const policySupported = isRuntimeExecutionPolicySupported(
     draft.policy,
     capabilities,
@@ -65,7 +64,7 @@ function ProfileEditor({
           )}
         </Stack>
         <Group>
-          {!creating && !readOnly && (
+          {!creating && !draft.reserved && (
             <Button
               color="red"
               variant="light"
@@ -78,7 +77,6 @@ function ProfileEditor({
           <Button
             loading={saving}
             disabled={
-              readOnly ||
               draft.id.trim().length === 0 ||
               draft.displayName.trim().length === 0 ||
               !policySupported
@@ -89,12 +87,13 @@ function ProfileEditor({
           </Button>
         </Group>
       </Group>
-      {readOnly && (
+      {draft.reserved && (
         <Alert color="blue">
-          Reserved system Profiles are read-only and cannot be retired.
+          Reserved system Profiles define stable identities and cannot be
+          retired. Their policy remains editable.
         </Alert>
       )}
-      {!readOnly && !policySupported && (
+      {!policySupported && (
         <Alert color="yellow">
           This draft requests Runtime authority that the current server
           capability gate cannot enforce. Remove the unavailable authority
@@ -114,7 +113,6 @@ function ProfileEditor({
       <TextInput
         label="Display name"
         value={draft.displayName}
-        disabled={readOnly}
         onChange={(event) =>
           onChange({ ...draft, displayName: event.currentTarget.value })
         }
@@ -122,7 +120,6 @@ function ProfileEditor({
       <Textarea
         label="Description"
         value={draft.description}
-        disabled={readOnly}
         autosize
         minRows={2}
         onChange={(event) =>
@@ -132,7 +129,6 @@ function ProfileEditor({
       <RuntimeExecutionPolicyEditor
         policy={draft.policy}
         capabilities={capabilities}
-        readOnly={readOnly}
         onChange={(policy) => onChange({ ...draft, policy })}
       />
     </Stack>
@@ -141,17 +137,13 @@ function ProfileEditor({
 
 export function RuntimeExecutionPageContent({
   state,
-  platformDraft,
   profileDraft,
   selectedProfileId,
   profileDetailOpen,
   profileModalOpened,
-  savingPlatform,
   savingProfile,
   retiringProfile,
   actionError,
-  onPlatformDraftChange,
-  onSavePlatform,
   onSelectProfile,
   onProfileDetailClose,
   onProfileDraftChange,
@@ -160,8 +152,7 @@ export function RuntimeExecutionPageContent({
   onSaveProfile,
   onRetireProfile,
 }: RuntimeExecutionPageContentProps): React.ReactElement {
-  const capabilities =
-    state.type === "LOADED" ? state.platform.capabilities : null;
+  const capabilities = state.type === "LOADED" ? state.capabilities : null;
   return (
     <Box h="100%" display="flex" style={{ flexDirection: "column" }}>
       <Modal
@@ -187,8 +178,7 @@ export function RuntimeExecutionPageContent({
       <Stack gap={4} p="md">
         <Title order={2}>Runtime Execution</Title>
         <Text c="dimmed">
-          Manage installation limits, reusable Profiles, and safe policy audit
-          history.
+          Manage reusable policy ceilings and safe policy audit history.
         </Text>
       </Stack>
       <Stack gap="sm" px="md">
@@ -202,7 +192,7 @@ export function RuntimeExecutionPageContent({
       </Stack>
       {state.type === "LOADED" && (
         <Tabs
-          defaultValue={profileDetailOpen ? "profiles" : "platform"}
+          defaultValue="profiles"
           px="md"
           pb="md"
           style={{
@@ -213,7 +203,6 @@ export function RuntimeExecutionPageContent({
           }}
         >
           <Tabs.List>
-            <Tabs.Tab value="platform">Platform limits</Tabs.Tab>
             <Tabs.Tab value="profiles">
               Profiles ({state.profiles.length})
             </Tabs.Tab>
@@ -221,44 +210,6 @@ export function RuntimeExecutionPageContent({
               Audit ({state.auditEvents.length})
             </Tabs.Tab>
           </Tabs.List>
-
-          <Tabs.Panel
-            value="platform"
-            pt="lg"
-            style={{ flex: 1, minHeight: 0, overflow: "auto" }}
-          >
-            <Stack gap="md">
-              <Group justify="space-between" align="flex-start">
-                <Stack gap={2}>
-                  <Text fw={600}>Installation-wide policy ceiling</Text>
-                  <Text size="sm" c="dimmed">
-                    Version {state.platform.version} · Digest{" "}
-                    <Code>{state.platform.digest.slice(0, 16)}</Code>
-                  </Text>
-                </Stack>
-                <Button
-                  loading={savingPlatform}
-                  disabled={
-                    platformDraft === null ||
-                    !isRuntimeExecutionPolicySupported(
-                      platformDraft,
-                      state.platform.capabilities,
-                    )
-                  }
-                  onClick={onSavePlatform}
-                >
-                  Save Platform policy
-                </Button>
-              </Group>
-              {platformDraft && (
-                <RuntimeExecutionPolicyEditor
-                  policy={platformDraft}
-                  capabilities={state.platform.capabilities}
-                  onChange={onPlatformDraftChange}
-                />
-              )}
-            </Stack>
-          </Tabs.Panel>
 
           <Tabs.Panel
             value="profiles"
@@ -320,7 +271,7 @@ export function RuntimeExecutionPageContent({
                       creating={false}
                       saving={savingProfile}
                       retiring={retiringProfile}
-                      capabilities={state.platform.capabilities}
+                      capabilities={state.capabilities}
                       onChange={onProfileDraftChange}
                       onSave={onSaveProfile}
                       onRetire={onRetireProfile}

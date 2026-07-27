@@ -1,5 +1,5 @@
 import type {
-  RuntimeExecutionPlatformPolicyResponse,
+  RuntimeExecutionManagementCapabilitiesResponse,
   RuntimeExecutionPolicyAuditEventResponse,
   RuntimeExecutionPolicyDocument,
   RuntimeExecutionProfileResponse,
@@ -10,7 +10,7 @@ export type RuntimeExecutionAdminState =
   | { type: "ERROR"; message: string }
   | {
       type: "LOADED";
-      platform: RuntimeExecutionPlatformPolicyResponse;
+      capabilities: RuntimeExecutionManagementCapabilitiesResponse;
       profiles: RuntimeExecutionProfileResponse[];
       auditEvents: RuntimeExecutionPolicyAuditEventResponse[];
     };
@@ -26,17 +26,13 @@ export interface RuntimeExecutionProfileDraft {
 
 export interface RuntimeExecutionPageContentProps {
   state: RuntimeExecutionAdminState;
-  platformDraft: RuntimeExecutionPolicyDocument | null;
   profileDraft: RuntimeExecutionProfileDraft | null;
   selectedProfileId: string | null;
   profileDetailOpen: boolean;
   profileModalOpened: boolean;
-  savingPlatform: boolean;
   savingProfile: boolean;
   retiringProfile: boolean;
   actionError: string | null;
-  onPlatformDraftChange: (policy: RuntimeExecutionPolicyDocument) => void;
-  onSavePlatform: () => void;
   onSelectProfile: (profileId: string) => void;
   onProfileDetailClose: () => void;
   onProfileDraftChange: (draft: RuntimeExecutionProfileDraft) => void;

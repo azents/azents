@@ -428,7 +428,7 @@ Name | Type | Description  | Notes
 
 List Workspace Profiles
 
-List Platform Profiles with Workspace-level availability reasons.
+List Profiles with Workspace-level availability reasons.
 
 ### Example
 

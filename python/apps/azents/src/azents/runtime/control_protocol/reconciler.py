@@ -411,7 +411,6 @@ def _snapshot_policy_evidence(
     snapshot: RuntimePolicySnapshot,
 ) -> RuntimeExecutionPolicyEvidence:
     source_versions = {
-        "platform": snapshot.execution_platform_version,
         "profile": snapshot.execution_profile_version,
         "workspace": snapshot.execution_workspace_version,
         "agent": snapshot.execution_agent_version,
