@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import WorkspaceUserRole
 from azents.core.runtime_execution_policy import (
-    RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
     SYSTEM_STANDARD_PROFILE_ID,
     JsonValue,
     RuntimeExecutionAuditEventType,
@@ -39,7 +38,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.runtime_execution_policy.data import (
     AgentRuntimeExecutionSetting,
-    RuntimeExecutionPlatformPolicy,
     RuntimeExecutionPolicyAuditEvent,
     RuntimeExecutionPolicyAuditEventCreate,
     RuntimeExecutionProfile,
@@ -75,16 +73,6 @@ class RuntimeExecutionPolicyUnavailable(Exception):
 
     def __post_init__(self) -> None:
         Exception.__init__(self, self.code)
-
-
-@dataclasses.dataclass(frozen=True)
-class RuntimeExecutionPlatformMutation:
-    """Replace the current Platform execution-policy ceiling."""
-
-    expected_version: int
-    policy: RuntimeExecutionPolicyDocument
-    actor_user_id: str
-    correlation_id: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -185,17 +173,6 @@ class RuntimeExecutionPolicyService:
         """Return the current server-owned policy management capability gate."""
         return _management_capabilities()
 
-    async def get_platform(self) -> RuntimeExecutionPlatformPolicy:
-        """Return the current Platform execution-policy ceiling."""
-        async with self.session_manager() as session:
-            platform = await self.repository.get_platform(session, for_update=False)
-        if platform is None:
-            raise RuntimeExecutionPolicyUnavailable(
-                "platform_policy_missing",
-                RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
-            )
-        return platform
-
     async def list_profiles(
         self,
         *,
@@ -287,7 +264,7 @@ class RuntimeExecutionPolicyService:
         offset: int,
         limit: int,
     ) -> list[RuntimeExecutionProfileAvailability]:
-        """List Platform Profiles with Workspace allowance diagnostics."""
+        """List Profiles with Workspace allowance diagnostics."""
         async with self.session_manager() as session:
             workspace = await self.repository.get_workspace(
                 session,
@@ -350,7 +327,6 @@ class RuntimeExecutionPolicyService:
                 workspace_user_id=workspace_user_id,
                 role=role,
             )
-            platform = await self.repository.get_platform(session, for_update=False)
             setting = await self.repository.get_agent_setting(
                 session,
                 agent_id=agent_id,
@@ -361,15 +337,10 @@ class RuntimeExecutionPolicyService:
                 workspace_id=workspace_id,
                 for_update=False,
             )
-            if platform is None or setting is None:
-                target_id = (
-                    RUNTIME_EXECUTION_PLATFORM_POLICY_ID
-                    if platform is None
-                    else agent_id
-                )
+            if setting is None:
                 raise RuntimeExecutionPolicyUnavailable(
                     "execution_policy_state_missing",
-                    target_id,
+                    agent_id,
                 )
             profile = await self.repository.get_profile(
                 session,
@@ -383,12 +354,10 @@ class RuntimeExecutionPolicyService:
                 )
         workspace_view = _workspace_view(workspace_id, workspace)
         resolution = resolve_runtime_execution_policy(
-            platform_policy=platform.policy,
             profile_policy=profile.policy,
             workspace_restriction=workspace_view.restriction,
             agent_restriction=setting.restriction,
             source_versions=RuntimeExecutionSourceVersions(
-                platform=platform.version,
                 profile=profile.version,
                 workspace=max(workspace_view.version, 1),
                 agent=setting.version,
@@ -494,63 +463,6 @@ class RuntimeExecutionPolicyService:
                 agent_id,
             )
 
-    async def replace_platform(
-        self,
-        mutation: RuntimeExecutionPlatformMutation,
-    ) -> RuntimeExecutionPlatformPolicy:
-        """Replace Platform policy with atomic expected-version audit."""
-        _require_policy_capability_available(
-            mutation.policy,
-            target_id=RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
-        )
-        async with self.session_manager() as session:
-            current = await self.repository.get_platform(session, for_update=True)
-            if current is None:
-                raise RuntimeExecutionPolicyUnavailable(
-                    "platform_policy_missing",
-                    RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
-                )
-            self._require_version(
-                target_id=current.id,
-                expected=mutation.expected_version,
-                current=current.version,
-            )
-            digest = digest_runtime_execution_policy(mutation.policy)
-            changed = classify_runtime_execution_change(
-                current.policy,
-                mutation.policy,
-            )
-            updated = await self.repository.replace_platform(
-                session,
-                expected_version=mutation.expected_version,
-                policy=mutation.policy,
-                digest=digest,
-                updated_by_user_id=mutation.actor_user_id,
-            )
-            if updated is None:
-                raise RuntimeExecutionPolicyVersionConflict(
-                    current.id,
-                    mutation.expected_version,
-                    current.version,
-                )
-            await self._append_audit(
-                session,
-                event_type=RuntimeExecutionAuditEventType.PLATFORM_POLICY_REPLACED,
-                layer=RuntimeExecutionManagementLayer.PLATFORM,
-                target_id=current.id,
-                correlation_id=mutation.correlation_id,
-                classification=changed.direction,
-                changed_paths=tuple(field.path for field in changed.fields),
-                before_digest=current.digest,
-                after_digest=updated.digest,
-                actor_user_id=mutation.actor_user_id,
-                actor_workspace_user_id=None,
-                workspace_id=None,
-                agent_id=None,
-                reason_code="operator_replace",
-            )
-            return updated
-
     async def create_profile(
         self,
         *,
@@ -604,7 +516,7 @@ class RuntimeExecutionPolicyService:
         profile_id: str,
         mutation: RuntimeExecutionProfileMutation,
     ) -> RuntimeExecutionProfile:
-        """Replace one Profile without broadening the reserved Standard."""
+        """Replace one Profile, including the reserved Standard policy."""
         async with self.session_manager() as session:
             current = await self.repository.get_profile(
                 session,
@@ -622,11 +534,6 @@ class RuntimeExecutionPolicyService:
                 current=current.version,
             )
             digest = digest_runtime_execution_policy(mutation.policy)
-            if current.reserved and digest != current.digest:
-                raise RuntimeExecutionPolicyUnavailable(
-                    "reserved_profile_policy_immutable",
-                    profile_id,
-                )
             _require_policy_capability_available(
                 mutation.policy,
                 target_id=profile_id,
@@ -747,20 +654,6 @@ class RuntimeExecutionPolicyService:
                 expected=mutation.expected_version,
                 current=current_version,
             )
-            platform = await self.repository.get_platform(
-                session,
-                for_update=False,
-            )
-            if platform is None:
-                raise RuntimeExecutionPolicyUnavailable(
-                    "platform_policy_missing",
-                    RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
-                )
-            validate_runtime_execution_restriction(
-                platform.policy,
-                mutation.restriction,
-                governing_layer=RuntimeExecutionPolicyLayer.PLATFORM,
-            )
             profiles = await self.repository.list_profiles(
                 session,
                 include_retired=True,
@@ -774,6 +667,12 @@ class RuntimeExecutionPolicyService:
                 raise RuntimeExecutionPolicyUnavailable(
                     "allowed_profile_not_found",
                     workspace_id,
+                )
+            for profile in profiles:
+                validate_runtime_execution_restriction(
+                    profile.policy,
+                    mutation.restriction,
+                    governing_layer=RuntimeExecutionPolicyLayer.PROFILE,
                 )
             if any(
                 not _profile_availability(
@@ -886,15 +785,6 @@ class RuntimeExecutionPolicyService:
                     "profile_not_found",
                     mutation.profile_id,
                 )
-            platform = await self.repository.get_platform(
-                session,
-                for_update=False,
-            )
-            if platform is None:
-                raise RuntimeExecutionPolicyUnavailable(
-                    "platform_policy_missing",
-                    RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
-                )
             workspace = await self.repository.get_workspace(
                 session,
                 workspace_id=workspace_id,
@@ -921,12 +811,10 @@ class RuntimeExecutionPolicyService:
                     mutation.profile_id,
                 )
             parent_policy = resolve_runtime_execution_policy(
-                platform_policy=platform.policy,
                 profile_policy=profile.policy,
                 workspace_restriction=workspace_restriction,
                 agent_restriction=empty_runtime_execution_restriction(),
                 source_versions=RuntimeExecutionSourceVersions(
-                    platform=platform.version,
                     profile=profile.version,
                     workspace=workspace.version if workspace is not None else 1,
                     agent=current.version,
@@ -993,7 +881,6 @@ class RuntimeExecutionPolicyService:
     ) -> RuntimeExecutionResolution:
         """Resolve current Agent intent against typed Provider compatibility."""
         async with self.session_manager() as session:
-            platform = await self.repository.get_platform(session, for_update=False)
             setting = await self.repository.get_agent_setting(
                 session,
                 agent_id=agent_id,
@@ -1004,15 +891,10 @@ class RuntimeExecutionPolicyService:
                 workspace_id=workspace_id,
                 for_update=False,
             )
-            if platform is None or setting is None:
-                target = (
-                    RUNTIME_EXECUTION_PLATFORM_POLICY_ID
-                    if platform is None
-                    else agent_id
-                )
+            if setting is None:
                 raise RuntimeExecutionPolicyUnavailable(
                     "execution_policy_state_missing",
-                    target,
+                    agent_id,
                 )
             profile = await self.repository.get_profile(
                 session,
@@ -1035,12 +917,10 @@ class RuntimeExecutionPolicyService:
             else frozenset({SYSTEM_STANDARD_PROFILE_ID})
         )
         return resolve_runtime_execution_policy(
-            platform_policy=platform.policy,
             profile_policy=profile.policy,
             workspace_restriction=workspace_restriction,
             agent_restriction=setting.restriction,
             source_versions=RuntimeExecutionSourceVersions(
-                platform=platform.version,
                 profile=profile.version,
                 workspace=workspace.version if workspace is not None else 1,
                 agent=setting.version,
@@ -1298,12 +1178,10 @@ def _policy_capability_reason(
 ) -> RuntimeExecutionAvailabilityReason | None:
     """Return a bounded incompatibility reason for one raw authority policy."""
     resolution = resolve_runtime_execution_policy(
-        platform_policy=policy,
         profile_policy=policy,
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),
         source_versions=RuntimeExecutionSourceVersions(
-            platform=1,
             profile=1,
             workspace=1,
             agent=1,

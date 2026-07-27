@@ -90,7 +90,6 @@ def _envelope(*, image_build: bool = False) -> RuntimeExecutionPolicyEnvelope:
                 "network.egress": 1,
             },
             source_versions={
-                "platform": 1,
                 "profile": 2,
                 "workspace": 3,
                 "agent": 4,

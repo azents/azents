@@ -26,9 +26,8 @@ class RuntimeExecutionPolicyLayer(str, Enum):
     """
     allowed enum values
     """
-    PLATFORM = 'platform'
-    WORKSPACE = 'workspace'
     PROFILE = 'profile'
+    WORKSPACE = 'workspace'
     AGENT = 'agent'
 
     @classmethod

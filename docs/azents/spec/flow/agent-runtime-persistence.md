@@ -18,7 +18,7 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
 last_verified_at: 2026-07-27
-spec_version: 8
+spec_version: 9
 ---
 
 # Agent Runtime Persistence
@@ -50,10 +50,11 @@ logical Runtime, advance its desired generation, delete its workspace, or invoke
 lifecycle command. A later explicit start or restart uses the normal generation-fenced policy and
 preserves the existing host directory or PVC.
 
-Runtime execution policy stores Agent intent separately from the applied Runtime target. Platform
-and Workspace restrictions can only narrow policy. An Agent Profile/override change is pending until
-explicit Apply attaches the next immutable target snapshot. A Platform or Workspace tightening
-automatically attaches a narrower target and advances desired generation without reset, terminal
+Runtime execution policy stores Agent intent separately from the applied Runtime target. The selected
+Profile is the complete policy ceiling; Workspace and Agent restrictions can only narrow it. An Agent
+Profile selection or override change is pending until explicit Apply attaches the next immutable target
+snapshot. A restrictive edit to the selected Profile or Workspace policy automatically attaches a
+narrower target and advances desired generation without reset, terminal
 deletion, Provider fallback, or Agent Workspace data loss. Target/applied snapshots, policy digest,
 source versions, and Provider evidence are generation-fenced durable metadata; they do not expose
 credentials, projected tokens, socket paths, or raw manifests.
@@ -177,6 +178,7 @@ Required checks:
 
 ## Changelog
 
+- **2026-07-27 (spec_version=9)** — Removed Platform execution-policy state and made the selected Profile the complete versioned ceiling and snapshot source.
 - **2026-07-27 (spec_version=7)** — Added lazy exact-Provider binding and initial policy snapshot attachment for pre-contract Runtime rows without workspace replacement.
 - **2026-07-26 (spec_version=6)** — Added durable execution-policy target/applied snapshots, reset-free restrictive convergence, fixed Kubernetes topology isolation, and separate unqualified nested-engine storage.
 - **2026-07-26 (spec_version=5)** — Added storage-preserving periodic convergence for desired-running Runtime workload image and configuration drift.

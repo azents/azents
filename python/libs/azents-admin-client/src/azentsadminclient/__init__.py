@@ -81,8 +81,6 @@ __all__ = [
     "RuntimeExecutionManagementLayer",
     "RuntimeExecutionNetworkMode",
     "RuntimeExecutionNetworkModule",
-    "RuntimeExecutionPlatformPolicyReplaceRequest",
-    "RuntimeExecutionPlatformPolicyResponse",
     "RuntimeExecutionPolicyAuditEventResponse",
     "RuntimeExecutionPolicyAuditListResponse",
     "RuntimeExecutionPolicyDocument",
@@ -234,8 +232,6 @@ from azentsadminclient.models.runtime_execution_management_capabilities_response
 from azentsadminclient.models.runtime_execution_management_layer import RuntimeExecutionManagementLayer as RuntimeExecutionManagementLayer
 from azentsadminclient.models.runtime_execution_network_mode import RuntimeExecutionNetworkMode as RuntimeExecutionNetworkMode
 from azentsadminclient.models.runtime_execution_network_module import RuntimeExecutionNetworkModule as RuntimeExecutionNetworkModule
-from azentsadminclient.models.runtime_execution_platform_policy_replace_request import RuntimeExecutionPlatformPolicyReplaceRequest as RuntimeExecutionPlatformPolicyReplaceRequest
-from azentsadminclient.models.runtime_execution_platform_policy_response import RuntimeExecutionPlatformPolicyResponse as RuntimeExecutionPlatformPolicyResponse
 from azentsadminclient.models.runtime_execution_policy_audit_event_response import RuntimeExecutionPolicyAuditEventResponse as RuntimeExecutionPolicyAuditEventResponse
 from azentsadminclient.models.runtime_execution_policy_audit_list_response import RuntimeExecutionPolicyAuditListResponse as RuntimeExecutionPolicyAuditListResponse
 from azentsadminclient.models.runtime_execution_policy_document import RuntimeExecutionPolicyDocument as RuntimeExecutionPolicyDocument

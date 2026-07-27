@@ -15,25 +15,25 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-26 | 57 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-27 | 58 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-26 | 133 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-26 | 18 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-26 | 12 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-27 | 7 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-27 | 8 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-23 | 4 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-26 | 75 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-26 | 49 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-27 | 51 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-26 | 134 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-26 | 31 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-27 | 8 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-27 | 32 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-27 | 9 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
@@ -295,6 +295,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Claude Rules Loader Historical Requirements Reconstruction](requirements/rules-260702-claude-rules-loader.md) | rules-260702 | 2026-07-02 | 2026-07-02 |
 | [Session-Scoped Runner Operation Concurrency Historical Requirements Reconstruction](requirements/runner-260710-runner-operation-concurrency.md) | runner-260710 | 2026-07-10 | - |
 | [Hierarchical Runtime Execution Profiles Requirements](requirements/runtime-260726-hierarchical-execution-profiles.md) | runtime-260726 | 2026-07-26 | - |
+| [Profile-Only Runtime Execution Policy Requirements](requirements/runtime-260727-profile-only-execution-policy.md) | runtime-260727 | 2026-07-27 | 2026-07-27 |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
@@ -634,6 +635,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Claude Rules Loader Historical Decision Reconstruction](adr/rules-260702-claude-rules-loader.md)
 - [Session-Scoped Runner Operation Concurrency](adr/runner-260710-runner-operation-concurrency.md)
 - [Hierarchical Runtime Execution Profiles](adr/runtime-260726-hierarchical-execution-profiles.md)
+- [Profile-Only Runtime Execution Policy](adr/runtime-260727-profile-only-execution-policy.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)

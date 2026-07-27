@@ -8555,7 +8555,7 @@
           "Runtime Execution v1"
         ],
         "summary": "List Workspace Profiles",
-        "description": "List Platform Profiles with Workspace-level availability reasons.",
+        "description": "List Profiles with Workspace-level availability reasons.",
         "operationId": "runtime_execution_v1_list_workspace_profiles",
         "security": [
           {
@@ -22128,7 +22128,6 @@
       "RuntimeExecutionAuditEventType": {
         "type": "string",
         "enum": [
-          "platform_policy_replaced",
           "profile_created",
           "profile_replaced",
           "profile_retired",
@@ -22371,7 +22370,6 @@
       "RuntimeExecutionManagementLayer": {
         "type": "string",
         "enum": [
-          "platform",
           "profile",
           "workspace",
           "agent",
@@ -22682,9 +22680,8 @@
       "RuntimeExecutionPolicyLayer": {
         "type": "string",
         "enum": [
-          "platform",
-          "workspace",
           "profile",
+          "workspace",
           "agent"
         ],
         "title": "RuntimeExecutionPolicyLayer",
@@ -23132,11 +23129,6 @@
       },
       "RuntimeExecutionSourceVersions": {
         "properties": {
-          "platform": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Platform"
-          },
           "profile": {
             "type": "integer",
             "minimum": 1.0,
@@ -23156,7 +23148,6 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "platform",
           "profile",
           "workspace",
           "agent"
@@ -25971,7 +25962,7 @@
           "reason"
         ],
         "title": "WorkspaceRuntimeExecutionProfileResponse",
-        "description": "Workspace availability of one Platform Profile."
+        "description": "Workspace availability of one execution Profile."
       },
       "WorkspaceUserListResponse": {
         "properties": {

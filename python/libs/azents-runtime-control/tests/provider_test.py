@@ -373,7 +373,6 @@ def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
             desired_generation=3,
             module_versions={"container.run": 1},
             source_versions={
-                "platform": 1,
                 "profile": 1,
                 "workspace": 1,
                 "agent": 1,

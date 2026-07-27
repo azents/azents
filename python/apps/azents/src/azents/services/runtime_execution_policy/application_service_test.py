@@ -40,7 +40,6 @@ from azents.core.runtime_execution_policy import (
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_execution_policy.data import (
     AgentRuntimeExecutionSetting,
-    RuntimeExecutionPlatformPolicy,
     RuntimeExecutionProfile,
 )
 from azents.repos.runtime_provider_policy.data import RuntimePolicySnapshot
@@ -113,7 +112,6 @@ def _snapshot() -> RuntimePolicySnapshot:
         override_provider_id=None,
         override_version=None,
         execution_profile_id=None,
-        execution_platform_version=None,
         execution_profile_version=None,
         execution_workspace_version=None,
         execution_agent_version=None,
@@ -138,12 +136,10 @@ def _snapshot() -> RuntimePolicySnapshot:
 def _resolved() -> _ResolvedRuntimePolicy:
     standard = standard_runtime_execution_policy()
     resolution = resolve_runtime_execution_policy(
-        platform_policy=standard,
         profile_policy=standard,
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),
         source_versions=RuntimeExecutionSourceVersions(
-            platform=1,
             profile=2,
             workspace=3,
             agent=4,
@@ -171,12 +167,10 @@ def _resolved() -> _ResolvedRuntimePolicy:
 def _unavailable_resolved() -> _ResolvedRuntimePolicy:
     policy = standard_runtime_execution_policy()
     unavailable = resolve_runtime_execution_policy(
-        platform_policy=policy,
         profile_policy=policy,
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),
         source_versions=RuntimeExecutionSourceVersions(
-            platform=1,
             profile=2,
             workspace=3,
             agent=4,
@@ -193,7 +187,6 @@ def _unavailable_resolved() -> _ResolvedRuntimePolicy:
         target_snapshot=dataclasses.replace(
             resolved.target_snapshot,
             execution_profile_id="system-standard",
-            execution_platform_version=1,
             execution_profile_version=2,
             execution_workspace_version=3,
             execution_agent_version=4,
@@ -216,7 +209,6 @@ def _targeted_resolved(
     snapshot = dataclasses.replace(
         resolved.target_snapshot,
         execution_profile_id=resolved.profile_id,
-        execution_platform_version=resolved.resolution.source_versions.platform,
         execution_profile_version=resolved.resolution.source_versions.profile,
         execution_workspace_version=resolved.resolution.source_versions.workspace,
         execution_agent_version=resolved.resolution.source_versions.agent,
@@ -273,7 +265,6 @@ def _upper_layer_change_resolved(
         }
     )
     resolution = resolve_runtime_execution_policy(
-        platform_policy=current,
         profile_policy=current,
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),
@@ -287,7 +278,6 @@ def _upper_layer_change_resolved(
     target = dataclasses.replace(
         _snapshot(),
         execution_profile_id="system-standard",
-        execution_platform_version=target_source_versions.platform,
         execution_profile_version=target_source_versions.profile,
         execution_workspace_version=target_source_versions.workspace,
         execution_agent_version=target_source_versions.agent,
@@ -329,13 +319,11 @@ def test_status_projection_requires_explicit_apply_for_saved_intent() -> None:
     [
         (
             RuntimeExecutionSourceVersions(
-                platform=2,
                 profile=2,
                 workspace=3,
                 agent=4,
             ),
             RuntimeExecutionSourceVersions(
-                platform=1,
                 profile=2,
                 workspace=3,
                 agent=4,
@@ -343,13 +331,11 @@ def test_status_projection_requires_explicit_apply_for_saved_intent() -> None:
         ),
         (
             RuntimeExecutionSourceVersions(
-                platform=1,
                 profile=2,
                 workspace=4,
                 agent=4,
             ),
             RuntimeExecutionSourceVersions(
-                platform=1,
                 profile=2,
                 workspace=3,
                 agent=4,
@@ -383,13 +369,11 @@ def test_status_projection_requires_apply_for_mixed_upper_layer_change() -> None
             current_cpu=1_000,
             current_memory=500,
             source_versions=RuntimeExecutionSourceVersions(
-                platform=2,
                 profile=2,
                 workspace=3,
                 agent=4,
             ),
             target_source_versions=RuntimeExecutionSourceVersions(
-                platform=1,
                 profile=2,
                 workspace=3,
                 agent=4,
@@ -478,15 +462,6 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
             ),
         }
     )
-    platform = RuntimeExecutionPlatformPolicy(
-        id="platform",
-        version=1,
-        policy=engine_policy,
-        digest=digest_runtime_execution_policy(engine_policy),
-        updated_by_user_id=None,
-        created_at=_NOW,
-        updated_at=_NOW,
-    )
     profile = RuntimeExecutionProfile(
         id="nested-engine",
         display_name="Nested engine",
@@ -556,7 +531,6 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
     workspace.restriction = empty_runtime_execution_restriction()
     workspace.allowed_profile_ids = frozenset({profile.id})
     workspace.version = 1
-    policy_repository.get_platform = AsyncMock(return_value=platform)
     policy_repository.get_agent_setting = AsyncMock(return_value=setting)
     policy_repository.get_workspace = AsyncMock(return_value=workspace)
     policy_repository.get_profile = AsyncMock(return_value=profile)
@@ -780,8 +754,8 @@ async def test_terminal_delete_retry_reuses_current_generation() -> None:
     snapshot_repository.create_and_advance_target_snapshot.assert_not_awaited()
 
 
-def test_automatic_convergence_requires_unchanged_profile_and_agent_intent() -> None:
-    """Only lower-layer version changes may be converged automatically."""
+def test_automatic_convergence_requires_unchanged_agent_intent() -> None:
+    """Profile ceiling changes may converge while Agent intent is unchanged."""
     resolved = _resolved()
     matching = dataclasses.replace(
         resolved,
@@ -793,7 +767,7 @@ def test_automatic_convergence_requires_unchanged_profile_and_agent_intent() -> 
     )
 
     assert _automatic_convergence_source_allowed(matching)
-    assert not _automatic_convergence_source_allowed(
+    assert _automatic_convergence_source_allowed(
         dataclasses.replace(
             matching,
             target_snapshot=dataclasses.replace(
@@ -871,7 +845,7 @@ async def test_unavailable_agent_intent_change_remains_pending_apply() -> None:
         resolved,
         target_snapshot=dataclasses.replace(
             resolved.target_snapshot,
-            execution_profile_version=1,
+            execution_agent_version=3,
         ),
     )
     snapshot_repository = Mock()
@@ -936,12 +910,10 @@ def test_legacy_capabilities_cannot_grant_engine_or_network_authority() -> None:
 
     standard = standard_runtime_execution_policy()
     resolution = resolve_runtime_execution_policy(
-        platform_policy=standard,
         profile_policy=standard,
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),
         source_versions=RuntimeExecutionSourceVersions(
-            platform=1,
             profile=1,
             workspace=1,
             agent=1,

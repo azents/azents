@@ -76,7 +76,7 @@ class TestAgentRuntimeExecutionPolicyStatusResponse(unittest.TestCase):
                     network_mode = 'none', ),
                 desired_generation = 56,
                 governing_layers = {
-                    'key' : 'platform'
+                    'key' : 'profile'
                     },
                 reason_codes = [
                     ''
@@ -126,7 +126,7 @@ class TestAgentRuntimeExecutionPolicyStatusResponse(unittest.TestCase):
                     network_mode = 'none', ),
                 desired_generation = 56,
                 governing_layers = {
-                    'key' : 'platform'
+                    'key' : 'profile'
                     },
                 reason_codes = [
                     ''

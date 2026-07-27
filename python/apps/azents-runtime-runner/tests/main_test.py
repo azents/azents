@@ -60,7 +60,7 @@ def test_runner_reads_provider_injected_policy_evidence(
     )
     monkeypatch.setenv(
         "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS",
-        json.dumps({"platform": 1, "profile": 2, "workspace": 3, "agent": 4}),
+        json.dumps({"profile": 2, "workspace": 3, "agent": 4}),
     )
 
     evidence = _execution_policy_evidence_from_env()

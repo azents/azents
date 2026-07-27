@@ -106,7 +106,7 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         network_mode = , ), 
                     desired_generation = 56, 
                     governing_layers = {
-                        'key' : 'platform'
+                        'key' : 'profile'
                         }, 
                     reason_codes = [
                         ''
@@ -188,7 +188,7 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         network_mode = , ), 
                     desired_generation = 56, 
                     governing_layers = {
-                        'key' : 'platform'
+                        'key' : 'profile'
                         }, 
                     reason_codes = [
                         ''

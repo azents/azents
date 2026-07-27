@@ -38,7 +38,7 @@ class TestRuntimeExecutionReduction(unittest.TestCase):
                 path = '0',
                 previous = None,
                 current = None,
-                governing_layer = 'platform',
+                governing_layer = 'profile',
                 reason = 'upper_layer_restriction'
             )
         else:
@@ -46,7 +46,7 @@ class TestRuntimeExecutionReduction(unittest.TestCase):
                 path = '0',
                 previous = None,
                 current = None,
-                governing_layer = 'platform',
+                governing_layer = 'profile',
                 reason = 'upper_layer_restriction',
         )
         """

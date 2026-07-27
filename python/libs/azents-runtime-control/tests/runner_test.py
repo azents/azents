@@ -664,7 +664,6 @@ def _registration() -> RunnerRegistration:
             desired_generation=5,
             module_versions={"container.run": 1},
             source_versions={
-                "platform": 1,
                 "profile": 1,
                 "workspace": 1,
                 "agent": 1,

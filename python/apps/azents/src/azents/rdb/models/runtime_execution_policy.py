@@ -55,55 +55,6 @@ runtime_execution_change_direction_enum = ENUM(
 )
 
 
-class RDBRuntimeExecutionPlatformPolicy(RDBModel):
-    """Current installation-wide execution-policy ceiling."""
-
-    __tablename__ = "runtime_execution_platform_policies"
-
-    CK_SINGLETON_ID = sa.CheckConstraint(
-        "id = 'platform'",
-        name="ck_runtime_execution_platform_policies_singleton_id",
-    )
-    CK_VERSION_POSITIVE = sa.CheckConstraint(
-        "version >= 1",
-        name="ck_runtime_execution_platform_policies_version_positive",
-    )
-    IX_UPDATED_BY_USER_ID = sa.Index(
-        "ix_runtime_execution_platform_policies_updated_by_user_id",
-        "updated_by_user_id",
-    )
-
-    id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
-    version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    policy: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    digest: Mapped[str] = mapped_column(sa.String(64), nullable=False)
-    updated_by_user_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        default=None,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        server_default=sa.func.now(),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        server_default=sa.func.now(),
-        onupdate=sa.func.now(),
-        nullable=False,
-    )
-
-    __table_args__ = (
-        CK_SINGLETON_ID,
-        CK_VERSION_POSITIVE,
-        IX_UPDATED_BY_USER_ID,
-    )
-
-
 class RDBRuntimeExecutionProfile(RDBModel):
     """Stable mutable named Runtime execution Profile."""
 

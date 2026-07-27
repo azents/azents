@@ -15,19 +15,6 @@ from azents.core.runtime_execution_policy import (
 
 
 @dataclass(frozen=True)
-class RuntimeExecutionPlatformPolicy:
-    """Current installation-wide execution-policy ceiling."""
-
-    id: str
-    version: int
-    policy: RuntimeExecutionPolicyDocument
-    digest: str
-    updated_by_user_id: str | None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-
-@dataclass(frozen=True)
 class RuntimeExecutionProfile:
     """Current stable named Runtime execution Profile."""
 

@@ -444,7 +444,6 @@ class RuntimeProviderPolicyRepository:
             override_provider_id=create.override_provider_id,
             override_version=create.override_version,
             execution_profile_id=create.execution_profile_id,
-            execution_platform_version=create.execution_platform_version,
             execution_profile_version=create.execution_profile_version,
             execution_workspace_version=create.execution_workspace_version,
             execution_agent_version=create.execution_agent_version,
@@ -513,7 +512,6 @@ class RuntimeProviderPolicyRepository:
             override_provider_id=create.override_provider_id,
             override_version=create.override_version,
             execution_profile_id=create.execution_profile_id,
-            execution_platform_version=create.execution_platform_version,
             execution_profile_version=create.execution_profile_version,
             execution_workspace_version=create.execution_workspace_version,
             execution_agent_version=create.execution_agent_version,
@@ -578,7 +576,6 @@ class RuntimeProviderPolicyRepository:
             override_provider_id=create.override_provider_id,
             override_version=create.override_version,
             execution_profile_id=create.execution_profile_id,
-            execution_platform_version=create.execution_platform_version,
             execution_profile_version=create.execution_profile_version,
             execution_workspace_version=create.execution_workspace_version,
             execution_agent_version=create.execution_agent_version,
@@ -936,7 +933,6 @@ class RuntimeProviderPolicyRepository:
             override_provider_id=rdb.override_provider_id,
             override_version=rdb.override_version,
             execution_profile_id=rdb.execution_profile_id,
-            execution_platform_version=rdb.execution_platform_version,
             execution_profile_version=rdb.execution_profile_version,
             execution_workspace_version=rdb.execution_workspace_version,
             execution_agent_version=rdb.execution_agent_version,
@@ -969,7 +965,6 @@ def _snapshot_evidence_matches(
         and _snapshot_module_versions(snapshot.resolved_execution_policy)
         == dict(evidence.module_versions)
         and {
-            "platform": snapshot.execution_platform_version,
             "profile": snapshot.execution_profile_version,
             "workspace": snapshot.execution_workspace_version,
             "agent": snapshot.execution_agent_version,

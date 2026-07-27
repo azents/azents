@@ -11,15 +11,11 @@ import type {
 
 export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps {
   const utils = trpc.useUtils();
-  const platformQuery = trpc.runtimeExecution.getPlatformPolicy.useQuery();
   const profilesQuery = trpc.runtimeExecution.listProfiles.useQuery();
   const auditQuery = trpc.runtimeExecution.listAuditEvents.useQuery();
   const [selectedProfileId, setSelectedProfileId] = useQueryState("profileId", {
     serializer: serializers.stringOrNull(),
   });
-  const [platformDraft, setPlatformDraft] = useState(
-    platformQuery.data?.policy ?? null,
-  );
   const [profileDraft, setProfileDraft] =
     useState<RuntimeExecutionProfileDraft | null>(null);
   const [profileModalOpened, setProfileModalOpened] = useState(false);
@@ -32,12 +28,6 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
   const effectiveProfileId = selectedProfileId ?? profiles[0]?.id ?? null;
   const selectedProfile =
     profiles.find((profile) => profile.id === effectiveProfileId) ?? null;
-
-  useEffect(() => {
-    if (platformQuery.data) {
-      setPlatformDraft(platformQuery.data.policy);
-    }
-  }, [platformQuery.data]);
 
   useEffect(() => {
     if (selectedProfile) {
@@ -54,19 +44,10 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
 
   const invalidateAll = async (): Promise<void> => {
     await Promise.all([
-      utils.runtimeExecution.getPlatformPolicy.invalidate(),
       utils.runtimeExecution.listProfiles.invalidate(),
       utils.runtimeExecution.listAuditEvents.invalidate(),
     ]);
   };
-  const replacePlatform =
-    trpc.runtimeExecution.replacePlatformPolicy.useMutation({
-      onSuccess: async () => {
-        setActionError(null);
-        await invalidateAll();
-      },
-      onError: (error) => setActionError(error.message),
-    });
   const createProfile = trpc.runtimeExecution.createProfile.useMutation({
     onSuccess: async (profile) => {
       setProfileModalOpened(false);
@@ -91,18 +72,16 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
     onError: (error) => setActionError(error.message),
   });
 
-  const loading =
-    platformQuery.isLoading || profilesQuery.isLoading || auditQuery.isLoading;
-  const queryError =
-    platformQuery.error ?? profilesQuery.error ?? auditQuery.error;
+  const loading = profilesQuery.isLoading || auditQuery.isLoading;
+  const queryError = profilesQuery.error ?? auditQuery.error;
   const state: RuntimeExecutionPageContentProps["state"] = loading
     ? { type: "LOADING" }
     : queryError
       ? { type: "ERROR", message: queryError.message }
-      : platformQuery.data && profilesQuery.data && auditQuery.data
+      : profilesQuery.data && auditQuery.data
         ? {
             type: "LOADED",
-            platform: platformQuery.data,
+            capabilities: profilesQuery.data.capabilities,
             profiles,
             auditEvents: auditQuery.data.items,
           }
@@ -110,33 +89,13 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
 
   return {
     state,
-    platformDraft,
     profileDraft,
     selectedProfileId: effectiveProfileId,
     profileDetailOpen: selectedProfileId !== null,
     profileModalOpened,
-    savingPlatform: replacePlatform.isPending,
     savingProfile: createProfile.isPending || replaceProfile.isPending,
     retiringProfile: retireProfile.isPending,
     actionError,
-    onPlatformDraftChange: setPlatformDraft,
-    onSavePlatform: () => {
-      if (
-        !platformQuery.data ||
-        !platformDraft ||
-        !isRuntimeExecutionPolicySupported(
-          platformDraft,
-          platformQuery.data.capabilities,
-        )
-      ) {
-        return;
-      }
-      setActionError(null);
-      replacePlatform.mutate({
-        expectedVersion: platformQuery.data.version,
-        policy: platformDraft,
-      });
-    },
     onSelectProfile: (profileId) => {
       setSelectedProfileId(profileId);
       setActionError(null);
@@ -144,14 +103,15 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
     onProfileDetailClose: () => setSelectedProfileId(null),
     onProfileDraftChange: setProfileDraft,
     onOpenCreateProfile: () => {
-      if (!platformQuery.data) {
+      const templatePolicy = selectedProfile?.policy ?? profiles[0]?.policy;
+      if (!templatePolicy) {
         return;
       }
       setProfileDraft({
         id: "",
         displayName: "",
         description: "",
-        policy: platformQuery.data.policy,
+        policy: templatePolicy,
         expectedVersion: null,
         reserved: false,
       });

@@ -29,9 +29,8 @@ def test_admin_routes_are_mounted_under_system_admin_authority() -> None:
         and route.path.startswith("/runtime-execution/v1")
     ]
 
-    assert len(routes) == 8
+    assert len(routes) == 6
     assert {route.path for route in routes} >= {
-        "/runtime-execution/v1/platform-policy",
         "/runtime-execution/v1/profiles",
         "/runtime-execution/v1/profiles/{profile_id}",
         "/runtime-execution/v1/profiles/{profile_id}/retire",

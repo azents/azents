@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import WorkspaceUserRole
 from azents.core.runtime_execution_policy import (
-    RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
     SYSTEM_STANDARD_PROFILE_ID,
     RuntimeExecutionBooleanModule,
     RuntimeExecutionBooleanRestriction,
@@ -33,7 +32,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.runtime_execution_policy.data import (
     AgentRuntimeExecutionSetting,
-    RuntimeExecutionPlatformPolicy,
     RuntimeExecutionProfile,
     WorkspaceRuntimeExecutionPolicy,
 )
@@ -43,28 +41,13 @@ from azents.repos.runtime_execution_policy.repository import (
 
 from .service import (
     AgentRuntimeExecutionSettingMutation,
-    RuntimeExecutionPlatformMutation,
     RuntimeExecutionPolicyService,
     RuntimeExecutionPolicyUnavailable,
-    RuntimeExecutionPolicyVersionConflict,
     RuntimeExecutionProfileMutation,
     WorkspaceRuntimeExecutionPolicyMutation,
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
-
-
-def _platform(*, version: int = 1) -> RuntimeExecutionPlatformPolicy:
-    policy = standard_runtime_execution_policy()
-    return RuntimeExecutionPlatformPolicy(
-        id=RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
-        version=version,
-        policy=policy,
-        digest=digest_runtime_execution_policy(policy),
-        updated_by_user_id=None,
-        created_at=_NOW,
-        updated_at=_NOW,
-    )
 
 
 def _expanded_standard() -> RuntimeExecutionPolicyDocument:
@@ -172,86 +155,46 @@ def _service(
 
 
 @pytest.mark.asyncio
-async def test_stale_platform_write_has_no_mutation_or_audit_side_effect() -> None:
-    """Expected-version rejection occurs before settings or audit writes."""
+async def test_reserved_standard_policy_can_be_changed() -> None:
+    """Reserved Standard remains the editable system Profile ceiling."""
     repository = Mock(spec=RuntimeExecutionPolicyRepository)
-    repository.get_platform = AsyncMock(return_value=_platform(version=2))
-    repository.replace_platform = AsyncMock()
+    current = _profile(reserved=True)
+    updated = dataclasses.replace(
+        current,
+        version=2,
+        policy=_expanded_standard(),
+        digest=digest_runtime_execution_policy(_expanded_standard()),
+    )
+    repository.get_profile = AsyncMock(return_value=current)
+    repository.replace_profile = AsyncMock(return_value=updated)
     repository.append_audit_event = AsyncMock()
     service = _service(repository)
 
-    with pytest.raises(RuntimeExecutionPolicyVersionConflict):
-        await service.replace_platform(
-            RuntimeExecutionPlatformMutation(
-                expected_version=1,
-                policy=standard_runtime_execution_policy(),
-                actor_user_id="user-1",
-                correlation_id="correlation-1",
-            )
-        )
+    result = await service.replace_profile(
+        SYSTEM_STANDARD_PROFILE_ID,
+        RuntimeExecutionProfileMutation(
+            expected_version=1,
+            display_name="Standard",
+            description="Changed metadata",
+            policy=_expanded_standard(),
+            actor_user_id="user-1",
+            correlation_id="correlation-1",
+        ),
+    )
 
-    repository.replace_platform.assert_not_awaited()
-    repository.append_audit_event.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_concurrent_platform_write_does_not_append_audit() -> None:
-    """A conditional update race remains free of partial audit effects."""
-    repository = Mock(spec=RuntimeExecutionPolicyRepository)
-    repository.get_platform = AsyncMock(return_value=_platform())
-    repository.replace_platform = AsyncMock(return_value=None)
-    repository.append_audit_event = AsyncMock()
-    service = _service(repository)
-
-    with pytest.raises(RuntimeExecutionPolicyVersionConflict):
-        await service.replace_platform(
-            RuntimeExecutionPlatformMutation(
-                expected_version=1,
-                policy=standard_runtime_execution_policy(),
-                actor_user_id="user-1",
-                correlation_id="correlation-1",
-            )
-        )
-
-    repository.append_audit_event.assert_not_awaited()
+    assert result is updated
+    repository.replace_profile.assert_awaited_once()
+    repository.append_audit_event.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_reserved_standard_authority_cannot_be_changed() -> None:
-    """Ordinary Profile mutation cannot broaden reserved Standard authority."""
-    repository = Mock(spec=RuntimeExecutionPolicyRepository)
-    repository.get_profile = AsyncMock(return_value=_profile(reserved=True))
-    repository.replace_profile = AsyncMock()
-    repository.append_audit_event = AsyncMock()
-    service = _service(repository)
-
-    with pytest.raises(
-        RuntimeExecutionPolicyUnavailable,
-        match="reserved_profile_policy_immutable",
-    ):
-        await service.replace_profile(
-            SYSTEM_STANDARD_PROFILE_ID,
-            RuntimeExecutionProfileMutation(
-                expected_version=1,
-                display_name="Standard",
-                description="Changed metadata",
-                policy=_expanded_standard(),
-                actor_user_id="user-1",
-                correlation_id="correlation-1",
-            ),
-        )
-
-    repository.replace_profile.assert_not_awaited()
-    repository.append_audit_event.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_workspace_restriction_cannot_expand_platform_boundary() -> None:
-    """Workspace writes reject broader storage authority before persistence."""
+async def test_workspace_restriction_cannot_expand_profile_boundary() -> None:
+    """Workspace writes reject broader storage authority than allowed Profiles."""
     repository = Mock(spec=RuntimeExecutionPolicyRepository)
     repository.get_workspace = AsyncMock(return_value=None)
-    repository.get_platform = AsyncMock(return_value=_platform())
-    repository.list_profiles = AsyncMock()
+    repository.list_profiles = AsyncMock(
+        return_value=_profiles(frozenset({SYSTEM_STANDARD_PROFILE_ID}))
+    )
     repository.replace_workspace = AsyncMock()
     repository.append_audit_event = AsyncMock()
     service = _service(repository)
@@ -279,7 +222,7 @@ async def test_workspace_restriction_cannot_expand_platform_boundary() -> None:
             ),
         )
 
-    repository.list_profiles.assert_not_awaited()
+    repository.list_profiles.assert_awaited_once()
     repository.replace_workspace.assert_not_awaited()
     repository.append_audit_event.assert_not_awaited()
 
@@ -314,7 +257,6 @@ async def test_agent_cannot_newly_select_workspace_disallowed_profile() -> None:
     repository.get_profile = AsyncMock(
         return_value=_profile(reserved=False, profile_id="profile-2")
     )
-    repository.get_platform = AsyncMock(return_value=_platform())
     repository.get_workspace = AsyncMock(return_value=workspace)
     repository.replace_agent_setting = AsyncMock()
     repository.append_audit_event = AsyncMock()
@@ -360,7 +302,6 @@ async def test_agent_can_select_qualified_nested_engine_profile() -> None:
     repository.get_agent_setting = AsyncMock(return_value=current)
     repository.get_agent_workspace_id = AsyncMock(return_value="workspace-1")
     repository.get_profile = AsyncMock(return_value=supported)
-    repository.get_platform = AsyncMock(return_value=_platform())
     repository.get_workspace = AsyncMock(
         return_value=_workspace(
             allowed_profile_ids=frozenset(
@@ -455,7 +396,6 @@ async def test_workspace_restriction_audit_aligns_optional_nested_modules(
             restriction=previous,
         )
     )
-    repository.get_platform = AsyncMock(return_value=_platform())
     repository.list_profiles = AsyncMock(return_value=_profiles(allowed))
     repository.replace_workspace = AsyncMock(
         return_value=_workspace(
@@ -522,7 +462,6 @@ async def test_workspace_allowance_audit_classifies_set_direction(
     )
     repository = Mock(spec=RuntimeExecutionPolicyRepository)
     repository.get_workspace = AsyncMock(return_value=current_workspace)
-    repository.get_platform = AsyncMock(return_value=_platform())
     repository.list_profiles = AsyncMock(return_value=_profiles(current))
     repository.replace_workspace = AsyncMock(return_value=updated_workspace)
     repository.append_audit_event = AsyncMock()
@@ -569,7 +508,6 @@ async def test_workspace_first_materialization_uses_implicit_standard_allowance(
     restriction = empty_runtime_execution_restriction()
     repository = Mock(spec=RuntimeExecutionPolicyRepository)
     repository.get_workspace = AsyncMock(return_value=None)
-    repository.get_platform = AsyncMock(return_value=_platform())
     repository.list_profiles = AsyncMock(return_value=_profiles(allowed_profile_ids))
     repository.replace_workspace = AsyncMock(
         return_value=_workspace(
@@ -697,7 +635,6 @@ async def test_agent_admin_receives_current_server_capability_evaluation() -> No
     )
     repository = Mock(spec=RuntimeExecutionPolicyRepository)
     repository.get_agent_workspace_id = AsyncMock(return_value="workspace-1")
-    repository.get_platform = AsyncMock(return_value=_platform())
     repository.get_agent_setting = AsyncMock(return_value=setting)
     repository.get_workspace = AsyncMock(return_value=None)
     repository.get_profile = AsyncMock(return_value=_profile(reserved=True))
@@ -726,36 +663,6 @@ async def test_agent_admin_receives_current_server_capability_evaluation() -> No
         RuntimeExecutionNetworkMode.DIRECT,
         RuntimeExecutionNetworkMode.NONE,
     )
-
-
-@pytest.mark.asyncio
-async def test_platform_write_accepts_qualified_engine_authority() -> None:
-    """Platform policy can store authority backed by qualified enforcement."""
-    repository = Mock(spec=RuntimeExecutionPolicyRepository)
-    current = _platform()
-    updated = dataclasses.replace(
-        current,
-        version=2,
-        policy=_expanded_standard(),
-        digest=digest_runtime_execution_policy(_expanded_standard()),
-    )
-    repository.get_platform = AsyncMock(return_value=current)
-    repository.replace_platform = AsyncMock(return_value=updated)
-    repository.append_audit_event = AsyncMock()
-    service = _service(repository)
-
-    result = await service.replace_platform(
-        RuntimeExecutionPlatformMutation(
-            expected_version=1,
-            policy=_expanded_standard(),
-            actor_user_id="user-1",
-            correlation_id="correlation-1",
-        )
-    )
-
-    assert result is updated
-    repository.replace_platform.assert_awaited_once()
-    repository.append_audit_event.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -798,7 +705,6 @@ async def test_workspace_can_allow_qualified_engine_profile() -> None:
     )
     repository = Mock(spec=RuntimeExecutionPolicyRepository)
     repository.get_workspace = AsyncMock(return_value=None)
-    repository.get_platform = AsyncMock(return_value=_platform())
     repository.list_profiles = AsyncMock(
         return_value=[_profile(reserved=True), supported]
     )

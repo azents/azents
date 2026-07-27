@@ -48,7 +48,6 @@ def _snapshot(
         override_provider_id=None,
         override_version=None,
         execution_profile_id="system-standard",
-        execution_platform_version=1,
         execution_profile_version=2,
         execution_workspace_version=3,
         execution_agent_version=4,
@@ -91,7 +90,6 @@ def _evidence(
         module_versions=module_versions or _MODULE_VERSIONS,
         source_versions=source_versions
         or {
-            "platform": 1,
             "profile": 2,
             "workspace": 3,
             "agent": 4,
@@ -109,7 +107,7 @@ def test_snapshot_evidence_requires_exact_digest_generation_and_versions() -> No
     )
     assert not _snapshot_evidence_matches(
         snapshot,
-        _evidence(source_versions={"platform": 1}),
+        _evidence(source_versions={"profile": 2}),
     )
     assert not _snapshot_evidence_matches(
         snapshot,

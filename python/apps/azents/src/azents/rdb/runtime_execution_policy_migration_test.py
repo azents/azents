@@ -33,6 +33,14 @@ _DEFAULT_EGRESS_MIGRATION = (
     / "versions"
     / "19f9c6124382_default_runtime_egress_to_direct.py"
 )
+_PROFILE_ONLY_MIGRATION = (
+    PROJECT_ROOT
+    / "db-schemas"
+    / "rdb"
+    / "migrations"
+    / "versions"
+    / "8ee8f5ae5a4d_remove_runtime_execution_platform_policy.py"
+)
 
 
 def _migration_values(path: Path) -> dict[str, Any]:
@@ -82,18 +90,21 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     revision_file = PROJECT_ROOT / "db-schemas" / "rdb" / "revision"
     seed_source = _SEED_MIGRATION.read_text()
     egress_source = _DEFAULT_EGRESS_MIGRATION.read_text()
+    profile_only_source = _PROFILE_ONLY_MIGRATION.read_text()
 
-    assert revision_file.read_text().strip() == "19f9c6124382"
+    assert revision_file.read_text().strip() == "8ee8f5ae5a4d"
     assert "INSERT INTO workspace_runtime_execution_policies" in seed_source
     assert "INSERT INTO workspace_runtime_execution_profile_allowances" in seed_source
     assert "INSERT INTO agent_runtime_execution_settings" in seed_source
     assert "UPDATE runtime_execution_platform_policies" in egress_source
     assert "UPDATE runtime_execution_profiles" in egress_source
     assert "UPDATE agent_runtimes" not in egress_source
+    assert 'op.drop_table("runtime_execution_platform_policies")' in profile_only_source
+    assert 'op.drop_column("runtime_policy_snapshots"' in profile_only_source
 
 
-def test_generated_revision_renders_valid_incremental_postgresql_sql() -> None:
-    """The additive upgrade renders independently from the prior schema head."""
+def test_generated_revisions_render_valid_incremental_postgresql_sql() -> None:
+    """The execution-policy upgrades render independently from the prior schema."""
     output = io.StringIO()
     config = AlembicConfig(
         PROJECT_ROOT / "db-schemas" / "rdb" / "alembic.ini",
@@ -106,7 +117,7 @@ def test_generated_revision_renders_valid_incremental_postgresql_sql() -> None:
 
     alembic_command.upgrade(
         config,
-        "f18c05d9d547:19f9c6124382",
+        "f18c05d9d547:8ee8f5ae5a4d",
         sql=True,
     )
 
@@ -115,3 +126,5 @@ def test_generated_revision_renders_valid_incremental_postgresql_sql() -> None:
     assert "UPDATE runtime_execution_profiles" in rendered
     assert '"mode":"direct"' in rendered
     assert "UPDATE agent_runtimes" not in rendered
+    assert "DROP TABLE runtime_execution_platform_policies" in rendered
+    assert "DROP COLUMN execution_platform_version" in rendered

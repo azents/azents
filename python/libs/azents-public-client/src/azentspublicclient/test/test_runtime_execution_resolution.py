@@ -40,7 +40,7 @@ class TestRuntimeExecutionResolution(unittest.TestCase):
                 digest = '',
                 source_versions = { },
                 governing_layers = {
-                    'key' : 'platform'
+                    'key' : 'profile'
                     },
                 reductions = [
                     { }
@@ -56,7 +56,7 @@ class TestRuntimeExecutionResolution(unittest.TestCase):
                 digest = '',
                 source_versions = { },
                 governing_layers = {
-                    'key' : 'platform'
+                    'key' : 'profile'
                     },
                 reductions = [
                     { }

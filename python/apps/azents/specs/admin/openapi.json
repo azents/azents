@@ -950,78 +950,6 @@
         }
       }
     },
-    "/runtime-execution/v1/platform-policy": {
-      "get": {
-        "tags": [
-          "Runtime Execution v1"
-        ],
-        "summary": "Get Platform Policy",
-        "description": "Return the installation-wide execution-policy ceiling.",
-        "operationId": "runtime_execution_v1_get_platform_policy",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionPlatformPolicyResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "Runtime Execution v1"
-        ],
-        "summary": "Replace Platform Policy",
-        "description": "Replace the Platform execution-policy ceiling.",
-        "operationId": "runtime_execution_v1_replace_platform_policy",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RuntimeExecutionPlatformPolicyReplaceRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionPlatformPolicyResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/runtime-execution/v1/profiles": {
       "get": {
         "tags": [
@@ -5008,7 +4936,6 @@
       "RuntimeExecutionAuditEventType": {
         "type": "string",
         "enum": [
-          "platform_policy_replaced",
           "profile_created",
           "profile_replaced",
           "profile_retired",
@@ -5107,7 +5034,6 @@
       "RuntimeExecutionManagementLayer": {
         "type": "string",
         "enum": [
-          "platform",
           "profile",
           "workspace",
           "agent",
@@ -5173,81 +5099,6 @@
         ],
         "title": "RuntimeExecutionNetworkModule",
         "description": "Nested-workload optional egress authority."
-      },
-      "RuntimeExecutionPlatformPolicyReplaceRequest": {
-        "properties": {
-          "expected_version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Expected Version"
-          },
-          "policy": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyDocument"
-          }
-        },
-        "type": "object",
-        "required": [
-          "expected_version",
-          "policy"
-        ],
-        "title": "RuntimeExecutionPlatformPolicyReplaceRequest",
-        "description": "Complete optimistic replacement of the Platform policy."
-      },
-      "RuntimeExecutionPlatformPolicyResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "version": {
-            "type": "integer",
-            "title": "Version"
-          },
-          "policy": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyDocument"
-          },
-          "digest": {
-            "type": "string",
-            "title": "Digest"
-          },
-          "updated_by_user_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated By User Id"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          },
-          "capabilities": {
-            "$ref": "#/components/schemas/RuntimeExecutionManagementCapabilitiesResponse"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "version",
-          "policy",
-          "digest",
-          "updated_by_user_id",
-          "created_at",
-          "updated_at",
-          "capabilities"
-        ],
-        "title": "RuntimeExecutionPlatformPolicyResponse",
-        "description": "Current Platform execution-policy ceiling."
       },
       "RuntimeExecutionPolicyAuditEventResponse": {
         "properties": {
@@ -7938,7 +7789,7 @@
     },
     {
       "name": "Runtime Execution v1",
-      "description": "\nRuntime Execution API (Admin)\n\nPlatform execution-policy and reusable Profile management.\n"
+      "description": "\nRuntime Execution API (Admin)\n\nReusable execution Profile management.\n"
     },
     {
       "name": "Runtime Provider v1",

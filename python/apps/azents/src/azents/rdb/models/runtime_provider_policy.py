@@ -397,11 +397,6 @@ class RDBRuntimePolicySnapshot(RDBModel):
         nullable=True,
         default=None,
     )
-    execution_platform_version: Mapped[int | None] = mapped_column(
-        sa.Integer,
-        nullable=True,
-        default=None,
-    )
     execution_profile_version: Mapped[int | None] = mapped_column(
         sa.Integer,
         nullable=True,

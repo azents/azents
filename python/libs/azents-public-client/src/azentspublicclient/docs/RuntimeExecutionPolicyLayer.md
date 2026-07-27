@@ -4,11 +4,9 @@ Authority layer contributing one effective execution policy value.
 
 ## Enum
 
-* `PLATFORM` (value: `'platform'`)
+* `PROFILE` (value: `'profile'`)
 
 * `WORKSPACE` (value: `'workspace'`)
-
-* `PROFILE` (value: `'profile'`)
 
 * `AGENT` (value: `'agent'`)
 

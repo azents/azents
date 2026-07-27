@@ -5,7 +5,6 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_execution_policy import (
-    RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
     RuntimeExecutionManagementLayer,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionPolicyRestriction,
@@ -14,7 +13,6 @@ from azents.core.runtime_execution_policy import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.runtime_execution_policy import (
     RDBAgentRuntimeExecutionSetting,
-    RDBRuntimeExecutionPlatformPolicy,
     RDBRuntimeExecutionPolicyAuditEvent,
     RDBRuntimeExecutionProfile,
     RDBWorkspaceRuntimeExecutionPolicy,
@@ -23,7 +21,6 @@ from azents.rdb.models.runtime_execution_policy import (
 
 from .data import (
     AgentRuntimeExecutionSetting,
-    RuntimeExecutionPlatformPolicy,
     RuntimeExecutionPolicyAuditEvent,
     RuntimeExecutionPolicyAuditEventCreate,
     RuntimeExecutionProfile,
@@ -34,49 +31,6 @@ from .data import (
 
 class RuntimeExecutionPolicyRepository:
     """Own SQLAlchemy access for the execution-policy domain."""
-
-    async def get_platform(
-        self,
-        session: AsyncSession,
-        *,
-        for_update: bool,
-    ) -> RuntimeExecutionPlatformPolicy | None:
-        """Fetch the singleton Platform policy."""
-        statement = sa.select(RDBRuntimeExecutionPlatformPolicy).where(
-            RDBRuntimeExecutionPlatformPolicy.id == RUNTIME_EXECUTION_PLATFORM_POLICY_ID
-        )
-        if for_update:
-            statement = statement.with_for_update()
-        row = (await session.execute(statement)).scalar_one_or_none()
-        return self._build_platform(row) if row is not None else None
-
-    async def replace_platform(
-        self,
-        session: AsyncSession,
-        *,
-        expected_version: int,
-        policy: RuntimeExecutionPolicyDocument,
-        digest: str,
-        updated_by_user_id: str | None,
-    ) -> RuntimeExecutionPlatformPolicy | None:
-        """Replace Platform policy only at the expected current version."""
-        result = await session.execute(
-            sa.update(RDBRuntimeExecutionPlatformPolicy)
-            .where(
-                RDBRuntimeExecutionPlatformPolicy.id
-                == RUNTIME_EXECUTION_PLATFORM_POLICY_ID,
-                RDBRuntimeExecutionPlatformPolicy.version == expected_version,
-            )
-            .values(
-                version=RDBRuntimeExecutionPlatformPolicy.version + 1,
-                policy=policy.model_dump(mode="json"),
-                digest=digest,
-                updated_by_user_id=updated_by_user_id,
-            )
-            .returning(RDBRuntimeExecutionPlatformPolicy)
-        )
-        row = result.scalar_one_or_none()
-        return self._build_platform(row) if row is not None else None
 
     async def get_profile(
         self,
@@ -434,20 +388,6 @@ class RuntimeExecutionPolicyRepository:
             )
         ).all()
         return [self._build_audit(row) for row in rows]
-
-    @staticmethod
-    def _build_platform(
-        row: RDBRuntimeExecutionPlatformPolicy,
-    ) -> RuntimeExecutionPlatformPolicy:
-        return RuntimeExecutionPlatformPolicy(
-            id=row.id,
-            version=row.version,
-            policy=RuntimeExecutionPolicyDocument.model_validate(row.policy),
-            digest=row.digest,
-            updated_by_user_id=row.updated_by_user_id,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
 
     @staticmethod
     def _build_profile(row: RDBRuntimeExecutionProfile) -> RuntimeExecutionProfile:

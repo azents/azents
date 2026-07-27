@@ -12,7 +12,6 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionRestrictionExpansion,
 )
 from azents.services.runtime_execution_policy.service import (
-    RuntimeExecutionPlatformMutation,
     RuntimeExecutionPolicyService,
     RuntimeExecutionPolicyUnavailable,
     RuntimeExecutionPolicyVersionConflict,
@@ -22,8 +21,6 @@ from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
     RuntimeExecutionManagementCapabilitiesResponse,
-    RuntimeExecutionPlatformPolicyReplaceRequest,
-    RuntimeExecutionPlatformPolicyResponse,
     RuntimeExecutionPolicyAuditEventResponse,
     RuntimeExecutionPolicyAuditListResponse,
     RuntimeExecutionProfileCreateRequest,
@@ -34,49 +31,6 @@ from .data import (
 )
 
 router = APIRouter()
-
-
-@router.get("/platform-policy")
-async def get_platform_policy(
-    service: Annotated[RuntimeExecutionPolicyService, Depends()],
-) -> RuntimeExecutionPlatformPolicyResponse:
-    """Return the installation-wide execution-policy ceiling."""
-    try:
-        platform = await service.get_platform()
-    except RuntimeExecutionPolicyUnavailable as error:
-        _raise_policy_error(error)
-    return RuntimeExecutionPlatformPolicyResponse.convert_from(
-        platform,
-        capabilities=service.get_management_capabilities(),
-    )
-
-
-@router.put("/platform-policy")
-async def replace_platform_policy(
-    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
-    service: Annotated[RuntimeExecutionPolicyService, Depends()],
-    request_body: RuntimeExecutionPlatformPolicyReplaceRequest,
-) -> RuntimeExecutionPlatformPolicyResponse:
-    """Replace the Platform execution-policy ceiling."""
-    try:
-        platform = await service.replace_platform(
-            RuntimeExecutionPlatformMutation(
-                expected_version=request_body.expected_version,
-                policy=request_body.policy,
-                actor_user_id=system_admin.user_id,
-                correlation_id=uuid7().hex,
-            )
-        )
-    except (
-        RuntimeExecutionPolicyUnavailable,
-        RuntimeExecutionPolicyVersionConflict,
-        RuntimeExecutionRestrictionExpansion,
-    ) as error:
-        _raise_policy_error(error)
-    return RuntimeExecutionPlatformPolicyResponse.convert_from(
-        platform,
-        capabilities=service.get_management_capabilities(),
-    )
 
 
 @router.get("/profiles")
@@ -245,7 +199,7 @@ def _raise_policy_error(error: Exception) -> NoReturn:
     if isinstance(error, RuntimeExecutionPolicyUnavailable):
         status_code = (
             status.HTTP_404_NOT_FOUND
-            if error.code in {"platform_policy_missing", "profile_not_found"}
+            if error.code == "profile_not_found"
             else status.HTTP_409_CONFLICT
         )
         raise HTTPException(
@@ -265,7 +219,7 @@ def mount(mounter: RouteMounter) -> None:
             """
             Runtime Execution API (Admin)
 
-            Platform execution-policy and reusable Profile management.
+            Reusable execution Profile management.
             """
         ),
     )

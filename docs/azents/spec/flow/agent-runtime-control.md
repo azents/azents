@@ -29,8 +29,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-07-26
-spec_version: 31
+last_verified_at: 2026-07-27
+spec_version: 32
 ---
 
 # Agent Runtime Control
@@ -271,7 +271,7 @@ Lifecycle APIs are desired-state declarations. Repeating the same request must c
 Reset carries its own desired generation and a final desired state. Provider is responsible for performing backend deletion/recreation according to that command and reporting the resulting observed state.
 
 Runtime execution targets are immutable generation-fenced policy snapshots. Explicit Agent Apply
-attaches a target; Platform/Workspace tightening attaches a narrower target through automatic
+attaches a target; restrictive edits to the selected Profile or Workspace policy attach a narrower target through automatic
 convergence. Control accepts Provider evidence only for the matching desired generation and does
 not report compliance before matching observation. Failed tightening remains pending or divergent
 and may fence/stop noncompliant authority, but never invokes reset, terminal delete, Provider
@@ -305,6 +305,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-27** (spec_version 32) — Removed Platform policy source evidence and made the selected Profile the complete execution ceiling.
 - **2026-07-26** (spec_version 31) — Added immutable execution-policy targets, generation-fenced convergence evidence, and reset-free fail-closed tightening semantics.
 - **2026-07-26** (spec_version 30) — Changed periodic desired-running Runtime reconciliation from read-only observe to idempotent start so Runner image and Provider-managed configuration drift converges without deleting Agent Workspace storage.
 - **2026-07-26** (spec_version 29) — Added confined managed-worktree discovery and

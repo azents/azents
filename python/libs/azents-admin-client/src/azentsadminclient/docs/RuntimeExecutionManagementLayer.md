@@ -4,8 +4,6 @@ Management authority that produced one metadata audit event.
 
 ## Enum
 
-* `PLATFORM` (value: `'platform'`)
-
 * `PROFILE` (value: `'profile'`)
 
 * `WORKSPACE` (value: `'workspace'`)

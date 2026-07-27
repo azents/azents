@@ -33,13 +33,6 @@ class TestRuntimeExecutionV1Api(unittest.TestCase):
         """
         pass
 
-    def test_runtime_execution_v1_get_platform_policy(self) -> None:
-        """Test case for runtime_execution_v1_get_platform_policy
-
-        Get Platform Policy
-        """
-        pass
-
     def test_runtime_execution_v1_get_profile(self) -> None:
         """Test case for runtime_execution_v1_get_profile
 
@@ -58,13 +51,6 @@ class TestRuntimeExecutionV1Api(unittest.TestCase):
         """Test case for runtime_execution_v1_list_profiles
 
         List Profiles
-        """
-        pass
-
-    def test_runtime_execution_v1_replace_platform_policy(self) -> None:
-        """Test case for runtime_execution_v1_replace_platform_policy
-
-        Replace Platform Policy
         """
         pass
 

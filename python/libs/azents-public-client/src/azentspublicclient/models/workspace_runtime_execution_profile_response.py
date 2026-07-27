@@ -27,7 +27,7 @@ from typing_extensions import Self
 
 class WorkspaceRuntimeExecutionProfileResponse(BaseModel):
     """
-    Workspace availability of one Platform Profile.
+    Workspace availability of one execution Profile.
     """ # noqa: E501
     id: StrictStr
     display_name: StrictStr
