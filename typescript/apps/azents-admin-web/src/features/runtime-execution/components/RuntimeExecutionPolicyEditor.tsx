@@ -13,10 +13,13 @@ import {
 } from "@mantine/core";
 import {
   isSupportedRuntimeExecutionNetworkMode,
-  isSupportedRuntimeExecutionStorageMode,
+  updateRuntimeExecutionDockerCapability,
+  updateRuntimeExecutionNetworkMode,
 } from "../runtimeExecutionPresentation";
+import { ByteSizeInput } from "./ByteSizeInput";
 import type {
   RuntimeExecutionManagementCapabilitiesResponse,
+  RuntimeExecutionNetworkMode,
   RuntimeExecutionPolicyDocument,
 } from "@azents/admin-client";
 
@@ -38,93 +41,217 @@ function lines(value: string): string[] {
     .filter((item) => item.length > 0);
 }
 
+const NETWORK_MODE_OPTIONS: {
+  value: RuntimeExecutionNetworkMode;
+  label: string;
+}[] = [
+  { value: "none", label: "System traffic only" },
+  { value: "direct", label: "All IP addresses" },
+  { value: "restricted", label: "Selected IP ranges only" },
+];
+
+function networkModeDescription(mode: RuntimeExecutionNetworkMode): string {
+  switch (mode) {
+    case "none":
+      return "Allows only DNS and the Runtime Control connection required by the platform. Blocks all other outbound traffic.";
+    case "direct":
+      return "Allows outbound traffic to all IPv4 and IPv6 addresses except the blocked CIDR ranges below.";
+    case "restricted":
+      return "Allows only the IPv4 and IPv6 CIDR ranges listed below, excluding blocked ranges.";
+  }
+}
+
 export function RuntimeExecutionPolicyEditor({
   policy,
   capabilities,
   readOnly = false,
   onChange,
 }: RuntimeExecutionPolicyEditorProps): React.ReactElement {
+  const dockerEnabled =
+    policy.image_build.enabled || policy.container_run.enabled;
+  const temporaryDockerStorageSupported =
+    capabilities.storage_modes.includes("ephemeral");
+
   return (
     <Stack gap="md">
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">
-          <Text fw={600}>Container capabilities</Text>
+          <Stack gap={2}>
+            <Text fw={600}>Docker</Text>
+            <Text size="sm" c="dimmed">
+              Configure Docker access inside the Runtime. Docker data is
+              temporary and is deleted when the Runtime Pod is replaced.
+            </Text>
+          </Stack>
           <SimpleGrid cols={{ base: 1, sm: 3 }}>
             <Checkbox
-              label="Build container images"
+              label="Build Docker images"
               checked={policy.image_build.enabled}
               disabled={
                 readOnly ||
-                (!capabilities.image_build && !policy.image_build.enabled)
+                ((!capabilities.image_build ||
+                  !temporaryDockerStorageSupported) &&
+                  !policy.image_build.enabled)
               }
               onChange={(event) => {
                 const enabled = event.currentTarget.checked;
-                if (enabled && !capabilities.image_build) {
+                if (
+                  enabled &&
+                  (!capabilities.image_build ||
+                    !temporaryDockerStorageSupported)
+                ) {
                   return;
                 }
-                onChange({
-                  ...policy,
-                  image_build: {
-                    ...policy.image_build,
+                onChange(
+                  updateRuntimeExecutionDockerCapability(
+                    policy,
+                    "image_build",
                     enabled,
-                  },
-                });
+                  ),
+                );
               }}
             />
             <Checkbox
-              label="Run nested containers"
+              label="Run Docker containers"
               checked={policy.container_run.enabled}
               disabled={
                 readOnly ||
-                (!capabilities.container_run && !policy.container_run.enabled)
+                ((!capabilities.container_run ||
+                  !temporaryDockerStorageSupported) &&
+                  !policy.container_run.enabled)
               }
               onChange={(event) => {
                 const enabled = event.currentTarget.checked;
-                if (enabled && !capabilities.container_run) {
+                if (
+                  enabled &&
+                  (!capabilities.container_run ||
+                    !temporaryDockerStorageSupported)
+                ) {
                   return;
                 }
-                onChange({
-                  ...policy,
-                  container_run: {
-                    ...policy.container_run,
+                onChange(
+                  updateRuntimeExecutionDockerCapability(
+                    policy,
+                    "container_run",
                     enabled,
-                  },
-                });
+                  ),
+                );
               }}
             />
             <Checkbox
-              label="Use Compose"
+              label="Use Docker Compose"
               checked={policy.compose.enabled}
               disabled={
-                readOnly || (!capabilities.compose && !policy.compose.enabled)
+                readOnly ||
+                ((!capabilities.compose ||
+                  !capabilities.container_run ||
+                  !temporaryDockerStorageSupported) &&
+                  !policy.compose.enabled)
               }
               onChange={(event) => {
                 const enabled = event.currentTarget.checked;
-                if (enabled && !capabilities.compose) {
+                if (
+                  enabled &&
+                  (!capabilities.compose ||
+                    !capabilities.container_run ||
+                    !temporaryDockerStorageSupported)
+                ) {
                   return;
                 }
-                onChange({
-                  ...policy,
-                  compose: {
-                    ...policy.compose,
+                onChange(
+                  updateRuntimeExecutionDockerCapability(
+                    policy,
+                    "compose",
                     enabled,
-                  },
-                });
+                  ),
+                );
               }}
             />
           </SimpleGrid>
+          <Stack gap={2}>
+            <Text size="sm" fw={500}>
+              Nested container limits
+            </Text>
+            <Text size="xs" c="dimmed">
+              Enforced across the Docker containers created inside this Runtime.
+            </Text>
+          </Stack>
+          <SimpleGrid cols={{ base: 1, sm: 2 }}>
+            <NumberInput
+              label="Aggregate PID limit"
+              description="Maximum total PIDs across all nested Docker containers."
+              value={policy.resources.pids ?? ""}
+              min={1}
+              placeholder="e.g. 256"
+              withAsterisk={dockerEnabled}
+              disabled={readOnly}
+              onChange={(value) =>
+                onChange({
+                  ...policy,
+                  resources: {
+                    ...policy.resources,
+                    pids: optionalNumber(value),
+                  },
+                })
+              }
+            />
+            <NumberInput
+              label="Container count limit"
+              description="Maximum number of nested Docker containers."
+              value={policy.resources.container_count ?? ""}
+              min={1}
+              placeholder="e.g. 4"
+              withAsterisk={dockerEnabled}
+              disabled={readOnly}
+              onChange={(value) =>
+                onChange({
+                  ...policy,
+                  resources: {
+                    ...policy.resources,
+                    container_count: optionalNumber(value),
+                  },
+                })
+              }
+            />
+          </SimpleGrid>
+          <ByteSizeInput
+            label="Temporary Docker storage capacity"
+            description="Required for Docker images and containers."
+            value={policy.engine_storage.capacity_bytes}
+            required={dockerEnabled}
+            placeholder="e.g. 8"
+            disabled={readOnly || !dockerEnabled}
+            onChange={(value) =>
+              onChange({
+                ...policy,
+                engine_storage: {
+                  ...policy.engine_storage,
+                  capacity_bytes: value,
+                },
+              })
+            }
+          />
         </Stack>
       </Paper>
 
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">
-          <Text fw={600}>Resource ceilings</Text>
+          <Stack gap={2}>
+            <Text fw={600}>Kubernetes resource limits</Text>
+            <Text size="sm" c="dimmed">
+              Applied as Kubernetes resources.limits and split between the
+              Docker engine and policy-gateway containers. resources.requests
+              are not set.
+            </Text>
+          </Stack>
           <Grid>
             <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
               <NumberInput
-                label="CPU millicores"
+                label="CPU limit (millicores)"
                 value={policy.resources.cpu_millicores ?? ""}
-                min={0}
+                min={1}
+                placeholder="e.g. 1000"
+                withAsterisk={dockerEnabled}
                 disabled={readOnly}
                 onChange={(value) =>
                   onChange({
@@ -137,69 +264,37 @@ export function RuntimeExecutionPolicyEditor({
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label="Memory bytes"
-                value={policy.resources.memory_bytes ?? ""}
-                min={0}
+            <Grid.Col span={{ base: 12, sm: 6, lg: 8 }}>
+              <ByteSizeInput
+                label="Memory limit"
+                value={policy.resources.memory_bytes}
+                placeholder="e.g. 4"
+                required={dockerEnabled}
                 disabled={readOnly}
                 onChange={(value) =>
                   onChange({
                     ...policy,
                     resources: {
                       ...policy.resources,
-                      memory_bytes: optionalNumber(value),
+                      memory_bytes: value,
                     },
                   })
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label="Process limit"
-                value={policy.resources.pids ?? ""}
-                min={0}
+            <Grid.Col span={{ base: 12, sm: 6, lg: 8 }}>
+              <ByteSizeInput
+                label="Ephemeral storage limit"
+                value={policy.resources.ephemeral_storage_bytes}
+                placeholder="e.g. 8"
+                required={dockerEnabled}
                 disabled={readOnly}
                 onChange={(value) =>
                   onChange({
                     ...policy,
                     resources: {
                       ...policy.resources,
-                      pids: optionalNumber(value),
-                    },
-                  })
-                }
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label="Container count"
-                value={policy.resources.container_count ?? ""}
-                min={0}
-                disabled={readOnly}
-                onChange={(value) =>
-                  onChange({
-                    ...policy,
-                    resources: {
-                      ...policy.resources,
-                      container_count: optionalNumber(value),
-                    },
-                  })
-                }
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label="Ephemeral storage bytes"
-                value={policy.resources.ephemeral_storage_bytes ?? ""}
-                min={0}
-                disabled={readOnly}
-                onChange={(value) =>
-                  onChange({
-                    ...policy,
-                    resources: {
-                      ...policy.resources,
-                      ephemeral_storage_bytes: optionalNumber(value),
+                      ephemeral_storage_bytes: value,
                     },
                   })
                 }
@@ -211,82 +306,13 @@ export function RuntimeExecutionPolicyEditor({
 
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">
-          <Text fw={600}>Engine storage</Text>
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <Select
-              label="Mode"
-              data={[
-                {
-                  value: "none",
-                  label: "None",
-                  disabled: !capabilities.storage_modes.includes("none"),
-                },
-                {
-                  value: "ephemeral",
-                  label: "Ephemeral",
-                  disabled: !capabilities.storage_modes.includes("ephemeral"),
-                },
-              ]}
-              value={policy.engine_storage.mode}
-              disabled={readOnly}
-              allowDeselect={false}
-              onChange={(value) => {
-                if (
-                  value === null ||
-                  !isSupportedRuntimeExecutionStorageMode(value, capabilities)
-                ) {
-                  return;
-                }
-                onChange({
-                  ...policy,
-                  engine_storage: {
-                    ...policy.engine_storage,
-                    mode: value,
-                  },
-                });
-              }}
-            />
-            <NumberInput
-              label="Capacity bytes"
-              value={policy.engine_storage.capacity_bytes ?? ""}
-              min={0}
-              disabled={readOnly}
-              onChange={(value) =>
-                onChange({
-                  ...policy,
-                  engine_storage: {
-                    ...policy.engine_storage,
-                    capacity_bytes: optionalNumber(value),
-                  },
-                })
-              }
-            />
-          </SimpleGrid>
-        </Stack>
-      </Paper>
-
-      <Paper withBorder p="md" radius="md">
-        <Stack gap="sm">
-          <Text fw={600}>Network egress</Text>
+          <Text fw={600}>Outbound network access</Text>
           <Select
-            label="Mode"
-            data={[
-              {
-                value: "none",
-                label: "None",
-                disabled: !capabilities.network_modes.includes("none"),
-              },
-              {
-                value: "restricted",
-                label: "Restricted",
-                disabled: !capabilities.network_modes.includes("restricted"),
-              },
-              {
-                value: "direct",
-                label: "Direct",
-                disabled: !capabilities.network_modes.includes("direct"),
-              },
-            ]}
+            label="Access policy"
+            description={networkModeDescription(policy.network_egress.mode)}
+            data={NETWORK_MODE_OPTIONS.filter(({ value }) =>
+              capabilities.network_modes.includes(value),
+            )}
             value={policy.network_egress.mode}
             disabled={readOnly}
             allowDeselect={false}
@@ -297,19 +323,14 @@ export function RuntimeExecutionPolicyEditor({
               ) {
                 return;
               }
-              onChange({
-                ...policy,
-                network_egress: {
-                  ...policy.network_egress,
-                  mode: value,
-                },
-              });
+              onChange(updateRuntimeExecutionNetworkMode(policy, value));
             }}
           />
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          {policy.network_egress.mode === "restricted" && (
             <Textarea
-              label="Allowed destinations"
-              description="One destination per line."
+              label="Allowed IP ranges (CIDR)"
+              description="One IPv4 or IPv6 CIDR per line, for example 140.82.112.0/20 or 2606:50c0::/32. Hostnames and URLs are not accepted."
+              placeholder={"140.82.112.0/20\n2606:50c0::/32"}
               value={policy.network_egress.allowed_destinations.join("\n")}
               disabled={readOnly}
               autosize
@@ -324,9 +345,12 @@ export function RuntimeExecutionPolicyEditor({
                 })
               }
             />
+          )}
+          {policy.network_egress.mode !== "none" && (
             <Textarea
-              label="Denied destinations"
-              description="One destination per line."
+              label="Blocked IP ranges (CIDR)"
+              description="One IPv4 or IPv6 CIDR per line. Traffic to these ranges is blocked even when otherwise allowed."
+              placeholder={"10.0.0.0/8\nfd00::/8"}
               value={policy.network_egress.denied_destinations.join("\n")}
               disabled={readOnly}
               autosize
@@ -341,7 +365,7 @@ export function RuntimeExecutionPolicyEditor({
                 })
               }
             />
-          </SimpleGrid>
+          )}
         </Stack>
       </Paper>
     </Stack>

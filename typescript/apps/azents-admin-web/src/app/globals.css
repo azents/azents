@@ -1,0 +1,8 @@
+@media (pointer: coarse) {
+  .azents-admin input:not([type="checkbox"]):not([type="radio"]),
+  .azents-admin select,
+  .azents-admin textarea {
+    /* iOS Safari zooms focused form controls whose computed font is below 16px. */
+    font-size: max(1rem, 16px);
+  }
+}
