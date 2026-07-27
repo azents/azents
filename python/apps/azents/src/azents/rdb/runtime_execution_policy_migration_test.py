@@ -127,6 +127,23 @@ def test_migration_backfill_restriction_is_canonical_empty_intent() -> None:
     assert all(value is None for name, value in restriction if name != "schema_version")
 
 
+def test_resource_migration_preserves_json_null_runtime_snapshots() -> None:
+    """Unresolved snapshots store JSON null and are not policy documents."""
+    resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
+
+    assert (
+        resource_values["_transform_optional_document"](
+            None,
+            resource_values["_upgrade_resources"],
+        )
+        is None
+    )
+    assert (
+        "jsonb_typeof(resolved_execution_policy) = 'object'"
+        in _RESOURCE_V2_MIGRATION.read_text()
+    )
+
+
 def test_revision_pointer_and_backfills_are_present() -> None:
     """The latest revision is selected and preserves existing Runtime snapshots."""
     revision_file = PROJECT_ROOT / "db-schemas" / "rdb" / "revision"
