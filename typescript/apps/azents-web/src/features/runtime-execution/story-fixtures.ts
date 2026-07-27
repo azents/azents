@@ -137,7 +137,6 @@ export const agentRuntimeExecutionPolicy: AgentRuntimeExecutionPolicyResponse =
       effective_policy: runtimeExecutionPolicy,
       digest: "effective-digest-0123456789",
       source_versions: {
-        platform: 2,
         profile: 3,
         workspace: 2,
         agent: 4,
