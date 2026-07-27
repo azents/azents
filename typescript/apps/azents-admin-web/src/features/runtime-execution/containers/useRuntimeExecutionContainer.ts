@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { serializers, useQueryState } from "@/hooks/use-query-state";
 import { trpc } from "@/trpc/client";
-import { isRuntimeExecutionPolicySupported } from "../runtimeExecutionPresentation";
+import { getRuntimeExecutionPolicyIssue } from "../runtimeExecutionPresentation";
 import type {
   RuntimeExecutionPageContentProps,
   RuntimeExecutionProfileDraft,
@@ -135,10 +135,10 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
       if (
         !profileDraft ||
         !profilesQuery.data ||
-        !isRuntimeExecutionPolicySupported(
+        getRuntimeExecutionPolicyIssue(
           profileDraft.policy,
           profilesQuery.data.capabilities,
-        )
+        ) !== null
       ) {
         return;
       }

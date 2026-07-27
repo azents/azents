@@ -19,7 +19,7 @@ import {
   Title,
 } from "@mantine/core";
 import { MasterDetailLayout } from "@/shared/components/MasterDetailLayout";
-import { isRuntimeExecutionPolicySupported } from "../runtimeExecutionPresentation";
+import { getRuntimeExecutionPolicyIssue } from "../runtimeExecutionPresentation";
 import { RuntimeExecutionPolicyEditor } from "./RuntimeExecutionPolicyEditor";
 import type {
   RuntimeExecutionPageContentProps,
@@ -46,7 +46,7 @@ function ProfileEditor({
   onSave: () => void;
   onRetire: () => void;
 }): React.ReactElement {
-  const policySupported = isRuntimeExecutionPolicySupported(
+  const policyIssue = getRuntimeExecutionPolicyIssue(
     draft.policy,
     capabilities,
   );
@@ -79,7 +79,7 @@ function ProfileEditor({
             disabled={
               draft.id.trim().length === 0 ||
               draft.displayName.trim().length === 0 ||
-              !policySupported
+              policyIssue !== null
             }
             onClick={onSave}
           >
@@ -93,13 +93,7 @@ function ProfileEditor({
           retired. Their policy remains editable.
         </Alert>
       )}
-      {!policySupported && (
-        <Alert color="yellow">
-          This draft requests Runtime authority that the current server
-          capability gate cannot enforce. Remove the unavailable authority
-          before saving.
-        </Alert>
-      )}
+      {policyIssue !== null && <Alert color="yellow">{policyIssue}</Alert>}
       {creating && (
         <TextInput
           label="Profile ID"
@@ -127,6 +121,7 @@ function ProfileEditor({
         }
       />
       <RuntimeExecutionPolicyEditor
+        key={creating ? "new-profile" : draft.id}
         policy={draft.policy}
         capabilities={capabilities}
         onChange={(policy) => onChange({ ...draft, policy })}

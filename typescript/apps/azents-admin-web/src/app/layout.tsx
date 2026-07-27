@@ -8,6 +8,7 @@ import { ClientLayout } from "./client-layout";
 
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
+import "./globals.css";
 
 export const metadata = {
   title: "Azents Admin",
@@ -54,7 +55,7 @@ export default async function RootLayout({
       <head>
         <ColorSchemeScript defaultColorScheme={colorScheme} />
       </head>
-      <body style={{ height: "100%", margin: 0 }}>
+      <body className="azents-admin" style={{ height: "100%", margin: 0 }}>
         <ConfigProvider config={getPublicConfig()}>
           <MantineProvider defaultColorScheme={colorScheme}>
             <ModalsProvider>
