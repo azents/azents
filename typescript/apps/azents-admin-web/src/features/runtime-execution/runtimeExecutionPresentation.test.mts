@@ -5,6 +5,7 @@ import {
   isRuntimeExecutionPolicySupported,
   updateRuntimeExecutionDockerCapability,
   updateRuntimeExecutionNetworkMode,
+  withRuntimeExecutionDockerDefaults,
 } from "./runtimeExecutionPresentation.ts";
 import type {
   RuntimeExecutionManagementCapabilitiesResponse,
@@ -38,12 +39,15 @@ const policy: RuntimeExecutionPolicyDocument = {
   },
   resources: {
     module_id: "container.resources",
-    version: 1,
-    cpu_millicores: null,
-    memory_bytes: null,
+    version: 2,
+    cpu_request_millicores: null,
+    cpu_limit_millicores: null,
+    memory_request_bytes: null,
+    memory_limit_bytes: null,
     pids: null,
     container_count: null,
     ephemeral_storage_bytes: null,
+    persistent_storage_bytes: null,
   },
   engine_storage: {
     module_id: "engine.storage",
@@ -96,6 +100,9 @@ void test("Docker capabilities and temporary storage stay consistent", () => {
   assert.equal(withCompose.container_run.enabled, true);
   assert.equal(withCompose.compose.enabled, true);
   assert.equal(withCompose.engine_storage.mode, "ephemeral");
+  assert.equal(withCompose.resources.pids, null);
+  assert.equal(withCompose.resources.container_count, null);
+  assert.equal(withCompose.engine_storage.capacity_bytes, 17_179_869_184);
 
   const withoutContainerRun = updateRuntimeExecutionDockerCapability(
     withCompose,
@@ -106,6 +113,26 @@ void test("Docker capabilities and temporary storage stay consistent", () => {
   assert.equal(withoutContainerRun.compose.enabled, false);
   assert.equal(withoutContainerRun.engine_storage.mode, "none");
   assert.equal(withoutContainerRun.engine_storage.capacity_bytes, null);
+});
+
+void test("existing Docker policies receive a storage default only", () => {
+  const withDefaults = withRuntimeExecutionDockerDefaults({
+    ...policy,
+    image_build: { ...policy.image_build, enabled: true },
+    resources: {
+      ...policy.resources,
+      pids: 1_024,
+    },
+    engine_storage: {
+      ...policy.engine_storage,
+      mode: "none",
+    },
+  });
+
+  assert.equal(withDefaults.resources.pids, 1_024);
+  assert.equal(withDefaults.resources.container_count, null);
+  assert.equal(withDefaults.engine_storage.mode, "ephemeral");
+  assert.equal(withDefaults.engine_storage.capacity_bytes, 17_179_869_184);
 });
 
 void test("Docker storage remains enabled while image builds require it", () => {
@@ -156,7 +183,7 @@ void test("network modes clear fields that the selected policy does not use", ()
   assert.deepEqual(systemOnly.network_egress.denied_destinations, []);
 });
 
-void test("Docker profiles require storage and positive Runtime limits", () => {
+void test("Docker profiles require ephemeral storage only", () => {
   const dockerCapabilities: RuntimeExecutionManagementCapabilitiesResponse = {
     image_build: true,
     container_run: true,
@@ -171,7 +198,7 @@ void test("Docker profiles require storage and positive Runtime limits", () => {
   );
   assert.equal(
     getRuntimeExecutionPolicyIssue(withDocker, dockerCapabilities),
-    "Enter a temporary Docker storage capacity before saving.",
+    "Set the ephemeral storage value before enabling Docker.",
   );
 
   const withStorage: RuntimeExecutionPolicyDocument = {
@@ -183,17 +210,13 @@ void test("Docker profiles require storage and positive Runtime limits", () => {
   };
   assert.equal(
     getRuntimeExecutionPolicyIssue(withStorage, dockerCapabilities),
-    "Set every Kubernetes and nested-container limit to a positive value before enabling Docker.",
+    "Set the ephemeral storage value before enabling Docker.",
   );
 
   const complete: RuntimeExecutionPolicyDocument = {
     ...withStorage,
     resources: {
       ...withStorage.resources,
-      cpu_millicores: 1_000,
-      memory_bytes: 4_294_967_296,
-      pids: 256,
-      container_count: 4,
       ephemeral_storage_bytes: 8_589_934_592,
     },
   };

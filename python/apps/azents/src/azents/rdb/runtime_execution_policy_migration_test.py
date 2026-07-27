@@ -1,6 +1,8 @@
 """Runtime execution policy migration invariants."""
 
+import hashlib
 import io
+import json
 import runpy
 from pathlib import Path
 from typing import Any
@@ -49,22 +51,38 @@ _EXTERNAL_CHANNEL_HEALTH_CODE_MIGRATION = (
     / "versions"
     / "e0615474dc27_add_external_channel_health_code.py"
 )
+_RESOURCE_V2_MIGRATION = (
+    PROJECT_ROOT
+    / "db-schemas"
+    / "rdb"
+    / "migrations"
+    / "versions"
+    / "142ffe7ca6e9_upgrade_runtime_resource_policy.py"
+)
 
 
 def _migration_values(path: Path) -> dict[str, Any]:
     return runpy.run_path(str(path))
 
 
+def _raw_digest(document: object) -> str:
+    encoded = json.dumps(
+        document,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def test_migration_seed_matches_the_previous_standard_policy() -> None:
     """The original seed remains the exact predecessor of the current default."""
     seed_values = _migration_values(_SEED_MIGRATION)
     egress_values = _migration_values(_DEFAULT_EGRESS_MIGRATION)
-    policy = RuntimeExecutionPolicyDocument.model_validate(
+    assert seed_values["_STANDARD_POLICY"] == egress_values["_OLD_STANDARD_POLICY"]
+    assert seed_values["_STANDARD_DIGEST"] == _raw_digest(
         seed_values["_STANDARD_POLICY"]
     )
-
-    assert seed_values["_STANDARD_POLICY"] == egress_values["_OLD_STANDARD_POLICY"]
-    assert seed_values["_STANDARD_DIGEST"] == digest_runtime_execution_policy(policy)
     assert seed_values["_STANDARD_DIGEST"] == egress_values["_OLD_STANDARD_DIGEST"]
     assert SYSTEM_STANDARD_PROFILE_ID == "system-standard"
 
@@ -72,23 +90,39 @@ def test_migration_seed_matches_the_previous_standard_policy() -> None:
 def test_default_egress_migration_matches_application_owned_standard_policy() -> None:
     """The migrated Standard is canonical and application-owned."""
     values = _migration_values(_DEFAULT_EGRESS_MIGRATION)
+    resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
     policy = RuntimeExecutionPolicyDocument.model_validate(
-        values["_DIRECT_STANDARD_POLICY"]
+        resource_values["_transform_document"](
+            values["_DIRECT_STANDARD_POLICY"],
+            resource_values["_upgrade_resources"],
+        )
     )
 
     assert policy == standard_runtime_execution_policy()
-    assert values["_DIRECT_STANDARD_DIGEST"] == digest_runtime_execution_policy(policy)
+    assert values["_DIRECT_STANDARD_DIGEST"] == _raw_digest(
+        values["_DIRECT_STANDARD_POLICY"]
+    )
+    assert resource_values["_digest"](policy.model_dump(mode="json")) == (
+        digest_runtime_execution_policy(policy)
+    )
 
 
 def test_migration_backfill_restriction_is_canonical_empty_intent() -> None:
     """Workspace and Agent migration rows do not add lower-layer authority."""
     values = _migration_values(_SEED_MIGRATION)
+    resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
     restriction = RuntimeExecutionPolicyRestriction.model_validate(
-        values["_EMPTY_RESTRICTION"]
+        resource_values["_transform_document"](
+            values["_EMPTY_RESTRICTION"],
+            resource_values["_upgrade_resources"],
+        )
     )
 
-    assert values["_EMPTY_RESTRICTION_DIGEST"] == digest_runtime_execution_policy(
-        restriction
+    assert values["_EMPTY_RESTRICTION_DIGEST"] == _raw_digest(
+        values["_EMPTY_RESTRICTION"]
+    )
+    assert resource_values["_digest"](restriction.model_dump(mode="json")) == (
+        digest_runtime_execution_policy(restriction)
     )
     assert all(value is None for name, value in restriction if name != "schema_version")
 
@@ -100,8 +134,11 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     egress_source = _DEFAULT_EGRESS_MIGRATION.read_text()
     profile_only_source = _PROFILE_ONLY_MIGRATION.read_text()
     health_code_source = _EXTERNAL_CHANNEL_HEALTH_CODE_MIGRATION.read_text()
+    resource_v2_source = _RESOURCE_V2_MIGRATION.read_text()
+    resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
 
-    assert revision_file.read_text().strip() == "e0615474dc27"
+    assert revision_file.read_text().strip() == "142ffe7ca6e9"
+    assert resource_values["down_revision"] == "e0615474dc27"
     assert "INSERT INTO workspace_runtime_execution_policies" in seed_source
     assert "INSERT INTO workspace_runtime_execution_profile_allowances" in seed_source
     assert "INSERT INTO agent_runtime_execution_settings" in seed_source
@@ -111,6 +148,9 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     assert 'op.drop_table("runtime_execution_platform_policies")' in profile_only_source
     assert 'op.drop_column("runtime_policy_snapshots"' in profile_only_source
     assert '"last_health_code", sa.String(length=64)' in health_code_source
+    assert '"version" = 2' not in resource_v2_source
+    assert 'upgraded["version"] = 2' in resource_v2_source
+    assert "application_state = 'pending'" in resource_v2_source
 
 
 def test_generated_revisions_render_valid_incremental_postgresql_sql() -> None:

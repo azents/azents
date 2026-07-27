@@ -44,12 +44,15 @@ const policy: RuntimeExecutionPolicyDocument = {
   },
   resources: {
     module_id: "container.resources",
-    version: 1,
-    cpu_millicores: null,
-    memory_bytes: null,
+    version: 2,
+    cpu_request_millicores: null,
+    cpu_limit_millicores: null,
+    memory_request_bytes: null,
+    memory_limit_bytes: null,
     pids: null,
     container_count: null,
     ephemeral_storage_bytes: null,
+    persistent_storage_bytes: null,
   },
   engine_storage: {
     module_id: "engine.storage",

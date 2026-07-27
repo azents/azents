@@ -204,6 +204,54 @@ async def test_aggregate_pids_denial_makes_zero_authorized_engine_requests(
 
 
 @pytest.mark.asyncio
+async def test_null_nested_container_ceilings_skip_aggregate_enforcement(
+    gateway_config: GatewayConfig,
+) -> None:
+    calls: list[AuthorizedEngineRequest] = []
+
+    async def execute(request: AuthorizedEngineRequest) -> EngineResponse:
+        calls.append(request)
+        return EngineResponse(status=201, headers={}, body=b"{}")
+
+    async def usage(runtime_id: str) -> EngineContainerUsage:
+        assert runtime_id == "runtime-1"
+        return EngineContainerUsage(count=10_000, pids_limit=1_000_000)
+
+    unbounded = dataclasses.replace(
+        gateway_config,
+        policy=dataclasses.replace(
+            gateway_config.policy,
+            resources=dataclasses.replace(
+                gateway_config.policy.resources,
+                pids=None,
+                container_count=None,
+            ),
+        ),
+    )
+    client = TestClient(
+        TestServer(
+            _application(
+                unbounded,
+                execute=execute,
+                container_usage=usage,
+            )
+        )
+    )
+    await client.start_server()
+    try:
+        response = await client.post(
+            "/v1.51/containers/create",
+            json={"Image": "busybox", "HostConfig": {"PidsLimit": 1_024}},
+        )
+    finally:
+        await client.close()
+
+    assert response.status == 201
+    assert len(calls) == 1
+    assert calls[0].requested_pids_limit == 1_024
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("denied_type", ["network", "volume"])
 async def test_unowned_compose_resource_makes_zero_authorized_engine_requests(
     compose_gateway_config: GatewayConfig,

@@ -9,6 +9,8 @@ export type RuntimeExecutionDockerCapability =
   | "container_run"
   | "compose";
 
+const DEFAULT_DOCKER_STORAGE_CAPACITY_BYTES = 16 * 1024 ** 3;
+
 export function isRuntimeExecutionPolicySupported(
   policy: RuntimeExecutionPolicyDocument,
   capabilities: RuntimeExecutionManagementCapabilitiesResponse,
@@ -17,8 +19,7 @@ export function isRuntimeExecutionPolicySupported(
     (!policy.image_build.enabled || capabilities.image_build) &&
     (!policy.container_run.enabled || capabilities.container_run) &&
     (!policy.compose.enabled || capabilities.compose) &&
-    capabilities.storage_modes.includes(policy.engine_storage.mode) &&
-    capabilities.network_modes.includes(policy.network_egress.mode)
+    capabilities.storage_modes.includes(policy.engine_storage.mode)
   );
 }
 
@@ -34,6 +35,21 @@ export function getRuntimeExecutionPolicyIssue(
   }
   const dockerEnabled =
     policy.image_build.enabled || policy.container_run.enabled;
+  const resources = policy.resources;
+  if (
+    resources.cpu_request_millicores !== null &&
+    resources.cpu_limit_millicores !== null &&
+    resources.cpu_request_millicores > resources.cpu_limit_millicores
+  ) {
+    return "CPU request cannot exceed CPU limit.";
+  }
+  if (
+    resources.memory_request_bytes !== null &&
+    resources.memory_limit_bytes !== null &&
+    resources.memory_request_bytes > resources.memory_limit_bytes
+  ) {
+    return "Memory request cannot exceed memory limit.";
+  }
   if (!dockerEnabled) {
     return null;
   }
@@ -44,26 +60,19 @@ export function getRuntimeExecutionPolicyIssue(
   ) {
     return "Enter a temporary Docker storage capacity before saving.";
   }
-  const resources = policy.resources;
   if (
-    [
-      resources.cpu_millicores,
-      resources.memory_bytes,
-      resources.pids,
-      resources.container_count,
-      resources.ephemeral_storage_bytes,
-    ].some((value) => value === null || value < 1)
+    resources.ephemeral_storage_bytes === null ||
+    resources.ephemeral_storage_bytes < 1
   ) {
-    return "Set every Kubernetes and nested-container limit to a positive value before enabling Docker.";
+    return "Set the ephemeral storage value before enabling Docker.";
   }
   return null;
 }
 
 export function isSupportedRuntimeExecutionNetworkMode(
   value: string,
-  capabilities: RuntimeExecutionManagementCapabilitiesResponse,
 ): value is RuntimeExecutionNetworkMode {
-  return capabilities.network_modes.some((mode) => mode === value);
+  return value === "none" || value === "restricted" || value === "direct";
 }
 
 export function updateRuntimeExecutionDockerCapability(
@@ -87,7 +96,7 @@ export function updateRuntimeExecutionDockerCapability(
         : policy.compose.enabled;
   const dockerEnabled = imageBuildEnabled || containerRunEnabled;
 
-  return {
+  const updatedPolicy: RuntimeExecutionPolicyDocument = {
     ...policy,
     image_build: {
       ...policy.image_build,
@@ -107,6 +116,29 @@ export function updateRuntimeExecutionDockerCapability(
       capacity_bytes: dockerEnabled
         ? policy.engine_storage.capacity_bytes
         : null,
+    },
+  };
+
+  return withRuntimeExecutionDockerDefaults(updatedPolicy);
+}
+
+export function withRuntimeExecutionDockerDefaults(
+  policy: RuntimeExecutionPolicyDocument,
+): RuntimeExecutionPolicyDocument {
+  const dockerEnabled =
+    policy.image_build.enabled || policy.container_run.enabled;
+  if (!dockerEnabled) {
+    return policy;
+  }
+
+  return {
+    ...policy,
+    engine_storage: {
+      ...policy.engine_storage,
+      mode: "ephemeral",
+      capacity_bytes:
+        policy.engine_storage.capacity_bytes ??
+        DEFAULT_DOCKER_STORAGE_CAPACITY_BYTES,
     },
   };
 }

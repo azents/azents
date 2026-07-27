@@ -46,8 +46,8 @@ const NETWORK_MODE_OPTIONS: {
   label: string;
 }[] = [
   { value: "none", label: "System traffic only" },
+  { value: "restricted", label: "Allowlist (selected IP ranges)" },
   { value: "direct", label: "All IP addresses" },
-  { value: "restricted", label: "Selected IP ranges only" },
 ];
 
 function networkModeDescription(mode: RuntimeExecutionNetworkMode): string {
@@ -179,11 +179,10 @@ export function RuntimeExecutionPolicyEditor({
           <SimpleGrid cols={{ base: 1, sm: 2 }}>
             <NumberInput
               label="Aggregate PID limit"
-              description="Maximum total PIDs across all nested Docker containers."
+              description="Optional maximum total PIDs across all nested Docker containers. Leave empty for unlimited."
               value={policy.resources.pids ?? ""}
               min={1}
               placeholder="e.g. 256"
-              withAsterisk={dockerEnabled}
               disabled={readOnly}
               onChange={(value) =>
                 onChange({
@@ -197,11 +196,10 @@ export function RuntimeExecutionPolicyEditor({
             />
             <NumberInput
               label="Container count limit"
-              description="Maximum number of nested Docker containers."
+              description="Optional maximum number of nested Docker containers. Leave empty for unlimited."
               value={policy.resources.container_count ?? ""}
               min={1}
               placeholder="e.g. 4"
-              withAsterisk={dockerEnabled}
               disabled={readOnly}
               onChange={(value) =>
                 onChange({
@@ -237,54 +235,88 @@ export function RuntimeExecutionPolicyEditor({
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">
           <Stack gap={2}>
-            <Text fw={600}>Kubernetes resource limits</Text>
+            <Text fw={600}>Kubernetes resources</Text>
             <Text size="sm" c="dimmed">
-              Applied as Kubernetes resources.limits and split between the
-              Docker engine and policy-gateway containers. resources.requests
-              are not set.
+              CPU and memory requests and limits are optional. Ephemeral storage
+              uses one fixed value for both request and limit. Values are split
+              between the Docker engine and policy-gateway containers.
             </Text>
           </Stack>
           <Grid>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <NumberInput
+                label="CPU request (millicores)"
+                value={policy.resources.cpu_request_millicores ?? ""}
+                min={1}
+                placeholder="e.g. 500"
+                disabled={readOnly}
+                onChange={(value) =>
+                  onChange({
+                    ...policy,
+                    resources: {
+                      ...policy.resources,
+                      cpu_request_millicores: optionalNumber(value),
+                    },
+                  })
+                }
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
               <NumberInput
                 label="CPU limit (millicores)"
-                value={policy.resources.cpu_millicores ?? ""}
+                value={policy.resources.cpu_limit_millicores ?? ""}
                 min={1}
                 placeholder="e.g. 1000"
-                withAsterisk={dockerEnabled}
                 disabled={readOnly}
                 onChange={(value) =>
                   onChange({
                     ...policy,
                     resources: {
                       ...policy.resources,
-                      cpu_millicores: optionalNumber(value),
+                      cpu_limit_millicores: optionalNumber(value),
                     },
                   })
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 8 }}>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <ByteSizeInput
+                label="Memory request"
+                value={policy.resources.memory_request_bytes}
+                placeholder="e.g. 2"
+                disabled={readOnly}
+                onChange={(value) =>
+                  onChange({
+                    ...policy,
+                    resources: {
+                      ...policy.resources,
+                      memory_request_bytes: value,
+                    },
+                  })
+                }
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
               <ByteSizeInput
                 label="Memory limit"
-                value={policy.resources.memory_bytes}
+                value={policy.resources.memory_limit_bytes}
                 placeholder="e.g. 4"
-                required={dockerEnabled}
                 disabled={readOnly}
                 onChange={(value) =>
                   onChange({
                     ...policy,
                     resources: {
                       ...policy.resources,
-                      memory_bytes: value,
+                      memory_limit_bytes: value,
                     },
                   })
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 8 }}>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
               <ByteSizeInput
-                label="Ephemeral storage limit"
+                label="Ephemeral storage"
+                description="Applied as the same Kubernetes request and limit."
                 value={policy.resources.ephemeral_storage_bytes}
                 placeholder="e.g. 8"
                 required={dockerEnabled}
@@ -300,6 +332,24 @@ export function RuntimeExecutionPolicyEditor({
                 }
               />
             </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <ByteSizeInput
+                label="Persistent workspace storage"
+                description="PVC expansions apply automatically. A smaller value takes effect after the workspace PVC is deleted and recreated."
+                value={policy.resources.persistent_storage_bytes}
+                placeholder="e.g. 20"
+                disabled={readOnly}
+                onChange={(value) =>
+                  onChange({
+                    ...policy,
+                    resources: {
+                      ...policy.resources,
+                      persistent_storage_bytes: value,
+                    },
+                  })
+                }
+              />
+            </Grid.Col>
           </Grid>
         </Stack>
       </Paper>
@@ -310,16 +360,14 @@ export function RuntimeExecutionPolicyEditor({
           <Select
             label="Access policy"
             description={networkModeDescription(policy.network_egress.mode)}
-            data={NETWORK_MODE_OPTIONS.filter(({ value }) =>
-              capabilities.network_modes.includes(value),
-            )}
+            data={NETWORK_MODE_OPTIONS}
             value={policy.network_egress.mode}
             disabled={readOnly}
             allowDeselect={false}
             onChange={(value) => {
               if (
                 value === null ||
-                !isSupportedRuntimeExecutionNetworkMode(value, capabilities)
+                !isSupportedRuntimeExecutionNetworkMode(value)
               ) {
                 return;
               }

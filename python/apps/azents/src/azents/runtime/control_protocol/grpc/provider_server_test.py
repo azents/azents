@@ -588,7 +588,7 @@ def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
             module_versions={
                 "container.compose": 1,
                 "container.image_build": 1,
-                "container.resources": 1,
+                "container.resources": 2,
                 "container.run": 1,
                 "engine.storage": 1,
                 "network.egress": 1,

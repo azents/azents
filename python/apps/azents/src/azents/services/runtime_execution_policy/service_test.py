@@ -66,8 +66,8 @@ def _expanded_standard() -> RuntimeExecutionPolicyDocument:
             ),
             "resources": policy.resources.model_copy(
                 update={
-                    "cpu_millicores": 1_000,
-                    "memory_bytes": 1_000,
+                    "cpu_limit_millicores": 1_000,
+                    "memory_limit_bytes": 1_000,
                     "pids": 100,
                     "container_count": 10,
                     "ephemeral_storage_bytes": 1_000,
@@ -343,15 +343,18 @@ async def test_agent_can_select_qualified_nested_engine_profile() -> None:
         (
             "resources",
             RuntimeExecutionResourceRestriction(
-                cpu_millicores=100,
-                memory_bytes=None,
+                cpu_request_millicores=None,
+                cpu_limit_millicores=100,
+                memory_request_bytes=None,
+                memory_limit_bytes=None,
                 pids=None,
                 container_count=None,
                 ephemeral_storage_bytes=None,
+                persistent_storage_bytes=None,
             ),
             True,
             RuntimeExecutionChangeDirection.RESTRICTIVE,
-            "resources.cpu_millicores",
+            "resources.cpu_limit_millicores",
         ),
         (
             "image_build",
@@ -363,15 +366,18 @@ async def test_agent_can_select_qualified_nested_engine_profile() -> None:
         (
             "resources",
             RuntimeExecutionResourceRestriction(
-                cpu_millicores=100,
-                memory_bytes=None,
+                cpu_request_millicores=None,
+                cpu_limit_millicores=100,
+                memory_request_bytes=None,
+                memory_limit_bytes=None,
                 pids=None,
                 container_count=None,
                 ephemeral_storage_bytes=None,
+                persistent_storage_bytes=None,
             ),
             False,
             RuntimeExecutionChangeDirection.AUTHORITY_EXPANDING,
-            "resources.cpu_millicores",
+            "resources.cpu_limit_millicores",
         ),
     ],
 )
@@ -662,6 +668,7 @@ async def test_agent_admin_receives_current_server_capability_evaluation() -> No
     assert policy.capabilities.network_modes == (
         RuntimeExecutionNetworkMode.DIRECT,
         RuntimeExecutionNetworkMode.NONE,
+        RuntimeExecutionNetworkMode.RESTRICTED,
     )
 
 

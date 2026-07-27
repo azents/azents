@@ -283,13 +283,17 @@ def test_runtime_provider_kubernetes_network_policy_renders_extra_egress() -> No
         "runtimeProviderKubernetes.networkPolicy.extraEgress[0].to[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=kube-system",
         "runtimeProviderKubernetes.networkPolicy.extraEgress[0].to[0].podSelector.matchLabels.app\\.kubernetes\\.io/name=traefik",
         "runtimeProviderKubernetes.networkPolicy.extraEgress[0].ports[0].protocol=TCP",
-        "runtimeProviderKubernetes.networkPolicy.extraEgress[0].ports[0].port=443",
+        "runtimeProviderKubernetes.networkPolicy.extraEgress[0].ports[0].port=websecure",
     )
 
     assert "namespaceSelector:" in rendered
     assert "kubernetes.io/metadata.name: kube-system" in rendered
     assert "app.kubernetes.io/name: traefik" in rendered
-    assert "port: 443" in rendered
+    assert "port: websecure" in rendered
+    assert "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS" in rendered
+    assert "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_DENIED_CIDRS" in rendered
+    assert "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_EXTRA_EGRESS" in rendered
+    assert '\\"port\\":\\"websecure\\"' in rendered
 
 
 def test_runtime_provider_kubernetes_inherits_global_image_pull_secrets() -> None:

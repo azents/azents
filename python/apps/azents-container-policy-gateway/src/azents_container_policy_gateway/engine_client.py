@@ -97,9 +97,10 @@ class EngineClient:
             limit = (
                 host_config.get("PidsLimit") if isinstance(host_config, dict) else None
             )
-            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-                raise RuntimeError("Docker Engine returned an unbounded PID limit")
-            pids_limit += limit
+            if isinstance(limit, bool):
+                raise RuntimeError("Docker Engine returned an invalid PID limit")
+            if isinstance(limit, int) and limit > 0:
+                pids_limit += limit
         return EngineContainerUsage(count=len(value), pids_limit=pids_limit)
 
     async def resource_owned(

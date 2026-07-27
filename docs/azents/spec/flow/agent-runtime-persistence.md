@@ -18,7 +18,7 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
 last_verified_at: 2026-07-27
-spec_version: 9
+spec_version: 10
 ---
 
 # Agent Runtime Persistence
@@ -134,12 +134,16 @@ Runner and nested workloads do not receive the Provider ServiceAccount, Provider
 Runtime Control credentials other than their Runtime-bound path, host sockets, or generic
 privileged controls. Agent Workspace PVC storage remains distinct from nested-engine storage.
 The Kubernetes Provider's typed Admin-accepted contract advertises image build, nested container
-run, Compose, ephemeral engine storage, and direct or disabled egress. Runtime policy resolution and
+run, Compose, ephemeral engine storage, and system-only, IP-allowlist, or all-IP egress. Runtime policy resolution and
 the next immutable target snapshot use the Provider's current accepted contract rather than raw
 registration metadata or a prior snapshot's contract revision. The Provider adds the fixed gateway
 and privileged engine only when the effective policy requires them, keeps engine state in a bounded
-engine-only `emptyDir`, and applies a Runtime-specific NetworkPolicy. Persistent nested-engine
-storage remains unavailable until a Provider advertises and qualifies bounded persistent capacity.
+engine-only `emptyDir`, and applies a Runtime-specific NetworkPolicy intersected with the Helm
+deployment NetworkPolicy hard cap. Optional PID and nested-container-count fields are enforced as
+aggregate ceilings when present; `null` is explicitly unlimited. Persistent nested-engine storage
+remains unavailable until a Provider advertises and qualifies bounded persistent capacity.
+The Profile separately controls Agent Workspace PVC capacity. Expansions apply to the existing PVC;
+shrinks are deferred until an explicit reset or terminal deletion recreates storage.
 
 ## Docker Provider v1
 
@@ -178,6 +182,7 @@ Required checks:
 
 ## Changelog
 
+- **2026-07-27 (spec_version=10)** — Added all implemented Profile network modes, Kubernetes request/limit resource semantics, and Profile-controlled PVC expansion with destructive shrink application.
 - **2026-07-27 (spec_version=9)** — Removed Platform execution-policy state and made the selected Profile the complete versioned ceiling and snapshot source.
 - **2026-07-27 (spec_version=7)** — Added lazy exact-Provider binding and initial policy snapshot attachment for pre-contract Runtime rows without workspace replacement.
 - **2026-07-26 (spec_version=6)** — Added durable execution-policy target/applied snapshots, reset-free restrictive convergence, fixed Kubernetes topology isolation, and separate unqualified nested-engine storage.
