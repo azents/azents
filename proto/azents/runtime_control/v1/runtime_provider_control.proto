@@ -104,7 +104,9 @@ message RuntimeExecutionPolicyEvidence {
 
 message RuntimeExecutionPolicyEnvelope {
   RuntimeExecutionPolicyEvidence evidence = 1;
-  google.protobuf.Struct effective_policy = 2;
+  reserved 2;
+  reserved "effective_policy";
+  string effective_policy_json = 3;
 }
 
 message ProviderCommandCompletion {

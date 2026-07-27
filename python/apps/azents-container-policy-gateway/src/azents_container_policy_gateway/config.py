@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from azents_runtime_control.execution_policy import (
-    JsonValue,
     RuntimeExecutionPolicy,
     RuntimeExecutionPolicyEnvelope,
     RuntimeExecutionPolicyEvidence,
@@ -48,9 +47,7 @@ def gateway_config_from_env(
         _required(values, "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS"),
         "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS",
     )
-    document = _policy_document(
-        _required(values, "AZ_RUNTIME_EXECUTION_POLICY_DOCUMENT")
-    )
+    document_json = _required(values, "AZ_RUNTIME_EXECUTION_POLICY_DOCUMENT")
     envelope = RuntimeExecutionPolicyEnvelope(
         evidence=RuntimeExecutionPolicyEvidence(
             snapshot_id=snapshot_id,
@@ -59,7 +56,7 @@ def gateway_config_from_env(
             module_versions=module_versions,
             source_versions=source_versions,
         ),
-        effective_policy=document,
+        effective_policy_json=document_json,
     )
     policy = parse_execution_policy_envelope(
         envelope,
@@ -119,13 +116,6 @@ def _version_mapping(value: str, name: str) -> dict[str, int]:
             raise ValueError(f"{name} must map non-empty strings to positive integers")
         result[key] = item
     return result
-
-
-def _policy_document(value: str) -> dict[str, JsonValue]:
-    parsed = json.loads(value)
-    if not isinstance(parsed, dict):
-        raise ValueError("AZ_RUNTIME_EXECUTION_POLICY_DOCUMENT must be a JSON object")
-    return {str(key): item for key, item in parsed.items()}
 
 
 def _absolute_path(value: str, name: str) -> Path:

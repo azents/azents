@@ -12,6 +12,7 @@ from azents_runtime_control.execution_policy import (
     RuntimeExecutionPolicy,
     RuntimeExecutionPolicyEnvelope,
     RuntimeExecutionPolicyEvidence,
+    canonical_effective_policy_json,
     digest_effective_policy,
     parse_execution_policy_envelope,
 )
@@ -47,7 +48,7 @@ def policy_document(
         },
         "resources": {
             "module_id": "container.resources",
-            "version": 2,
+            "version": 1,
             "cpu_request_millicores": None,
             "cpu_limit_millicores": 1000 if engine else None,
             "memory_request_bytes": None,
@@ -96,7 +97,7 @@ def policy(
                 "container.image_build": 1,
                 "container.run": 1,
                 "container.compose": 1,
-                "container.resources": 2,
+                "container.resources": 1,
                 "engine.storage": 1,
                 "network.egress": 1,
             },
@@ -106,7 +107,7 @@ def policy(
                 "agent": 1,
             },
         ),
-        effective_policy=document,
+        effective_policy_json=canonical_effective_policy_json(document),
     )
     return parse_execution_policy_envelope(envelope, desired_generation=3)
 
@@ -135,7 +136,7 @@ def gateway_env(
                 "container.image_build": 1,
                 "container.run": 1,
                 "container.compose": 1,
-                "container.resources": 2,
+                "container.resources": 1,
                 "engine.storage": 1,
                 "network.egress": 1,
             }
@@ -147,7 +148,9 @@ def gateway_env(
                 "agent": 1,
             }
         ),
-        "AZ_RUNTIME_EXECUTION_POLICY_DOCUMENT": json.dumps(document),
+        "AZ_RUNTIME_EXECUTION_POLICY_DOCUMENT": canonical_effective_policy_json(
+            document
+        ),
         "AZ_RUNTIME_GATEWAY_LISTEN_SOCKET": "/tmp/gateway.sock",
         "AZ_RUNTIME_GATEWAY_ENGINE_SOCKET": "/tmp/engine.sock",
     }

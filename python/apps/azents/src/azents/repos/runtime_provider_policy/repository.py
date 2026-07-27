@@ -1,7 +1,7 @@
 """Runtime Provider contract, configuration, and Runtime policy persistence."""
 
 import datetime
-from collections.abc import Mapping
+import json
 
 import sqlalchemy as sa
 from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
@@ -78,9 +78,17 @@ class RuntimeProviderPolicyRepository:
         for_update: bool,
     ) -> RuntimeProviderContractRevision | None:
         """Fetch a contract proposal by its Provider-local semantic digest."""
-        statement = sa.select(RDBRuntimeProviderContractRevision).where(
-            RDBRuntimeProviderContractRevision.provider_id == provider_id,
-            RDBRuntimeProviderContractRevision.digest == digest,
+        statement = (
+            sa.select(RDBRuntimeProviderContractRevision)
+            .where(
+                RDBRuntimeProviderContractRevision.provider_id == provider_id,
+                RDBRuntimeProviderContractRevision.digest == digest,
+            )
+            .order_by(
+                RDBRuntimeProviderContractRevision.created_at.desc(),
+                RDBRuntimeProviderContractRevision.id.desc(),
+            )
+            .limit(1)
         )
         if for_update:
             statement = statement.with_for_update()
@@ -121,6 +129,12 @@ class RuntimeProviderPolicyRepository:
         )
         if provider_exists is None:
             raise ValueError("Provider does not exist.")
+        await session.execute(
+            sa.delete(RDBRuntimeProviderContractRevision).where(
+                RDBRuntimeProviderContractRevision.provider_id == create.provider_id,
+                RDBRuntimeProviderContractRevision.accepted_at.is_(None),
+            )
+        )
         rdb = RDBRuntimeProviderContractRevision(
             provider_id=create.provider_id,
             digest=create.digest,
@@ -146,6 +160,17 @@ class RuntimeProviderPolicyRepository:
         accepted_at: datetime.datetime,
     ) -> RuntimeProviderContractRevision | None:
         """Accept one candidate and atomically move the Provider contract pointer."""
+        latest_contract_revision_id = await session.scalar(
+            sa.select(RDBRuntimeProviderContractRevision.id)
+            .where(RDBRuntimeProviderContractRevision.provider_id == provider_id)
+            .order_by(
+                RDBRuntimeProviderContractRevision.created_at.desc(),
+                RDBRuntimeProviderContractRevision.id.desc(),
+            )
+            .limit(1)
+        )
+        if latest_contract_revision_id != contract_revision_id:
+            return None
         result = await session.execute(
             sa.update(RDBRuntimeProviderContractRevision)
             .where(
@@ -447,7 +472,7 @@ class RuntimeProviderPolicyRepository:
             execution_profile_version=create.execution_profile_version,
             execution_workspace_version=create.execution_workspace_version,
             execution_agent_version=create.execution_agent_version,
-            resolved_execution_policy=create.resolved_execution_policy,
+            resolved_execution_policy_json=create.resolved_execution_policy_json,
             execution_source_trace=create.execution_source_trace,
             execution_provider_compatibility=(create.execution_provider_compatibility),
             execution_target_digest=create.execution_target_digest,
@@ -515,7 +540,7 @@ class RuntimeProviderPolicyRepository:
             execution_profile_version=create.execution_profile_version,
             execution_workspace_version=create.execution_workspace_version,
             execution_agent_version=create.execution_agent_version,
-            resolved_execution_policy=create.resolved_execution_policy,
+            resolved_execution_policy_json=create.resolved_execution_policy_json,
             execution_source_trace=create.execution_source_trace,
             execution_provider_compatibility=(create.execution_provider_compatibility),
             execution_target_digest=create.execution_target_digest,
@@ -579,7 +604,7 @@ class RuntimeProviderPolicyRepository:
             execution_profile_version=create.execution_profile_version,
             execution_workspace_version=create.execution_workspace_version,
             execution_agent_version=create.execution_agent_version,
-            resolved_execution_policy=create.resolved_execution_policy,
+            resolved_execution_policy_json=create.resolved_execution_policy_json,
             execution_source_trace=create.execution_source_trace,
             execution_provider_compatibility=create.execution_provider_compatibility,
             execution_target_digest=create.execution_target_digest,
@@ -936,7 +961,7 @@ class RuntimeProviderPolicyRepository:
             execution_profile_version=rdb.execution_profile_version,
             execution_workspace_version=rdb.execution_workspace_version,
             execution_agent_version=rdb.execution_agent_version,
-            resolved_execution_policy=rdb.resolved_execution_policy,
+            resolved_execution_policy_json=rdb.resolved_execution_policy_json,
             execution_source_trace=rdb.execution_source_trace,
             execution_provider_compatibility=(rdb.execution_provider_compatibility),
             execution_target_digest=rdb.execution_target_digest,
@@ -962,7 +987,7 @@ def _snapshot_evidence_matches(
         snapshot.id == evidence.snapshot_id
         and snapshot.target_desired_generation == evidence.desired_generation
         and snapshot.execution_target_digest == evidence.digest
-        and _snapshot_module_versions(snapshot.resolved_execution_policy)
+        and _snapshot_module_versions(snapshot.resolved_execution_policy_json)
         == dict(evidence.module_versions)
         and {
             "profile": snapshot.execution_profile_version,
@@ -973,11 +998,12 @@ def _snapshot_evidence_matches(
     )
 
 
-def _snapshot_module_versions(
-    policy: Mapping[str, object] | None,
-) -> dict[str, int]:
-    if policy is None:
+def _snapshot_module_versions(policy_json: str | None) -> dict[str, int]:
+    if policy_json is None:
         return {}
+    policy = json.loads(policy_json)
+    if not isinstance(policy, dict):
+        raise ValueError("Runtime execution-policy snapshot must contain an object.")
     versions: dict[str, int] = {}
     for value in policy.values():
         if not isinstance(value, dict):

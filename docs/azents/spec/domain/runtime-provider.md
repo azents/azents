@@ -44,7 +44,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeExecution.ts
 last_verified_at: 2026-07-27
-spec_version: 9
+spec_version: 11
 ---
 
 # Runtime Provider
@@ -59,7 +59,7 @@ Providers are optional. A Provider must be enabled, active, connected, Workspace
 
 ## Policy and contract state
 
-The aggregate stores lifecycle state, enablement, scope, Workspace availability mode, declared capabilities, accepted contract revision, active configuration revision, and an incrementing Admin policy version. Contract revisions are immutable and move through candidate, accepted, rejected, and superseded states. Configuration revisions are immutable candidates that require Provider validation and explicit activation; active configuration is tied to the accepted contract and is never returned with secret plaintext.
+The aggregate stores lifecycle state, enablement, scope, Workspace availability mode, declared capabilities, accepted contract revision, active configuration revision, and an incrementing Admin policy version. Accepted contract revisions are immutable history. Never-accepted proposals are transient approval targets: a newer Provider proposal deletes the older unapproved row so only the current proposal remains actionable. Configuration revisions are immutable candidates that require Provider validation and explicit activation; active configuration is tied to the accepted contract and is never returned with secret plaintext.
 
 After workload authentication and identity matching, Provider registration submits the complete
 restricted capability contract. Runtime Control validates its implementation and protocol identity,
@@ -68,6 +68,12 @@ the connection. A first or changed valid digest remains a candidate: the Provide
 for observation, but it is not provisioning-ready until a System Admin explicitly accepts that exact
 revision. Admin routes expose contract history and expected-`admin_version` acceptance, and the Admin
 Provider detail presents pending revisions with an explicit acceptance action.
+Only the Provider's current advertised contract may remain a candidate or be accepted. A newer
+proposal deletes older never-accepted proposals, and an older revision cannot later replace the
+current candidate. If the Provider advertises a digest that was accepted and later superseded,
+that current drift creates a new candidate revision even though the same digest exists in accepted
+history. Admin can therefore always review and restore the contract the connected Provider actually
+advertises.
 
 Admin routes expose inventory and mutable policy/availability operations under `/runtime-provider/v1/providers`. Public discovery exposes only safe option metadata under `/runtime-provider/v1/workspaces/{handle}/providers`; credentials, authentication evidence, encrypted secrets, audit state, and mutable Runtime bindings are excluded.
 
@@ -113,6 +119,12 @@ target snapshot records and references that accepted contract revision even when
 snapshot used an older revision. A stale non-null Provider configuration remains unavailable until
 it is validated against the newly accepted contract.
 
+All execution-policy modules use version `1` until the contract is formally released. The current
+resource shape replaces the earlier development shape in place; policy rows and snapshots are
+migrated to v1, and Runtime Control contains no v2 parser or fallback. The immutable Provider
+command envelope transports the effective policy as canonical JSON text, not protobuf `Struct`.
+Snapshot persistence uses the same canonical JSON text and does not retain the removed JSONB field.
+
 Agent intent is independent from a physical Runtime. Saving Agent Profile/override intent does not
 advance Runtime desired generation. Explicit Apply attaches an immutable target snapshot and
 generation. Profile or Workspace tightening automatically creates a narrower target without a
@@ -132,16 +144,14 @@ and selector/port egress rules are passed into the Provider and intersected with
 Runtime policy. Deployment-only selector/port exceptions are added only to all-address mode, never
 to a Profile allowlist or system-only policy.
 
-`container.resources/v2` separates optional Kubernetes CPU and memory requests from optional
+`container.resources/v1` separates optional Kubernetes CPU and memory requests from optional
 limits. Ephemeral storage is one fixed allocation applied as the same request and limit. Optional
 PID and container-count values bound nested Docker workloads when set; `null` means unlimited and
 skips the corresponding aggregate Gateway check. Temporary Docker image/container data uses a
 separate bounded engine-only `emptyDir`. Persistent workspace storage configures the Runtime
 PVC request: expansion is applied in place, but a smaller configured value is retained until an
 explicit operation deletes and recreates the PVC. Persistent Docker engine storage and
-proxy-required egress remain unavailable because the Provider does not advertise them. A legacy
-accepted contract without the typed section remains usable for the non-engine baseline but cannot
-grant nested-engine authority.
+proxy-required egress remain unavailable because the Provider does not advertise them.
 Admin/Public surfaces must not expose Provider credentials, socket paths, raw manifests, Kubernetes
 resource names, or generic privileged controls.
 
@@ -182,7 +192,9 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
-- **9 (2026-07-27):** Advertised all implemented network modes, defined resource module v2 request/limit semantics, and added Profile-controlled persistent workspace capacity with deferred shrink.
+- **11 (2026-07-27):** Made the currently advertised Provider contract the sole approval target, deleted stale never-accepted proposals, and allowed a previously accepted digest to be proposed again after drift.
+- **10 (2026-07-27):** Unified every unreleased execution-policy module on v1, migrated stored policies without a v2 compatibility path, replaced protobuf Struct and snapshot JSONB with canonical JSON text, and prevented stale contract acceptance.
+- **9 (2026-07-27):** Advertised all implemented network modes, defined resource module v1 request/limit semantics, and added Profile-controlled persistent workspace capacity with deferred shrink.
 - **8 (2026-07-27):** Removed the installation-wide execution-policy ceiling and made each editable Profile the complete authority ceiling.
 - **7 (2026-07-27):** Made unrestricted direct outbound networking the installation and reserved Standard default while leaving nested container authority disabled.
 - **6 (2026-07-27):** Added accepted typed execution-policy capabilities as the authority source for Kubernetes engine features.

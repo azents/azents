@@ -656,7 +656,7 @@ def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
                 "agent": 1,
             },
         ),
-        effective_policy={},
+        effective_policy_json="{}",
     )
 
 

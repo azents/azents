@@ -58,14 +58,16 @@ class FailedRunErrorFinalizer:
         input: FailedRunFinalizationInput,
         *,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
-    ) -> FailedRunFinalizationResult:
-        """Append terminal failed-run output and close the run as failed."""
+    ) -> FailedRunFinalizationResult | None:
+        """Close the run as failed unless a serialized Stop intent wins."""
         async with self.session_manager() as session:
-            await self.session_lifecycle.assert_owner_generation(
+            claimed = await self.session_lifecycle.claim_failed_run_finalization(
                 session,
                 session_id=input.session_id,
                 owner_generation=input.owner_generation,
             )
+            if not claimed:
+                return None
             finalized = await self.event_store.append_terminal_failed_run(
                 session,
                 session_id=input.session_id,

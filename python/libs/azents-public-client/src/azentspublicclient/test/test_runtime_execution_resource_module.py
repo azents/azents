@@ -36,7 +36,7 @@ class TestRuntimeExecutionResourceModule(unittest.TestCase):
         if include_optional:
             return RuntimeExecutionResourceModule(
                 module_id = 'container.resources',
-                version = 2,
+                version = 1,
                 cpu_request_millicores = 1.0,
                 cpu_limit_millicores = 1.0,
                 memory_request_bytes = 1.0,
@@ -49,7 +49,7 @@ class TestRuntimeExecutionResourceModule(unittest.TestCase):
         else:
             return RuntimeExecutionResourceModule(
                 module_id = 'container.resources',
-                version = 2,
+                version = 1,
                 cpu_request_millicores = 1.0,
                 cpu_limit_millicores = 1.0,
                 memory_request_bytes = 1.0,

@@ -64,7 +64,7 @@ export const runtimeExecutionPolicy: RuntimeExecutionPolicyDocument = {
   },
   resources: {
     module_id: "container.resources",
-    version: 2,
+    version: 1,
     cpu_request_millicores: 1_000,
     cpu_limit_millicores: 2_000,
     memory_request_bytes: 2_147_483_648,

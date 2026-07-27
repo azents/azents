@@ -75,8 +75,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-26
-spec_version: 134
+last_verified_at: 2026-07-27
+spec_version: 135
 ---
 
 # Agent Execution Loop
@@ -416,7 +416,10 @@ state. The worker finalizer then emits `RunComplete` and clears live activity.
 User Stop has priority before failed-attempt persistence, after retry-state publication, during
 backoff, and during a retry attempt. Stop uses the ordinary terminal interruption path, clears retry
 and context-preparation live state, appends no provider `system_error`, exposes no failed-run Retry
-action, and never creates stopped-Run recovery or replay state.
+action, and never creates stopped-Run recovery or replay state. Terminal failed-run finalization
+holds the Session ownership lock and refuses the failed transition when durable Stop intent is
+already present, closing the race between `interrupt_agent` and a concurrently failing tool or
+model attempt.
 
 Command wake-ups execute through the same `RunExecutor` boundary as normal model runs. A pending
 command is resolved before the `agent_runs` row is created; unknown-command or pre-run resolve
@@ -1172,6 +1175,8 @@ with a channel/message icon rather than presenting it as Goal continuation.
 
 ## Changelog
 
+- **2026-07-27** (spec_version 135) — Serialized terminal failure against durable Stop intent so
+  an accepted `interrupt_agent` request cannot race into a failed child Run.
 - **2026-07-26** (spec_version 134) — Replaced the legacy `wait_agent` loop contract with the
   independent `wait` Toolkit and raised its inclusive timeout maximum to 900 seconds.
 - **2026-07-26** (spec_version 133) — Added the parameterless manual orphan Git-worktree

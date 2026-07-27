@@ -13,6 +13,7 @@ from google.protobuf import struct_pb2
 from azents_runtime_control.execution_policy import (
     JsonValue,
     RuntimeExecutionPolicyEvidence,
+    canonical_effective_policy_json,
     digest_effective_policy,
     validate_standard_execution_policy_envelope,
 )
@@ -58,8 +59,6 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
             {"auth": {"runner_auth_credential_id": "runner-credential-1"}}
         )
         execution_policy = _execution_policy_document()
-        execution_policy_struct = struct_pb2.Struct()
-        execution_policy_struct.update(execution_policy)
         yield runtime_provider_control_pb2.ControlMessage(
             request_id="req-1",
             provider_command=runtime_provider_control_pb2.ProviderCommand(
@@ -82,7 +81,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                             "container.image_build": 1,
                             "container.run": 1,
                             "container.compose": 1,
-                            "container.resources": 2,
+                            "container.resources": 1,
                             "engine.storage": 1,
                             "network.egress": 1,
                         },
@@ -92,7 +91,9 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                             "agent": 1,
                         },
                     ),
-                    effective_policy=execution_policy_struct,
+                    effective_policy_json=canonical_effective_policy_json(
+                        execution_policy
+                    ),
                 ),
             ),
         )
@@ -308,7 +309,7 @@ def _execution_policy_document() -> dict[str, JsonValue]:
         },
         "resources": {
             "module_id": "container.resources",
-            "version": 2,
+            "version": 1,
             "cpu_request_millicores": None,
             "cpu_limit_millicores": None,
             "memory_request_bytes": None,

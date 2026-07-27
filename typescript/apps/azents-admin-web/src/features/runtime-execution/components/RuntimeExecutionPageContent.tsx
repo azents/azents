@@ -32,6 +32,7 @@ function ProfileEditor({
   creating,
   saving,
   retiring,
+  actionError,
   capabilities,
   onChange,
   onSave,
@@ -41,6 +42,7 @@ function ProfileEditor({
   creating: boolean;
   saving: boolean;
   retiring: boolean;
+  actionError: string | null;
   capabilities: RuntimeExecutionManagementCapabilitiesResponse;
   onChange: (draft: RuntimeExecutionProfileDraft) => void;
   onSave: () => void;
@@ -91,6 +93,11 @@ function ProfileEditor({
         <Alert color="blue">
           Reserved system Profiles define stable identities and cannot be
           retired. Their policy remains editable.
+        </Alert>
+      )}
+      {actionError && (
+        <Alert color="red" title="Could not save Profile">
+          {actionError}
         </Alert>
       )}
       {policyIssue !== null && <Alert color="yellow">{policyIssue}</Alert>}
@@ -162,6 +169,7 @@ export function RuntimeExecutionPageContent({
             creating
             saving={savingProfile}
             retiring={false}
+            actionError={actionError}
             capabilities={capabilities}
             onChange={onProfileDraftChange}
             onSave={onSaveProfile}
@@ -177,11 +185,6 @@ export function RuntimeExecutionPageContent({
         </Text>
       </Stack>
       <Stack gap="sm" px="md">
-        {actionError && (
-          <Alert color="red" title="Action failed">
-            {actionError}
-          </Alert>
-        )}
         {state.type === "LOADING" && <Loader />}
         {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
       </Stack>
@@ -266,6 +269,7 @@ export function RuntimeExecutionPageContent({
                       creating={false}
                       saving={savingProfile}
                       retiring={retiringProfile}
+                      actionError={actionError}
                       capabilities={state.capabilities}
                       onChange={onProfileDraftChange}
                       onSave={onSaveProfile}

@@ -131,24 +131,31 @@ class _FailedRunEventStore:
 class _SessionLifecycle:
     """SessionLifecycleService test double."""
 
-    def __init__(self, *, owner_generation: int = 1) -> None:
+    def __init__(
+        self,
+        *,
+        owner_generation: int = 1,
+        failed_run_claimed: bool = True,
+    ) -> None:
         self.owner_generation = owner_generation
+        self.failed_run_claimed = failed_run_claimed
         self.assertions: list[tuple[str, int]] = []
 
-    async def assert_owner_generation(
+    async def claim_failed_run_finalization(
         self,
         session: AsyncSession,
         *,
         session_id: str,
         owner_generation: int,
-    ) -> None:
-        """Reject stale failed-run finalization."""
+    ) -> bool:
+        """Reject stale finalization or yield to a serialized Stop intent."""
         del session
         self.assertions.append((session_id, owner_generation))
         if owner_generation != self.owner_generation:
             raise CanonicalExecutionOwnerGenerationStaleError(
                 "Session owner generation is stale"
             )
+        return self.failed_run_claimed
 
 
 def _payload_from_create(create: EventCreate) -> SystemErrorPayload | RunMarkerPayload:
@@ -204,6 +211,7 @@ async def test_failed_run_finalizer_appends_error_marker_and_run_complete() -> N
         dispatch_event=dispatch_event,
     )
 
+    assert result is not None
     assert [create.kind for create in event_store.creates] == [
         EventKind.SYSTEM_ERROR,
         EventKind.RUN_MARKER,
@@ -253,5 +261,38 @@ async def test_failed_run_finalizer_rejects_stale_owner_before_mutation() -> Non
             dispatch_event=dispatch_event,
         )
 
+    assert event_store.calls == []
+    assert dispatched == []
+
+
+@pytest.mark.asyncio
+async def test_failed_run_finalizer_yields_to_serialized_stop_intent() -> None:
+    """A Stop committed under the Session lock prevents terminal failed output."""
+    event_store = _FailedRunEventStore()
+    lifecycle = _SessionLifecycle(failed_run_claimed=False)
+    dispatched: list[tuple[str, PublishedEvent]] = []
+    finalizer = FailedRunErrorFinalizer(
+        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
+        event_store=cast(FailedRunEventStore, event_store),
+        session_lifecycle=cast(SessionLifecycleService, lifecycle),
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        dispatched.append((session_id, event))
+
+    result = await finalizer.finalize(
+        FailedRunFinalizationInput(
+            session_id="session-001",
+            owner_generation=1,
+            run_id="run-001".rjust(32, "0"),
+            user_message="temporary failure",
+            retry_state=_retry_state(),
+            reason="retry_exhausted",
+        ),
+        dispatch_event=dispatch_event,
+    )
+
+    assert result is None
+    assert lifecycle.assertions == [("session-001", 1)]
     assert event_store.calls == []
     assert dispatched == []

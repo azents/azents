@@ -70,7 +70,7 @@ def _policy(
         ),
         resources=RuntimeExecutionResourceModule(
             module_id=RuntimeExecutionModuleId.RESOURCES,
-            version=2,
+            version=1,
             cpu_request_millicores=cpu_request_millicores,
             cpu_limit_millicores=cpu_limit_millicores,
             memory_request_bytes=memory_request_bytes,
@@ -105,7 +105,7 @@ def _provider() -> RuntimeExecutionProviderCapabilities:
         supported_modules=frozenset(
             RuntimeExecutionModuleSupport(
                 module_id=module_id,
-                version=(2 if module_id is RuntimeExecutionModuleId.RESOURCES else 1),
+                version=1,
             )
             for module_id in RuntimeExecutionModuleId
         ),

@@ -31,6 +31,7 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionRequiredAction,
     RuntimeExecutionSourceVersions,
     RuntimeExecutionStorageMode,
+    canonical_runtime_execution_policy_json,
     classify_runtime_execution_change,
     digest_runtime_execution_policy,
     empty_runtime_execution_restriction,
@@ -115,7 +116,7 @@ def _snapshot() -> RuntimePolicySnapshot:
         execution_profile_version=None,
         execution_workspace_version=None,
         execution_agent_version=None,
-        resolved_execution_policy=None,
+        resolved_execution_policy_json=None,
         execution_source_trace=None,
         execution_provider_compatibility=None,
         execution_target_digest=None,
@@ -190,7 +191,9 @@ def _unavailable_resolved() -> _ResolvedRuntimePolicy:
             execution_profile_version=2,
             execution_workspace_version=3,
             execution_agent_version=4,
-            resolved_execution_policy=policy.model_dump(mode="json"),
+            resolved_execution_policy_json=(
+                canonical_runtime_execution_policy_json(policy)
+            ),
             execution_source_trace={},
             execution_provider_compatibility={},
             execution_target_digest=digest_runtime_execution_policy(policy),
@@ -212,7 +215,7 @@ def _targeted_resolved(
         execution_profile_version=resolved.resolution.source_versions.profile,
         execution_workspace_version=resolved.resolution.source_versions.workspace,
         execution_agent_version=resolved.resolution.source_versions.agent,
-        resolved_execution_policy=policy.model_dump(mode="json"),
+        resolved_execution_policy_json=canonical_runtime_execution_policy_json(policy),
         execution_source_trace={},
         execution_provider_compatibility={},
         execution_target_digest=resolved.resolution.digest,
@@ -281,7 +284,9 @@ def _upper_layer_change_resolved(
         execution_profile_version=target_source_versions.profile,
         execution_workspace_version=target_source_versions.workspace,
         execution_agent_version=target_source_versions.agent,
-        resolved_execution_policy=baseline.model_dump(mode="json"),
+        resolved_execution_policy_json=canonical_runtime_execution_policy_json(
+            baseline
+        ),
         execution_source_trace={},
         execution_provider_compatibility={},
         execution_target_digest=target_digest,
@@ -519,9 +524,7 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
             "supported_modules": [
                 {
                     "module_id": module_id.value,
-                    "version": (
-                        2 if module_id is RuntimeExecutionModuleId.RESOURCES else 1
-                    ),
+                    "version": 1,
                 }
                 for module_id in RuntimeExecutionModuleId
             ],
@@ -795,7 +798,7 @@ def test_automatic_convergence_requires_unchanged_agent_intent() -> None:
 async def test_incompatible_convergence_stops_with_a_new_exact_target() -> None:
     """Fail-closed stopping never advances generation without a target snapshot."""
     resolved = _unavailable_resolved()
-    canonical_policy = resolved.target_snapshot.resolved_execution_policy
+    canonical_policy = resolved.target_snapshot.resolved_execution_policy_json
     assert canonical_policy is not None
     created_snapshot = dataclasses.replace(
         resolved.target_snapshot,
@@ -835,7 +838,7 @@ async def test_incompatible_convergence_stops_with_a_new_exact_target() -> None:
     assert outcome == "stopped"
     call = snapshot_repository.create_and_advance_target_snapshot.await_args
     assert call.kwargs["create"].target_desired_generation == 3
-    assert call.kwargs["create"].resolved_execution_policy == canonical_policy
+    assert call.kwargs["create"].resolved_execution_policy_json == canonical_policy
     assert call.kwargs["lifecycle_command"] is RuntimeLifecycleCommandType.STOP
     assert call.kwargs["desired_state"] is RuntimeDesiredState.STOPPED
     assert call.kwargs["terminal_delete_requested"] is False
