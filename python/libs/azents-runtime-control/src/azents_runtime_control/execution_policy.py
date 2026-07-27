@@ -43,7 +43,6 @@ class RuntimeExecutionNetworkMode(enum.StrEnum):
     """Supported optional Runtime egress mode."""
 
     NONE = "none"
-    PROXY_REQUIRED = "proxy_required"
     RESTRICTED = "restricted"
     DIRECT = "direct"
 

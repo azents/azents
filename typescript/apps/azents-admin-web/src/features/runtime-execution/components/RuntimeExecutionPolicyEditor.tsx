@@ -277,12 +277,6 @@ export function RuntimeExecutionPolicyEditor({
                 disabled: !capabilities.network_modes.includes("none"),
               },
               {
-                value: "proxy_required",
-                label: "Proxy required",
-                disabled:
-                  !capabilities.network_modes.includes("proxy_required"),
-              },
-              {
                 value: "restricted",
                 label: "Restricted",
                 disabled: !capabilities.network_modes.includes("restricted"),

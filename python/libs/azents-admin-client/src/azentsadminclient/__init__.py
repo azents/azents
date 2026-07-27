@@ -109,6 +109,10 @@ __all__ = [
     "RuntimeProviderBindingAuditEventType",
     "RuntimeProviderBindingOwner",
     "RuntimeProviderBindingState",
+    "RuntimeProviderContractAcceptRequest",
+    "RuntimeProviderContractListResponse",
+    "RuntimeProviderContractResponse",
+    "RuntimeProviderContractStatus",
     "RuntimeProviderLifecycleState",
     "RuntimeProviderListResponse",
     "RuntimeProviderPolicyUpdateRequest",
@@ -258,6 +262,10 @@ from azentsadminclient.models.runtime_provider_availability_request import Runti
 from azentsadminclient.models.runtime_provider_binding_audit_event_type import RuntimeProviderBindingAuditEventType as RuntimeProviderBindingAuditEventType
 from azentsadminclient.models.runtime_provider_binding_owner import RuntimeProviderBindingOwner as RuntimeProviderBindingOwner
 from azentsadminclient.models.runtime_provider_binding_state import RuntimeProviderBindingState as RuntimeProviderBindingState
+from azentsadminclient.models.runtime_provider_contract_accept_request import RuntimeProviderContractAcceptRequest as RuntimeProviderContractAcceptRequest
+from azentsadminclient.models.runtime_provider_contract_list_response import RuntimeProviderContractListResponse as RuntimeProviderContractListResponse
+from azentsadminclient.models.runtime_provider_contract_response import RuntimeProviderContractResponse as RuntimeProviderContractResponse
+from azentsadminclient.models.runtime_provider_contract_status import RuntimeProviderContractStatus as RuntimeProviderContractStatus
 from azentsadminclient.models.runtime_provider_lifecycle_state import RuntimeProviderLifecycleState as RuntimeProviderLifecycleState
 from azentsadminclient.models.runtime_provider_list_response import RuntimeProviderListResponse as RuntimeProviderListResponse
 from azentsadminclient.models.runtime_provider_policy_update_request import RuntimeProviderPolicyUpdateRequest as RuntimeProviderPolicyUpdateRequest

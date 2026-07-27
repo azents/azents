@@ -35,9 +35,7 @@ const restrictionSchema = z.object({
     .nullable(),
   network_egress: z
     .object({
-      mode: z
-        .enum(["none", "proxy_required", "restricted", "direct"])
-        .nullable(),
+      mode: z.enum(["none", "restricted", "direct"]).nullable(),
       allowed_destinations: z.array(z.string()).nullable(),
       denied_destinations: z.array(z.string()),
     })

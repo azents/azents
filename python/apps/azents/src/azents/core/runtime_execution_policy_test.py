@@ -116,8 +116,8 @@ def _versions() -> RuntimeExecutionSourceVersions:
     )
 
 
-def test_standard_policy_is_stable_and_grants_no_optional_authority() -> None:
-    """Reserved Standard is deterministic and baseline-equivalent."""
+def test_standard_policy_is_stable_with_direct_outbound_networking() -> None:
+    """Reserved Standard is deterministic and permits outbound networking."""
     first = standard_runtime_execution_policy()
     second = standard_runtime_execution_policy()
 
@@ -128,7 +128,9 @@ def test_standard_policy_is_stable_and_grants_no_optional_authority() -> None:
     assert first.container_run.enabled is False
     assert first.compose.enabled is False
     assert first.engine_storage.mode is RuntimeExecutionStorageMode.NONE
-    assert first.network_egress.mode is RuntimeExecutionNetworkMode.NONE
+    assert first.network_egress.mode is RuntimeExecutionNetworkMode.DIRECT
+    assert first.network_egress.allowed_destinations == frozenset()
+    assert first.network_egress.denied_destinations == frozenset()
 
 
 def test_policy_rejects_unknown_fields_and_module_versions() -> None:
@@ -140,6 +142,11 @@ def test_policy_rejects_unknown_fields_and_module_versions() -> None:
 
     payload = _policy().model_dump(mode="json")
     payload["image_build"]["version"] = 2
+    with pytest.raises(ValidationError):
+        RuntimeExecutionPolicyDocument.model_validate(payload)
+
+    payload = _policy().model_dump(mode="json")
+    payload["network_egress"]["mode"] = "proxy_required"
     with pytest.raises(ValidationError):
         RuntimeExecutionPolicyDocument.model_validate(payload)
 

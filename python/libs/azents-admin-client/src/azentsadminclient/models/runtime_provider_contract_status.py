@@ -18,21 +18,22 @@ from enum import Enum
 from typing_extensions import Self
 
 
-class RuntimeExecutionNetworkMode(str, Enum):
+class RuntimeProviderContractStatus(str, Enum):
     """
-    Optional egress authority ordered from narrowest to broadest.
+    Administrative state of an immutable Provider capability contract.
     """
 
     """
     allowed enum values
     """
-    NONE = 'none'
-    RESTRICTED = 'restricted'
-    DIRECT = 'direct'
+    CANDIDATE = 'candidate'
+    ACCEPTED = 'accepted'
+    REJECTED = 'rejected'
+    SUPERSEDED = 'superseded'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:
-        """Create an instance of RuntimeExecutionNetworkMode from a JSON string"""
+        """Create an instance of RuntimeProviderContractStatus from a JSON string"""
         return cls(json.loads(json_str))
 
 

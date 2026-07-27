@@ -27,7 +27,6 @@ class RuntimeExecutionNetworkMode(str, Enum):
     allowed enum values
     """
     NONE = 'none'
-    PROXY_REQUIRED = 'proxy_required'
     RESTRICTED = 'restricted'
     DIRECT = 'direct'
 

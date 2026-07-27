@@ -44,7 +44,7 @@ const policySchema = z.object({
   network_egress: z.object({
     module_id: z.literal("network.egress"),
     version: z.literal(1),
-    mode: z.enum(["none", "proxy_required", "restricted", "direct"]),
+    mode: z.enum(["none", "restricted", "direct"]),
     allowed_destinations: z.array(z.string()),
     denied_destinations: z.array(z.string()),
   }),

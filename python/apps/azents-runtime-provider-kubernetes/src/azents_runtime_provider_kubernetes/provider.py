@@ -1065,10 +1065,6 @@ class KubernetesRuntimeProvider:
             raise UnsupportedExecutionPolicy(
                 "Engine storage requires a container execution capability."
             )
-        if policy.network_egress.mode is RuntimeExecutionNetworkMode.PROXY_REQUIRED:
-            raise UnsupportedExecutionPolicy(
-                "Proxy-required egress is not supported by this Provider version."
-            )
         for destination in (
             *policy.network_egress.allowed_destinations,
             *policy.network_egress.denied_destinations,

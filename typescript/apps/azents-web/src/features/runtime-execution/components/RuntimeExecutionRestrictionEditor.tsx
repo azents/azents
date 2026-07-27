@@ -280,7 +280,6 @@ export function RuntimeExecutionRestrictionEditor({
             data={[
               { value: "inherit", label: t("inherit") },
               { value: "none", label: t("networkNone") },
-              { value: "proxy_required", label: t("networkProxy") },
               { value: "restricted", label: t("networkRestricted") },
               { value: "direct", label: t("networkDirect") },
             ]}
