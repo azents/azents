@@ -430,6 +430,7 @@ class ExternalChannelRepository:
         connection.capabilities = {
             "interaction_public_key": interaction_public_key,
         }
+        connection.status = ExternalChannelConnectionStatus.CONFIGURING
         await session.flush()
         return True
 

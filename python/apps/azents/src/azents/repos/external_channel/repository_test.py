@@ -325,6 +325,51 @@ class TestExternalChannelRepository:
         assert updated.last_verified_at == _at(3)
         assert updated.last_health_at == _at(3)
 
+    async def test_prepared_discord_callback_restores_ping_authority_on_retry(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A retry exposes only provisional PING authority before activation."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "discord-prepared-callback-retry",
+        )
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id).model_copy(
+                update={
+                    "provider": ExternalChannelProvider.DISCORD,
+                    "ingress_profile": (
+                        ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+                    ),
+                    "status": ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
+                    "provider_app_id": "discord-app-retry",
+                    "provider_tenant_id": None,
+                    "provider_config": {"target_guild_id": "guild-1"},
+                }
+            ),
+        )
+
+        prepared = await repo.prepare_discord_callback(
+            rdb_session,
+            connection_id=connection.id,
+            expected_encrypted_credentials="ciphertext-only",
+            expected_configuration_generation=connection.configuration_generation,
+            provider_app_id="discord-app-retry",
+            interaction_public_key="a" * 64,
+            callback_selector_hash="retry-selector-hash",
+        )
+        configured = await repo.get_discord_http_configuration_by_selector_hash(
+            rdb_session,
+            selector_hash="retry-selector-hash",
+        )
+
+        assert prepared is True
+        assert configured is not None
+        assert configured.status is ExternalChannelConnectionStatus.CONFIGURING
+        assert configured.capabilities == {"interaction_public_key": "a" * 64}
+
     async def test_event_admission_returns_existing_event_for_provider_retry(
         self,
         rdb_session: AsyncSession,
