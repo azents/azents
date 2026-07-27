@@ -676,7 +676,7 @@ def test_unsupported_methods_and_paths_are_denied(
         _authorize(run_policy, method=method, path=path)
 
 
-def test_query_and_header_surface_is_default_deny(
+def test_query_surface_is_default_deny(
     run_policy: RuntimeExecutionPolicy,
 ) -> None:
     with pytest.raises(GatewayAuthorizationDenied, match="Duplicate"):
@@ -693,12 +693,69 @@ def test_query_and_header_surface_is_default_deny(
             path="/v1.51/containers/json",
             query=(("all", "yes"),),
         )
+
+
+@pytest.mark.parametrize("connection", ["keep-alive", "close", "KEEP-ALIVE"])
+def test_nonsemantic_client_headers_are_accepted_and_stripped(
+    run_policy: RuntimeExecutionPolicy,
+    connection: str,
+) -> None:
+    request = authorize_request(
+        policy=run_policy,
+        runtime_id="runtime-1",
+        method="GET",
+        raw_path="/v1.51/containers/json",
+        query=(),
+        headers={
+            "Accept": "application/json",
+            "Connection": connection,
+            "X-Client-Metadata": "session-1",
+        },
+        body=b"",
+    )
+
+    assert request.headers == {"accept": "application/json"}
+
+
+@pytest.mark.parametrize(
+    "connection",
+    ["upgrade", "keep-alive, upgrade", "x-client-metadata", ""],
+)
+def test_authority_bearing_connection_headers_are_denied(
+    run_policy: RuntimeExecutionPolicy,
+    connection: str,
+) -> None:
+    with pytest.raises(GatewayAuthorizationDenied, match="Connection"):
+        _authorize(
+            run_policy,
+            method="GET",
+            path="/v1.51/containers/json",
+            headers={"Connection": connection},
+        )
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "Expect",
+        "Proxy-Connection",
+        "TE",
+        "Trailer",
+        "Upgrade",
+        "X-Registry-Auth",
+        "X-Registry-Config",
+    ],
+)
+def test_security_sensitive_headers_remain_denied(
+    run_policy: RuntimeExecutionPolicy,
+    header: str,
+) -> None:
     with pytest.raises(GatewayAuthorizationDenied, match="headers"):
         _authorize(
             run_policy,
             method="GET",
             path="/v1.51/containers/json",
-            headers={"X-Unrecognized": "value"},
+            headers={header: "value"},
         )
 
 

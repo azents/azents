@@ -23,23 +23,13 @@ _MAX_BUILD_CONTEXT_FILES = 10_000
 _MAX_QUERY_BYTES = 64 * 1024
 _MAX_BUILD_CONTEXT_BYTES = 256 * 1024 * 1024
 _GATEWAY_MEMORY_MAX_BYTES = 512 * 1024 * 1024
-_CLIENT_HEADERS = frozenset(
-    {
-        "accept",
-        "accept-encoding",
-        "content-encoding",
-        "content-length",
-        "content-type",
-        "host",
-        "transfer-encoding",
-        "user-agent",
-        "x-azents-correlation-id",
-    }
-)
 _FORWARDED_HEADERS = frozenset({"accept", "content-encoding", "content-type"})
 _FORBIDDEN_HEADERS = frozenset(
     {
-        "connection",
+        "expect",
+        "proxy-connection",
+        "te",
+        "trailer",
         "upgrade",
         "x-registry-auth",
         "x-registry-config",
@@ -532,11 +522,14 @@ def _validate_headers(
             "unsafe_header",
             f"Unsupported headers: {', '.join(sorted(forbidden))}.",
         )
-    unknown = set(lowered).difference(_CLIENT_HEADERS)
-    if unknown:
+    connection = lowered.get("connection")
+    if connection is not None and connection.strip().lower() not in {
+        "close",
+        "keep-alive",
+    }:
         raise GatewayAuthorizationDenied(
-            "unsupported_header",
-            f"Unsupported headers: {', '.join(sorted(unknown))}.",
+            "unsafe_header",
+            "Only close and keep-alive Connection headers are supported.",
         )
     content_length = lowered.get("content-length")
     if content_length is not None and (
