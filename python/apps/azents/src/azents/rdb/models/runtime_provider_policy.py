@@ -56,11 +56,6 @@ class RDBRuntimeProviderContractRevision(RDBModel):
 
     __tablename__ = "runtime_provider_contract_revisions"
 
-    UQ_PROVIDER_DIGEST = sa.UniqueConstraint(
-        "provider_id",
-        "digest",
-        name="uq_runtime_provider_contract_revisions_provider_digest",
-    )
     IX_PROVIDER_CREATED = sa.Index(
         "ix_runtime_provider_contract_revisions_provider_created",
         "provider_id",
@@ -131,7 +126,7 @@ class RDBRuntimeProviderContractRevision(RDBModel):
         nullable=False,
     )
 
-    __table_args__ = (UQ_PROVIDER_DIGEST, IX_PROVIDER_CREATED, IX_PROVIDER_STATUS)
+    __table_args__ = (IX_PROVIDER_CREATED, IX_PROVIDER_STATUS)
 
 
 class RDBRuntimeProviderConfigRevision(RDBModel):
@@ -412,8 +407,8 @@ class RDBRuntimePolicySnapshot(RDBModel):
         nullable=True,
         default=None,
     )
-    resolved_execution_policy: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB,
+    resolved_execution_policy_json: Mapped[str | None] = mapped_column(
+        sa.Text,
         nullable=True,
         default=None,
     )

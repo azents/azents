@@ -39,7 +39,7 @@ const policy: RuntimeExecutionPolicyDocument = {
   },
   resources: {
     module_id: "container.resources",
-    version: 2,
+    version: 1,
     cpu_request_millicores: null,
     cpu_limit_millicores: null,
     memory_request_bytes: null,

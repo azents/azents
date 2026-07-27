@@ -1142,7 +1142,7 @@ def _validation_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
         supported_modules=frozenset(
             RuntimeExecutionModuleSupport(
                 module_id=module_id,
-                version=(2 if module_id is RuntimeExecutionModuleId.RESOURCES else 1),
+                version=1,
             )
             for module_id in RuntimeExecutionModuleId
         ),

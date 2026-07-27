@@ -52,9 +52,9 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
     ]);
   };
   const createProfile = trpc.runtimeExecution.createProfile.useMutation({
-    onSuccess: async (profile) => {
+    onSuccess: async () => {
       setProfileModalOpened(false);
-      setSelectedProfileId(profile.id);
+      setSelectedProfileId(null);
       setActionError(null);
       await invalidateAll();
     },
@@ -62,6 +62,7 @@ export function useRuntimeExecutionContainer(): RuntimeExecutionPageContentProps
   });
   const replaceProfile = trpc.runtimeExecution.replaceProfile.useMutation({
     onSuccess: async () => {
+      setSelectedProfileId(null);
       setActionError(null);
       await invalidateAll();
     },

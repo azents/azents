@@ -311,7 +311,7 @@ def test_capability_gate_accepts_qualified_typed_policy(
     authority_policy["image_build"] = image_build
     authority_policy["resources"] = {
         "module_id": "container.resources",
-        "version": 2,
+        "version": 1,
         "cpu_request_millicores": 500,
         "cpu_limit_millicores": 1000,
         "memory_request_bytes": 268435456,

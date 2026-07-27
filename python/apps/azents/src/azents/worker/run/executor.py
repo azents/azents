@@ -493,7 +493,7 @@ class RunExecutor:
                 "error_type": exc.__class__.__name__,
             },
         )
-        await self.failed_run_finalizer.finalize(
+        finalized = await self.failed_run_finalizer.finalize(
             FailedRunFinalizationInput(
                 session_id=session_id,
                 owner_generation=owner_generation,
@@ -504,6 +504,18 @@ class RunExecutor:
             ),
             dispatch_event=dispatch_event,
         )
+        if finalized is None:
+            await self.session_lifecycle.update_agent_run_retry_state(
+                session_id,
+                owner_generation=owner_generation,
+                run_id=active_run.id,
+                retry_state=None,
+            )
+            await self.user_stop_finalizer.record_interrupted_run(
+                session_id,
+                owner_generation=owner_generation,
+                run_id=active_run.id,
+            )
         return active_run.id
 
     async def resolve_idle_continuation_toolkits(
@@ -1524,7 +1536,7 @@ class RunExecutor:
                     if finalization_reason is not None:
                         run_end_reason = "error"
                         terminal_run_status = AgentRunStatus.FAILED
-                        await self.failed_run_finalizer.finalize(
+                        finalized = await self.failed_run_finalizer.finalize(
                             FailedRunFinalizationInput(
                                 session_id=snapshot.session_id,
                                 owner_generation=owner_generation,
@@ -1535,7 +1547,10 @@ class RunExecutor:
                             ),
                             dispatch_event=dispatch_event,
                         )
-                        run_completed = True
+                        if finalized is None:
+                            await record_user_stop()
+                        else:
+                            run_completed = True
                     else:
                         retry_stopped = await self._wait_for_failed_run_retry(
                             session_id=snapshot.session_id,
@@ -1688,7 +1703,7 @@ class RunExecutor:
                     if finalization_reason is not None:
                         run_end_reason = "error"
                         terminal_run_status = AgentRunStatus.FAILED
-                        await self.failed_run_finalizer.finalize(
+                        finalized = await self.failed_run_finalizer.finalize(
                             FailedRunFinalizationInput(
                                 session_id=snapshot.session_id,
                                 owner_generation=owner_generation,
@@ -1699,7 +1714,10 @@ class RunExecutor:
                             ),
                             dispatch_event=dispatch_event,
                         )
-                        run_completed = True
+                        if finalized is None:
+                            await record_user_stop()
+                        else:
+                            run_completed = True
                         break
                     retry_stopped = await self._wait_for_failed_run_retry(
                         session_id=snapshot.session_id,
@@ -1786,7 +1804,7 @@ class RunExecutor:
                     if finalization_reason is not None:
                         run_end_reason = "error"
                         terminal_run_status = AgentRunStatus.FAILED
-                        await self.failed_run_finalizer.finalize(
+                        finalized = await self.failed_run_finalizer.finalize(
                             FailedRunFinalizationInput(
                                 session_id=snapshot.session_id,
                                 owner_generation=owner_generation,
@@ -1797,7 +1815,10 @@ class RunExecutor:
                             ),
                             dispatch_event=dispatch_event,
                         )
-                        run_completed = True
+                        if finalized is None:
+                            await record_user_stop()
+                        else:
+                            run_completed = True
                         break
                     retry_stopped = await self._wait_for_failed_run_retry(
                         session_id=snapshot.session_id,

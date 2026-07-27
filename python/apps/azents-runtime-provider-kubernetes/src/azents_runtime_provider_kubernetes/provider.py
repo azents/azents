@@ -821,11 +821,7 @@ class KubernetesRuntimeProvider:
             _ENV_POLICY_DESIRED_GENERATION: str(evidence.desired_generation),
             _ENV_POLICY_MODULE_VERSIONS: _canonical_mapping(evidence.module_versions),
             _ENV_POLICY_SOURCE_VERSIONS: _canonical_mapping(evidence.source_versions),
-            _ENV_POLICY_DOCUMENT: json.dumps(
-                command.execution_policy.effective_policy,
-                sort_keys=True,
-                separators=(",", ":"),
-            ),
+            _ENV_POLICY_DOCUMENT: command.execution_policy.effective_policy_json,
             _ENV_GATEWAY_LISTEN_SOCKET: _GATEWAY_SOCKET_PATH,
             _ENV_GATEWAY_ENGINE_SOCKET: _ENGINE_SOCKET_PATH,
         }

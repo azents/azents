@@ -93,9 +93,11 @@ class _AgentSessionRepository:
         *,
         owner_generation: int = 0,
         pending_command_id: str | None = None,
+        stop_requested_at: datetime | None = None,
     ) -> None:
         self.owner_generation = owner_generation
         self.pending_command_id = pending_command_id
+        self.stop_requested_at = stop_requested_at
         self.idle_session_ids: list[str] = []
         self.heartbeat_session_ids: list[str] = []
 
@@ -119,6 +121,7 @@ class _AgentSessionRepository:
             AgentSession,
             SimpleNamespace(
                 owner_generation=self.owner_generation,
+                stop_requested_at=self.stop_requested_at,
                 pending_command_id=self.pending_command_id,
                 pending_command_name="compact" if self.pending_command_id else None,
                 pending_command_payload={} if self.pending_command_id else None,
@@ -478,6 +481,26 @@ async def test_terminal_update_rejects_cross_session_run() -> None:
         )
 
     assert agent_run_repository.terminal_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_failed_run_finalization_yields_to_locked_stop_request() -> None:
+    """Failure cannot claim a Session after durable Stop intent is present."""
+    service = _service(
+        agent_run_repository=_AgentRunRepository(None),
+        agent_session_repository=_AgentSessionRepository(
+            stop_requested_at=datetime(2026, 7, 27, tzinfo=UTC)
+        ),
+        pending_scheduling_modes=set(),
+    )
+
+    claimed = await service.claim_failed_run_finalization(
+        cast(AsyncSession, _Session()),
+        session_id="session-001",
+        owner_generation=0,
+    )
+
+    assert claimed is False
 
 
 @pytest.mark.asyncio

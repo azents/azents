@@ -10,6 +10,7 @@ from azents_runtime_control.execution_policy import (
     RuntimeExecutionPolicyEnvelope,
     RuntimeExecutionPolicyEvidence,
     RuntimeExecutionStorageMode,
+    canonical_effective_policy_json,
     digest_effective_policy,
     parse_execution_policy_envelope,
     validate_standard_execution_policy_envelope,
@@ -36,7 +37,7 @@ def _policy(*, image_build: bool = False) -> dict[str, JsonValue]:
         },
         "resources": {
             "module_id": "container.resources",
-            "version": 2,
+            "version": 1,
             "cpu_request_millicores": None,
             "cpu_limit_millicores": None,
             "memory_request_bytes": None,
@@ -90,7 +91,7 @@ def _envelope(*, image_build: bool = False) -> RuntimeExecutionPolicyEnvelope:
                 "container.image_build": 1,
                 "container.run": 1,
                 "container.compose": 1,
-                "container.resources": 2,
+                "container.resources": 1,
                 "engine.storage": 1,
                 "network.egress": 1,
             },
@@ -100,7 +101,7 @@ def _envelope(*, image_build: bool = False) -> RuntimeExecutionPolicyEnvelope:
                 "agent": 4,
             },
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
 
@@ -129,7 +130,7 @@ def test_digest_mismatch_is_rejected() -> None:
             module_versions=envelope.evidence.module_versions,
             source_versions=envelope.evidence.source_versions,
         ),
-        effective_policy=envelope.effective_policy,
+        effective_policy_json=envelope.effective_policy_json,
     )
     with pytest.raises(ValueError, match="digest does not match"):
         validate_standard_execution_policy_envelope(
@@ -159,7 +160,7 @@ def test_module_version_evidence_mismatch_is_rejected() -> None:
             },
             source_versions=envelope.evidence.source_versions,
         ),
-        effective_policy=envelope.effective_policy,
+        effective_policy_json=envelope.effective_policy_json,
     )
 
     with pytest.raises(ValueError, match="module evidence does not match"):
@@ -200,7 +201,7 @@ def test_authority_bearing_policy_parses_as_typed_contract() -> None:
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
     parsed = parse_execution_policy_envelope(envelope, desired_generation=3)
@@ -221,7 +222,7 @@ def test_removed_proxy_network_mode_is_rejected() -> None:
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
     with pytest.raises(ValueError, match="network mode is invalid"):
@@ -235,7 +236,7 @@ def test_engine_policy_requires_ephemeral_storage() -> None:
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
     with pytest.raises(ValueError, match="ephemeral storage"):
@@ -255,7 +256,7 @@ def test_unknown_module_field_is_rejected() -> None:
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
     with pytest.raises(ValueError, match="module evidence is invalid"):
@@ -270,7 +271,7 @@ def test_boolean_schema_version_is_rejected() -> None:
             _envelope().evidence,
             digest=digest_effective_policy(policy),
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )
 
     with pytest.raises(ValueError, match="document shape is invalid"):

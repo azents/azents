@@ -12,7 +12,11 @@ import {
   Textarea,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import type { RuntimeExecutionPolicyRestriction } from "@azents/public-client";
+import { ByteSizeInput } from "./ByteSizeInput";
+import type {
+  RuntimeExecutionPolicyRestriction,
+  RuntimeExecutionResourceRestriction,
+} from "@azents/public-client";
 
 interface RuntimeExecutionRestrictionEditorProps {
   restriction: RuntimeExecutionPolicyRestriction;
@@ -31,22 +35,24 @@ function lines(value: string): string[] {
     .filter((item) => item.length > 0);
 }
 
+const EMPTY_RESOURCES: RuntimeExecutionResourceRestriction = {
+  cpu_request_millicores: null,
+  cpu_limit_millicores: null,
+  memory_request_bytes: null,
+  memory_limit_bytes: null,
+  pids: null,
+  container_count: null,
+  ephemeral_storage_bytes: null,
+  persistent_storage_bytes: null,
+};
+
 export function RuntimeExecutionRestrictionEditor({
   restriction,
   readOnly = false,
   onChange,
 }: RuntimeExecutionRestrictionEditorProps): React.ReactElement {
   const t = useTranslations("workspace.runtimeExecution.restrictions");
-  const resources = restriction.resources ?? {
-    cpu_request_millicores: null,
-    cpu_limit_millicores: null,
-    memory_request_bytes: null,
-    memory_limit_bytes: null,
-    pids: null,
-    container_count: null,
-    ephemeral_storage_bytes: null,
-    persistent_storage_bytes: null,
-  };
+  const resources = restriction.resources ?? EMPTY_RESOURCES;
   const storage = restriction.engine_storage ?? {
     mode: null,
     capacity_bytes: null,
@@ -56,15 +62,25 @@ export function RuntimeExecutionRestrictionEditor({
     allowed_destinations: null,
     denied_destinations: [],
   };
+  const updateResources = (
+    values: Partial<RuntimeExecutionResourceRestriction>,
+  ): void => {
+    onChange({
+      ...restriction,
+      resources: { ...resources, ...values },
+    });
+  };
 
   return (
     <Stack gap="md">
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">
-          <Text fw={600}>{t("capabilitiesTitle")}</Text>
-          <Text size="sm" c="dimmed">
-            {t("capabilitiesDescription")}
-          </Text>
+          <Stack gap={2}>
+            <Text fw={600}>{t("dockerTitle")}</Text>
+            <Text size="sm" c="dimmed">
+              {t("dockerDescription")}
+            </Text>
+          </Stack>
           <SimpleGrid cols={{ base: 1, sm: 3 }}>
             <Checkbox
               label={t("disableImageBuild")}
@@ -106,153 +122,167 @@ export function RuntimeExecutionRestrictionEditor({
               }
             />
           </SimpleGrid>
+          <Stack gap={2}>
+            <Text size="sm" fw={500}>
+              {t("nestedContainerLimits")}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {t("optionalRestrictionDescription")}
+            </Text>
+          </Stack>
+          <SimpleGrid cols={{ base: 1, sm: 2 }}>
+            <NumberInput
+              label={t("aggregatePidLimit")}
+              description={t("inheritWhenEmpty")}
+              value={resources.pids ?? ""}
+              min={1}
+              placeholder={t("pidPlaceholder")}
+              disabled={readOnly}
+              onChange={(value) =>
+                updateResources({ pids: optionalNumber(value) })
+              }
+            />
+            <NumberInput
+              label={t("containerCountLimit")}
+              description={t("inheritWhenEmpty")}
+              value={resources.container_count ?? ""}
+              min={1}
+              placeholder={t("containerPlaceholder")}
+              disabled={readOnly}
+              onChange={(value) =>
+                updateResources({ container_count: optionalNumber(value) })
+              }
+            />
+          </SimpleGrid>
+          <Select
+            label={t("dockerStoragePolicy")}
+            description={t("dockerStorageDescription")}
+            data={[
+              { value: "inherit", label: t("inheritProfile") },
+              { value: "none", label: t("storageNone") },
+              { value: "ephemeral", label: t("storageEphemeral") },
+            ]}
+            value={storage.mode ?? "inherit"}
+            allowDeselect={false}
+            disabled={readOnly}
+            onChange={(value) => {
+              if (value === null) {
+                return;
+              }
+              onChange({
+                ...restriction,
+                engine_storage: {
+                  ...storage,
+                  mode: value === "inherit" ? null : value,
+                },
+              });
+            }}
+          />
+          <ByteSizeInput
+            label={t("temporaryDockerStorage")}
+            description={t("inheritWhenEmpty")}
+            unitLabel={t("unit")}
+            value={storage.capacity_bytes}
+            placeholder={t("storagePlaceholder")}
+            disabled={readOnly || storage.mode === "none"}
+            onChange={(value) =>
+              onChange({
+                ...restriction,
+                engine_storage: { ...storage, capacity_bytes: value },
+              })
+            }
+          />
         </Stack>
       </Paper>
 
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">
-          <Checkbox
-            label={t("resourceTitle")}
-            checked={restriction.resources !== null}
-            disabled={readOnly}
-            onChange={(event) =>
-              onChange({
-                ...restriction,
-                resources: event.currentTarget.checked ? resources : null,
-              })
-            }
-          />
+          <Stack gap={2}>
+            <Text fw={600}>{t("kubernetesResourcesTitle")}</Text>
+            <Text size="sm" c="dimmed">
+              {t("kubernetesResourcesDescription")}
+            </Text>
+          </Stack>
           <Grid>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
               <NumberInput
                 label={t("cpuRequestMillicores")}
+                description={t("inheritWhenEmpty")}
                 value={resources.cpu_request_millicores ?? ""}
                 min={1}
-                disabled={readOnly || restriction.resources === null}
+                placeholder={t("cpuRequestPlaceholder")}
+                disabled={readOnly}
                 onChange={(value) =>
-                  onChange({
-                    ...restriction,
-                    resources: {
-                      ...resources,
-                      cpu_request_millicores: optionalNumber(value),
-                    },
+                  updateResources({
+                    cpu_request_millicores: optionalNumber(value),
                   })
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
               <NumberInput
                 label={t("cpuLimitMillicores")}
+                description={t("inheritWhenEmpty")}
                 value={resources.cpu_limit_millicores ?? ""}
                 min={1}
-                disabled={readOnly || restriction.resources === null}
+                placeholder={t("cpuLimitPlaceholder")}
+                disabled={readOnly}
                 onChange={(value) =>
-                  onChange({
-                    ...restriction,
-                    resources: {
-                      ...resources,
-                      cpu_limit_millicores: optionalNumber(value),
-                    },
+                  updateResources({
+                    cpu_limit_millicores: optionalNumber(value),
                   })
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label={t("memoryRequestBytes")}
-                value={resources.memory_request_bytes ?? ""}
-                min={1}
-                disabled={readOnly || restriction.resources === null}
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <ByteSizeInput
+                label={t("memoryRequest")}
+                description={t("inheritWhenEmpty")}
+                unitLabel={t("unit")}
+                value={resources.memory_request_bytes}
+                placeholder={t("memoryRequestPlaceholder")}
+                disabled={readOnly}
                 onChange={(value) =>
-                  onChange({
-                    ...restriction,
-                    resources: {
-                      ...resources,
-                      memory_request_bytes: optionalNumber(value),
-                    },
-                  })
+                  updateResources({ memory_request_bytes: value })
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label={t("memoryLimitBytes")}
-                value={resources.memory_limit_bytes ?? ""}
-                min={1}
-                disabled={readOnly || restriction.resources === null}
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <ByteSizeInput
+                label={t("memoryLimit")}
+                description={t("inheritWhenEmpty")}
+                unitLabel={t("unit")}
+                value={resources.memory_limit_bytes}
+                placeholder={t("memoryLimitPlaceholder")}
+                disabled={readOnly}
                 onChange={(value) =>
-                  onChange({
-                    ...restriction,
-                    resources: {
-                      ...resources,
-                      memory_limit_bytes: optionalNumber(value),
-                    },
-                  })
+                  updateResources({ memory_limit_bytes: value })
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label={t("pids")}
-                value={resources.pids ?? ""}
-                min={1}
-                disabled={readOnly || restriction.resources === null}
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <ByteSizeInput
+                label={t("ephemeralStorage")}
+                description={t("ephemeralStorageDescription")}
+                unitLabel={t("unit")}
+                value={resources.ephemeral_storage_bytes}
+                placeholder={t("ephemeralPlaceholder")}
+                disabled={readOnly}
                 onChange={(value) =>
-                  onChange({
-                    ...restriction,
-                    resources: { ...resources, pids: optionalNumber(value) },
-                  })
+                  updateResources({ ephemeral_storage_bytes: value })
                 }
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label={t("containerCount")}
-                value={resources.container_count ?? ""}
-                min={1}
-                disabled={readOnly || restriction.resources === null}
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <ByteSizeInput
+                label={t("persistentStorage")}
+                description={t("persistentStorageDescription")}
+                unitLabel={t("unit")}
+                value={resources.persistent_storage_bytes}
+                placeholder={t("persistentPlaceholder")}
+                disabled={readOnly}
                 onChange={(value) =>
-                  onChange({
-                    ...restriction,
-                    resources: {
-                      ...resources,
-                      container_count: optionalNumber(value),
-                    },
-                  })
-                }
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label={t("ephemeralStorageBytes")}
-                value={resources.ephemeral_storage_bytes ?? ""}
-                min={1}
-                disabled={readOnly || restriction.resources === null}
-                onChange={(value) =>
-                  onChange({
-                    ...restriction,
-                    resources: {
-                      ...resources,
-                      ephemeral_storage_bytes: optionalNumber(value),
-                    },
-                  })
-                }
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, lg: 4 }}>
-              <NumberInput
-                label={t("persistentStorageBytes")}
-                value={resources.persistent_storage_bytes ?? ""}
-                min={1}
-                disabled={readOnly || restriction.resources === null}
-                onChange={(value) =>
-                  onChange({
-                    ...restriction,
-                    resources: {
-                      ...resources,
-                      persistent_storage_bytes: optionalNumber(value),
-                    },
-                  })
+                  updateResources({ persistent_storage_bytes: value })
                 }
               />
             </Grid.Col>
@@ -262,84 +292,23 @@ export function RuntimeExecutionRestrictionEditor({
 
       <Paper withBorder p="md" radius="md">
         <Stack gap="sm">
-          <Checkbox
-            label={t("storageTitle")}
-            checked={restriction.engine_storage !== null}
-            disabled={readOnly}
-            onChange={(event) =>
-              onChange({
-                ...restriction,
-                engine_storage: event.currentTarget.checked ? storage : null,
-              })
-            }
-          />
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <Select
-              label={t("mode")}
-              data={[
-                { value: "inherit", label: t("inherit") },
-                { value: "none", label: t("storageNone") },
-                { value: "ephemeral", label: t("storageEphemeral") },
-              ]}
-              value={storage.mode ?? "inherit"}
-              allowDeselect={false}
-              disabled={readOnly || restriction.engine_storage === null}
-              onChange={(value) => {
-                if (value === null) {
-                  return;
-                }
-                onChange({
-                  ...restriction,
-                  engine_storage: {
-                    ...storage,
-                    mode: value === "inherit" ? null : value,
-                  },
-                });
-              }}
-            />
-            <NumberInput
-              label={t("capacityBytes")}
-              value={storage.capacity_bytes ?? ""}
-              min={1}
-              disabled={readOnly || restriction.engine_storage === null}
-              onChange={(value) =>
-                onChange({
-                  ...restriction,
-                  engine_storage: {
-                    ...storage,
-                    capacity_bytes: optionalNumber(value),
-                  },
-                })
-              }
-            />
-          </SimpleGrid>
-        </Stack>
-      </Paper>
-
-      <Paper withBorder p="md" radius="md">
-        <Stack gap="sm">
-          <Checkbox
-            label={t("networkTitle")}
-            checked={restriction.network_egress !== null}
-            disabled={readOnly}
-            onChange={(event) =>
-              onChange({
-                ...restriction,
-                network_egress: event.currentTarget.checked ? network : null,
-              })
-            }
-          />
+          <Stack gap={2}>
+            <Text fw={600}>{t("networkTitle")}</Text>
+            <Text size="sm" c="dimmed">
+              {t("networkDescription")}
+            </Text>
+          </Stack>
           <Select
-            label={t("mode")}
+            label={t("accessPolicy")}
             data={[
-              { value: "inherit", label: t("inherit") },
+              { value: "inherit", label: t("inheritProfile") },
               { value: "none", label: t("networkNone") },
               { value: "restricted", label: t("networkRestricted") },
               { value: "direct", label: t("networkDirect") },
             ]}
             value={network.mode ?? "inherit"}
             allowDeselect={false}
-            disabled={readOnly || restriction.network_egress === null}
+            disabled={readOnly}
             onChange={(value) => {
               if (value === null) {
                 return;
@@ -353,12 +322,13 @@ export function RuntimeExecutionRestrictionEditor({
               });
             }}
           />
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          {network.mode === "restricted" && (
             <Textarea
-              label={t("allowedDestinations")}
-              description={t("onePerLine")}
+              label={t("allowedIpRanges")}
+              description={t("cidrDescription")}
+              placeholder={t("allowedCidrPlaceholder")}
               value={(network.allowed_destinations ?? []).join("\n")}
-              disabled={readOnly || restriction.network_egress === null}
+              disabled={readOnly}
               autosize
               minRows={3}
               onChange={(event) =>
@@ -371,11 +341,14 @@ export function RuntimeExecutionRestrictionEditor({
                 })
               }
             />
+          )}
+          {network.mode !== "none" && (
             <Textarea
-              label={t("deniedDestinations")}
-              description={t("onePerLine")}
+              label={t("blockedIpRanges")}
+              description={t("blockedCidrDescription")}
+              placeholder={t("blockedCidrPlaceholder")}
               value={network.denied_destinations.join("\n")}
-              disabled={readOnly || restriction.network_egress === null}
+              disabled={readOnly}
               autosize
               minRows={3}
               onChange={(event) =>
@@ -388,7 +361,7 @@ export function RuntimeExecutionRestrictionEditor({
                 })
               }
             />
-          </SimpleGrid>
+          )}
         </Stack>
       </Paper>
     </Stack>

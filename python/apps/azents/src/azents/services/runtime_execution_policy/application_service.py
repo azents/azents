@@ -35,6 +35,7 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionSourceVersions,
     RuntimeExecutionStorageMode,
     canonical_runtime_execution_policy,
+    canonical_runtime_execution_policy_json,
     digest_runtime_execution_policy,
     empty_runtime_execution_restriction,
     resolve_runtime_execution_policy,
@@ -357,9 +358,9 @@ class RuntimeExecutionPolicyApplicationService:
         provider_compatibility = resolved.provider_compatibility
 
         next_generation = resolved.runtime.desired_generation + 1
-        canonical_policy = canonical_runtime_execution_policy(effective_policy)
-        if not isinstance(canonical_policy, dict):
-            raise AssertionError("Canonical execution policy must be an object.")
+        canonical_policy_json = canonical_runtime_execution_policy_json(
+            effective_policy
+        )
         execution_digest = digest_runtime_execution_policy(effective_policy)
         snapshot = await self.snapshot_repository.create_and_advance_target_snapshot(
             session,
@@ -374,7 +375,7 @@ class RuntimeExecutionPolicyApplicationService:
                 execution_profile_version=source_versions.profile,
                 execution_workspace_version=source_versions.workspace,
                 execution_agent_version=source_versions.agent,
-                resolved_execution_policy=canonical_policy,
+                resolved_execution_policy_json=canonical_policy_json,
                 execution_source_trace=execution_source_trace,
                 execution_provider_compatibility=provider_compatibility,
                 execution_target_digest=execution_digest,
@@ -713,9 +714,9 @@ class RuntimeExecutionPolicyApplicationService:
             if runtime.desired_state is RuntimeDesiredState.RUNNING
             else RuntimeLifecycleCommandType.STOP
         )
-        canonical_policy = canonical_runtime_execution_policy(effective_policy)
-        if not isinstance(canonical_policy, dict):
-            raise AssertionError("Canonical execution policy must be an object.")
+        canonical_policy_json = canonical_runtime_execution_policy_json(
+            effective_policy
+        )
         snapshot = await self.snapshot_repository.create_and_advance_target_snapshot(
             session,
             create=RuntimePolicySnapshotCreate(
@@ -729,7 +730,7 @@ class RuntimeExecutionPolicyApplicationService:
                 execution_profile_version=source_versions.profile,
                 execution_workspace_version=source_versions.workspace,
                 execution_agent_version=source_versions.agent,
-                resolved_execution_policy=canonical_policy,
+                resolved_execution_policy_json=canonical_policy_json,
                 execution_source_trace={
                     "governing_layers": {
                         path: layer.value
@@ -1030,10 +1031,10 @@ def _capability_summaries(
 def _snapshot_policy(
     snapshot: RuntimePolicySnapshot | None,
 ) -> RuntimeExecutionPolicyDocument | None:
-    if snapshot is None or snapshot.resolved_execution_policy is None:
+    if snapshot is None or snapshot.resolved_execution_policy_json is None:
         return None
-    return RuntimeExecutionPolicyDocument.model_validate(
-        snapshot.resolved_execution_policy
+    return RuntimeExecutionPolicyDocument.model_validate_json(
+        snapshot.resolved_execution_policy_json
     )
 
 

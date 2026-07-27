@@ -11,6 +11,7 @@ from azents_runtime_control.execution_policy import (
     JsonValue,
     RuntimeExecutionPolicyEnvelope,
     RuntimeExecutionPolicyEvidence,
+    canonical_effective_policy_json,
     digest_effective_policy,
 )
 from azents_runtime_control.provider import (
@@ -618,7 +619,7 @@ def _execution_policy(
         },
         "resources": {
             "module_id": "container.resources",
-            "version": 2,
+            "version": 1,
             "cpu_request_millicores": None,
             "cpu_limit_millicores": 1_000 if image_build else None,
             "memory_request_bytes": None,
@@ -651,7 +652,7 @@ def _execution_policy(
                 "container.image_build": 1,
                 "container.run": 1,
                 "container.compose": 1,
-                "container.resources": 2,
+                "container.resources": 1,
                 "engine.storage": 1,
                 "network.egress": 1,
             },
@@ -661,5 +662,5 @@ def _execution_policy(
                 "agent": 1,
             },
         ),
-        effective_policy=policy,
+        effective_policy_json=canonical_effective_policy_json(policy),
     )

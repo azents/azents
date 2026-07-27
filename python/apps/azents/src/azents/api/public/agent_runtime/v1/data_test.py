@@ -95,6 +95,7 @@ def test_execution_policy_status_exposes_only_safe_summary_fields() -> None:
             "snapshot_id",
             "resolved_config",
             "resolved_execution_policy",
+            "resolved_execution_policy_json",
             "encrypted_secrets",
             "secret_metadata",
             "source_trace",

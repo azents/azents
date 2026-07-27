@@ -89,7 +89,7 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
             {"module_id": "container.image_build", "version": 1},
             {"module_id": "container.run", "version": 1},
             {"module_id": "container.compose", "version": 1},
-            {"module_id": "container.resources", "version": 2},
+            {"module_id": "container.resources", "version": 1},
             {"module_id": "engine.storage", "version": 1},
             {"module_id": "network.egress", "version": 1},
         ],

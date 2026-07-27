@@ -109,7 +109,10 @@ class RuntimeProviderContractService:
                 digest=canonical.digest,
                 for_update=False,
             )
-            if existing is not None:
+            if existing is not None and (
+                existing.status is RuntimeProviderContractStatus.CANDIDATE
+                or provider.accepted_contract_revision_id == existing.id
+            ):
                 return existing
             return await self.policy_repository.create_contract(
                 session,

@@ -22,7 +22,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.core.runtime_execution_policy import (
-    canonical_runtime_execution_policy,
+    canonical_runtime_execution_policy_json,
     digest_runtime_execution_policy,
     standard_runtime_execution_policy,
 )
@@ -466,7 +466,7 @@ async def _attach_execution_policy(
                 "supported_modules": [
                     {"module_id": "container.compose", "version": 1},
                     {"module_id": "container.image_build", "version": 1},
-                    {"module_id": "container.resources", "version": 2},
+                    {"module_id": "container.resources", "version": 1},
                     {"module_id": "container.run", "version": 1},
                     {"module_id": "engine.storage", "version": 1},
                     {"module_id": "network.egress", "version": 1},
@@ -484,8 +484,6 @@ async def _attach_execution_policy(
     await session.flush()
 
     policy = standard_runtime_execution_policy()
-    canonical_policy = canonical_runtime_execution_policy(policy)
-    assert isinstance(canonical_policy, dict)
     snapshot = RDBRuntimePolicySnapshot(
         runtime_id=runtime_id,
         provider_id=provider.id,
@@ -499,7 +497,7 @@ async def _attach_execution_policy(
         execution_profile_version=1,
         execution_workspace_version=1,
         execution_agent_version=1,
-        resolved_execution_policy=canonical_policy,
+        resolved_execution_policy_json=canonical_runtime_execution_policy_json(policy),
         execution_source_trace={},
         execution_provider_compatibility={},
         execution_target_digest=digest_runtime_execution_policy(policy),

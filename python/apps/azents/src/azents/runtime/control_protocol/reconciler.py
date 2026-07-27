@@ -1,6 +1,7 @@
 """Agent Runtime desired-state reconciliation."""
 
 import dataclasses
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -354,11 +355,11 @@ class RuntimeLifecycleReconciler:
             raise ValueError("Runtime execution-policy Provider binding is invalid.")
         if snapshot.target_desired_generation != runtime.desired_generation:
             raise ValueError("Runtime execution-policy target generation is stale.")
-        if snapshot.resolved_execution_policy is None:
+        if snapshot.resolved_execution_policy_json is None:
             raise ValueError("Runtime execution-policy target document is missing.")
         envelope = RuntimeExecutionPolicyEnvelope(
             evidence=_snapshot_policy_evidence(snapshot),
-            effective_policy=snapshot.resolved_execution_policy,
+            effective_policy_json=snapshot.resolved_execution_policy_json,
         )
         parse_execution_policy_envelope(
             envelope,
@@ -417,12 +418,15 @@ def _snapshot_policy_evidence(
     }
     if (
         snapshot.execution_target_digest is None
-        or snapshot.resolved_execution_policy is None
+        or snapshot.resolved_execution_policy_json is None
         or any(version is None for version in source_versions.values())
     ):
         raise ValueError("Runtime execution-policy snapshot evidence is incomplete.")
     module_versions: dict[str, int] = {}
-    for value in snapshot.resolved_execution_policy.values():
+    policy = json.loads(snapshot.resolved_execution_policy_json)
+    if not isinstance(policy, dict):
+        raise ValueError("Runtime execution-policy snapshot must contain an object.")
+    for value in policy.values():
         if not isinstance(value, dict):
             continue
         module_id = value.get("module_id")

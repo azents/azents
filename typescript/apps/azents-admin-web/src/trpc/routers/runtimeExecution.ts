@@ -26,7 +26,7 @@ const policySchema = z.object({
   compose: booleanModuleSchema,
   resources: z.object({
     module_id: z.literal("container.resources"),
-    version: z.literal(2),
+    version: z.literal(1),
     cpu_request_millicores: z.number().int().positive().nullable(),
     cpu_limit_millicores: z.number().int().positive().nullable(),
     memory_request_bytes: z.number().int().positive().nullable(),

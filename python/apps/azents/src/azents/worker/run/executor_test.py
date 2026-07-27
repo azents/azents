@@ -1068,19 +1068,20 @@ class _SessionGitWorktreeService:
 class _FailedRunFinalizer:
     """Failed-run finalizer test double."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, claimed: bool = True) -> None:
         self.inputs: list[FailedRunFinalizationInput] = []
+        self.claimed = claimed
 
     async def finalize(
         self,
         input: FailedRunFinalizationInput,
         *,
         dispatch_event: object,
-    ) -> object:
+    ) -> object | None:
         """Record finalization input."""
         del dispatch_event
         self.inputs.append(input)
-        return object()
+        return object() if self.claimed else None
 
 
 class _UserStopFinalizer:
@@ -3175,6 +3176,41 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
     assert finalization_input.reason == "retry_exhausted"
     assert result.terminal_run_status == AgentRunStatus.FAILED
     assert lifecycle.cleared_commands == [("session-001", "command-001")]
+
+
+@pytest.mark.asyncio
+async def test_execute_stop_wins_race_with_terminal_command_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Stop fenced by the failed finalizer completes the Run as stopped."""
+    _patch_successful_resolution(monkeypatch)
+    lifecycle = _SessionLifecycle()
+    finalizer = _FailedRunFinalizer(claimed=False)
+    user_stop_finalizer = _UserStopFinalizer()
+    executor = _executor(
+        lifecycle,
+        command_registry={"compact": cast(CommandHandler, _FailingCommandHandler())},
+        failed_run_finalizer=finalizer,
+        user_stop_finalizer=user_stop_finalizer,
+        failed_run_max_retries=1,
+    )
+
+    result = await executor.execute(
+        _message(pending_command=_pending_command()),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=_noop_dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+
+    assert len(finalizer.inputs) == 1
+    assert result.run_id is not None
+    assert user_stop_finalizer.interrupted_runs == [("session-001", result.run_id)]
+    assert result.terminal_run_status is AgentRunStatus.STOPPED
 
 
 @pytest.mark.asyncio

@@ -50,7 +50,7 @@ class TestRuntimeExecutionPolicyDocument(unittest.TestCase):
                     enabled = True, ),
                 resources = azentsadminclient.models.runtime_execution_resource_module.RuntimeExecutionResourceModule(
                     module_id = 'container.resources', 
-                    version = 2, 
+                    version = 1, 
                     cpu_request_millicores = 1.0, 
                     cpu_limit_millicores = 1.0, 
                     memory_request_bytes = 1.0, 
@@ -92,7 +92,7 @@ class TestRuntimeExecutionPolicyDocument(unittest.TestCase):
                     enabled = True, ),
                 resources = azentsadminclient.models.runtime_execution_resource_module.RuntimeExecutionResourceModule(
                     module_id = 'container.resources', 
-                    version = 2, 
+                    version = 1, 
                     cpu_request_millicores = 1.0, 
                     cpu_limit_millicores = 1.0, 
                     memory_request_bytes = 1.0, 

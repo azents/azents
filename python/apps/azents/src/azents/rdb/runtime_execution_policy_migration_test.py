@@ -59,6 +59,14 @@ _RESOURCE_V2_MIGRATION = (
     / "versions"
     / "142ffe7ca6e9_upgrade_runtime_resource_policy.py"
 )
+_JSON_TEXT_MIGRATION = (
+    PROJECT_ROOT
+    / "db-schemas"
+    / "rdb"
+    / "migrations"
+    / "versions"
+    / "7b4c1d2e9f60_store_runtime_policy_as_json_text.py"
+)
 
 
 def _migration_values(path: Path) -> dict[str, Any]:
@@ -91,10 +99,14 @@ def test_default_egress_migration_matches_application_owned_standard_policy() ->
     """The migrated Standard is canonical and application-owned."""
     values = _migration_values(_DEFAULT_EGRESS_MIGRATION)
     resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
+    json_text_values = _migration_values(_JSON_TEXT_MIGRATION)
     policy = RuntimeExecutionPolicyDocument.model_validate(
-        resource_values["_transform_document"](
-            values["_DIRECT_STANDARD_POLICY"],
-            resource_values["_upgrade_resources"],
+        json_text_values["_set_resource_module_version"](
+            resource_values["_transform_document"](
+                values["_DIRECT_STANDARD_POLICY"],
+                resource_values["_upgrade_resources"],
+            ),
+            version=1,
         )
     )
 
@@ -111,10 +123,14 @@ def test_migration_backfill_restriction_is_canonical_empty_intent() -> None:
     """Workspace and Agent migration rows do not add lower-layer authority."""
     values = _migration_values(_SEED_MIGRATION)
     resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
+    json_text_values = _migration_values(_JSON_TEXT_MIGRATION)
     restriction = RuntimeExecutionPolicyRestriction.model_validate(
-        resource_values["_transform_document"](
-            values["_EMPTY_RESTRICTION"],
-            resource_values["_upgrade_resources"],
+        json_text_values["_set_resource_module_version"](
+            resource_values["_transform_document"](
+                values["_EMPTY_RESTRICTION"],
+                resource_values["_upgrade_resources"],
+            ),
+            version=1,
         )
     )
 
@@ -144,6 +160,18 @@ def test_resource_migration_preserves_json_null_runtime_snapshots() -> None:
     )
 
 
+def test_json_text_migration_canonicalizes_existing_policy_documents() -> None:
+    """Existing JSONB objects become deterministic JSON strings."""
+    values = _migration_values(_JSON_TEXT_MIGRATION)
+
+    assert values["down_revision"] == "142ffe7ca6e9"
+    assert values["_canonical_json"]({"z": 1, "a": [2, 3]}) == ('{"a":[2,3],"z":1}')
+    assert values["_set_resource_module_version"](
+        {"resources": {"module_id": "container.resources", "version": 2}},
+        version=1,
+    ) == {"resources": {"module_id": "container.resources", "version": 1}}
+
+
 def test_revision_pointer_and_backfills_are_present() -> None:
     """The latest revision is selected and preserves existing Runtime snapshots."""
     revision_file = PROJECT_ROOT / "db-schemas" / "rdb" / "revision"
@@ -152,9 +180,10 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     profile_only_source = _PROFILE_ONLY_MIGRATION.read_text()
     health_code_source = _EXTERNAL_CHANNEL_HEALTH_CODE_MIGRATION.read_text()
     resource_v2_source = _RESOURCE_V2_MIGRATION.read_text()
+    json_text_source = _JSON_TEXT_MIGRATION.read_text()
     resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
 
-    assert revision_file.read_text().strip() == "142ffe7ca6e9"
+    assert revision_file.read_text().strip() == "7b4c1d2e9f60"
     assert resource_values["down_revision"] == "e0615474dc27"
     assert "INSERT INTO workspace_runtime_execution_policies" in seed_source
     assert "INSERT INTO workspace_runtime_execution_profile_allowances" in seed_source
@@ -168,6 +197,14 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     assert '"version" = 2' not in resource_v2_source
     assert 'upgraded["version"] = 2' in resource_v2_source
     assert "application_state = 'pending'" in resource_v2_source
+    assert 'new_column_name="resolved_execution_policy_json"' in json_text_source
+    assert "jsonb_typeof(resolved_execution_policy) = 'object'" in json_text_source
+    assert "_rewrite_policy_documents(version=1)" in json_text_source
+    assert "_rewrite_policy_documents(version=2)" not in json_text_source
+    assert "stale.accepted_at IS NULL" in json_text_source
+    assert (
+        '"uq_runtime_provider_contract_revisions_provider_digest"' in json_text_source
+    )
 
 
 def test_generated_revisions_render_valid_incremental_postgresql_sql() -> None:

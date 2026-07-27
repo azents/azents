@@ -473,7 +473,7 @@ def _initial_snapshot_create(
         execution_profile_version=None,
         execution_workspace_version=None,
         execution_agent_version=None,
-        resolved_execution_policy=None,
+        resolved_execution_policy_json=None,
         execution_source_trace=None,
         execution_provider_compatibility=None,
         execution_target_digest=None,

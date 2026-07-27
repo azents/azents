@@ -378,7 +378,7 @@ def test_capability_contract_declares_qualified_execution_support() -> None:
         "container.image_build": 1,
         "container.run": 1,
         "container.compose": 1,
-        "container.resources": 2,
+        "container.resources": 1,
         "engine.storage": 1,
         "network.egress": 1,
     }

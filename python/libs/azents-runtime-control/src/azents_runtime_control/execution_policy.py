@@ -28,7 +28,7 @@ class RuntimeExecutionPolicyEnvelope:
     """Validated effective execution policy sent to a bound Provider."""
 
     evidence: RuntimeExecutionPolicyEvidence
-    effective_policy: Mapping[str, JsonValue]
+    effective_policy_json: str
 
 
 class RuntimeExecutionStorageMode(enum.StrEnum):
@@ -92,13 +92,30 @@ class RuntimeExecutionPolicy:
 
 def digest_effective_policy(policy: Mapping[str, JsonValue]) -> str:
     """Return the canonical SHA-256 digest for an effective policy document."""
-    encoded = json.dumps(
+    return hashlib.sha256(canonical_effective_policy_json(policy).encode()).hexdigest()
+
+
+def canonical_effective_policy_json(policy: Mapping[str, JsonValue]) -> str:
+    """Serialize an effective policy as deterministic JSON for storage and transport."""
+    return json.dumps(
         policy,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    )
+
+
+def effective_policy_from_json(value: str) -> dict[str, JsonValue]:
+    """Parse one canonical effective-policy JSON object."""
+    try:
+        parsed: JsonValue = json.loads(value)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise ValueError("Runtime execution-policy JSON is invalid.") from error
+    if not isinstance(parsed, dict):
+        raise ValueError("Runtime execution-policy JSON must contain an object.")
+    if canonical_effective_policy_json(parsed) != value:
+        raise ValueError("Runtime execution-policy JSON is not canonical.")
+    return parsed
 
 
 def validate_execution_policy_envelope(
@@ -112,7 +129,8 @@ def validate_execution_policy_envelope(
         raise ValueError("Runtime execution-policy desired generation is invalid.")
     if len(evidence.digest) != 64:
         raise ValueError("Runtime execution-policy digest is invalid.")
-    if digest_effective_policy(envelope.effective_policy) != evidence.digest:
+    policy = effective_policy_from_json(envelope.effective_policy_json)
+    if digest_effective_policy(policy) != evidence.digest:
         raise ValueError("Runtime execution-policy digest does not match its document.")
     if not evidence.module_versions or any(
         not module_id or isinstance(version, bool) or version < 1
@@ -168,7 +186,7 @@ def parse_execution_policy_envelope(
         raise ValueError(
             "Runtime execution-policy evidence generation does not match the command."
         )
-    policy = envelope.effective_policy
+    policy = effective_policy_from_json(envelope.effective_policy_json)
     expected_modules = {
         "image_build": "container.image_build",
         "container_run": "container.run",
@@ -215,15 +233,12 @@ def parse_execution_policy_envelope(
             policy,
             field,
             module_id,
-            expected_version=(2 if module_id == "container.resources" else 1),
+            expected_version=1,
             expected_fields=module_fields[field],
         )
         for field, module_id in expected_modules.items()
     }
-    expected_module_versions = {
-        module_id: (2 if module_id == "container.resources" else 1)
-        for module_id in expected_modules.values()
-    }
+    expected_module_versions = {module_id: 1 for module_id in expected_modules.values()}
     if dict(envelope.evidence.module_versions) != expected_module_versions:
         raise ValueError(
             "Runtime execution-policy module evidence does not match its document."

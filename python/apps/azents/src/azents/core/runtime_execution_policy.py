@@ -149,7 +149,7 @@ class RuntimeExecutionResourceModule(_FrozenPolicyModel):
     """Kubernetes resources and nested-workload resource ceilings."""
 
     module_id: Literal[RuntimeExecutionModuleId.RESOURCES]
-    version: Literal[2]
+    version: Literal[1]
     cpu_request_millicores: int | None = Field(ge=1)
     cpu_limit_millicores: int | None = Field(ge=1)
     memory_request_bytes: int | None = Field(ge=1)
@@ -414,7 +414,7 @@ def standard_runtime_execution_policy() -> RuntimeExecutionPolicyDocument:
         ),
         resources=RuntimeExecutionResourceModule(
             module_id=RuntimeExecutionModuleId.RESOURCES,
-            version=2,
+            version=1,
             cpu_request_millicores=None,
             cpu_limit_millicores=None,
             memory_request_bytes=None,
@@ -464,16 +464,23 @@ def canonical_runtime_execution_policy(
     return normalized
 
 
-def digest_runtime_execution_policy(
+def canonical_runtime_execution_policy_json(
     policy: RuntimeExecutionPolicyDocument | RuntimeExecutionPolicyRestriction,
 ) -> str:
-    """Return the canonical SHA-256 execution-policy digest."""
-    encoded = json.dumps(
+    """Return deterministic JSON text for persistence and transport."""
+    return json.dumps(
         canonical_runtime_execution_policy(policy),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
-    ).encode()
+    )
+
+
+def digest_runtime_execution_policy(
+    policy: RuntimeExecutionPolicyDocument | RuntimeExecutionPolicyRestriction,
+) -> str:
+    """Return the canonical SHA-256 execution-policy digest."""
+    encoded = canonical_runtime_execution_policy_json(policy).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -681,7 +688,7 @@ def _apply_restriction(
     if restriction.resources is not None:
         resources = RuntimeExecutionResourceModule(
             module_id=RuntimeExecutionModuleId.RESOURCES,
-            version=2,
+            version=1,
             **{
                 name: _minimum_bound(
                     getattr(policy.resources, name),
@@ -852,7 +859,7 @@ def _required_module_support(
     return frozenset(
         RuntimeExecutionModuleSupport(
             module_id=module_id,
-            version=(2 if module_id is RuntimeExecutionModuleId.RESOURCES else 1),
+            version=1,
         )
         for module_id in module_ids
     )

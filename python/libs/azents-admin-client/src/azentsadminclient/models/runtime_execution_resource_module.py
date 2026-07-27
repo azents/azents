@@ -49,8 +49,8 @@ class RuntimeExecutionResourceModule(BaseModel):
     @field_validator('version')
     def version_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set([2]):
-            raise ValueError("must be one of enum values (2)")
+        if value not in set([1]):
+            raise ValueError("must be one of enum values (1)")
         return value
 
     model_config = ConfigDict(
