@@ -1,5 +1,7 @@
 """Runtime Provider settings tests."""
 
+# pyright: reportPrivateUsage=false
+
 import asyncio
 import dataclasses
 from datetime import datetime
@@ -309,3 +311,29 @@ def test_provider_settings_accepts_pod_image_pull_secrets(
     assert settings.image_pull_secrets == (
         LocalObjectReference(name="ecr-pull-secret"),
     )
+
+
+def test_capability_contract_declares_qualified_execution_support() -> None:
+    """Registration carries the exact execution authority Admin must accept."""
+    execution_policy = provider_main._CAPABILITY_CONTRACT["execution_policy"]
+
+    assert isinstance(execution_policy, dict)
+    assert execution_policy["privileged_engine"] is True
+    assert execution_policy["storage_modes"] == ["none", "ephemeral"]
+    assert execution_policy["network_modes"] == ["none", "direct"]
+    supported_modules = execution_policy["supported_modules"]
+    assert isinstance(supported_modules, list)
+    module_ids: list[str] = []
+    for module in supported_modules:
+        assert isinstance(module, dict)
+        module_id = module["module_id"]
+        assert isinstance(module_id, str)
+        module_ids.append(module_id)
+    assert set(module_ids) == {
+        "container.image_build",
+        "container.run",
+        "container.compose",
+        "container.resources",
+        "engine.storage",
+        "network.egress",
+    }

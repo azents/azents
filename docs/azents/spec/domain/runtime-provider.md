@@ -42,7 +42,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
 last_verified_at: 2026-07-27
-spec_version: 5
+spec_version: 6
 ---
 
 # Runtime Provider
@@ -97,6 +97,13 @@ replacement.
 Raw Provider registration metadata is not product capability authority. The server-owned
 management/status gate is authoritative: the resolver marks an unsatisfied Profile unavailable and
 provisioning fails closed rather than dropping an unsupported module or selecting a weaker Runtime.
+The immutable contract may include a typed `execution_policy` section declaring exact module
+versions, privileged-engine implementation support, storage modes, network modes, and optional
+resource maxima. Runtime resolution uses only the bound Provider's current accepted contract;
+missing, candidate, rejected, malformed, or superseded declarations cannot grant authority. A new
+target snapshot records and references that accepted contract revision even when the previous
+snapshot used an older revision. A stale non-null Provider configuration remains unavailable until
+it is validated against the newly accepted contract.
 
 Agent intent is independent from a physical Runtime. Saving Agent Profile/override intent does not
 advance Runtime desired generation. Explicit Apply attaches an immutable target snapshot and
@@ -105,10 +112,14 @@ second Agent Apply; it preserves Agent Workspace storage and does not invoke res
 delete. Audit and public projections contain only bounded policy metadata, reason codes, source
 layers, digests, and generations.
 
-The current server capability gate keeps `privileged_engine` unavailable and exposes storage/network
-mode `none`. Kubernetes Provider registration metadata such as `engine_storage_ephemeral` is not
-yet translated into product availability. Image build, container run, Compose, ephemeral or
-persistent engine storage, and qualified nested-workload enablement are therefore not advertised.
+The installation management gate exposes image build, container run, Compose, `none` or
+`ephemeral` engine storage, and `none` or `direct` network egress. The Kubernetes Provider declares
+those exact capabilities in its Admin-accepted typed contract and enforces them with the fixed
+Runner, policy-gateway, and engine topology plus a generation-fenced Runtime NetworkPolicy.
+Persistent engine storage, proxy-required egress, and restricted-destination egress remain
+unavailable because this Provider contract does not advertise them. A legacy accepted contract
+without the typed section remains usable for the non-engine baseline but cannot grant nested-engine
+authority.
 Admin/Public surfaces must not expose Provider credentials, socket paths, raw manifests, Kubernetes
 resource names, or generic privileged controls.
 

@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-07-26
-spec_version: 11
+last_verified_at: 2026-07-27
+spec_version: 12
 ---
 
 # E2E Primary Test Strategy
@@ -135,11 +135,12 @@ Live workflow runs `live_external` E2E marker. If credential is missing in live 
 Agent Runtime Provider E2E follows the same policy. The focused required lane creates its System Docker Provider declaration through the trusted bootstrap source, enrolls it through the Admin and Public HTTP APIs, and passes only the issued credential to the Provider process. In required live Runtime Provider runs, missing or stale external provider prerequisites are treated as failures. Optional or nightly runs can report prerequisite-not-ready as a skip summary.
 
 Runtime Execution Profile E2E creates policy state through Admin/Public APIs only. It verifies
-typed unknown-field rejection, fail-closed unavailable capability, hierarchy reductions and
+typed unknown-field rejection, qualified engine-policy acceptance, hierarchy reductions and
 expansion rejection, save versus explicit Apply, idempotent Apply, automatic restrictive
-convergence, bounded audit/status projections, and response redaction. A Web Surface journey first
-uses an actual server projection and may use server-shaped response fixtures only for bounded
-presentation branches.
+convergence, bounded audit/status projections, and response redaction. Bound Runtime application
+still fails closed unless that Runtime's Provider has the required typed accepted contract. A Web
+Surface journey first uses an actual server projection and may use server-shaped response fixtures
+only for bounded presentation branches.
 
 Qualified Kubernetes execution-policy coverage is live evidence. Its prerequisite contract must
 distinguish unadvertised capability from advertised-but-unenforced privileged engine, CNI,

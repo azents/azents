@@ -18,7 +18,7 @@ Details of all living specs. Synchronized from frontmatter.
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-26 | 12 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-24 | 6 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-21 | 17 |
-| runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-07-27 | 5 |
+| runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-07-27 | 6 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-23 | 4 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-26 | 75 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-20 | 8 |
@@ -30,7 +30,7 @@ Details of all living specs. Synchronized from frontmatter.
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-26 | 134 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-26 | 31 |
-| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-27 | 7 |
+| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-27 | 8 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
@@ -45,6 +45,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-26 | 11 |
+| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-27 | 12 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-07-19 | 6 |

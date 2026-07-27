@@ -8,6 +8,14 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from azents.core.runtime_execution_policy import (
+    RuntimeExecutionModuleSupport,
+    RuntimeExecutionNetworkMode,
+    RuntimeExecutionProviderCapabilities,
+    RuntimeExecutionResourceModule,
+    RuntimeExecutionStorageMode,
+)
+
 
 class RuntimeProviderPolicyScope(enum.StrEnum):
     """Policy layer at which a Provider contract accepts values."""
@@ -156,6 +164,19 @@ RuntimeProviderConfigField = Annotated[
 ]
 
 
+class RuntimeProviderExecutionPolicyContract(BaseModel):
+    """Typed execution-policy support declared by one Provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
+    supported_modules: set[RuntimeExecutionModuleSupport]
+    privileged_engine: bool
+    storage_modes: set[RuntimeExecutionStorageMode]
+    network_modes: set[RuntimeExecutionNetworkMode]
+    resource_maxima: RuntimeExecutionResourceModule | None
+
+
 class RuntimeProviderCapabilityContract(BaseModel):
     """Complete immutable capability proposal from one authenticated Provider."""
 
@@ -174,6 +195,7 @@ class RuntimeProviderCapabilityContract(BaseModel):
         default_factory=list,
         max_length=100,
     )
+    execution_policy: RuntimeProviderExecutionPolicyContract | None = None
 
     @model_validator(mode="after")
     def validate_contract(self) -> "RuntimeProviderCapabilityContract":
@@ -216,6 +238,21 @@ def canonicalize_runtime_provider_contract(
     canonical_json["optional_capabilities"] = sorted(
         canonical_json["optional_capabilities"]
     )
+    execution_policy = canonical_json.get("execution_policy")
+    if execution_policy is None:
+        # Preserve existing contract digests when this backwards-compatible
+        # capability section is absent.
+        del canonical_json["execution_policy"]
+    elif isinstance(execution_policy, dict):
+        supported_modules = execution_policy["supported_modules"]
+        if not isinstance(supported_modules, list):
+            raise AssertionError("Execution-policy module support must be a list.")
+        execution_policy["supported_modules"] = sorted(
+            supported_modules,
+            key=lambda item: (item["module_id"], item["version"]),
+        )
+        execution_policy["storage_modes"] = sorted(execution_policy["storage_modes"])
+        execution_policy["network_modes"] = sorted(execution_policy["network_modes"])
     encoded = json.dumps(
         canonical_json,
         sort_keys=True,
@@ -226,4 +263,26 @@ def canonicalize_runtime_provider_contract(
         contract=contract,
         canonical_json=canonical_json,
         digest=hashlib.sha256(encoded).hexdigest(),
+    )
+
+
+def runtime_execution_capabilities_from_provider_contract(
+    contract: RuntimeProviderCapabilityContract,
+) -> RuntimeExecutionProviderCapabilities:
+    """Project accepted Provider declarations into resolver capabilities."""
+    execution_policy = contract.execution_policy
+    if execution_policy is None:
+        return RuntimeExecutionProviderCapabilities(
+            supported_modules=frozenset(),
+            privileged_engine=False,
+            storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
+            network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
+            resource_maxima=None,
+        )
+    return RuntimeExecutionProviderCapabilities(
+        supported_modules=frozenset(execution_policy.supported_modules),
+        privileged_engine=execution_policy.privileged_engine,
+        storage_modes=frozenset(execution_policy.storage_modes),
+        network_modes=frozenset(execution_policy.network_modes),
+        resource_maxima=execution_policy.resource_maxima,
     )

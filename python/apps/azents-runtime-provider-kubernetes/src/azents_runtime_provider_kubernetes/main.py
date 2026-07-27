@@ -78,6 +78,21 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
         "terminal_delete_destroys_workspace": True,
     },
     "configuration_fields": [],
+    "execution_policy": {
+        "schema_version": 1,
+        "supported_modules": [
+            {"module_id": "container.image_build", "version": 1},
+            {"module_id": "container.run", "version": 1},
+            {"module_id": "container.compose", "version": 1},
+            {"module_id": "container.resources", "version": 1},
+            {"module_id": "engine.storage", "version": 1},
+            {"module_id": "network.egress", "version": 1},
+        ],
+        "privileged_engine": True,
+        "storage_modes": ["none", "ephemeral"],
+        "network_modes": ["none", "direct"],
+        "resource_maxima": None,
+    },
 }
 
 

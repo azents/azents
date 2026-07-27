@@ -1257,15 +1257,25 @@ def _string_set(value: JsonValue) -> set[str]:
 
 
 def _validation_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
-    """Return only capability support backed by the current implementation."""
+    """Return the installation capability ceiling backed by qualified Providers."""
     return RuntimeExecutionProviderCapabilities(
         supported_modules=frozenset(
             RuntimeExecutionModuleSupport(module_id=module_id, version=1)
             for module_id in RuntimeExecutionModuleId
         ),
-        privileged_engine=False,
-        storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
-        network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
+        privileged_engine=True,
+        storage_modes=frozenset(
+            {
+                RuntimeExecutionStorageMode.NONE,
+                RuntimeExecutionStorageMode.EPHEMERAL,
+            }
+        ),
+        network_modes=frozenset(
+            {
+                RuntimeExecutionNetworkMode.NONE,
+                RuntimeExecutionNetworkMode.DIRECT,
+            }
+        ),
         resource_maxima=None,
     )
 
