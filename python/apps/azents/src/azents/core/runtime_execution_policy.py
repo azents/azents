@@ -44,7 +44,6 @@ class RuntimeExecutionNetworkMode(enum.StrEnum):
     """Optional egress authority ordered from narrowest to broadest."""
 
     NONE = "none"
-    PROXY_REQUIRED = "proxy_required"
     RESTRICTED = "restricted"
     DIRECT = "direct"
 
@@ -359,9 +358,8 @@ _STORAGE_RANK = {
 }
 _NETWORK_RANK = {
     RuntimeExecutionNetworkMode.NONE: 0,
-    RuntimeExecutionNetworkMode.PROXY_REQUIRED: 1,
-    RuntimeExecutionNetworkMode.RESTRICTED: 2,
-    RuntimeExecutionNetworkMode.DIRECT: 3,
+    RuntimeExecutionNetworkMode.RESTRICTED: 1,
+    RuntimeExecutionNetworkMode.DIRECT: 2,
 }
 _RESOURCE_PATHS = (
     "cpu_millicores",
@@ -373,7 +371,7 @@ _RESOURCE_PATHS = (
 
 
 def standard_runtime_execution_policy() -> RuntimeExecutionPolicyDocument:
-    """Return the reserved non-expanding Standard Profile policy."""
+    """Return the reserved Standard Profile with direct outbound networking."""
     return RuntimeExecutionPolicyDocument(
         schema_version=1,
         image_build=RuntimeExecutionBooleanModule(
@@ -409,7 +407,7 @@ def standard_runtime_execution_policy() -> RuntimeExecutionPolicyDocument:
         network_egress=RuntimeExecutionNetworkModule(
             module_id=RuntimeExecutionModuleId.NETWORK_EGRESS,
             version=1,
-            mode=RuntimeExecutionNetworkMode.NONE,
+            mode=RuntimeExecutionNetworkMode.DIRECT,
             allowed_destinations=frozenset(),
             denied_destinations=frozenset(),
         ),
@@ -852,7 +850,10 @@ def _provider_compatibility_error(
             RuntimeExecutionAvailabilityReason.PROVIDER_STORAGE_UNSUPPORTED,
             "The bound Provider cannot enforce the selected engine storage mode.",
         )
-    if engine_needed and policy.network_egress.mode not in provider.network_modes:
+    if (
+        policy.network_egress.mode is not RuntimeExecutionNetworkMode.NONE
+        and policy.network_egress.mode not in provider.network_modes
+    ):
         return (
             RuntimeExecutionAvailabilityReason.PROVIDER_NETWORK_UNSUPPORTED,
             "The bound Provider cannot enforce the selected network mode.",
@@ -884,9 +885,10 @@ def _required_module_support(
             {
                 RuntimeExecutionModuleId.RESOURCES,
                 RuntimeExecutionModuleId.ENGINE_STORAGE,
-                RuntimeExecutionModuleId.NETWORK_EGRESS,
             }
         )
+    if policy.network_egress.mode is not RuntimeExecutionNetworkMode.NONE:
+        module_ids.add(RuntimeExecutionModuleId.NETWORK_EGRESS)
     return frozenset(
         RuntimeExecutionModuleSupport(module_id=module_id, version=1)
         for module_id in module_ids

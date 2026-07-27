@@ -8,7 +8,7 @@ from typing import Protocol
 from azents_runtime_control.execution_policy import (
     RuntimeExecutionPolicyEnvelope,
     RuntimeExecutionPolicyEvidence,
-    validate_standard_execution_policy_envelope,
+    parse_execution_policy_envelope,
 )
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
@@ -360,7 +360,7 @@ class RuntimeLifecycleReconciler:
             evidence=_snapshot_policy_evidence(snapshot),
             effective_policy=snapshot.resolved_execution_policy,
         )
-        validate_standard_execution_policy_envelope(
+        parse_execution_policy_envelope(
             envelope,
             desired_generation=runtime.desired_generation,
         )

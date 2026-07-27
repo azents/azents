@@ -1542,7 +1542,6 @@
         "storagePersistent": "Persistent",
         "capacityBytes": "Capacity bytes",
         "networkNone": "None",
-        "networkProxy": "Proxy required",
         "networkRestricted": "Restricted",
         "networkDirect": "Direct",
         "allowedDestinations": "Allowed destinations",

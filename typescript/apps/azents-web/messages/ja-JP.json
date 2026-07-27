@@ -1542,7 +1542,6 @@
         "storagePersistent": "永続",
         "capacityBytes": "容量（バイト）",
         "networkNone": "なし",
-        "networkProxy": "プロキシ必須",
         "networkRestricted": "制限付き",
         "networkDirect": "直接",
         "allowedDestinations": "許可する宛先",

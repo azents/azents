@@ -90,7 +90,7 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
         ],
         "privileged_engine": True,
         "storage_modes": ["none", "ephemeral"],
-        "network_modes": ["none", "direct"],
+        "network_modes": ["none", "restricted", "direct"],
         "resource_maxima": None,
     },
 }

@@ -18,7 +18,7 @@ Details of all living specs. Synchronized from frontmatter.
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-26 | 12 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-24 | 6 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-21 | 17 |
-| runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-07-27 | 6 |
+| runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-07-27 | 7 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-23 | 4 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-26 | 75 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-20 | 8 |

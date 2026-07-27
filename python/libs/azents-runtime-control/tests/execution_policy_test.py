@@ -205,6 +205,23 @@ def test_authority_bearing_policy_parses_as_typed_contract() -> None:
     assert parsed.network_egress.allowed_destinations == ("203.0.113.0/24",)
 
 
+def test_removed_proxy_network_mode_is_rejected() -> None:
+    policy = _policy()
+    network = policy["network_egress"]
+    assert isinstance(network, dict)
+    network["mode"] = "proxy_required"
+    envelope = RuntimeExecutionPolicyEnvelope(
+        evidence=dataclasses.replace(
+            _envelope().evidence,
+            digest=digest_effective_policy(policy),
+        ),
+        effective_policy=policy,
+    )
+
+    with pytest.raises(ValueError, match="network mode is invalid"):
+        parse_execution_policy_envelope(envelope, desired_generation=3)
+
+
 def test_engine_policy_requires_complete_resource_bounds() -> None:
     policy = _policy(image_build=True)
     envelope = RuntimeExecutionPolicyEnvelope(

@@ -5120,7 +5120,6 @@
         "type": "string",
         "enum": [
           "none",
-          "proxy_required",
           "restricted",
           "direct"
         ],

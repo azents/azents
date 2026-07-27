@@ -42,7 +42,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
 last_verified_at: 2026-07-27
-spec_version: 6
+spec_version: 7
 ---
 
 # Runtime Provider
@@ -93,6 +93,12 @@ retired and use expected-version mutation. Retiring an ordinary Profile preserve
 intent but makes affected selection unavailable until a valid Profile is chosen. Platform/Profile
 writes are capability-gated, so unsupported authority cannot be introduced by profile creation or
 replacement.
+
+The installation and reserved `system-standard` defaults permit unrestricted direct outbound
+networking, represented by `network.egress=direct` with empty allow and deny destination sets.
+This default applies to both the Runner and nested engine containers because the Kubernetes
+NetworkPolicy selects the complete Runtime Pod. Image build, nested container execution, Compose,
+and engine storage remain disabled until an Admin explicitly grants them through policy.
 
 Raw Provider registration metadata is not product capability authority. The server-owned
 management/status gate is authoritative: the resolver marks an unsatisfied Profile unavailable and
@@ -160,6 +166,8 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **7 (2026-07-27):** Made unrestricted direct outbound networking the installation and reserved Standard default while leaving nested container authority disabled.
+- **6 (2026-07-27):** Added accepted typed execution-policy capabilities as the authority source for Kubernetes engine features.
 - **5 (2026-07-27):** Connected authenticated Provider contract proposal, immutable candidate persistence, explicit Admin acceptance, and storage-preserving legacy Runtime policy binding.
 - **4 (2026-07-26):** Added restrictive Runtime Execution Profile compatibility, explicit Apply versus automatic tightening convergence, safe policy projections, and the current fail-closed privileged-engine boundary.
 - **3 (2026-07-23):** Promoted durable authentication bindings, explicit issued-token and Kubernetes ServiceAccount methods, Admin binding lifecycle, TokenReview workload identity, secret-free Helm deployment, and Runtime storage preservation behavior.

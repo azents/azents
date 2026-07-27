@@ -18,6 +18,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.runtime_execution_policy import (
+    RuntimeExecutionAvailabilityReason,
     RuntimeExecutionBooleanModule,
     RuntimeExecutionChangeDirection,
     RuntimeExecutionModuleId,
@@ -67,6 +68,18 @@ def _legacy_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
         storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
         network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
         resource_maxima=None,
+    )
+
+
+def _direct_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
+    """Model an accepted typed Provider that supports direct networking."""
+    legacy = _legacy_provider_capabilities()
+    return legacy.model_copy(
+        update={
+            "network_modes": frozenset(
+                {RuntimeExecutionNetworkMode.NONE, RuntimeExecutionNetworkMode.DIRECT}
+            )
+        }
     )
 
 
@@ -135,7 +148,7 @@ def _resolved() -> _ResolvedRuntimePolicy:
             workspace=3,
             agent=4,
         ),
-        provider_capabilities=_legacy_provider_capabilities(),
+        provider_capabilities=_direct_provider_capabilities(),
         profile_active=True,
         profile_allowed=True,
         applied_policy=None,
@@ -168,7 +181,7 @@ def _unavailable_resolved() -> _ResolvedRuntimePolicy:
             workspace=3,
             agent=4,
         ),
-        provider_capabilities=_legacy_provider_capabilities(),
+        provider_capabilities=_direct_provider_capabilities(),
         profile_active=False,
         profile_allowed=True,
         applied_policy=policy,
@@ -265,7 +278,7 @@ def _upper_layer_change_resolved(
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),
         source_versions=source_versions,
-        provider_capabilities=_legacy_provider_capabilities(),
+        provider_capabilities=_direct_provider_capabilities(),
         profile_active=True,
         profile_allowed=True,
         applied_policy=baseline,
@@ -894,20 +907,17 @@ def test_mixed_convergence_copies_only_restrictive_fields() -> None:
                 module_id=RuntimeExecutionModuleId.IMAGE_BUILD,
                 version=1,
                 enabled=True,
-            )
-        }
-    )
-    current = standard.model_copy(
-        update={
+            ),
             "network_egress": RuntimeExecutionNetworkModule(
                 module_id=RuntimeExecutionModuleId.NETWORK_EGRESS,
                 version=1,
-                mode=RuntimeExecutionNetworkMode.DIRECT,
+                mode=RuntimeExecutionNetworkMode.NONE,
                 allowed_destinations=frozenset(),
                 denied_destinations=frozenset(),
-            )
+            ),
         }
     )
+    current = standard
     change = classify_runtime_execution_change(applied, current)
     assert change.direction is RuntimeExecutionChangeDirection.MIXED
 
@@ -923,3 +933,27 @@ def test_legacy_capabilities_cannot_grant_engine_or_network_authority() -> None:
     assert not capabilities.privileged_engine
     assert capabilities.storage_modes == {RuntimeExecutionStorageMode.NONE}
     assert capabilities.network_modes == {RuntimeExecutionNetworkMode.NONE}
+
+    standard = standard_runtime_execution_policy()
+    resolution = resolve_runtime_execution_policy(
+        platform_policy=standard,
+        profile_policy=standard,
+        workspace_restriction=empty_runtime_execution_restriction(),
+        agent_restriction=empty_runtime_execution_restriction(),
+        source_versions=RuntimeExecutionSourceVersions(
+            platform=1,
+            profile=1,
+            workspace=1,
+            agent=1,
+        ),
+        provider_capabilities=capabilities,
+        profile_active=True,
+        profile_allowed=True,
+        applied_policy=None,
+    )
+
+    assert not resolution.available
+    assert (
+        resolution.availability_reason
+        is RuntimeExecutionAvailabilityReason.PROVIDER_NETWORK_UNSUPPORTED
+    )

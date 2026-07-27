@@ -1542,7 +1542,6 @@
         "storagePersistent": "영구",
         "capacityBytes": "용량 바이트",
         "networkNone": "없음",
-        "networkProxy": "프록시 필수",
         "networkRestricted": "제한됨",
         "networkDirect": "직접",
         "allowedDestinations": "허용 대상",

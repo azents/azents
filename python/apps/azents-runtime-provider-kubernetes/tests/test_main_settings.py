@@ -320,7 +320,7 @@ def test_capability_contract_declares_qualified_execution_support() -> None:
     assert isinstance(execution_policy, dict)
     assert execution_policy["privileged_engine"] is True
     assert execution_policy["storage_modes"] == ["none", "ephemeral"]
-    assert execution_policy["network_modes"] == ["none", "direct"]
+    assert execution_policy["network_modes"] == ["none", "restricted", "direct"]
     supported_modules = execution_policy["supported_modules"]
     assert isinstance(supported_modules, list)
     module_ids: list[str] = []

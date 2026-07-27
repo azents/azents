@@ -6,8 +6,6 @@ Optional egress authority ordered from narrowest to broadest.
 
 * `NONE` (value: `'none'`)
 
-* `PROXY_REQUIRED` (value: `'proxy_required'`)
-
 * `RESTRICTED` (value: `'restricted'`)
 
 * `DIRECT` (value: `'direct'`)
