@@ -75,7 +75,8 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
     "optional_capabilities": [
         "execution_policy_v1",
         "runtime_network_policy",
-        "engine_storage_ephemeral",
+        "docker_privileged_dind",
+        "docker_storage_ephemeral",
     ],
     "persistence": {
         "kind": "persistent",
@@ -86,16 +87,10 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
     "execution_policy": {
         "schema_version": 1,
         "supported_modules": [
-            {"module_id": "container.image_build", "version": 1},
-            {"module_id": "container.run", "version": 1},
-            {"module_id": "container.compose", "version": 1},
-            {"module_id": "container.resources", "version": 1},
-            {"module_id": "engine.storage", "version": 1},
-            {"module_id": "network.egress", "version": 1},
+            {"module_id": "docker", "version": 1},
+            {"module_id": "runtime.resources", "version": 1},
         ],
-        "privileged_engine": True,
         "storage_modes": ["none", "ephemeral"],
-        "network_modes": ["none", "restricted", "direct"],
         "resource_maxima": None,
     },
 }
@@ -159,7 +154,6 @@ async def _run_control_loop(
             pvc_storage_request=settings.pvc_storage_request,
             runner_resources=settings.runner_resources,
             runner_env=settings.runner_env,
-            gateway_image=settings.gateway_image,
             engine_image=settings.engine_image,
             runtime_control_namespace=settings.runtime_control_namespace,
             runtime_control_labels=settings.runtime_control_labels,
@@ -188,7 +182,8 @@ async def _run_control_loop(
             "pvc_persistence",
             "execution_policy_v1",
             "runtime_network_policy",
-            "engine_storage_ephemeral",
+            "docker_privileged_dind",
+            "docker_storage_ephemeral",
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={"workspace_path": settings.workspace_path},
@@ -501,7 +496,6 @@ class ProviderSettings:
             _json_container_resources_env("AZ_RUNTIME_RUNNER_RESOURCES")
         )
         self.runner_env: Mapping[str, str] = _selected_env(RUNNER_LIMIT_ENV_NAMES)
-        self.gateway_image = _required_env("AZ_RUNTIME_PROVIDER_GATEWAY_IMAGE")
         self.engine_image = _required_env("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE")
         self.runtime_control_namespace = _required_env(
             "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE"

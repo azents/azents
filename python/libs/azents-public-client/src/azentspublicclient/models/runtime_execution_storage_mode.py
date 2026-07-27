@@ -20,7 +20,7 @@ from typing_extensions import Self
 
 class RuntimeExecutionStorageMode(str, Enum):
     """
-    Nested-engine storage lifecycle ordered from narrowest to broadest.
+    Docker data-storage lifecycle ordered from narrowest to broadest.
     """
 
     """

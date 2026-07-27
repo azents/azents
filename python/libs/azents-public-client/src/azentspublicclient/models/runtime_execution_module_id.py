@@ -26,12 +26,8 @@ class RuntimeExecutionModuleId(str, Enum):
     """
     allowed enum values
     """
-    CONTAINER_DOT_IMAGE_BUILD = 'container.image_build'
-    CONTAINER_DOT_RUN = 'container.run'
-    CONTAINER_DOT_COMPOSE = 'container.compose'
-    CONTAINER_DOT_RESOURCES = 'container.resources'
-    ENGINE_DOT_STORAGE = 'engine.storage'
-    NETWORK_DOT_EGRESS = 'network.egress'
+    DOCKER = 'docker'
+    RUNTIME_DOT_RESOURCES = 'runtime.resources'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:

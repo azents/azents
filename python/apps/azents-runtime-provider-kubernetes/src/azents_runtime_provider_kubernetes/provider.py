@@ -11,7 +11,6 @@ from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
 
 from azents_runtime_control.execution_policy import (
-    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicy,
     RuntimeExecutionPolicyEvidence,
     RuntimeExecutionStorageMode,
@@ -83,29 +82,17 @@ _QUANTITY_SUFFIX_MULTIPLIERS = {
 }
 _IMAGE_GENERATION = "agent-runtime-kubernetes-v1"
 _RUNNER_CONTAINER_NAME = "runner"
-_GATEWAY_CONTAINER_NAME = "container-policy-gateway"
 _ENGINE_CONTAINER_NAME = "container-engine"
 _WORKSPACE_VOLUME_NAME = "agent-workspace"
-_GATEWAY_SOCKET_VOLUME_NAME = "container-gateway-socket"
 _ENGINE_SOCKET_VOLUME_NAME = "container-engine-socket"
 _ENGINE_STORAGE_VOLUME_NAME = "container-engine-storage"
-_GATEWAY_SOCKET_DIR = "/var/run/azents-gateway"
 _ENGINE_SOCKET_DIR = "/var/run/azents-engine"
 _ENGINE_STORAGE_PATH = "/var/lib/azents-engine"
-_GATEWAY_SOCKET_PATH = f"{_GATEWAY_SOCKET_DIR}/docker.sock"
 _ENGINE_SOCKET_PATH = f"{_ENGINE_SOCKET_DIR}/docker.sock"
 _RUNNER_UID = 1000
 _RUNNER_GID = 1000
-_GATEWAY_UID = 1001
-_GATEWAY_GID = 1001
-_ENGINE_SOCKET_GROUP = "azents-gateway"
+_ENGINE_SOCKET_GROUP = "azents-runner"
 _FS_GROUP_CHANGE_POLICY = "OnRootMismatch"
-_GATEWAY_CPU_MIN_MILLICORES = 50
-_GATEWAY_CPU_MAX_MILLICORES = 250
-_GATEWAY_MEMORY_MIN_BYTES = 128 * 1024 * 1024
-_GATEWAY_MEMORY_MAX_BYTES = 512 * 1024 * 1024
-_GATEWAY_EPHEMERAL_MIN_BYTES = 16 * 1024 * 1024
-_GATEWAY_EPHEMERAL_MAX_BYTES = 64 * 1024 * 1024
 
 _LABEL_MANAGED_BY = "azents/managed-by"
 _LABEL_PROVIDER_ID = "azents/runtime-provider-id"
@@ -139,10 +126,10 @@ _ENV_POLICY_DIGEST = "AZ_RUNTIME_EXECUTION_POLICY_DIGEST"
 _ENV_POLICY_DESIRED_GENERATION = "AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION"
 _ENV_POLICY_MODULE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS"
 _ENV_POLICY_SOURCE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS"
-_ENV_GATEWAY_SOCKET = "DOCKER_HOST"
-_ENV_POLICY_DOCUMENT = "AZ_RUNTIME_EXECUTION_POLICY_DOCUMENT"
-_ENV_GATEWAY_LISTEN_SOCKET = "AZ_RUNTIME_GATEWAY_LISTEN_SOCKET"
-_ENV_GATEWAY_ENGINE_SOCKET = "AZ_RUNTIME_GATEWAY_ENGINE_SOCKET"
+_ENV_DOCKER_HOST = "DOCKER_HOST"
+_ENV_TESTCONTAINERS_HOST_OVERRIDE = "TESTCONTAINERS_HOST_OVERRIDE"
+_ENV_TESTCONTAINERS_CONNECTION_MODE = "TESTCONTAINERS_CONNECTION_MODE"
+_ENV_TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE = "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE"
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -184,7 +171,6 @@ class KubernetesRuntimeProviderConfig:
     pvc_storage_request: str
     runner_resources: ContainerResources | None
     runner_env: Mapping[str, str]
-    gateway_image: str
     engine_image: str
     runtime_control_namespace: str
     runtime_control_labels: Mapping[str, str]
@@ -223,7 +209,6 @@ class KubernetesRuntimeProvider:
             *config.network_hard_cap_denied_cidrs,
         ):
             _ip_network(cidr)
-        _immutable_image_reference(config.gateway_image, "gateway image")
         _immutable_image_reference(config.engine_image, "engine image")
         self._api = api
         self._config = config
@@ -241,7 +226,7 @@ class KubernetesRuntimeProvider:
             extra=_log_context(command, self._config),
         )
         await self._ensure_pvc(command, policy)
-        await self._ensure_network_policy(command, policy)
+        await self._ensure_network_policy(command)
         await self._ensure_pod(command, policy, replace=False)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.START,
@@ -282,7 +267,7 @@ class KubernetesRuntimeProvider:
             extra=_log_context(command, self._config),
         )
         await self._ensure_pvc(command, policy)
-        await self._ensure_network_policy(command, policy)
+        await self._ensure_network_policy(command)
         await self._ensure_pod(command, policy, replace=True)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.RESTART,
@@ -322,7 +307,7 @@ class KubernetesRuntimeProvider:
         )
         await self._ensure_pvc(command, policy)
         if command.reset_final_desired_state is RuntimeDesiredState.RUNNING:
-            await self._ensure_network_policy(command, policy)
+            await self._ensure_network_policy(command)
             await self._ensure_pod(command, policy, replace=False)
             report = await self.observe(command)
         else:
@@ -378,7 +363,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeProviderReport:
         """Observe one Runtime Pod/PVC/NetworkPolicy resource set."""
-        policy = self._validate_command(command)
+        self._validate_command(command)
         pod = await self._api.get_pod(
             _pod_name(command.identity.runtime_id),
             self._config.namespace,
@@ -401,9 +386,7 @@ class KubernetesRuntimeProvider:
             _network_policy_name(command.identity.runtime_id),
             self._config.namespace,
         )
-        if network_policy is None or network_policy != self._network_policy(
-            command, policy
-        ):
+        if network_policy is None or network_policy != self._network_policy(command):
             return self._report(
                 command,
                 observed_state=RuntimeProviderObservedState.STARTING,
@@ -529,9 +512,8 @@ class KubernetesRuntimeProvider:
     async def _ensure_network_policy(
         self,
         command: RuntimeLifecycleCommand,
-        policy: RuntimeExecutionPolicy,
     ) -> None:
-        network_policy = self._network_policy(command, policy)
+        network_policy = self._network_policy(command)
         _LOGGER.info(
             "Kubernetes Runtime ensuring NetworkPolicy",
             extra={
@@ -655,10 +637,10 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
         policy: RuntimeExecutionPolicy,
     ) -> PodResource:
-        engine_required = policy.image_build or policy.container_run
-        engine_storage_capacity = policy.engine_storage.capacity_bytes
-        if engine_required and engine_storage_capacity is None:
-            raise AssertionError("engine storage capacity is required")
+        docker_enabled = policy.docker.enabled
+        docker_storage_capacity = policy.docker.storage_capacity_bytes
+        if docker_enabled and docker_storage_capacity is None:
+            raise AssertionError("Docker storage capacity is required")
         return PodResource(
             metadata=ObjectMeta(
                 name=_pod_name(command.identity.runtime_id),
@@ -682,11 +664,6 @@ class KubernetesRuntimeProvider:
                     *(
                         (
                             EmptyDirVolume(
-                                name=_GATEWAY_SOCKET_VOLUME_NAME,
-                                medium="Memory",
-                                size_limit="16Mi",
-                            ),
-                            EmptyDirVolume(
                                 name=_ENGINE_SOCKET_VOLUME_NAME,
                                 medium="Memory",
                                 size_limit="16Mi",
@@ -694,10 +671,10 @@ class KubernetesRuntimeProvider:
                             EmptyDirVolume(
                                 name=_ENGINE_STORAGE_VOLUME_NAME,
                                 medium=None,
-                                size_limit=str(engine_storage_capacity),
+                                size_limit=str(docker_storage_capacity),
                             ),
                         )
-                        if engine_required
+                        if docker_enabled
                         else ()
                     ),
                 ),
@@ -716,20 +693,21 @@ class KubernetesRuntimeProvider:
                 read_only=False,
             )
         ]
-        engine_required = policy.image_build or policy.container_run
+        docker_enabled = policy.docker.enabled
         runner_env = self._env(command)
-        execution_resources = (
-            _execution_resource_partition(policy) if engine_required else None
-        )
-        if engine_required:
+        docker_resources = _docker_resources(policy) if docker_enabled else None
+        if docker_enabled:
             runner_mounts.append(
                 VolumeMount(
-                    name=_GATEWAY_SOCKET_VOLUME_NAME,
-                    mount_path=_GATEWAY_SOCKET_DIR,
+                    name=_ENGINE_SOCKET_VOLUME_NAME,
+                    mount_path=_ENGINE_SOCKET_DIR,
                     read_only=True,
                 )
             )
-            runner_env[_ENV_GATEWAY_SOCKET] = f"unix://{_GATEWAY_SOCKET_PATH}"
+            runner_env[_ENV_DOCKER_HOST] = f"unix://{_ENGINE_SOCKET_PATH}"
+            runner_env[_ENV_TESTCONTAINERS_HOST_OVERRIDE] = "127.0.0.1"
+            runner_env[_ENV_TESTCONTAINERS_CONNECTION_MODE] = "docker_host"
+            runner_env[_ENV_TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE] = _ENGINE_SOCKET_PATH
         runner = ContainerSpec(
             name=_RUNNER_CONTAINER_NAME,
             image=command.runner_image,
@@ -747,40 +725,10 @@ class KubernetesRuntimeProvider:
             ),
             volume_mounts=tuple(runner_mounts),
         )
-        if not engine_required:
+        if not docker_enabled:
             return (runner,)
-        if execution_resources is None:
-            raise AssertionError("execution resource partition is required")
-        gateway = ContainerSpec(
-            name=_GATEWAY_CONTAINER_NAME,
-            image=self._config.gateway_image,
-            command=("/usr/local/bin/azents-container-policy-gateway",),
-            args=(),
-            working_dir="/",
-            resources=execution_resources.gateway,
-            security_context=_unprivileged_security_context(
-                uid=_GATEWAY_UID,
-                gid=_GATEWAY_GID,
-                read_only_root_filesystem=True,
-            ),
-            readiness_probe=_gateway_probe(command),
-            env=tuple(
-                EnvVar(name=key, value=value)
-                for key, value in self._gateway_env(command).items()
-            ),
-            volume_mounts=(
-                VolumeMount(
-                    name=_GATEWAY_SOCKET_VOLUME_NAME,
-                    mount_path=_GATEWAY_SOCKET_DIR,
-                    read_only=False,
-                ),
-                VolumeMount(
-                    name=_ENGINE_SOCKET_VOLUME_NAME,
-                    mount_path=_ENGINE_SOCKET_DIR,
-                    read_only=False,
-                ),
-            ),
-        )
+        if docker_resources is None:
+            raise AssertionError("Docker resources are required")
         engine = ContainerSpec(
             name=_ENGINE_CONTAINER_NAME,
             image=self._config.engine_image,
@@ -791,7 +739,7 @@ class KubernetesRuntimeProvider:
                 f"--group={_ENGINE_SOCKET_GROUP}",
             ),
             working_dir="/",
-            resources=execution_resources.engine,
+            resources=docker_resources,
             security_context=_engine_security_context(),
             readiness_probe=_engine_probe(),
             env=(),
@@ -808,29 +756,11 @@ class KubernetesRuntimeProvider:
                 ),
             ),
         )
-        return (runner, gateway, engine)
-
-    def _gateway_env(
-        self,
-        command: RuntimeLifecycleCommand,
-    ) -> dict[str, str]:
-        evidence = command.execution_policy.evidence
-        return {
-            _ENV_RUNTIME_ID: command.identity.runtime_id,
-            _ENV_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
-            _ENV_POLICY_DIGEST: evidence.digest,
-            _ENV_POLICY_DESIRED_GENERATION: str(evidence.desired_generation),
-            _ENV_POLICY_MODULE_VERSIONS: _canonical_mapping(evidence.module_versions),
-            _ENV_POLICY_SOURCE_VERSIONS: _canonical_mapping(evidence.source_versions),
-            _ENV_POLICY_DOCUMENT: command.execution_policy.effective_policy_json,
-            _ENV_GATEWAY_LISTEN_SOCKET: _GATEWAY_SOCKET_PATH,
-            _ENV_GATEWAY_ENGINE_SOCKET: _ENGINE_SOCKET_PATH,
-        }
+        return (runner, engine)
 
     def _network_policy(
         self,
         command: RuntimeLifecycleCommand,
-        policy: RuntimeExecutionPolicy,
     ) -> NetworkPolicyResource:
         return NetworkPolicyResource(
             metadata=ObjectMeta(
@@ -854,7 +784,7 @@ class KubernetesRuntimeProvider:
                 egress=(
                     _dns_egress_rule(),
                     _runtime_control_egress_rule(self._config),
-                    *_optional_egress_rules(policy, self._config),
+                    *_permitted_egress_rules(self._config),
                 ),
             ),
         )
@@ -1091,24 +1021,18 @@ class KubernetesRuntimeProvider:
             command.execution_policy,
             desired_generation=command.desired_generation,
         )
-        engine_required = policy.image_build or policy.container_run
-        if engine_required:
+        if policy.docker.enabled:
             _immutable_image_reference(command.runner_image, "Runner image")
-            _execution_resource_partition(policy)
-            if policy.engine_storage.mode is not RuntimeExecutionStorageMode.EPHEMERAL:
+            _docker_resources(policy)
+            if policy.docker.storage_mode is not RuntimeExecutionStorageMode.EPHEMERAL:
                 raise UnsupportedExecutionPolicy(
-                    "Kubernetes Runtime Provider supports ephemeral engine "
+                    "Kubernetes Runtime Provider supports ephemeral Docker "
                     "storage only."
                 )
-        elif policy.engine_storage.mode is not RuntimeExecutionStorageMode.NONE:
+        elif policy.docker.storage_mode is not RuntimeExecutionStorageMode.NONE:
             raise UnsupportedExecutionPolicy(
-                "Engine storage requires a container execution capability."
+                "Docker storage requires Docker to be enabled."
             )
-        for destination in (
-            *policy.network_egress.allowed_destinations,
-            *policy.network_egress.denied_destinations,
-        ):
-            _ip_network(destination)
         return policy
 
 
@@ -1143,32 +1067,6 @@ def _engine_security_context() -> ContainerSecurityContext:
     )
 
 
-def _gateway_probe(command: RuntimeLifecycleCommand) -> Probe:
-    evidence = command.execution_policy.evidence
-    return Probe(
-        exec_action=ExecAction(
-            command=(
-                "/usr/local/bin/azents-container-policy-gateway",
-                "check-ready",
-                "--socket",
-                _GATEWAY_SOCKET_PATH,
-                "--runtime-id",
-                command.identity.runtime_id,
-                "--desired-generation",
-                str(command.desired_generation),
-                "--snapshot-id",
-                evidence.snapshot_id,
-                "--policy-digest",
-                evidence.digest,
-            )
-        ),
-        initial_delay_seconds=1,
-        period_seconds=2,
-        timeout_seconds=1,
-        failure_threshold=30,
-    )
-
-
 def _engine_probe() -> Probe:
     return Probe(
         exec_action=ExecAction(
@@ -1198,15 +1096,9 @@ def _immutable_image_reference(value: str, name: str) -> str:
     return value
 
 
-@dataclasses.dataclass(frozen=True)
-class _ExecutionResourcePartition:
-    gateway: ContainerResources
-    engine: ContainerResources
-
-
-def _execution_resource_partition(
+def _docker_resources(
     policy: RuntimeExecutionPolicy,
-) -> _ExecutionResourcePartition:
+) -> ContainerResources:
     resources = policy.resources
     cpu_request_millicores = resources.cpu_request_millicores
     cpu_limit_millicores = resources.cpu_limit_millicores
@@ -1215,106 +1107,21 @@ def _execution_resource_partition(
     ephemeral_storage_bytes = resources.ephemeral_storage_bytes
     if ephemeral_storage_bytes is None:
         raise AssertionError("execution ephemeral storage is required")
-    gateway_cpu_request = _gateway_resource_share(
-        cpu_request_millicores,
-        maximum=_GATEWAY_CPU_MAX_MILLICORES,
-        divisor=4,
+    requests = _kubernetes_resource_values(
+        cpu_millicores=cpu_request_millicores,
+        memory_bytes=memory_request_bytes,
+        ephemeral_storage_bytes=ephemeral_storage_bytes,
     )
-    gateway_cpu_limit = _gateway_resource_share(
-        cpu_limit_millicores,
-        maximum=_GATEWAY_CPU_MAX_MILLICORES,
-        divisor=4,
+    limits = _kubernetes_resource_values(
+        cpu_millicores=cpu_limit_millicores,
+        memory_bytes=memory_limit_bytes,
+        ephemeral_storage_bytes=ephemeral_storage_bytes,
     )
-    gateway_memory_request = _gateway_resource_share(
-        memory_request_bytes,
-        maximum=_GATEWAY_MEMORY_MAX_BYTES,
-        divisor=4,
+    return ContainerResources(
+        requests=requests,
+        limits=limits,
+        claims=None,
     )
-    gateway_memory_limit = _gateway_resource_share(
-        memory_limit_bytes,
-        maximum=_GATEWAY_MEMORY_MAX_BYTES,
-        divisor=4,
-    )
-    gateway_ephemeral = min(
-        _GATEWAY_EPHEMERAL_MAX_BYTES,
-        ephemeral_storage_bytes // 16,
-    )
-    if (
-        (
-            gateway_cpu_limit is not None
-            and gateway_cpu_limit < _GATEWAY_CPU_MIN_MILLICORES
-        )
-        or (
-            gateway_memory_limit is not None
-            and gateway_memory_limit < _GATEWAY_MEMORY_MIN_BYTES
-        )
-        or gateway_ephemeral < _GATEWAY_EPHEMERAL_MIN_BYTES
-    ):
-        raise UnsupportedExecutionPolicy(
-            "Container execution policy resources are too small for the "
-            "fixed policy gateway."
-        )
-    gateway_requests = _kubernetes_resource_values(
-        cpu_millicores=gateway_cpu_request,
-        memory_bytes=gateway_memory_request,
-        ephemeral_storage_bytes=gateway_ephemeral,
-    )
-    gateway_limits = _kubernetes_resource_values(
-        cpu_millicores=gateway_cpu_limit,
-        memory_bytes=gateway_memory_limit,
-        ephemeral_storage_bytes=gateway_ephemeral,
-    )
-    engine_requests = _kubernetes_resource_values(
-        cpu_millicores=_remaining_resource(
-            cpu_request_millicores,
-            gateway_cpu_request,
-        ),
-        memory_bytes=_remaining_resource(
-            memory_request_bytes,
-            gateway_memory_request,
-        ),
-        ephemeral_storage_bytes=ephemeral_storage_bytes - gateway_ephemeral,
-    )
-    engine_limits = _kubernetes_resource_values(
-        cpu_millicores=_remaining_resource(
-            cpu_limit_millicores,
-            gateway_cpu_limit,
-        ),
-        memory_bytes=_remaining_resource(
-            memory_limit_bytes,
-            gateway_memory_limit,
-        ),
-        ephemeral_storage_bytes=ephemeral_storage_bytes - gateway_ephemeral,
-    )
-    return _ExecutionResourcePartition(
-        gateway=ContainerResources(
-            requests=gateway_requests,
-            limits=gateway_limits,
-            claims=None,
-        ),
-        engine=ContainerResources(
-            requests=engine_requests,
-            limits=engine_limits,
-            claims=None,
-        ),
-    )
-
-
-def _gateway_resource_share(
-    value: int | None,
-    *,
-    maximum: int,
-    divisor: int,
-) -> int | None:
-    if value is None:
-        return None
-    return min(maximum, value // divisor)
-
-
-def _remaining_resource(total: int | None, allocated: int | None) -> int | None:
-    if total is None or allocated is None:
-        return None
-    return total - allocated
 
 
 def _kubernetes_resource_values(
@@ -1375,59 +1182,28 @@ def _runtime_control_egress_rule(
     )
 
 
-def _optional_egress_rules(
-    policy: RuntimeExecutionPolicy,
+def _permitted_egress_rules(
     config: KubernetesRuntimeProviderConfig,
 ) -> tuple[NetworkPolicyEgressRule, ...]:
-    network = policy.network_egress
-    if network.mode is RuntimeExecutionNetworkMode.NONE:
-        return ()
-    profile_denied = tuple(_ip_network(value) for value in network.denied_destinations)
     hard_cap_denied = tuple(
         _ip_network(value) for value in config.network_hard_cap_denied_cidrs
     )
     hard_cap_allowed = tuple(
         _ip_network(value) for value in config.network_hard_cap_allowed_cidrs
     )
-    if network.mode is RuntimeExecutionNetworkMode.DIRECT:
-        rules: list[NetworkPolicyEgressRule] = []
-        for internet in (
-            ipaddress.ip_network("0.0.0.0/0"),
-            ipaddress.ip_network("::/0"),
-        ):
-            rule = _bounded_ip_block_rule(
-                internet,
-                denied=(*hard_cap_denied, *profile_denied),
-            )
-            if rule is not None:
-                rules.append(rule)
-        for allowed in hard_cap_allowed:
-            rule = _bounded_ip_block_rule(allowed, denied=profile_denied)
-            if rule is not None:
-                rules.append(rule)
-        return (*rules, *config.network_hard_cap_extra_egress)
-    if network.mode is RuntimeExecutionNetworkMode.RESTRICTED:
-        rules: list[NetworkPolicyEgressRule] = []
-        for allowed_value in network.allowed_destinations:
-            allowed = _ip_network(allowed_value)
-            rule = _bounded_ip_block_rule(
-                allowed,
-                denied=(*hard_cap_denied, *profile_denied),
-            )
-            if rule is not None:
-                rules.append(rule)
-            for exception in hard_cap_allowed:
-                intersection = _network_intersection(allowed, exception)
-                if intersection is None:
-                    continue
-                exception_rule = _bounded_ip_block_rule(
-                    intersection,
-                    denied=profile_denied,
-                )
-                if exception_rule is not None:
-                    rules.append(exception_rule)
-        return tuple(rules)
-    raise AssertionError(f"unsupported network mode: {network.mode}")
+    rules: list[NetworkPolicyEgressRule] = []
+    for internet in (
+        ipaddress.ip_network("0.0.0.0/0"),
+        ipaddress.ip_network("::/0"),
+    ):
+        rule = _bounded_ip_block_rule(internet, denied=hard_cap_denied)
+        if rule is not None:
+            rules.append(rule)
+    for allowed in hard_cap_allowed:
+        rule = _bounded_ip_block_rule(allowed, denied=())
+        if rule is not None:
+            rules.append(rule)
+    return (*rules, *config.network_hard_cap_extra_egress)
 
 
 def _bounded_ip_block_rule(
@@ -1491,17 +1267,6 @@ def _subnet_of_same_family(
     ):
         return candidate.subnet_of(container)
     return False
-
-
-def _network_intersection(
-    left: ipaddress.IPv4Network | ipaddress.IPv6Network,
-    right: ipaddress.IPv4Network | ipaddress.IPv6Network,
-) -> ipaddress.IPv4Network | ipaddress.IPv6Network | None:
-    if _subnet_of_same_family(left, right):
-        return left
-    if _subnet_of_same_family(right, left):
-        return right
-    return None
 
 
 def _fail_closed_without_command_policy(

@@ -8,7 +8,6 @@ import pytest
 
 CHART_DIR = Path(__file__).resolve().parents[1]
 _RUNNER_DIGEST = f"sha256:{'a' * 64}"
-_GATEWAY_DIGEST = f"sha256:{'b' * 64}"
 _ENGINE_DIGEST = f"sha256:{'c' * 64}"
 _PROVIDER_DIGEST = f"sha256:{'d' * 64}"
 
@@ -26,9 +25,6 @@ def _helm_template(*values: str) -> str:
         "web.image.tag=sha",
         "adminWeb.image.repository=repo/admin-web",
         "adminWeb.image.tag=sha",
-        "runtimeProviderKubernetes.gatewayImage.repository=repo/gateway",
-        "runtimeProviderKubernetes.gatewayImage.tag=sha",
-        f"runtimeProviderKubernetes.gatewayImage.digest={_GATEWAY_DIGEST}",
         "runtimeProviderKubernetes.engineImage.repository=repo/engine",
         "runtimeProviderKubernetes.engineImage.tag=sha",
         f"runtimeProviderKubernetes.engineImage.digest={_ENGINE_DIGEST}",
@@ -89,7 +85,6 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "mountPath: /var/run/azents/runtime-provider-bootstrap" in rendered
     assert "repo/provider:sha" in rendered
     assert f"repo/runner:sha@{_RUNNER_DIGEST}" in rendered
-    assert f"repo/gateway:sha@{_GATEWAY_DIGEST}" in rendered
     assert f"repo/engine:sha@{_ENGINE_DIGEST}" in rendered
     assert "AZ_RUNTIME_CONTROL_ENDPOINT" in rendered
     assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
@@ -137,8 +132,6 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "azents-runtime-execution-policy-default-deny" in rendered
     assert "azents/managed-by: azents-runtime-provider-kubernetes" in rendered
     assert 'azents/execution-policy-managed: "true"' in rendered
-    assert "AZ_RUNTIME_PROVIDER_GATEWAY_IMAGE" in rendered
-    assert "repo/gateway:sha" in rendered
     assert "AZ_RUNTIME_PROVIDER_ENGINE_IMAGE" in rendered
     assert "repo/engine:sha" in rendered
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE" in rendered
@@ -398,7 +391,6 @@ def test_runtime_provider_kubernetes_digest_pinning_render_contract() -> None:
     "digest_value",
     [
         "runtimeProviderKubernetes.runnerImage.digest=",
-        "runtimeProviderKubernetes.gatewayImage.digest=",
         "runtimeProviderKubernetes.engineImage.digest=",
     ],
 )

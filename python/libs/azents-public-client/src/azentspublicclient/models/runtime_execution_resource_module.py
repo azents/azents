@@ -25,7 +25,7 @@ from typing_extensions import Self
 
 class RuntimeExecutionResourceModule(BaseModel):
     """
-    Kubernetes resources and nested-workload resource ceilings.
+    Kubernetes resources for the Runtime workload and Workspace volume.
     """ # noqa: E501
     module_id: StrictStr
     version: StrictInt
@@ -33,18 +33,16 @@ class RuntimeExecutionResourceModule(BaseModel):
     cpu_limit_millicores: Optional[Annotated[int, Field(strict=True, ge=1)]]
     memory_request_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
     memory_limit_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
-    pids: Optional[Annotated[int, Field(strict=True, ge=1)]]
-    container_count: Optional[Annotated[int, Field(strict=True, ge=1)]]
     ephemeral_storage_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
     persistent_storage_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["module_id", "version", "cpu_request_millicores", "cpu_limit_millicores", "memory_request_bytes", "memory_limit_bytes", "pids", "container_count", "ephemeral_storage_bytes", "persistent_storage_bytes"]
+    __properties: ClassVar[List[str]] = ["module_id", "version", "cpu_request_millicores", "cpu_limit_millicores", "memory_request_bytes", "memory_limit_bytes", "ephemeral_storage_bytes", "persistent_storage_bytes"]
 
     @field_validator('module_id')
     def module_id_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['container.resources']):
-            raise ValueError("must be one of enum values ('container.resources')")
+        if value not in set(['runtime.resources']):
+            raise ValueError("must be one of enum values ('runtime.resources')")
         return value
 
     @field_validator('version')
@@ -120,16 +118,6 @@ class RuntimeExecutionResourceModule(BaseModel):
         if self.memory_limit_bytes is None and "memory_limit_bytes" in self.model_fields_set:
             _dict['memory_limit_bytes'] = None
 
-        # set to None if pids (nullable) is None
-        # and model_fields_set contains the field
-        if self.pids is None and "pids" in self.model_fields_set:
-            _dict['pids'] = None
-
-        # set to None if container_count (nullable) is None
-        # and model_fields_set contains the field
-        if self.container_count is None and "container_count" in self.model_fields_set:
-            _dict['container_count'] = None
-
         # set to None if ephemeral_storage_bytes (nullable) is None
         # and model_fields_set contains the field
         if self.ephemeral_storage_bytes is None and "ephemeral_storage_bytes" in self.model_fields_set:
@@ -158,8 +146,6 @@ class RuntimeExecutionResourceModule(BaseModel):
             "cpu_limit_millicores": obj.get("cpu_limit_millicores"),
             "memory_request_bytes": obj.get("memory_request_bytes"),
             "memory_limit_bytes": obj.get("memory_limit_bytes"),
-            "pids": obj.get("pids"),
-            "container_count": obj.get("container_count"),
             "ephemeral_storage_bytes": obj.get("ephemeral_storage_bytes"),
             "persistent_storage_bytes": obj.get("persistent_storage_bytes")
         })

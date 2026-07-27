@@ -342,13 +342,6 @@ Return the Runtime Runner image for the Kubernetes Runtime Provider.
 {{- end -}}
 
 {{/*
-Return the fixed policy gateway image for Kubernetes Runtime Pods.
-*/}}
-{{- define "azents.runtimeGatewayImage" -}}
-{{- include "azents.immutableImageReference" (dict "image" .Values.runtimeProviderKubernetes.gatewayImage "repositoryRequiredMessage" "runtimeProviderKubernetes.gatewayImage.repository is required" "tagRequiredMessage" "runtimeProviderKubernetes.gatewayImage.tag is required" "digestRequiredMessage" "runtimeProviderKubernetes.gatewayImage.digest is required" "digestInvalidMessage" "runtimeProviderKubernetes.gatewayImage.digest must be a sha256 digest") -}}
-{{- end -}}
-
-{{/*
 Return the fixed nested engine image for Kubernetes Runtime Pods.
 */}}
 {{- define "azents.runtimeEngineImage" -}}

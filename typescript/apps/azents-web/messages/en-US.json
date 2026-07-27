@@ -1571,16 +1571,8 @@
       "restrictions": {
         "dockerTitle": "Docker",
         "dockerDescription": "Add Workspace restrictions to the Docker access granted by the selected Profile. Unset values inherit the Profile.",
-        "disableImageBuild": "Disable Docker image builds",
-        "disableContainerRun": "Disable Docker containers",
-        "disableCompose": "Disable Docker Compose",
-        "nestedContainerLimits": "Nested container limits",
-        "optionalRestrictionDescription": "Set only the values this Workspace needs to reduce.",
-        "aggregatePidLimit": "Aggregate PID limit",
-        "containerCountLimit": "Container count limit",
+        "disableDocker": "Disable Docker",
         "inheritWhenEmpty": "Leave empty to inherit the Profile value.",
-        "pidPlaceholder": "e.g. 256",
-        "containerPlaceholder": "e.g. 4",
         "dockerStoragePolicy": "Docker storage policy",
         "dockerStorageDescription": "Keep the Profile setting or further restrict temporary Docker data.",
         "inheritProfile": "Inherit from Profile",
@@ -1603,20 +1595,7 @@
         "persistentStorageDescription": "PVC expansions apply automatically. Smaller values take effect after the PVC is deleted and recreated.",
         "persistentPlaceholder": "e.g. 20",
         "unit": "Unit",
-        "storageNone": "Disable Docker storage",
-        "storageEphemeral": "Temporary storage",
-        "networkTitle": "Outbound network access",
-        "networkDescription": "Add a Workspace restriction to the outbound access granted by the Profile.",
-        "accessPolicy": "Access policy",
-        "networkNone": "System traffic only",
-        "networkRestricted": "Allowlist (selected IP ranges)",
-        "networkDirect": "All IP addresses",
-        "allowedIpRanges": "Allowed IP ranges (CIDR)",
-        "blockedIpRanges": "Blocked IP ranges (CIDR)",
-        "cidrDescription": "One IPv4 or IPv6 CIDR per line. Hostnames and URLs are not accepted.",
-        "blockedCidrDescription": "Traffic to these ranges is blocked even when otherwise allowed.",
-        "allowedCidrPlaceholder": "140.82.112.0/20\n2606:50c0::/32",
-        "blockedCidrPlaceholder": "10.0.0.0/8\nfd00::/8"
+        "storageEphemeral": "Temporary storage"
       },
       "workspacePage": {
         "title": "Runtime execution",
@@ -1727,22 +1706,15 @@
           "runtime_failure": "The Runtime reported an operational failure. Reference code: {code}"
         },
         "fieldLabels": {
-          "imageBuild": "Build Docker images",
-          "containerRun": "Run Docker containers",
-          "compose": "Use Docker Compose",
+          "docker": "Docker",
           "cpuRequest": "CPU request",
           "cpuLimit": "CPU limit",
           "memoryRequest": "Memory request",
           "memoryLimit": "Memory limit",
-          "pidLimit": "Aggregate PID limit",
-          "containerCount": "Container count limit",
           "ephemeralStorage": "Runtime ephemeral storage",
           "persistentStorage": "Persistent workspace storage",
           "dockerStoragePolicy": "Temporary Docker storage policy",
-          "dockerStorageCapacity": "Temporary Docker storage capacity",
-          "networkPolicy": "Outbound network access",
-          "allowedIpRanges": "Allowed IP ranges",
-          "blockedIpRanges": "Blocked IP ranges"
+          "dockerStorageCapacity": "Temporary Docker storage capacity"
         },
         "layerLabels": {
           "profile": "Profile",
@@ -1750,9 +1722,7 @@
           "agent": "Agent settings"
         },
         "capabilityLabels": {
-          "imageBuild": "Build images",
-          "containerRun": "Run containers",
-          "compose": "Docker Compose"
+          "docker": "Docker"
         },
         "storageModes": {
           "none": "No temporary Docker storage",

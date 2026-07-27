@@ -52,7 +52,7 @@ def test_audit_response_does_not_serialize_metadata_payload() -> None:
         target_id="profile-1",
         correlation_id="correlation-1",
         classification=RuntimeExecutionChangeDirection.RESTRICTIVE,
-        changed_paths=("container_run.enabled",),
+        changed_paths=("docker.enabled",),
         impact_counts={"agents": 1},
         reason_code="operator_replace",
         outcome_code="applied",

@@ -45,7 +45,6 @@ jobs:
               - '.pre-commit-config.yaml'
               - 'proto/**'
               - 'python/apps/azents/**'
-              - 'python/apps/azents-container-policy-gateway/**'
               - 'python/apps/azents-runtime-provider-docker/**'
               - 'python/apps/azents-runtime-provider-kubernetes/**'
               - 'python/apps/azents-runtime-runner/**'
@@ -57,7 +56,6 @@ jobs:
               - 'docker-compose.azents.yaml'
               - 'proto/**'
               - 'python/apps/azents/**'
-              - 'python/apps/azents-container-policy-gateway/**'
               - 'python/apps/azents-runtime-provider-docker/**'
               - 'python/apps/azents-runtime-provider-kubernetes/**'
               - 'python/apps/azents-runtime-runner/**'
@@ -104,7 +102,6 @@ jobs:
               - 'images/**'
               - 'proto/**'
               - 'python/apps/azents/**'
-              - 'python/apps/azents-container-policy-gateway/**'
               - 'python/apps/azents-runtime-provider-docker/**'
               - 'python/apps/azents-runtime-provider-kubernetes/**'
               - 'python/apps/azents-runtime-runner/**'
@@ -148,7 +145,6 @@ jobs:
           - python/libs/az-common
           - python/libs/azents-runtime-control
           - python/apps/azents
-          - python/apps/azents-container-policy-gateway
           - python/apps/azents-runtime-runner
           - python/apps/azents-runtime-provider-kubernetes
           - python/apps/azents-runtime-provider-docker
@@ -247,6 +243,8 @@ jobs:
         run: |
           cd testenv/azents/e2e
           uv run pyright .
+      - name: Verify Runtime Docker workflows
+        run: python testenv/azents/scripts/verify-runtime-docker.py
       - name: Run deterministic E2E
         run: |
           cd testenv/azents/e2e
@@ -485,10 +483,6 @@ jobs:
             dockerfile: python/apps/azents-runtime-runner/Dockerfile
             image: azents-runtime-runner:ci
             extra_context: ""
-          - name: azents-container-policy-gateway
-            dockerfile: python/apps/azents-container-policy-gateway/Dockerfile
-            image: azents-container-policy-gateway:ci
-            extra_context: ""
           - name: azents-runtime-engine
             dockerfile: images/azents-runtime-engine/Dockerfile
             image: azents-runtime-engine:ci
@@ -525,12 +519,6 @@ jobs:
                 'docker --version | grep -F "Docker version 28.5.2" &&
                  docker compose version | grep -F "Docker Compose version v2.40.3" &&
                  test ! -e /var/run/azents-engine/docker.sock'
-              ;;
-            azents-container-policy-gateway)
-              docker run --rm \
-                --entrypoint /workspace/python/apps/azents-container-policy-gateway/.venv/bin/python \
-                "${{ matrix.image }}" \
-                -c 'import azents_container_policy_gateway'
               ;;
             azents-runtime-engine)
               docker run --rm --entrypoint dockerd "${{ matrix.image }}" --version \

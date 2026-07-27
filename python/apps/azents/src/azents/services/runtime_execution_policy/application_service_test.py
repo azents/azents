@@ -19,12 +19,10 @@ from azents.core.enums import (
 )
 from azents.core.runtime_execution_policy import (
     RuntimeExecutionAvailabilityReason,
-    RuntimeExecutionBooleanModule,
     RuntimeExecutionChangeDirection,
+    RuntimeExecutionDockerModule,
     RuntimeExecutionModuleId,
     RuntimeExecutionModuleSupport,
-    RuntimeExecutionNetworkMode,
-    RuntimeExecutionNetworkModule,
     RuntimeExecutionPolicyStatus,
     RuntimeExecutionProfileLifecycle,
     RuntimeExecutionProviderCapabilities,
@@ -58,44 +56,46 @@ _NOW = datetime.datetime.now(datetime.timezone.utc)
 
 
 def _legacy_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
-    """Model the accepted pre-engine Provider boundary used by legacy tests."""
+    """Model a Provider that supports only the Standard Profile."""
     return RuntimeExecutionProviderCapabilities(
-        supported_modules=frozenset(
-            RuntimeExecutionModuleSupport(module_id=module_id, version=1)
-            for module_id in RuntimeExecutionModuleId
-        ),
-        privileged_engine=False,
+        supported_modules=frozenset(),
         storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
-        network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
         resource_maxima=None,
     )
 
 
 def _direct_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
-    """Model an accepted typed Provider that supports direct networking."""
-    legacy = _legacy_provider_capabilities()
-    return legacy.model_copy(
-        update={
-            "network_modes": frozenset(
-                {RuntimeExecutionNetworkMode.NONE, RuntimeExecutionNetworkMode.DIRECT}
+    """Model a Provider that supports Kubernetes Runtime resources."""
+    return RuntimeExecutionProviderCapabilities(
+        supported_modules=frozenset(
+            (
+                RuntimeExecutionModuleSupport(
+                    module_id=RuntimeExecutionModuleId.RESOURCES, version=1
+                ),
             )
-        }
+        ),
+        storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
+        resource_maxima=None,
     )
 
 
 def _engine_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
     """Model a Provider that supports temporary Docker storage."""
-    direct = _direct_provider_capabilities()
-    return direct.model_copy(
-        update={
-            "privileged_engine": True,
-            "storage_modes": frozenset(
-                {
-                    RuntimeExecutionStorageMode.NONE,
-                    RuntimeExecutionStorageMode.EPHEMERAL,
-                }
-            ),
-        }
+    return RuntimeExecutionProviderCapabilities(
+        supported_modules=frozenset(
+            (
+                RuntimeExecutionModuleSupport(
+                    module_id=RuntimeExecutionModuleId.DOCKER, version=1
+                ),
+                RuntimeExecutionModuleSupport(
+                    module_id=RuntimeExecutionModuleId.RESOURCES, version=1
+                ),
+            )
+        ),
+        storage_modes=frozenset(
+            {RuntimeExecutionStorageMode.NONE, RuntimeExecutionStorageMode.EPHEMERAL}
+        ),
+        resource_maxima=None,
     )
 
 
@@ -327,16 +327,24 @@ def _upper_layer_change_resolved(
 
 
 def _storage_expansion_resolved() -> _ResolvedRuntimePolicy:
-    """Return a Runtime whose only remaining change expands Docker storage."""
-    applied_policy = standard_runtime_execution_policy()
+    """Return a Runtime whose remaining change enables Docker authority."""
+    standard = standard_runtime_execution_policy()
+    applied_policy = standard.model_copy(
+        update={
+            "resources": standard.resources.model_copy(
+                update={"ephemeral_storage_bytes": 17_179_869_184}
+            )
+        }
+    )
     current_policy = applied_policy.model_copy(
         update={
-            "engine_storage": applied_policy.engine_storage.model_copy(
-                update={
-                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
-                    "capacity_bytes": 17_179_869_184,
-                }
-            )
+            "docker": RuntimeExecutionDockerModule(
+                module_id=RuntimeExecutionModuleId.DOCKER,
+                version=1,
+                enabled=True,
+                storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+                storage_capacity_bytes=17_179_869_184,
+            ),
         }
     )
     source_versions = RuntimeExecutionSourceVersions(
@@ -547,23 +555,20 @@ def test_status_projection_marks_snapshot_divergence() -> None:
 async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> None:
     """Runtime resolution consumes typed authority from the accepted contract."""
     base = standard_runtime_execution_policy()
-    engine_policy = base.model_copy(
+    docker_policy = base.model_copy(
         update={
-            "image_build": base.image_build.model_copy(update={"enabled": True}),
-            "container_run": base.container_run.model_copy(update={"enabled": True}),
+            "docker": RuntimeExecutionDockerModule(
+                module_id=RuntimeExecutionModuleId.DOCKER,
+                version=1,
+                enabled=True,
+                storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+                storage_capacity_bytes=8_589_934_592,
+            ),
             "resources": base.resources.model_copy(
                 update={
                     "cpu_limit_millicores": 1_000,
                     "memory_limit_bytes": 1_073_741_824,
-                    "pids": 256,
-                    "container_count": 8,
                     "ephemeral_storage_bytes": 8_589_934_592,
-                }
-            ),
-            "engine_storage": base.engine_storage.model_copy(
-                update={
-                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
-                    "capacity_bytes": 8_589_934_592,
                 }
             ),
         }
@@ -574,8 +579,8 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
         description="Qualified engine profile",
         lifecycle=RuntimeExecutionProfileLifecycle.ACTIVE,
         version=1,
-        policy=engine_policy,
-        digest=digest_runtime_execution_policy(engine_policy),
+        policy=docker_policy,
+        digest=digest_runtime_execution_policy(docker_policy),
         reserved=False,
         system_key=None,
         updated_by_user_id=None,
@@ -629,9 +634,7 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
                 }
                 for module_id in RuntimeExecutionModuleId
             ],
-            "privileged_engine": True,
             "storage_modes": ["none", "ephemeral"],
-            "network_modes": ["none", "direct"],
             "resource_maxima": None,
         },
     }
@@ -663,8 +666,7 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
 
     assert resolved.resolution.available
     assert resolved.accepted_contract_revision_id == "contract-2"
-    assert resolved.provider_compatibility["authority_bearing_policy_supported"]
-    assert resolved.provider_compatibility["network_modes"] == ["direct", "none"]
+    assert resolved.provider_compatibility["docker_supported"]
 
 
 async def test_status_read_uses_read_resolver_without_target_mutation() -> None:
@@ -1012,28 +1014,32 @@ def test_mixed_convergence_copies_only_restrictive_fields() -> None:
     standard = standard_runtime_execution_policy()
     applied = standard.model_copy(
         update={
-            "image_build": RuntimeExecutionBooleanModule(
-                module_id=RuntimeExecutionModuleId.IMAGE_BUILD,
+            "docker": RuntimeExecutionDockerModule(
+                module_id=RuntimeExecutionModuleId.DOCKER,
                 version=1,
                 enabled=True,
+                storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+                storage_capacity_bytes=8_589_934_592,
             ),
-            "network_egress": RuntimeExecutionNetworkModule(
-                module_id=RuntimeExecutionModuleId.NETWORK_EGRESS,
-                version=1,
-                mode=RuntimeExecutionNetworkMode.NONE,
-                allowed_destinations=frozenset(),
-                denied_destinations=frozenset(),
+            "resources": standard.resources.model_copy(
+                update={"ephemeral_storage_bytes": 8_589_934_592}
             ),
         }
     )
-    current = standard
+    current = standard.model_copy(
+        update={
+            "resources": standard.resources.model_copy(
+                update={"cpu_limit_millicores": 1_000}
+            )
+        }
+    )
     change = classify_runtime_execution_change(applied, current)
     assert change.direction is RuntimeExecutionChangeDirection.MIXED
 
     projected = _restrictive_projection(applied, current)
 
-    assert projected.image_build.enabled is False
-    assert projected.network_egress.mode is RuntimeExecutionNetworkMode.NONE
+    assert projected.docker.enabled is False
+    assert projected.resources.cpu_limit_millicores == 1_000
 
 
 def test_restrictive_projection_keeps_storage_mode_and_capacity_atomic() -> None:
@@ -1041,41 +1047,22 @@ def test_restrictive_projection_keeps_storage_mode_and_capacity_atomic() -> None
     standard = standard_runtime_execution_policy()
     applied = standard.model_copy(
         update={
-            "engine_storage": standard.engine_storage.model_copy(
-                update={
-                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
-                    "capacity_bytes": 17_179_869_184,
-                }
-            )
+            "docker": RuntimeExecutionDockerModule(
+                module_id=RuntimeExecutionModuleId.DOCKER,
+                version=1,
+                enabled=True,
+                storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+                storage_capacity_bytes=17_179_869_184,
+            ),
+            "resources": standard.resources.model_copy(
+                update={"ephemeral_storage_bytes": 17_179_869_184}
+            ),
         }
     )
     projected = _restrictive_projection(applied, standard)
 
-    assert projected.engine_storage.mode is RuntimeExecutionStorageMode.NONE
-    assert projected.engine_storage.capacity_bytes is None
-
-
-def test_restrictive_projection_keeps_network_mode_and_ranges_atomic() -> None:
-    """No-egress projection cannot retain an older direct-mode allow range."""
-    standard = standard_runtime_execution_policy()
-    applied = standard.model_copy(
-        update={
-            "network_egress": standard.network_egress.model_copy(
-                update={"allowed_destinations": frozenset({"0.0.0.0/0"})}
-            )
-        }
-    )
-    current = standard.model_copy(
-        update={
-            "network_egress": standard.network_egress.model_copy(
-                update={"mode": RuntimeExecutionNetworkMode.NONE}
-            )
-        }
-    )
-    projected = _restrictive_projection(applied, current)
-
-    assert projected.network_egress.mode is RuntimeExecutionNetworkMode.NONE
-    assert projected.network_egress.allowed_destinations == frozenset()
+    assert projected.docker.storage_mode is RuntimeExecutionStorageMode.NONE
+    assert projected.docker.storage_capacity_bytes is None
 
 
 def test_restrictive_projection_keeps_request_within_new_limit() -> None:
@@ -1106,13 +1093,17 @@ def test_restrictive_projection_does_not_split_expanding_storage_module() -> Non
     applied = standard_runtime_execution_policy()
     current = applied.model_copy(
         update={
-            "resources": applied.resources.model_copy(
-                update={"cpu_limit_millicores": 1_000}
+            "docker": RuntimeExecutionDockerModule(
+                module_id=RuntimeExecutionModuleId.DOCKER,
+                version=1,
+                enabled=True,
+                storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+                storage_capacity_bytes=17_179_869_184,
             ),
-            "engine_storage": applied.engine_storage.model_copy(
+            "resources": applied.resources.model_copy(
                 update={
-                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
-                    "capacity_bytes": 17_179_869_184,
+                    "cpu_limit_millicores": 1_000,
+                    "ephemeral_storage_bytes": 17_179_869_184,
                 }
             ),
         }
@@ -1123,20 +1114,33 @@ def test_restrictive_projection_does_not_split_expanding_storage_module() -> Non
     projected = _restrictive_projection(applied, current)
 
     assert projected.resources.cpu_limit_millicores == 1_000
-    assert projected.engine_storage.mode is RuntimeExecutionStorageMode.NONE
-    assert projected.engine_storage.capacity_bytes is None
+    assert projected.docker.storage_mode is RuntimeExecutionStorageMode.NONE
+    assert projected.docker.storage_capacity_bytes is None
 
 
-def test_legacy_capabilities_cannot_grant_engine_or_network_authority() -> None:
+def test_standard_only_capabilities_cannot_grant_docker_authority() -> None:
     capabilities = _legacy_provider_capabilities()
 
-    assert not capabilities.privileged_engine
+    assert capabilities.supported_modules == frozenset()
     assert capabilities.storage_modes == {RuntimeExecutionStorageMode.NONE}
-    assert capabilities.network_modes == {RuntimeExecutionNetworkMode.NONE}
 
     standard = standard_runtime_execution_policy()
+    docker_policy = standard.model_copy(
+        update={
+            "docker": RuntimeExecutionDockerModule(
+                module_id=RuntimeExecutionModuleId.DOCKER,
+                version=1,
+                enabled=True,
+                storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+                storage_capacity_bytes=8_589_934_592,
+            ),
+            "resources": standard.resources.model_copy(
+                update={"ephemeral_storage_bytes": 8_589_934_592}
+            ),
+        }
+    )
     resolution = resolve_runtime_execution_policy(
-        profile_policy=standard,
+        profile_policy=docker_policy,
         workspace_restriction=empty_runtime_execution_restriction(),
         agent_restriction=empty_runtime_execution_restriction(),
         source_versions=RuntimeExecutionSourceVersions(
@@ -1153,5 +1157,5 @@ def test_legacy_capabilities_cannot_grant_engine_or_network_authority() -> None:
     assert not resolution.available
     assert (
         resolution.availability_reason
-        is RuntimeExecutionAvailabilityReason.PROVIDER_NETWORK_UNSUPPORTED
+        is RuntimeExecutionAvailabilityReason.PROVIDER_MODULE_UNSUPPORTED
     )

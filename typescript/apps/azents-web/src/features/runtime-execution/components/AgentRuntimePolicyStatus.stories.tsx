@@ -7,19 +7,14 @@ const configured: AgentRuntimeExecutionPolicyStatusResponse = {
   configured: {
     profile_id: "standard",
     digest: "configured-digest-0123456789",
-    capabilities: [
-      { module_id: "container.image_build", version: 1, enabled: false },
-      { module_id: "container.run", version: 1, enabled: true },
-      { module_id: "container.compose", version: 1, enabled: false },
-    ],
+    capabilities: [{ module_id: "docker", version: 1, enabled: true }],
     storage_mode: "ephemeral",
     storage_capacity_bytes: 10_737_418_240,
-    network_mode: "restricted",
   },
   target: null,
   applied: null,
   desired_generation: 3,
-  governing_layers: { "container.image_build.enabled": "workspace" },
+  governing_layers: { "docker.enabled": "workspace" },
   reason_codes: ["explicit_apply_required"],
   required_action: "apply",
 };

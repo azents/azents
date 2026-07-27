@@ -21,7 +21,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-26 | 12 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-27 | 12 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-28 | 13 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-23 | 4 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-26 | 75 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
@@ -32,8 +32,8 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-27 | 135 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-27 | 37 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-27 | 10 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-28 | 38 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-28 | 11 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
@@ -129,6 +129,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
 | [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
+| [Complete Runtime Docker Access Requirements](requirements/docker-260728-runtime-docker-access.md) | docker-260728 | 2026-07-28 | 2026-07-28 |
 | [Use Documented OpenAI Responses Terminal Discriminators Historical Requirements Reconstruction](requirements/documented-260716-documented-openai-responses-terminal-discriminators.md) | documented-260716 | 2026-07-16 | - |
 | [Draft Agent Session First Message Creation Historical Requirements Reconstruction](requirements/draft-260628-draft-message.md) | draft-260628 | 2026-06-28 | - |
 | [Drain Input Buffers Sequentially Before Turn Start Historical Requirements Reconstruction](requirements/drain-260712-drain-input-buffers-before-turn-start.md) | drain-260712 | 2026-07-12 | - |
@@ -469,6 +470,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 - [DockerAgentHomeClient sandbox-daemon Sidecar Historical Decision Reconstruction](adr/docker-260409-docker-home-sidecar.md)
 - [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)
+- [Complete Runtime Docker Access](adr/docker-260728-runtime-docker-access.md)
 - [Use Documented OpenAI Responses Terminal Discriminators](adr/documented-260716-documented-openai-responses-terminal-discriminators.md)
 - [Draft Agent Session First Message Creation Historical Decision Reconstruction](adr/draft-260628-draft-message.md)
 - [Drain Input Buffers Sequentially Before Turn Start](adr/drain-260712-drain-input-buffers-before-turn-start.md)

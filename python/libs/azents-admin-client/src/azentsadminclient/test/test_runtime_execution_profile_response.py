@@ -42,41 +42,21 @@ class TestRuntimeExecutionProfileResponse(unittest.TestCase):
                 version = 56,
                 policy = azentsadminclient.models.runtime_execution_policy_document.RuntimeExecutionPolicyDocument(
                     schema_version = 1, 
-                    image_build = azentsadminclient.models.runtime_execution_boolean_module.RuntimeExecutionBooleanModule(
-                        module_id = 'container.image_build', 
+                    docker = azentsadminclient.models.runtime_execution_docker_module.RuntimeExecutionDockerModule(
+                        module_id = 'docker', 
                         version = 1, 
-                        enabled = True, ), 
-                    container_run = azentsadminclient.models.runtime_execution_boolean_module.RuntimeExecutionBooleanModule(
-                        module_id = 'container.image_build', 
-                        version = 1, 
-                        enabled = True, ), 
-                    compose = , 
+                        enabled = True, 
+                        storage_mode = 'none', 
+                        storage_capacity_bytes = 1.0, ), 
                     resources = azentsadminclient.models.runtime_execution_resource_module.RuntimeExecutionResourceModule(
-                        module_id = 'container.resources', 
+                        module_id = 'runtime.resources', 
                         version = 1, 
                         cpu_request_millicores = 1.0, 
                         cpu_limit_millicores = 1.0, 
                         memory_request_bytes = 1.0, 
                         memory_limit_bytes = 1.0, 
-                        pids = 1.0, 
-                        container_count = 1.0, 
                         ephemeral_storage_bytes = 1.0, 
-                        persistent_storage_bytes = 1.0, ), 
-                    engine_storage = azentsadminclient.models.runtime_execution_storage_module.RuntimeExecutionStorageModule(
-                        module_id = 'engine.storage', 
-                        version = 1, 
-                        mode = 'none', 
-                        capacity_bytes = 1.0, ), 
-                    network_egress = azentsadminclient.models.runtime_execution_network_module.RuntimeExecutionNetworkModule(
-                        module_id = 'network.egress', 
-                        version = 1, 
-                        mode = 'none', 
-                        allowed_destinations = [
-                            '0'
-                            ], 
-                        denied_destinations = [
-                            '0'
-                            ], ), ),
+                        persistent_storage_bytes = 1.0, ), ),
                 digest = '',
                 reserved = True,
                 system_key = '',
@@ -93,41 +73,21 @@ class TestRuntimeExecutionProfileResponse(unittest.TestCase):
                 version = 56,
                 policy = azentsadminclient.models.runtime_execution_policy_document.RuntimeExecutionPolicyDocument(
                     schema_version = 1, 
-                    image_build = azentsadminclient.models.runtime_execution_boolean_module.RuntimeExecutionBooleanModule(
-                        module_id = 'container.image_build', 
+                    docker = azentsadminclient.models.runtime_execution_docker_module.RuntimeExecutionDockerModule(
+                        module_id = 'docker', 
                         version = 1, 
-                        enabled = True, ), 
-                    container_run = azentsadminclient.models.runtime_execution_boolean_module.RuntimeExecutionBooleanModule(
-                        module_id = 'container.image_build', 
-                        version = 1, 
-                        enabled = True, ), 
-                    compose = , 
+                        enabled = True, 
+                        storage_mode = 'none', 
+                        storage_capacity_bytes = 1.0, ), 
                     resources = azentsadminclient.models.runtime_execution_resource_module.RuntimeExecutionResourceModule(
-                        module_id = 'container.resources', 
+                        module_id = 'runtime.resources', 
                         version = 1, 
                         cpu_request_millicores = 1.0, 
                         cpu_limit_millicores = 1.0, 
                         memory_request_bytes = 1.0, 
                         memory_limit_bytes = 1.0, 
-                        pids = 1.0, 
-                        container_count = 1.0, 
                         ephemeral_storage_bytes = 1.0, 
-                        persistent_storage_bytes = 1.0, ), 
-                    engine_storage = azentsadminclient.models.runtime_execution_storage_module.RuntimeExecutionStorageModule(
-                        module_id = 'engine.storage', 
-                        version = 1, 
-                        mode = 'none', 
-                        capacity_bytes = 1.0, ), 
-                    network_egress = azentsadminclient.models.runtime_execution_network_module.RuntimeExecutionNetworkModule(
-                        module_id = 'network.egress', 
-                        version = 1, 
-                        mode = 'none', 
-                        allowed_destinations = [
-                            '0'
-                            ], 
-                        denied_destinations = [
-                            '0'
-                            ], ), ),
+                        persistent_storage_bytes = 1.0, ), ),
                 digest = '',
                 reserved = True,
                 system_key = '',

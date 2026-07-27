@@ -1571,16 +1571,8 @@
       "restrictions": {
         "dockerTitle": "Docker",
         "dockerDescription": "Ajoutez des restrictions Workspace aux fonctions Docker autorisées par le Profile. Les valeurs vides héritent du Profile.",
-        "disableImageBuild": "Désactiver la création d’images Docker",
-        "disableContainerRun": "Désactiver les conteneurs Docker",
-        "disableCompose": "Désactiver Docker Compose",
-        "nestedContainerLimits": "Limites des conteneurs imbriqués",
-        "optionalRestrictionDescription": "Renseignez uniquement les valeurs que ce Workspace doit réduire.",
-        "aggregatePidLimit": "PID Limit agrégée",
-        "containerCountLimit": "Limit du nombre de conteneurs",
+        "disableDocker": "Désactiver Docker",
         "inheritWhenEmpty": "Laissez vide pour hériter de la valeur du Profile.",
-        "pidPlaceholder": "ex. 256",
-        "containerPlaceholder": "ex. 4",
         "dockerStoragePolicy": "Politique de stockage Docker",
         "dockerStorageDescription": "Conservez le réglage du Profile ou limitez davantage les données Docker temporaires.",
         "inheritProfile": "Hériter du Profile",
@@ -1603,20 +1595,7 @@
         "persistentStorageDescription": "L’agrandissement du PVC est automatique. Une réduction s’applique après suppression et recréation du PVC.",
         "persistentPlaceholder": "ex. 20",
         "unit": "Unité",
-        "storageNone": "Désactiver le stockage Docker",
-        "storageEphemeral": "Stockage temporaire",
-        "networkTitle": "Outbound network access",
-        "networkDescription": "Ajoutez une restriction Workspace à l’outbound access autorisé par le Profile.",
-        "accessPolicy": "Access policy",
-        "networkNone": "System traffic only",
-        "networkRestricted": "Allowlist (plages IP sélectionnées)",
-        "networkDirect": "Toutes les adresses IP",
-        "allowedIpRanges": "Plages IP autorisées (CIDR)",
-        "blockedIpRanges": "Plages IP bloquées (CIDR)",
-        "cidrDescription": "Un CIDR IPv4 ou IPv6 par ligne. Les hostnames et URL ne sont pas acceptés.",
-        "blockedCidrDescription": "Le traffic vers ces plages reste bloqué même s’il est autorisé ailleurs.",
-        "allowedCidrPlaceholder": "140.82.112.0/20\n2606:50c0::/32",
-        "blockedCidrPlaceholder": "10.0.0.0/8\nfd00::/8"
+        "storageEphemeral": "Stockage temporaire"
       },
       "workspacePage": {
         "title": "Exécution du runtime",
@@ -1727,22 +1706,15 @@
           "runtime_failure": "L'opération Runtime a échoué. Code de référence : {code}"
         },
         "fieldLabels": {
-          "imageBuild": "Créer des images Docker",
-          "containerRun": "Exécuter des conteneurs Docker",
-          "compose": "Utiliser Docker Compose",
+          "docker": "Docker",
           "cpuRequest": "CPU Request",
           "cpuLimit": "CPU Limit",
           "memoryRequest": "Memory Request",
           "memoryLimit": "Memory Limit",
-          "pidLimit": "Limite totale de PID",
-          "containerCount": "Limite du nombre de conteneurs",
           "ephemeralStorage": "Stockage temporaire du Runtime",
           "persistentStorage": "Stockage persistant du Workspace",
           "dockerStoragePolicy": "Politique de stockage Docker temporaire",
-          "dockerStorageCapacity": "Capacité du stockage Docker temporaire",
-          "networkPolicy": "Accès réseau outbound",
-          "allowedIpRanges": "Plages IP autorisées",
-          "blockedIpRanges": "Plages IP bloquées"
+          "dockerStorageCapacity": "Capacité du stockage Docker temporaire"
         },
         "layerLabels": {
           "profile": "Profile",
@@ -1750,9 +1722,7 @@
           "agent": "Réglages de l’Agent"
         },
         "capabilityLabels": {
-          "imageBuild": "Créer des images",
-          "containerRun": "Exécuter des conteneurs",
-          "compose": "Docker Compose"
+          "docker": "Docker"
         },
         "storageModes": {
           "none": "Aucun stockage Docker temporaire",

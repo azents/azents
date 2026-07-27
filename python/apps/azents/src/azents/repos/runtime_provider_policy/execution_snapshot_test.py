@@ -112,7 +112,7 @@ def test_snapshot_evidence_requires_exact_digest_generation_and_versions() -> No
     )
     assert not _snapshot_evidence_matches(
         snapshot,
-        _evidence(module_versions={"container.run": 2}),
+        _evidence(module_versions={"docker": 2}),
     )
 
 

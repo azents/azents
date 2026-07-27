@@ -17,28 +17,29 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentsadminclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode
 from typing import Optional, Set
 from typing_extensions import Self
 
-class RuntimeExecutionStorageModule(BaseModel):
+class RuntimeExecutionDockerModule(BaseModel):
     """
-    Nested-engine storage mode and capacity ceiling.
+    Complete Docker capability and its private data-volume lifecycle.
     """ # noqa: E501
     module_id: StrictStr
     version: StrictInt
-    mode: RuntimeExecutionStorageMode
-    capacity_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
-    __properties: ClassVar[List[str]] = ["module_id", "version", "mode", "capacity_bytes"]
+    enabled: StrictBool
+    storage_mode: RuntimeExecutionStorageMode
+    storage_capacity_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
+    __properties: ClassVar[List[str]] = ["module_id", "version", "enabled", "storage_mode", "storage_capacity_bytes"]
 
     @field_validator('module_id')
     def module_id_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['engine.storage']):
-            raise ValueError("must be one of enum values ('engine.storage')")
+        if value not in set(['docker']):
+            raise ValueError("must be one of enum values ('docker')")
         return value
 
     @field_validator('version')
@@ -66,7 +67,7 @@ class RuntimeExecutionStorageModule(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of RuntimeExecutionStorageModule from a JSON string"""
+        """Create an instance of RuntimeExecutionDockerModule from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -87,16 +88,16 @@ class RuntimeExecutionStorageModule(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # set to None if capacity_bytes (nullable) is None
+        # set to None if storage_capacity_bytes (nullable) is None
         # and model_fields_set contains the field
-        if self.capacity_bytes is None and "capacity_bytes" in self.model_fields_set:
-            _dict['capacity_bytes'] = None
+        if self.storage_capacity_bytes is None and "storage_capacity_bytes" in self.model_fields_set:
+            _dict['storage_capacity_bytes'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of RuntimeExecutionStorageModule from a dict"""
+        """Create an instance of RuntimeExecutionDockerModule from a dict"""
         if obj is None:
             return None
 
@@ -106,8 +107,9 @@ class RuntimeExecutionStorageModule(BaseModel):
         _obj = cls.model_validate({
             "module_id": obj.get("module_id"),
             "version": obj.get("version"),
-            "mode": obj.get("mode"),
-            "capacity_bytes": obj.get("capacity_bytes")
+            "enabled": obj.get("enabled"),
+            "storage_mode": obj.get("storage_mode"),
+            "storage_capacity_bytes": obj.get("storage_capacity_bytes")
         })
         return _obj
 

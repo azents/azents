@@ -39,8 +39,6 @@ class TestRuntimeExecutionResourceRestriction(unittest.TestCase):
                 cpu_limit_millicores = 1.0,
                 memory_request_bytes = 1.0,
                 memory_limit_bytes = 1.0,
-                pids = 1.0,
-                container_count = 1.0,
                 ephemeral_storage_bytes = 1.0,
                 persistent_storage_bytes = 1.0
             )
@@ -50,8 +48,6 @@ class TestRuntimeExecutionResourceRestriction(unittest.TestCase):
                 cpu_limit_millicores = 1.0,
                 memory_request_bytes = 1.0,
                 memory_limit_bytes = 1.0,
-                pids = 1.0,
-                container_count = 1.0,
                 ephemeral_storage_bytes = 1.0,
                 persistent_storage_bytes = 1.0,
         )

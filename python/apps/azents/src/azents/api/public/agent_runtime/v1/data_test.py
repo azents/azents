@@ -5,7 +5,6 @@ from azents.api.public.agent_runtime.v1.data import (
 )
 from azents.core.runtime_execution_policy import (
     RuntimeExecutionModuleId,
-    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyLayer,
     RuntimeExecutionPolicyStatus,
     RuntimeExecutionRequiredAction,
@@ -22,17 +21,7 @@ from azents.services.runtime_execution_policy.application_service import (
 def _projection() -> RuntimeExecutionPolicyStatusProjection:
     capabilities = (
         RuntimeExecutionCapabilitySummary(
-            module_id=RuntimeExecutionModuleId.IMAGE_BUILD,
-            version=1,
-            enabled=False,
-        ),
-        RuntimeExecutionCapabilitySummary(
-            module_id=RuntimeExecutionModuleId.CONTAINER_RUN,
-            version=1,
-            enabled=False,
-        ),
-        RuntimeExecutionCapabilitySummary(
-            module_id=RuntimeExecutionModuleId.COMPOSE,
+            module_id=RuntimeExecutionModuleId.DOCKER,
             version=1,
             enabled=False,
         ),
@@ -43,7 +32,6 @@ def _projection() -> RuntimeExecutionPolicyStatusProjection:
         capabilities=capabilities,
         storage_mode=RuntimeExecutionStorageMode.NONE,
         storage_capacity_bytes=None,
-        network_mode=RuntimeExecutionNetworkMode.NONE,
     )
     applied = RuntimeExecutionSnapshotSummary(
         profile_id="system-standard",
@@ -52,7 +40,6 @@ def _projection() -> RuntimeExecutionPolicyStatusProjection:
         capabilities=capabilities,
         storage_mode=RuntimeExecutionStorageMode.NONE,
         storage_capacity_bytes=None,
-        network_mode=RuntimeExecutionNetworkMode.NONE,
     )
     return RuntimeExecutionPolicyStatusProjection(
         status=RuntimeExecutionPolicyStatus.APPLIED,
@@ -61,7 +48,7 @@ def _projection() -> RuntimeExecutionPolicyStatusProjection:
         applied=applied,
         desired_generation=3,
         governing_layers={
-            "image_build.enabled": RuntimeExecutionPolicyLayer.PROFILE,
+            "docker.enabled": RuntimeExecutionPolicyLayer.PROFILE,
         },
         reason_codes=(),
         required_action=RuntimeExecutionRequiredAction.NONE,

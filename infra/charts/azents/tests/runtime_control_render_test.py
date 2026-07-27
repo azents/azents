@@ -8,7 +8,6 @@ import pytest
 
 CHART_DIR = Path(__file__).resolve().parents[1]
 _RUNNER_DIGEST = f"sha256:{'a' * 64}"
-_GATEWAY_DIGEST = f"sha256:{'b' * 64}"
 _ENGINE_DIGEST = f"sha256:{'c' * 64}"
 _SERVER_DIGEST = f"sha256:{'d' * 64}"
 _WEB_DIGEST = f"sha256:{'e' * 64}"
@@ -28,9 +27,6 @@ def _helm_template(*values: str) -> str:
         "web.image.tag=sha",
         "adminWeb.image.repository=repo/admin-web",
         "adminWeb.image.tag=sha",
-        "runtimeProviderKubernetes.gatewayImage.repository=repo/gateway",
-        "runtimeProviderKubernetes.gatewayImage.tag=sha",
-        f"runtimeProviderKubernetes.gatewayImage.digest={_GATEWAY_DIGEST}",
         "runtimeProviderKubernetes.engineImage.repository=repo/engine",
         "runtimeProviderKubernetes.engineImage.tag=sha",
         f"runtimeProviderKubernetes.engineImage.digest={_ENGINE_DIGEST}",

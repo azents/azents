@@ -19,54 +19,28 @@ import type {
 } from "@azents/public-client";
 
 const capabilities: RuntimeExecutionManagementCapabilitiesResponse = {
-  image_build: false,
-  container_run: false,
-  compose: false,
+  docker: false,
   storage_modes: ["none"],
-  network_modes: ["none"],
 };
 
 const policy: RuntimeExecutionPolicyDocument = {
   schema_version: 1,
-  image_build: {
-    module_id: "container.image_build",
+  docker: {
+    module_id: "docker",
     version: 1,
     enabled: false,
-  },
-  container_run: {
-    module_id: "container.run",
-    version: 1,
-    enabled: false,
-  },
-  compose: {
-    module_id: "container.compose",
-    version: 1,
-    enabled: false,
+    storage_mode: "none",
+    storage_capacity_bytes: null,
   },
   resources: {
-    module_id: "container.resources",
+    module_id: "runtime.resources",
     version: 1,
     cpu_request_millicores: null,
     cpu_limit_millicores: null,
     memory_request_bytes: null,
     memory_limit_bytes: null,
-    pids: null,
-    container_count: null,
     ephemeral_storage_bytes: null,
     persistent_storage_bytes: null,
-  },
-  engine_storage: {
-    module_id: "engine.storage",
-    version: 1,
-    mode: "none",
-    capacity_bytes: null,
-  },
-  network_egress: {
-    module_id: "network.egress",
-    version: 1,
-    mode: "none",
-    allowed_destinations: [],
-    denied_destinations: [],
   },
 };
 
@@ -92,7 +66,6 @@ const configuredStatus: AgentRuntimeExecutionPolicyStatusResponse = {
     capabilities: [],
     storage_mode: "none",
     storage_capacity_bytes: null,
-    network_mode: "none",
   },
   target: null,
   applied: null,
@@ -102,7 +75,7 @@ const configuredStatus: AgentRuntimeExecutionPolicyStatusResponse = {
   required_action: "apply",
 };
 
-void test("workspace Runtime Execution edit visibility follows the workspace role", () => {
+void test("workspace edit visibility follows the Workspace role", () => {
   assert.equal(canEditWorkspaceRuntimeExecution("owner"), true);
   assert.equal(canEditWorkspaceRuntimeExecution("manager"), true);
   assert.equal(canEditWorkspaceRuntimeExecution("member"), false);
@@ -115,73 +88,39 @@ void test("Apply visibility follows only the server-required action", () => {
   assert.equal(canApplyRuntimeExecution("administrator_action"), false);
 });
 
-void test("server management capabilities reject unsupported authority", () => {
+void test("Provider capabilities gate complete Docker authority", () => {
   assert.equal(isRuntimeExecutionPolicySupported(policy, capabilities), true);
+  const dockerPolicy: RuntimeExecutionPolicyDocument = {
+    ...policy,
+    docker: {
+      ...policy.docker,
+      enabled: true,
+      storage_mode: "ephemeral",
+      storage_capacity_bytes: 16 * 1024 ** 3,
+    },
+  };
   assert.equal(
-    isRuntimeExecutionPolicySupported(
-      {
-        ...policy,
-        container_run: { ...policy.container_run, enabled: true },
-      },
-      capabilities,
-    ),
-    false,
-  );
-  assert.equal(
-    isRuntimeExecutionPolicySupported(
-      {
-        ...policy,
-        network_egress: { ...policy.network_egress, mode: "direct" },
-      },
-      capabilities,
-    ),
+    isRuntimeExecutionPolicySupported(dockerPolicy, capabilities),
     false,
   );
 });
 
-void test("workspace allowance permits supported blocked Profiles only", () => {
+void test("workspace allowance accepts only supported active Profiles", () => {
   assert.equal(
-    canAllowWorkspaceRuntimeExecutionProfile(
-      {
-        ...profile,
-        allowed: false,
-        available: false,
-        reason: "profile_not_allowed",
-      },
-      capabilities,
-    ),
+    canAllowWorkspaceRuntimeExecutionProfile(profile, capabilities),
     true,
   );
-  const unsupportedProfile = {
+  const retired = {
     ...profile,
-    id: "engine",
-    allowed: false,
-    available: false,
-    reason: "profile_not_allowed",
-    policy: {
-      ...policy,
-      container_run: { ...policy.container_run, enabled: true },
-    },
+    lifecycle: "retired",
   } satisfies WorkspaceRuntimeExecutionProfileResponse;
   assert.equal(
-    canAllowWorkspaceRuntimeExecutionProfile(unsupportedProfile, capabilities),
+    canAllowWorkspaceRuntimeExecutionProfile(retired, capabilities),
     false,
   );
   assert.equal(
-    canSaveWorkspaceRuntimeExecution(
-      [profile.id],
-      [profile, unsupportedProfile],
-      capabilities,
-    ),
+    canSaveWorkspaceRuntimeExecution([profile.id], [profile], capabilities),
     true,
-  );
-  assert.equal(
-    canSaveWorkspaceRuntimeExecution(
-      [unsupportedProfile.id],
-      [profile, unsupportedProfile],
-      capabilities,
-    ),
-    false,
   );
 });
 
@@ -189,7 +128,7 @@ void test("Agent save requires a server-available active Profile", () => {
   assert.equal(canSaveAgentRuntimeExecution(profile.id, [profile]), true);
   assert.equal(
     canSaveAgentRuntimeExecution(profile.id, [
-      { ...profile, available: false, reason: "provider_engine_unsupported" },
+      { ...profile, available: false, reason: "provider_module_unsupported" },
     ]),
     false,
   );
@@ -205,23 +144,11 @@ void test("status polling follows wait and stops at terminal actions", () => {
     }),
     RUNTIME_EXECUTION_STATUS_REFETCH_INTERVAL_MS,
   );
-  for (const requiredAction of [
-    "none",
-    "apply",
-    "administrator_action",
-  ] as const) {
-    assert.equal(
-      runtimeExecutionStatusRefetchInterval({
-        ...configuredStatus,
-        required_action: requiredAction,
-      }),
-      false,
-    );
-  }
+  assert.equal(runtimeExecutionStatusRefetchInterval(configuredStatus), false);
   assert.equal(runtimeExecutionStatusRefetchInterval(), false);
 });
 
-void test("every Runtime policy reason has a visible message fallback", () => {
+void test("unknown Runtime failures retain a visible fallback", () => {
   assert.equal(
     runtimePolicyReasonMessageKey("RUNTIME_POLICY_PROVIDER_EVIDENCE_MISMATCH"),
     "reasonExplanations.provider_evidence_mismatch",

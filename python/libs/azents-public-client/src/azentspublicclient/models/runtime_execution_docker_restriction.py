@@ -17,33 +17,31 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
+from azentspublicclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode
 from typing import Optional, Set
 from typing_extensions import Self
 
-class RuntimeExecutionBooleanModule(BaseModel):
+class RuntimeExecutionDockerRestriction(BaseModel):
     """
-    One versioned boolean execution capability module.
+    Optional lower-layer Docker authority narrowing.
     """ # noqa: E501
-    module_id: StrictStr
-    version: StrictInt
-    enabled: StrictBool
+    enabled: Optional[StrictBool]
+    storage_mode: Optional[RuntimeExecutionStorageMode]
+    storage_capacity_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["module_id", "version", "enabled"]
+    __properties: ClassVar[List[str]] = ["enabled", "storage_mode", "storage_capacity_bytes"]
 
-    @field_validator('module_id')
-    def module_id_validate_enum(cls, value):
+    @field_validator('enabled')
+    def enabled_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['container.image_build', 'container.run', 'container.compose']):
-            raise ValueError("must be one of enum values ('container.image_build', 'container.run', 'container.compose')")
-        return value
+        if value is None:
+            return value
 
-    @field_validator('version')
-    def version_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set([1]):
-            raise ValueError("must be one of enum values (1)")
+        if value not in set(['false']):
+            raise ValueError("must be one of enum values ('false')")
         return value
 
     model_config = ConfigDict(
@@ -64,7 +62,7 @@ class RuntimeExecutionBooleanModule(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of RuntimeExecutionBooleanModule from a JSON string"""
+        """Create an instance of RuntimeExecutionDockerRestriction from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -92,11 +90,26 @@ class RuntimeExecutionBooleanModule(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if enabled (nullable) is None
+        # and model_fields_set contains the field
+        if self.enabled is None and "enabled" in self.model_fields_set:
+            _dict['enabled'] = None
+
+        # set to None if storage_mode (nullable) is None
+        # and model_fields_set contains the field
+        if self.storage_mode is None and "storage_mode" in self.model_fields_set:
+            _dict['storage_mode'] = None
+
+        # set to None if storage_capacity_bytes (nullable) is None
+        # and model_fields_set contains the field
+        if self.storage_capacity_bytes is None and "storage_capacity_bytes" in self.model_fields_set:
+            _dict['storage_capacity_bytes'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of RuntimeExecutionBooleanModule from a dict"""
+        """Create an instance of RuntimeExecutionDockerRestriction from a dict"""
         if obj is None:
             return None
 
@@ -104,9 +117,9 @@ class RuntimeExecutionBooleanModule(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "module_id": obj.get("module_id"),
-            "version": obj.get("version"),
-            "enabled": obj.get("enabled")
+            "enabled": obj.get("enabled"),
+            "storage_mode": obj.get("storage_mode"),
+            "storage_capacity_bytes": obj.get("storage_capacity_bytes")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

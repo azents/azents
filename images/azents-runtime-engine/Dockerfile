@@ -4,6 +4,6 @@ LABEL io.azents.docker.api-version="1.51"
 LABEL io.azents.docker.engine-version="28.5.2"
 LABEL io.azents.runtime-engine.storage="ephemeral"
 
-RUN addgroup -g 1001 azents-gateway
+RUN addgroup -g 1000 azents-runner
 
 ENTRYPOINT ["dockerd"]

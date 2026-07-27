@@ -662,7 +662,7 @@ def _registration() -> RunnerRegistration:
             snapshot_id="snapshot-1",
             digest="d" * 64,
             desired_generation=5,
-            module_versions={"container.run": 1},
+            module_versions={"docker": 1, "runtime.resources": 1},
             source_versions={
                 "profile": 1,
                 "workspace": 1,

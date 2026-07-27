@@ -34,13 +34,10 @@ _STATUS_RESPONSE_OVERRIDE = r"""
       profile_id: "standard",
       digest: "configured-digest-0123456789",
       capabilities: [
-        { module_id: "container.image_build", version: 1, enabled: false },
-        { module_id: "container.run", version: 1, enabled: true },
-        { module_id: "container.compose", version: 1, enabled: false },
+        { module_id: "docker", version: 1, enabled: true },
       ],
       storage_mode: "ephemeral",
       storage_capacity_bytes: 10737418240,
-      network_mode: "restricted",
     },
     target: null,
     applied: null,
@@ -89,9 +86,8 @@ def _login_main_web(
     email_input = _wait(driver).until(ec.element_to_be_clickable((By.NAME, "email")))
     email_input.send_keys(email, Keys.ENTER)
     _wait(driver).until(ec.url_contains("/login/password"))
-    password_input = _wait(driver).until(
-        ec.element_to_be_clickable((By.NAME, "password"))
-    )
+    password_locator = (By.NAME, "password")
+    password_input = _wait(driver).until(ec.element_to_be_clickable(password_locator))
     password_input.send_keys(_SIGNUP_PASSWORD, Keys.ENTER)
     _wait(driver).until(ec.url_contains("/workspaces"))
 

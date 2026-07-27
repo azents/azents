@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from azents.core.runtime_execution_policy import (
     RuntimeExecutionModuleSupport,
-    RuntimeExecutionNetworkMode,
     RuntimeExecutionProviderCapabilities,
     RuntimeExecutionResourceModule,
     RuntimeExecutionStorageMode,
@@ -171,9 +170,7 @@ class RuntimeProviderExecutionPolicyContract(BaseModel):
 
     schema_version: Literal[1]
     supported_modules: set[RuntimeExecutionModuleSupport]
-    privileged_engine: bool
     storage_modes: set[RuntimeExecutionStorageMode]
-    network_modes: set[RuntimeExecutionNetworkMode]
     resource_maxima: RuntimeExecutionResourceModule | None
 
 
@@ -251,7 +248,6 @@ def canonicalize_runtime_provider_contract(
             key=lambda item: (item["module_id"], item["version"]),
         )
         execution_policy["storage_modes"] = sorted(execution_policy["storage_modes"])
-        execution_policy["network_modes"] = sorted(execution_policy["network_modes"])
     encoded = json.dumps(
         canonical_json,
         sort_keys=True,
@@ -273,15 +269,11 @@ def runtime_execution_capabilities_from_provider_contract(
     if execution_policy is None:
         return RuntimeExecutionProviderCapabilities(
             supported_modules=frozenset(),
-            privileged_engine=False,
             storage_modes=frozenset({RuntimeExecutionStorageMode.NONE}),
-            network_modes=frozenset({RuntimeExecutionNetworkMode.NONE}),
             resource_maxima=None,
         )
     return RuntimeExecutionProviderCapabilities(
         supported_modules=frozenset(execution_policy.supported_modules),
-        privileged_engine=execution_policy.privileged_engine,
         storage_modes=frozenset(execution_policy.storage_modes),
-        network_modes=frozenset(execution_policy.network_modes),
         resource_maxima=execution_policy.resource_maxima,
     )

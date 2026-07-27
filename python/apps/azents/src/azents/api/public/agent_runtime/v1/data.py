@@ -15,7 +15,6 @@ from azents.core.enums import (
 )
 from azents.core.runtime_execution_policy import (
     RuntimeExecutionModuleId,
-    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyLayer,
     RuntimeExecutionPolicyStatus,
     RuntimeExecutionRequiredAction,
@@ -84,7 +83,6 @@ class RuntimeExecutionConfiguredSummaryResponse(BaseModel):
     capabilities: list[RuntimeExecutionCapabilitySummaryResponse]
     storage_mode: RuntimeExecutionStorageMode
     storage_capacity_bytes: int | None
-    network_mode: RuntimeExecutionNetworkMode
 
     @classmethod
     def convert_from(cls, data: RuntimeExecutionConfiguredSummary) -> Self:
@@ -98,7 +96,6 @@ class RuntimeExecutionConfiguredSummaryResponse(BaseModel):
             ],
             storage_mode=data.storage_mode,
             storage_capacity_bytes=data.storage_capacity_bytes,
-            network_mode=data.network_mode,
         )
 
 
@@ -111,7 +108,6 @@ class RuntimeExecutionSnapshotSummaryResponse(BaseModel):
     capabilities: list[RuntimeExecutionCapabilitySummaryResponse]
     storage_mode: RuntimeExecutionStorageMode
     storage_capacity_bytes: int | None
-    network_mode: RuntimeExecutionNetworkMode
 
     @classmethod
     def convert_from(cls, data: RuntimeExecutionSnapshotSummary) -> Self:
@@ -126,7 +122,6 @@ class RuntimeExecutionSnapshotSummaryResponse(BaseModel):
             ],
             storage_mode=data.storage_mode,
             storage_capacity_bytes=data.storage_capacity_bytes,
-            network_mode=data.network_mode,
         )
 
 

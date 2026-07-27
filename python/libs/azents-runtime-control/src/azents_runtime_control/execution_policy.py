@@ -32,62 +32,40 @@ class RuntimeExecutionPolicyEnvelope:
 
 
 class RuntimeExecutionStorageMode(enum.StrEnum):
-    """Supported nested-engine storage lifecycle."""
+    """Supported Docker data-storage lifecycle."""
 
     NONE = "none"
     EPHEMERAL = "ephemeral"
     PERSISTENT = "persistent"
 
 
-class RuntimeExecutionNetworkMode(enum.StrEnum):
-    """Supported optional Runtime egress mode."""
-
-    NONE = "none"
-    RESTRICTED = "restricted"
-    DIRECT = "direct"
-
-
 @dataclasses.dataclass(frozen=True)
 class RuntimeExecutionResources:
-    """Typed Kubernetes and nested-container resources from one policy."""
+    """Typed Kubernetes Runtime resources from one policy."""
 
     cpu_request_millicores: int | None
     cpu_limit_millicores: int | None
     memory_request_bytes: int | None
     memory_limit_bytes: int | None
-    pids: int | None
-    container_count: int | None
     ephemeral_storage_bytes: int | None
     persistent_storage_bytes: int | None
 
 
 @dataclasses.dataclass(frozen=True)
-class RuntimeExecutionEngineStorage:
-    """Typed nested-engine storage policy."""
+class RuntimeExecutionDocker:
+    """Complete Docker authority and its private data-volume lifecycle."""
 
-    mode: RuntimeExecutionStorageMode
-    capacity_bytes: int | None
-
-
-@dataclasses.dataclass(frozen=True)
-class RuntimeExecutionNetworkEgress:
-    """Typed optional Runtime egress policy."""
-
-    mode: RuntimeExecutionNetworkMode
-    allowed_destinations: tuple[str, ...]
-    denied_destinations: tuple[str, ...]
+    enabled: bool
+    storage_mode: RuntimeExecutionStorageMode
+    storage_capacity_bytes: int | None
 
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeExecutionPolicy:
     """Complete typed execution policy consumed by Providers."""
 
-    image_build: bool
-    container_run: bool
-    compose: bool
+    docker: RuntimeExecutionDocker
     resources: RuntimeExecutionResources
-    engine_storage: RuntimeExecutionEngineStorage
-    network_egress: RuntimeExecutionNetworkEgress
 
 
 def digest_effective_policy(policy: Mapping[str, JsonValue]) -> str:
@@ -158,21 +136,15 @@ def validate_standard_execution_policy_envelope(
         envelope,
         desired_generation=desired_generation,
     )
-    if policy.image_build or policy.container_run or policy.compose:
+    if policy.docker.enabled:
         raise ValueError("Runtime execution policy grants unsupported authority.")
     if any(dataclasses.astuple(policy.resources)):
         raise ValueError("Runtime execution policy grants unsupported resources.")
     if (
-        policy.engine_storage.mode is not RuntimeExecutionStorageMode.NONE
-        or policy.engine_storage.capacity_bytes is not None
+        policy.docker.storage_mode is not RuntimeExecutionStorageMode.NONE
+        or policy.docker.storage_capacity_bytes is not None
     ):
         raise ValueError("Runtime execution policy grants unsupported storage.")
-    if (
-        policy.network_egress.mode is not RuntimeExecutionNetworkMode.NONE
-        or policy.network_egress.allowed_destinations
-        or policy.network_egress.denied_destinations
-    ):
-        raise ValueError("Runtime execution policy grants unsupported network access.")
 
 
 def parse_execution_policy_envelope(
@@ -188,12 +160,8 @@ def parse_execution_policy_envelope(
         )
     policy = effective_policy_from_json(envelope.effective_policy_json)
     expected_modules = {
-        "image_build": "container.image_build",
-        "container_run": "container.run",
-        "compose": "container.compose",
-        "resources": "container.resources",
-        "engine_storage": "engine.storage",
-        "network_egress": "network.egress",
+        "docker": "docker",
+        "resources": "runtime.resources",
     }
     schema_version = policy.get("schema_version")
     if (
@@ -208,24 +176,14 @@ def parse_execution_policy_envelope(
     ):
         raise ValueError("Runtime execution-policy document shape is invalid.")
     module_fields = {
-        "image_build": {"enabled"},
-        "container_run": {"enabled"},
-        "compose": {"enabled"},
+        "docker": {"enabled", "storage_mode", "storage_capacity_bytes"},
         "resources": {
             "cpu_request_millicores",
             "cpu_limit_millicores",
             "memory_request_bytes",
             "memory_limit_bytes",
-            "pids",
-            "container_count",
             "ephemeral_storage_bytes",
             "persistent_storage_bytes",
-        },
-        "engine_storage": {"mode", "capacity_bytes"},
-        "network_egress": {
-            "mode",
-            "allowed_destinations",
-            "denied_destinations",
         },
     }
     modules = {
@@ -244,9 +202,7 @@ def parse_execution_policy_envelope(
             "Runtime execution-policy module evidence does not match its document."
         )
     parsed = RuntimeExecutionPolicy(
-        image_build=_boolean_module(modules["image_build"]),
-        container_run=_boolean_module(modules["container_run"]),
-        compose=_boolean_module(modules["compose"]),
+        docker=_docker_module(modules["docker"]),
         resources=RuntimeExecutionResources(
             **{
                 field: _optional_positive_int(modules["resources"], field)
@@ -255,21 +211,14 @@ def parse_execution_policy_envelope(
                     "cpu_limit_millicores",
                     "memory_request_bytes",
                     "memory_limit_bytes",
-                    "pids",
-                    "container_count",
                     "ephemeral_storage_bytes",
                     "persistent_storage_bytes",
                 )
             }
         ),
-        engine_storage=_engine_storage(modules["engine_storage"]),
-        network_egress=_network_egress(modules["network_egress"]),
     )
-    if parsed.compose and not parsed.container_run:
-        raise ValueError("container.compose/v1 requires container.run/v1.")
-    engine_required = parsed.image_build or parsed.container_run
-    if engine_required and parsed.resources.ephemeral_storage_bytes is None:
-        raise ValueError("Container execution requires ephemeral storage.")
+    if parsed.docker.enabled and parsed.resources.ephemeral_storage_bytes is None:
+        raise ValueError("Docker requires a Kubernetes ephemeral-storage allocation.")
     if (
         parsed.resources.cpu_request_millicores is not None
         and parsed.resources.cpu_limit_millicores is not None
@@ -283,11 +232,6 @@ def parse_execution_policy_envelope(
         and parsed.resources.memory_request_bytes > parsed.resources.memory_limit_bytes
     ):
         raise ValueError("Memory request cannot exceed memory limit.")
-    if (
-        engine_required
-        and parsed.engine_storage.mode is RuntimeExecutionStorageMode.NONE
-    ):
-        raise ValueError("Container execution requires engine storage.")
     return parsed
 
 
@@ -313,11 +257,29 @@ def _module(
     return value
 
 
-def _boolean_module(module: Mapping[str, JsonValue]) -> bool:
+def _docker_module(module: Mapping[str, JsonValue]) -> RuntimeExecutionDocker:
     enabled = module.get("enabled")
     if not isinstance(enabled, bool):
-        raise ValueError("Runtime execution-policy boolean module is invalid.")
-    return enabled
+        raise ValueError("Runtime execution-policy Docker module is invalid.")
+    try:
+        storage_mode = RuntimeExecutionStorageMode(str(module.get("storage_mode")))
+    except ValueError as error:
+        raise ValueError("Runtime execution-policy storage mode is invalid.") from error
+    storage_capacity = _optional_positive_int(module, "storage_capacity_bytes")
+    if not enabled:
+        if storage_mode is not RuntimeExecutionStorageMode.NONE:
+            raise ValueError("Disabled Docker must not allocate storage.")
+        if storage_capacity is not None:
+            raise ValueError("Disabled Docker must not declare storage capacity.")
+    elif storage_mode is RuntimeExecutionStorageMode.NONE:
+        raise ValueError("Enabled Docker requires a storage mode.")
+    elif storage_capacity is None:
+        raise ValueError("Enabled Docker requires a storage capacity.")
+    return RuntimeExecutionDocker(
+        enabled=enabled,
+        storage_mode=storage_mode,
+        storage_capacity_bytes=storage_capacity,
+    )
 
 
 def _optional_positive_int(
@@ -330,54 +292,3 @@ def _optional_positive_int(
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError("Runtime execution-policy resource bound is invalid.")
     return value
-
-
-def _engine_storage(
-    module: Mapping[str, JsonValue],
-) -> RuntimeExecutionEngineStorage:
-    try:
-        mode = RuntimeExecutionStorageMode(str(module.get("mode")))
-    except ValueError as error:
-        raise ValueError("Runtime execution-policy storage mode is invalid.") from error
-    capacity = _optional_positive_int(module, "capacity_bytes")
-    if mode is RuntimeExecutionStorageMode.NONE:
-        if capacity is not None:
-            raise ValueError("Engine storage capacity requires a storage mode.")
-    elif capacity is None:
-        raise ValueError("Engine storage mode requires a capacity ceiling.")
-    return RuntimeExecutionEngineStorage(mode=mode, capacity_bytes=capacity)
-
-
-def _network_egress(
-    module: Mapping[str, JsonValue],
-) -> RuntimeExecutionNetworkEgress:
-    try:
-        mode = RuntimeExecutionNetworkMode(str(module.get("mode")))
-    except ValueError as error:
-        raise ValueError("Runtime execution-policy network mode is invalid.") from error
-    allowed = _string_tuple(module, "allowed_destinations")
-    denied = _string_tuple(module, "denied_destinations")
-    if set(allowed) & set(denied):
-        raise ValueError("Network destinations cannot be both allowed and denied.")
-    if mode is RuntimeExecutionNetworkMode.NONE and allowed:
-        raise ValueError("No-egress mode cannot declare allowed destinations.")
-    return RuntimeExecutionNetworkEgress(
-        mode=mode,
-        allowed_destinations=allowed,
-        denied_destinations=denied,
-    )
-
-
-def _string_tuple(
-    module: Mapping[str, JsonValue],
-    field: str,
-) -> tuple[str, ...]:
-    value = module.get(field)
-    if not isinstance(value, list):
-        raise ValueError("Runtime execution-policy destination list is invalid.")
-    result: list[str] = []
-    for item in value:
-        if not isinstance(item, str) or not item:
-            raise ValueError("Runtime execution-policy destination list is invalid.")
-        result.append(item)
-    return tuple(sorted(result))

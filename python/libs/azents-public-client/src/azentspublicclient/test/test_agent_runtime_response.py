@@ -76,34 +76,31 @@ class TestAgentRuntimeResponse(unittest.TestCase):
                         digest = '', 
                         capabilities = [
                             azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                                module_id = 'container.image_build', 
+                                module_id = 'docker', 
                                 version = 56, 
                                 enabled = True, )
                             ], 
                         storage_mode = 'none', 
-                        storage_capacity_bytes = 56, 
-                        network_mode = 'none', ), 
+                        storage_capacity_bytes = 56, ), 
                     target = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
                         profile_id = '', 
                         digest = '', 
                         desired_generation = 56, 
                         capabilities = [
                             azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                                module_id = 'container.image_build', 
+                                module_id = 'docker', 
                                 version = 56, 
                                 enabled = True, )
                             ], 
                         storage_mode = 'none', 
-                        storage_capacity_bytes = 56, 
-                        network_mode = 'none', ), 
+                        storage_capacity_bytes = 56, ), 
                     applied = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
                         profile_id = '', 
                         digest = '', 
                         desired_generation = 56, 
                         capabilities = , 
                         storage_mode = , 
-                        storage_capacity_bytes = 56, 
-                        network_mode = , ), 
+                        storage_capacity_bytes = 56, ), 
                     desired_generation = 56, 
                     governing_layers = {
                         'key' : 'profile'
@@ -156,34 +153,31 @@ class TestAgentRuntimeResponse(unittest.TestCase):
                         digest = '', 
                         capabilities = [
                             azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                                module_id = 'container.image_build', 
+                                module_id = 'docker', 
                                 version = 56, 
                                 enabled = True, )
                             ], 
                         storage_mode = 'none', 
-                        storage_capacity_bytes = 56, 
-                        network_mode = 'none', ), 
+                        storage_capacity_bytes = 56, ), 
                     target = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
                         profile_id = '', 
                         digest = '', 
                         desired_generation = 56, 
                         capabilities = [
                             azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                                module_id = 'container.image_build', 
+                                module_id = 'docker', 
                                 version = 56, 
                                 enabled = True, )
                             ], 
                         storage_mode = 'none', 
-                        storage_capacity_bytes = 56, 
-                        network_mode = 'none', ), 
+                        storage_capacity_bytes = 56, ), 
                     applied = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
                         profile_id = '', 
                         digest = '', 
                         desired_generation = 56, 
                         capabilities = , 
                         storage_mode = , 
-                        storage_capacity_bytes = 56, 
-                        network_mode = , ), 
+                        storage_capacity_bytes = 56, ), 
                     desired_generation = 56, 
                     governing_layers = {
                         'key' : 'profile'

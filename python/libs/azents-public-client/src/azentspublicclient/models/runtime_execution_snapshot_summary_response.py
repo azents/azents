@@ -20,7 +20,6 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.runtime_execution_capability_summary_response import RuntimeExecutionCapabilitySummaryResponse
-from azentspublicclient.models.runtime_execution_network_mode import RuntimeExecutionNetworkMode
 from azentspublicclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode
 from typing import Optional, Set
 from typing_extensions import Self
@@ -35,9 +34,8 @@ class RuntimeExecutionSnapshotSummaryResponse(BaseModel):
     capabilities: List[RuntimeExecutionCapabilitySummaryResponse]
     storage_mode: RuntimeExecutionStorageMode
     storage_capacity_bytes: Optional[StrictInt]
-    network_mode: RuntimeExecutionNetworkMode
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["profile_id", "digest", "desired_generation", "capabilities", "storage_mode", "storage_capacity_bytes", "network_mode"]
+    __properties: ClassVar[List[str]] = ["profile_id", "digest", "desired_generation", "capabilities", "storage_mode", "storage_capacity_bytes"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -114,8 +112,7 @@ class RuntimeExecutionSnapshotSummaryResponse(BaseModel):
             "desired_generation": obj.get("desired_generation"),
             "capabilities": [RuntimeExecutionCapabilitySummaryResponse.from_dict(_item) for _item in obj["capabilities"]] if obj.get("capabilities") is not None else None,
             "storage_mode": obj.get("storage_mode"),
-            "storage_capacity_bytes": obj.get("storage_capacity_bytes"),
-            "network_mode": obj.get("network_mode")
+            "storage_capacity_bytes": obj.get("storage_capacity_bytes")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

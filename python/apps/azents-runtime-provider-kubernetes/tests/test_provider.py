@@ -72,7 +72,6 @@ from azents_runtime_provider_kubernetes.runtime_control import (
 _RUNNER_IMAGE = f"repo/runner:phase5@sha256:{'a' * 64}"
 _OLD_RUNNER_IMAGE = f"repo/runner:old@sha256:{'b' * 64}"
 _NEW_RUNNER_IMAGE = f"repo/runner:new@sha256:{'c' * 64}"
-_GATEWAY_IMAGE = f"repo/gateway:phase5@sha256:{'d' * 64}"
 _ENGINE_IMAGE = f"repo/engine:phase5@sha256:{'e' * 64}"
 
 
@@ -247,7 +246,6 @@ def _provider_with_runner_env(
                 claims=None,
             ),
             runner_env=runner_env,
-            gateway_image=_GATEWAY_IMAGE,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
             runtime_control_labels={
@@ -469,7 +467,6 @@ async def test_start_allows_omitted_runner_resources() -> None:
             pvc_storage_request="20Gi",
             runner_resources=None,
             runner_env={},
-            gateway_image=_GATEWAY_IMAGE,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
             runtime_control_labels={
@@ -508,7 +505,6 @@ async def test_start_preserves_generic_runner_resource_requirements() -> None:
             pvc_storage_request="20Gi",
             runner_resources=resources,
             runner_env={},
-            gateway_image=_GATEWAY_IMAGE,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
             runtime_control_labels={
@@ -543,7 +539,6 @@ async def test_start_reuses_pod_with_kubernetes_default_tolerations() -> None:
             pvc_storage_request="20Gi",
             runner_resources=None,
             runner_env={},
-            gateway_image=_GATEWAY_IMAGE,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
             runtime_control_labels={
@@ -638,7 +633,11 @@ async def test_start_reuses_pod_with_canonicalized_kubernetes_quantities() -> No
     provider = _provider(api)
     command = _command(
         RuntimeLifecycleCommandType.START,
-        execution_policy=_execution_policy(image_build=True),
+        execution_policy=_execution_policy(
+            docker_enabled=True,
+            cpu_request_millicores=500,
+            memory_request_bytes=1_073_741_824,
+        ),
     )
     await provider.start(command)
     pod_key = ("azents-runtime", "azents-runtime-runtime-1")
@@ -660,9 +659,9 @@ async def test_start_reuses_pod_with_canonicalized_kubernetes_quantities() -> No
                         engine.resources,
                         limits={
                             **engine.resources.limits,
-                            "cpu": "750m",
-                            "memory": "1536Mi",
-                            "ephemeral-storage": "10176Mi",
+                            "cpu": "1",
+                            "memory": "2Gi",
+                            "ephemeral-storage": "10Gi",
                         },
                     ),
                 ),
@@ -893,7 +892,6 @@ async def test_start_applies_configured_pod_annotations() -> None:
                 claims=None,
             ),
             runner_env={},
-            gateway_image=_GATEWAY_IMAGE,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
             runtime_control_labels={
@@ -930,7 +928,6 @@ async def test_start_applies_configured_runtime_pod_scheduling() -> None:
                 claims=None,
             ),
             runner_env={},
-            gateway_image=_GATEWAY_IMAGE,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
             runtime_control_labels={
@@ -975,7 +972,6 @@ async def test_start_applies_configured_runtime_pod_image_pull_secrets() -> None
             pvc_storage_request="20Gi",
             runner_resources=None,
             runner_env={},
-            gateway_image=_GATEWAY_IMAGE,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
             runtime_control_labels={
@@ -1006,7 +1002,6 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
             pvc_storage_request="20Gi",
             runner_resources=None,
             runner_env={},
-            gateway_image=_GATEWAY_IMAGE,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
             runtime_control_labels={
@@ -1024,7 +1019,6 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
             pvc_storage_request="20Gi",
             runner_resources=None,
             runner_env={},
-            gateway_image=_GATEWAY_IMAGE,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
             runtime_control_labels={
@@ -1328,7 +1322,6 @@ def test_invalid_workspace_path_is_rejected() -> None:
                     claims=None,
                 ),
                 runner_env={},
-                gateway_image=_GATEWAY_IMAGE,
                 engine_image=_ENGINE_IMAGE,
                 runtime_control_namespace="azents",
                 runtime_control_labels={
@@ -1367,16 +1360,13 @@ async def test_standard_policy_evidence_is_persisted_and_reported() -> None:
 
 
 @pytest.mark.asyncio
-async def test_container_execution_policy_creates_fixed_isolated_topology() -> None:
+async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
     execution_policy = _execution_policy(
-        image_build=True,
+        docker_enabled=True,
         cpu_request_millicores=500,
         memory_request_bytes=1_073_741_824,
-        network_mode="restricted",
-        allowed_destinations=("203.0.113.0/24",),
-        denied_destinations=("203.0.113.128/25",),
     )
 
     await provider.start(
@@ -1387,101 +1377,59 @@ async def test_container_execution_policy_creates_fixed_isolated_topology() -> N
     )
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
-    runner, gateway, engine = pod.spec.containers
+    runner, engine = pod.spec.containers
     assert [container.name for container in pod.spec.containers] == [
         "runner",
-        "container-policy-gateway",
         "container-engine",
     ]
     assert runner.security_context.privileged is False
-    assert gateway.security_context.privileged is False
-    assert gateway.security_context.read_only_root_filesystem is True
-    assert gateway.resources == ContainerResources(
-        requests={
-            "cpu": "125m",
-            "memory": "268435456",
-            "ephemeral-storage": "67108864",
-        },
-        limits={
-            "cpu": "250m",
-            "memory": "536870912",
-            "ephemeral-storage": "67108864",
-        },
-        claims=None,
-    )
     assert engine.resources == ContainerResources(
         requests={
-            "cpu": "375m",
-            "memory": "805306368",
-            "ephemeral-storage": "10670309376",
+            "cpu": "500m",
+            "memory": "1073741824",
+            "ephemeral-storage": "10737418240",
         },
         limits={
-            "cpu": "750m",
-            "memory": "1610612736",
-            "ephemeral-storage": "10670309376",
+            "cpu": "1",
+            "memory": "2147483648",
+            "ephemeral-storage": "10737418240",
         },
         claims=None,
     )
     assert engine.security_context.privileged is True
     assert engine.security_context.run_as_user == 0
     assert runner.image == _RUNNER_IMAGE
-    assert gateway.image == _GATEWAY_IMAGE
     assert engine.image == _ENGINE_IMAGE
     assert pod.spec.service_account_name is None
     assert pod.spec.automount_service_account_token is False
     assert {mount.name for mount in runner.volume_mounts} == {
         "agent-workspace",
-        "container-gateway-socket",
-    }
-    runner_gateway_mount = next(
-        mount
-        for mount in runner.volume_mounts
-        if mount.name == "container-gateway-socket"
-    )
-    assert runner_gateway_mount.read_only is True
-    runner_env = {item.name: item.value for item in runner.env}
-    assert runner_env["DOCKER_HOST"] == ("unix:///var/run/azents-gateway/docker.sock")
-    assert {mount.name for mount in gateway.volume_mounts} == {
-        "container-gateway-socket",
         "container-engine-socket",
     }
-    assert all(mount.name != "agent-workspace" for mount in gateway.volume_mounts)
+    runner_engine_mount = next(
+        mount
+        for mount in runner.volume_mounts
+        if mount.name == "container-engine-socket"
+    )
+    assert runner_engine_mount.mount_path == "/var/run/azents-engine"
+    assert runner_engine_mount.read_only is True
+    runner_env = {item.name: item.value for item in runner.env}
+    assert runner_env["DOCKER_HOST"] == "unix:///var/run/azents-engine/docker.sock"
+    assert runner_env["TESTCONTAINERS_HOST_OVERRIDE"] == "127.0.0.1"
+    assert runner_env["TESTCONTAINERS_CONNECTION_MODE"] == "docker_host"
+    assert runner_env["TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE"] == (
+        "/var/run/azents-engine/docker.sock"
+    )
     assert {mount.name for mount in engine.volume_mounts} == {
         "container-engine-socket",
         "container-engine-storage",
     }
-    assert all(
-        mount.name not in {"agent-workspace", "container-gateway-socket"}
-        for mount in engine.volume_mounts
-    )
-    assert engine.args[-1] == "--group=azents-gateway"
-    assert gateway.readiness_probe is not None
-    assert gateway.readiness_probe.exec_action.command == (
-        "/usr/local/bin/azents-container-policy-gateway",
-        "check-ready",
-        "--socket",
-        "/var/run/azents-gateway/docker.sock",
-        "--runtime-id",
-        "runtime-1",
-        "--desired-generation",
-        "1",
-        "--snapshot-id",
-        execution_policy.evidence.snapshot_id,
-        "--policy-digest",
-        execution_policy.evidence.digest,
-    )
+    assert all(mount.name != "agent-workspace" for mount in engine.volume_mounts)
+    assert engine.args[-1] == "--group=azents-runner"
     assert engine.readiness_probe is not None
     engine_probe = engine.readiness_probe.exec_action.command
     assert engine_probe[:2] == ("sh", "-ec")
     assert "28.5.2/1.51" in engine_probe[2]
-    gateway_env = {item.name: item.value for item in gateway.env}
-    assert gateway_env["AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION"] == "1"
-    assert gateway_env["AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS"]
-    assert gateway_env["AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS"]
-    assert (
-        gateway_env["AZ_RUNTIME_EXECUTION_POLICY_DIGEST"]
-        == execution_policy.evidence.digest
-    )
     engine_storage = pod.spec.volumes[-1]
     assert isinstance(engine_storage, EmptyDirVolume)
     assert engine_storage.size_limit == "8589934592"
@@ -1500,10 +1448,7 @@ async def test_container_execution_policy_creates_fixed_isolated_topology() -> N
     assert network_policy.spec.pod_selector.match_labels[
         "azents/provider-generation"
     ] == str(7)
-    restricted_peer = network_policy.spec.egress[-1].peers[0]
-    assert restricted_peer.ip_block is not None
-    assert restricted_peer.ip_block.cidr == "203.0.113.0/24"
-    assert restricted_peer.ip_block.except_cidrs == ("203.0.113.128/25",)
+    assert len(network_policy.spec.egress) == 4
 
 
 @pytest.mark.asyncio
@@ -1533,7 +1478,7 @@ async def test_direct_network_policy_is_bounded_by_deployment_hard_cap() -> None
     await provider.start(
         _command(
             RuntimeLifecycleCommandType.START,
-            execution_policy=_execution_policy(network_mode="direct"),
+            execution_policy=_execution_policy(),
         )
     )
 
@@ -1551,94 +1496,7 @@ async def test_direct_network_policy_is_bounded_by_deployment_hard_cap() -> None
     assert optional_rules[-1] == extra_egress
 
 
-@pytest.mark.asyncio
-async def test_restricted_network_policy_intersects_deployment_hard_cap() -> None:
-    api = FakeKubernetesApi()
-    extra_egress = NetworkPolicyEgressRule(
-        peers=(
-            NetworkPolicyPeer(
-                namespace_selector=LabelSelector(
-                    match_labels={"kubernetes.io/metadata.name": "database"}
-                ),
-                pod_selector=None,
-                ip_block=None,
-            ),
-        ),
-        ports=(NetworkPolicyPort(protocol="TCP", port=5432),),
-    )
-    provider = _provider(
-        api,
-        network_hard_cap_allowed_cidrs=("10.10.0.0/16",),
-        network_hard_cap_denied_cidrs=("10.0.0.0/8",),
-        network_hard_cap_extra_egress=(extra_egress,),
-    )
-
-    await provider.start(
-        _command(
-            RuntimeLifecycleCommandType.START,
-            execution_policy=_execution_policy(
-                network_mode="restricted",
-                allowed_destinations=("10.0.0.0/8",),
-                denied_destinations=("10.10.128.0/17",),
-            ),
-        )
-    )
-
-    network_policy = api.network_policies[
-        ("azents-runtime", "azents-runtime-runtime-1-execution")
-    ]
-    optional_rules = network_policy.spec.egress[2:]
-    assert len(optional_rules) == 1
-    allowed = optional_rules[0].peers[0].ip_block
-    assert allowed is not None
-    assert allowed.cidr == "10.10.0.0/16"
-    assert allowed.except_cidrs == ("10.10.128.0/17",)
-
-
-@pytest.mark.asyncio
-async def test_system_only_network_policy_does_not_add_hard_cap_egress() -> None:
-    api = FakeKubernetesApi()
-    provider = _provider(
-        api,
-        network_hard_cap_allowed_cidrs=("10.10.0.0/16",),
-        network_hard_cap_extra_egress=(
-            NetworkPolicyEgressRule(
-                peers=(
-                    NetworkPolicyPeer(
-                        namespace_selector=None,
-                        pod_selector=None,
-                        ip_block=IpBlock(cidr="203.0.113.0/24", except_cidrs=()),
-                    ),
-                ),
-                ports=(),
-            ),
-        ),
-    )
-
-    await provider.start(
-        _command(
-            RuntimeLifecycleCommandType.START,
-            execution_policy=_execution_policy(network_mode="none"),
-        )
-    )
-
-    network_policy = api.network_policies[
-        ("azents-runtime", "azents-runtime-runtime-1-execution")
-    ]
-    assert len(network_policy.spec.egress) == 2
-
-
-@pytest.mark.parametrize(
-    ("gateway_image", "engine_image"),
-    [
-        ("repo/gateway:latest", _ENGINE_IMAGE),
-        (_GATEWAY_IMAGE, "repo/engine:latest"),
-    ],
-)
-def test_provider_rejects_mutable_gateway_and_engine_images(
-    gateway_image: str,
-    engine_image: str,
-) -> None:
+def test_provider_rejects_mutable_engine_image() -> None:
     with pytest.raises(UnsupportedExecutionPolicy, match="immutable sha256"):
         KubernetesRuntimeProvider(
             FakeKubernetesApi(),
@@ -1649,8 +1507,7 @@ def test_provider_rejects_mutable_gateway_and_engine_images(
                 pvc_storage_request="20Gi",
                 runner_resources=None,
                 runner_env={},
-                gateway_image=gateway_image,
-                engine_image=engine_image,
+                engine_image="repo/engine:latest",
                 runtime_control_namespace="azents",
                 runtime_control_labels={
                     "app.kubernetes.io/component": "runtime-control",
@@ -1670,42 +1527,7 @@ async def test_authority_policy_rejects_mutable_runner_image_before_mutation() -
             _command(
                 RuntimeLifecycleCommandType.START,
                 runner_image="repo/runner:latest",
-                execution_policy=_execution_policy(image_build=True),
-            )
-        )
-
-    assert api.pods == {}
-    assert api.pvcs == {}
-    assert api.network_policies == {}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("cpu_limit_millicores", "memory_limit_bytes", "ephemeral_storage_bytes"),
-    [
-        (199, 2_147_483_648, 10_737_418_240),
-        (1000, 256 * 1024 * 1024, 10_737_418_240),
-        (1000, 2_147_483_648, 255 * 1024 * 1024),
-    ],
-)
-async def test_authority_policy_rejects_too_small_gateway_resource_envelope(
-    cpu_limit_millicores: int,
-    memory_limit_bytes: int,
-    ephemeral_storage_bytes: int,
-) -> None:
-    api = FakeKubernetesApi()
-    provider = _provider(api)
-
-    with pytest.raises(UnsupportedExecutionPolicy, match="too small"):
-        await provider.start(
-            _command(
-                RuntimeLifecycleCommandType.START,
-                execution_policy=_execution_policy(
-                    image_build=True,
-                    cpu_limit_millicores=cpu_limit_millicores,
-                    memory_limit_bytes=memory_limit_bytes,
-                    ephemeral_storage_bytes=ephemeral_storage_bytes,
-                ),
+                execution_policy=_execution_policy(docker_enabled=True),
             )
         )
 
@@ -1732,7 +1554,6 @@ async def test_new_network_policy_does_not_select_old_pod_when_replacement_fails
                 provider_generation=8,
                 execution_policy=_execution_policy(
                     desired_generation=2,
-                    network_mode="direct",
                 ),
             )
         )
@@ -1762,12 +1583,12 @@ async def test_invalid_container_execution_policy_fails_before_resource_mutation
     api = FakeKubernetesApi()
     provider = _provider(api)
 
-    with pytest.raises(ValueError, match="ephemeral storage"):
+    with pytest.raises(ValueError, match="storage mode"):
         await provider.start(
             _command(
                 RuntimeLifecycleCommandType.START,
                 execution_policy=_execution_policy(
-                    image_build=True,
+                    docker_enabled=True,
                     bounded=False,
                 ),
             )
@@ -1778,33 +1599,9 @@ async def test_invalid_container_execution_policy_fails_before_resource_mutation
     assert api.network_policies == {}
 
 
-@pytest.mark.asyncio
-async def test_direct_network_policy_can_deny_an_entire_ip_family() -> None:
-    api = FakeKubernetesApi()
-    provider = _provider(api)
-
-    await provider.start(
-        _command(
-            RuntimeLifecycleCommandType.START,
-            execution_policy=_execution_policy(
-                network_mode="direct",
-                denied_destinations=("0.0.0.0/0",),
-            ),
-        )
-    )
-
-    network_policy = api.network_policies[
-        ("azents-runtime", "azents-runtime-runtime-1-execution")
-    ]
-    optional_rules = network_policy.spec.egress[2:]
-    assert len(optional_rules) == 1
-    assert optional_rules[0].peers[0].ip_block is not None
-    assert optional_rules[0].peers[0].ip_block.cidr == "::/0"
-
-
 def _execution_policy(
     *,
-    image_build: bool = False,
+    docker_enabled: bool = False,
     desired_generation: int = 1,
     bounded: bool = True,
     cpu_request_millicores: int | None = None,
@@ -1813,56 +1610,34 @@ def _execution_policy(
     memory_limit_bytes: int = 2_147_483_648,
     ephemeral_storage_bytes: int = 10_737_418_240,
     persistent_storage_bytes: int | None = None,
-    network_mode: str = "none",
-    allowed_destinations: tuple[str, ...] = (),
-    denied_destinations: tuple[str, ...] = (),
 ) -> RuntimeExecutionPolicyEnvelope:
-    engine_enabled = image_build and bounded
+    docker_configured = docker_enabled and bounded
     policy: dict[str, JsonValue] = {
         "schema_version": 1,
-        "image_build": {
-            "module_id": "container.image_build",
+        "docker": {
+            "module_id": "docker",
             "version": 1,
-            "enabled": image_build,
-        },
-        "container_run": {
-            "module_id": "container.run",
-            "version": 1,
-            "enabled": False,
-        },
-        "compose": {
-            "module_id": "container.compose",
-            "version": 1,
-            "enabled": False,
+            "enabled": docker_enabled,
+            "storage_mode": "ephemeral" if docker_configured else "none",
+            "storage_capacity_bytes": (8_589_934_592 if docker_configured else None),
         },
         "resources": {
-            "module_id": "container.resources",
+            "module_id": "runtime.resources",
             "version": 1,
             "cpu_request_millicores": (
-                cpu_request_millicores if engine_enabled else None
+                cpu_request_millicores if docker_configured else None
             ),
-            "cpu_limit_millicores": cpu_limit_millicores if engine_enabled else None,
-            "memory_request_bytes": (memory_request_bytes if engine_enabled else None),
-            "memory_limit_bytes": memory_limit_bytes if engine_enabled else None,
-            "pids": 256 if engine_enabled else None,
-            "container_count": 8 if engine_enabled else None,
+            "cpu_limit_millicores": (
+                cpu_limit_millicores if docker_configured else None
+            ),
+            "memory_request_bytes": (
+                memory_request_bytes if docker_configured else None
+            ),
+            "memory_limit_bytes": (memory_limit_bytes if docker_configured else None),
             "ephemeral_storage_bytes": (
-                ephemeral_storage_bytes if engine_enabled else None
+                ephemeral_storage_bytes if docker_configured else None
             ),
             "persistent_storage_bytes": persistent_storage_bytes,
-        },
-        "engine_storage": {
-            "module_id": "engine.storage",
-            "version": 1,
-            "mode": "ephemeral" if engine_enabled else "none",
-            "capacity_bytes": 8_589_934_592 if engine_enabled else None,
-        },
-        "network_egress": {
-            "module_id": "network.egress",
-            "version": 1,
-            "mode": network_mode,
-            "allowed_destinations": list(allowed_destinations),
-            "denied_destinations": list(denied_destinations),
         },
     }
     return RuntimeExecutionPolicyEnvelope(
@@ -1870,14 +1645,7 @@ def _execution_policy(
             snapshot_id="snapshot-1",
             digest=digest_effective_policy(policy),
             desired_generation=desired_generation,
-            module_versions={
-                "container.image_build": 1,
-                "container.run": 1,
-                "container.compose": 1,
-                "container.resources": 1,
-                "engine.storage": 1,
-                "network.egress": 1,
-            },
+            module_versions={"docker": 1, "runtime.resources": 1},
             source_versions={
                 "profile": 1,
                 "workspace": 1,

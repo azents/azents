@@ -12,11 +12,7 @@ Bounded reason explaining why an execution policy is unavailable.
 
 * `PROVIDER_MODULE_UNSUPPORTED` (value: `'provider_module_unsupported'`)
 
-* `PROVIDER_ENGINE_UNSUPPORTED` (value: `'provider_engine_unsupported'`)
-
 * `PROVIDER_STORAGE_UNSUPPORTED` (value: `'provider_storage_unsupported'`)
-
-* `PROVIDER_NETWORK_UNSUPPORTED` (value: `'provider_network_unsupported'`)
 
 * `PROVIDER_LIMIT_EXCEEDED` (value: `'provider_limit_exceeded'`)
 

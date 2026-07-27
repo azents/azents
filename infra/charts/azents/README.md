@@ -93,17 +93,18 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 - Provider Deployment: `AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKSPACE_PATH`, `AZ_RUNTIME_PROVIDER_STORAGE_CLASS`, `AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS`
 - Provider RBAC: leader election Lease permissions are scoped to the provider namespace, while Runtime Pod/PVC/NetworkPolicy permissions are scoped to the workload namespace
 - Runtime Pod image pulls: by default, Runtime Pods inherit `global.imagePullSecrets`. Consumers may override with `runtimeProviderKubernetes.runtimePod.imagePullSecrets`. Referenced pull secrets must already exist in the workload namespace.
-- Runtime execution images: Runner, container-policy gateway, and nested Engine
+- Runtime execution images: Runner and nested Docker Engine
   references must include immutable `sha256` digests. The Provider rejects
   authority-bearing Runtime commands with a mutable Runner image, and the chart
   refuses to render enabled Runtime Control or Kubernetes Provider components
-  without the corresponding Runner, gateway, and Engine digests.
+  without the corresponding Runner and Engine digests.
 - Runtime Pod resources: `runtimeProviderKubernetes.runnerResources` is passed to the Provider as Kubernetes `ResourceRequirements`. Defaults set requests to CPU `1` and memory `2Gi`; limits are intentionally omitted unless consumers set them.
 - Runner operation limits: `runtimeProviderKubernetes.runnerLimits` configures per-Session, system, Runtime, pending, and control-path concurrency. Defaults are 10 Session active, 10 system active, 50 Runtime active, 100 pending per owner, 1,000 pending per Runtime, and 4 control operations. The Provider forwards these values to new Runner Pods; restart existing Runtimes after changing them.
 - Persistence: Kubernetes Provider v1 uses PVCs in the workload namespace as canonical persistence
 - Runtime NetworkPolicy: Profile-managed Runtime Pods always match a chart-owned
-  deny-all baseline and receive allowed DNS, Runtime Control, and policy-derived
-  egress only through Provider-owned Runtime-specific NetworkPolicies. The legacy
+  deny-all baseline and receive DNS, Runtime Control, and general outbound egress
+  only through Provider-owned Runtime-specific NetworkPolicies. The deployment's
+  static network policy is the hard cap. The legacy
   broad policy explicitly excludes these Pods because Kubernetes allow rules are
   additive. For legacy Pods, `deniedCidrs` narrows default public egress,
   `allowedCidrs` adds explicit CIDRs, and `extraEgress` adds service exceptions.
@@ -120,7 +121,7 @@ External secret-store delivery remains outside this chart. External Secrets Oper
 ## Optional Component Prerequisites
 
 - `server.mcpEgressProxy.enabled=true`: renders the Squid proxy Deployment/Service/NetworkPolicy in the server namespace and injects `AZ_MCP_PROXY_URL` into the server ConfigMap.
-- `runtimeProviderKubernetes.enabled=true`: requires `runtimeProviderKubernetes.image.*`, digest-pinned `runtimeProviderKubernetes.runnerImage.*`, `runtimeProviderKubernetes.gatewayImage.*`, and `runtimeProviderKubernetes.engineImage.*`, `server.runtimeControl.enabled=true`, a digest-pinned `server.runtimeControl.runnerImage.*`, and an operator-owned Runtime Control TLS Secret. Provider authentication uses the rendered ServiceAccount identity; no Provider credential Secret or shared Runtime Control auth Secret is required.
+- `runtimeProviderKubernetes.enabled=true`: requires `runtimeProviderKubernetes.image.*`, digest-pinned `runtimeProviderKubernetes.runnerImage.*` and `runtimeProviderKubernetes.engineImage.*`, `server.runtimeControl.enabled=true`, a digest-pinned `server.runtimeControl.runnerImage.*`, and an operator-owned Runtime Control TLS Secret. Provider authentication uses the rendered ServiceAccount identity; no Provider credential Secret or shared Runtime Control auth Secret is required.
 
 ## Kustomize Label Differences
 

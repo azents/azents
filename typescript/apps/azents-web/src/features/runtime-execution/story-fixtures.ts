@@ -11,11 +11,8 @@ import type {
 
 export const runtimeExecutionManagementCapabilities: RuntimeExecutionManagementCapabilitiesResponse =
   {
-    image_build: false,
-    container_run: false,
-    compose: false,
-    storage_modes: ["none"],
-    network_modes: ["none"],
+    docker: true,
+    storage_modes: ["none", "ephemeral"],
   };
 
 export const runtimeExecutionAgent: AgentResponse = {
@@ -47,57 +44,30 @@ export const runtimeExecutionAgent: AgentResponse = {
 
 export const runtimeExecutionPolicy: RuntimeExecutionPolicyDocument = {
   schema_version: 1,
-  image_build: {
-    module_id: "container.image_build",
-    version: 1,
-    enabled: false,
-  },
-  container_run: {
-    module_id: "container.run",
+  docker: {
+    module_id: "docker",
     version: 1,
     enabled: true,
-  },
-  compose: {
-    module_id: "container.compose",
-    version: 1,
-    enabled: false,
+    storage_mode: "ephemeral",
+    storage_capacity_bytes: 10_737_418_240,
   },
   resources: {
-    module_id: "container.resources",
+    module_id: "runtime.resources",
     version: 1,
     cpu_request_millicores: 1_000,
     cpu_limit_millicores: 2_000,
     memory_request_bytes: 2_147_483_648,
     memory_limit_bytes: 4_294_967_296,
-    pids: 512,
-    container_count: 8,
     ephemeral_storage_bytes: 10_737_418_240,
     persistent_storage_bytes: 21_474_836_480,
-  },
-  engine_storage: {
-    module_id: "engine.storage",
-    version: 1,
-    mode: "ephemeral",
-    capacity_bytes: 10_737_418_240,
-  },
-  network_egress: {
-    module_id: "network.egress",
-    version: 1,
-    mode: "restricted",
-    allowed_destinations: ["registry.example.com"],
-    denied_destinations: ["metadata.internal"],
   },
 };
 
 export const emptyRuntimeExecutionRestriction: RuntimeExecutionPolicyRestriction =
   {
     schema_version: 1,
-    image_build: null,
-    container_run: null,
-    compose: null,
+    docker: null,
     resources: null,
-    engine_storage: null,
-    network_egress: null,
   };
 
 export const runtimeExecutionProfile: WorkspaceRuntimeExecutionProfileResponse =
@@ -145,7 +115,7 @@ export const agentRuntimeExecutionPolicy: AgentRuntimeExecutionPolicyResponse =
         agent: 4,
       },
       governing_layers: {
-        "container.image_build.enabled": "workspace",
+        "docker.enabled": "workspace",
       },
       reductions: [],
       change: { direction: "metadata_only", fields: [] },
@@ -163,20 +133,15 @@ export const configuredRuntimeExecutionStatus: AgentRuntimeExecutionPolicyStatus
     configured: {
       profile_id: "standard",
       digest: "configured-digest-0123456789",
-      capabilities: [
-        { module_id: "container.image_build", version: 1, enabled: false },
-        { module_id: "container.run", version: 1, enabled: true },
-        { module_id: "container.compose", version: 1, enabled: false },
-      ],
+      capabilities: [{ module_id: "docker", version: 1, enabled: true }],
       storage_mode: "ephemeral",
       storage_capacity_bytes: 10_737_418_240,
-      network_mode: "restricted",
     },
     target: null,
     applied: null,
     desired_generation: 3,
     governing_layers: {
-      "container.image_build.enabled": "workspace",
+      "docker.enabled": "workspace",
     },
     reason_codes: ["explicit_apply_required"],
     required_action: "apply",

@@ -10,7 +10,6 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionAvailabilityReason,
     RuntimeExecutionChangeDirection,
     RuntimeExecutionManagementLayer,
-    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionPolicyRestriction,
     RuntimeExecutionProfileLifecycle,
@@ -34,21 +33,15 @@ from azents.services.runtime_execution_policy.service import (
 class RuntimeExecutionManagementCapabilitiesResponse(BaseModel):
     """Safe server-owned policy management capability gate."""
 
-    image_build: bool
-    container_run: bool
-    compose: bool
+    docker: bool
     storage_modes: list[RuntimeExecutionStorageMode]
-    network_modes: list[RuntimeExecutionNetworkMode]
 
     @classmethod
     def convert_from(cls, data: RuntimeExecutionManagementCapabilities) -> Self:
         """Convert the current server capability gate."""
         return cls(
-            image_build=data.image_build,
-            container_run=data.container_run,
-            compose=data.compose,
+            docker=data.docker,
             storage_modes=list(data.storage_modes),
-            network_modes=list(data.network_modes),
         )
 
 

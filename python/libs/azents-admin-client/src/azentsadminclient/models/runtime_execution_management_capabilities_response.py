@@ -19,7 +19,6 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictBool
 from typing import Any, ClassVar, Dict, List
-from azentsadminclient.models.runtime_execution_network_mode import RuntimeExecutionNetworkMode
 from azentsadminclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode
 from typing import Optional, Set
 from typing_extensions import Self
@@ -28,13 +27,10 @@ class RuntimeExecutionManagementCapabilitiesResponse(BaseModel):
     """
     Safe server-owned policy management capability gate.
     """ # noqa: E501
-    image_build: StrictBool
-    container_run: StrictBool
-    compose: StrictBool
+    docker: StrictBool
     storage_modes: List[RuntimeExecutionStorageMode]
-    network_modes: List[RuntimeExecutionNetworkMode]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["image_build", "container_run", "compose", "storage_modes", "network_modes"]
+    __properties: ClassVar[List[str]] = ["docker", "storage_modes"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -94,11 +90,8 @@ class RuntimeExecutionManagementCapabilitiesResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "image_build": obj.get("image_build"),
-            "container_run": obj.get("container_run"),
-            "compose": obj.get("compose"),
-            "storage_modes": obj.get("storage_modes"),
-            "network_modes": obj.get("network_modes")
+            "docker": obj.get("docker"),
+            "storage_modes": obj.get("storage_modes")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

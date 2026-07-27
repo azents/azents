@@ -12,18 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import WorkspaceUserRole
 from azents.core.runtime_execution_policy import (
     SYSTEM_STANDARD_PROFILE_ID,
-    RuntimeExecutionBooleanModule,
-    RuntimeExecutionBooleanRestriction,
     RuntimeExecutionChangeDirection,
+    RuntimeExecutionDockerModule,
+    RuntimeExecutionDockerRestriction,
     RuntimeExecutionManagementLayer,
     RuntimeExecutionModuleId,
-    RuntimeExecutionNetworkMode,
     RuntimeExecutionPolicyDocument,
     RuntimeExecutionPolicyRestriction,
     RuntimeExecutionProfileLifecycle,
     RuntimeExecutionResourceRestriction,
     RuntimeExecutionStorageMode,
-    RuntimeExecutionStorageRestriction,
     digest_runtime_execution_policy,
     empty_runtime_execution_restriction,
     standard_runtime_execution_policy,
@@ -54,29 +52,18 @@ def _expanded_standard() -> RuntimeExecutionPolicyDocument:
     policy = standard_runtime_execution_policy()
     return policy.model_copy(
         update={
-            "image_build": RuntimeExecutionBooleanModule(
-                module_id=RuntimeExecutionModuleId.IMAGE_BUILD,
+            "docker": RuntimeExecutionDockerModule(
+                module_id=RuntimeExecutionModuleId.DOCKER,
                 version=1,
                 enabled=True,
-            ),
-            "container_run": RuntimeExecutionBooleanModule(
-                module_id=RuntimeExecutionModuleId.CONTAINER_RUN,
-                version=1,
-                enabled=True,
+                storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+                storage_capacity_bytes=1_000,
             ),
             "resources": policy.resources.model_copy(
                 update={
                     "cpu_limit_millicores": 1_000,
                     "memory_limit_bytes": 1_000,
-                    "pids": 100,
-                    "container_count": 10,
                     "ephemeral_storage_bytes": 1_000,
-                }
-            ),
-            "engine_storage": policy.engine_storage.model_copy(
-                update={
-                    "mode": RuntimeExecutionStorageMode.EPHEMERAL,
-                    "capacity_bytes": 1_000,
                 }
             ),
         }
@@ -199,22 +186,19 @@ async def test_workspace_restriction_cannot_expand_profile_boundary() -> None:
     repository.append_audit_event = AsyncMock()
     service = _service(repository)
 
-    with pytest.raises(ValueError, match="engine_storage.mode"):
+    with pytest.raises(ValueError, match="docker.storage_mode"):
         await service.replace_workspace(
             "workspace-1",
             WorkspaceRuntimeExecutionPolicyMutation(
                 expected_version=0,
                 restriction=RuntimeExecutionPolicyRestriction(
                     schema_version=1,
-                    image_build=None,
-                    container_run=None,
-                    compose=None,
-                    resources=None,
-                    engine_storage=RuntimeExecutionStorageRestriction(
-                        mode=RuntimeExecutionStorageMode.EPHEMERAL,
-                        capacity_bytes=1_000,
+                    docker=RuntimeExecutionDockerRestriction(
+                        enabled=None,
+                        storage_mode=RuntimeExecutionStorageMode.EPHEMERAL,
+                        storage_capacity_bytes=1_000,
                     ),
-                    network_egress=None,
+                    resources=None,
                 ),
                 allowed_profile_ids=frozenset({SYSTEM_STANDARD_PROFILE_ID}),
                 actor_workspace_user_id="workspace-user-1",
@@ -334,11 +318,13 @@ async def test_agent_can_select_qualified_nested_engine_profile() -> None:
     ("field", "restricted", "adding", "expected", "expected_path"),
     [
         (
-            "image_build",
-            RuntimeExecutionBooleanRestriction(enabled=False),
+            "docker",
+            RuntimeExecutionDockerRestriction(
+                enabled=False, storage_mode=None, storage_capacity_bytes=None
+            ),
             True,
             RuntimeExecutionChangeDirection.RESTRICTIVE,
-            "image_build.enabled",
+            "docker.enabled",
         ),
         (
             "resources",
@@ -347,8 +333,6 @@ async def test_agent_can_select_qualified_nested_engine_profile() -> None:
                 cpu_limit_millicores=100,
                 memory_request_bytes=None,
                 memory_limit_bytes=None,
-                pids=None,
-                container_count=None,
                 ephemeral_storage_bytes=None,
                 persistent_storage_bytes=None,
             ),
@@ -357,11 +341,13 @@ async def test_agent_can_select_qualified_nested_engine_profile() -> None:
             "resources.cpu_limit_millicores",
         ),
         (
-            "image_build",
-            RuntimeExecutionBooleanRestriction(enabled=False),
+            "docker",
+            RuntimeExecutionDockerRestriction(
+                enabled=False, storage_mode=None, storage_capacity_bytes=None
+            ),
             False,
             RuntimeExecutionChangeDirection.AUTHORITY_EXPANDING,
-            "image_build.enabled",
+            "docker.enabled",
         ),
         (
             "resources",
@@ -370,8 +356,6 @@ async def test_agent_can_select_qualified_nested_engine_profile() -> None:
                 cpu_limit_millicores=100,
                 memory_request_bytes=None,
                 memory_limit_bytes=None,
-                pids=None,
-                container_count=None,
                 ephemeral_storage_bytes=None,
                 persistent_storage_bytes=None,
             ),
@@ -383,8 +367,7 @@ async def test_agent_can_select_qualified_nested_engine_profile() -> None:
 )
 async def test_workspace_restriction_audit_aligns_optional_nested_modules(
     field: str,
-    restricted: RuntimeExecutionBooleanRestriction
-    | RuntimeExecutionResourceRestriction,
+    restricted: RuntimeExecutionDockerRestriction | RuntimeExecutionResourceRestriction,
     adding: bool,
     expected: RuntimeExecutionChangeDirection,
     expected_path: str,
@@ -658,17 +641,10 @@ async def test_agent_admin_receives_current_server_capability_evaluation() -> No
     assert policy.setting == setting
     assert policy.resolution.available
     assert policy.provider_compatibility_evaluated is True
-    assert policy.capabilities.image_build
-    assert policy.capabilities.container_run
-    assert policy.capabilities.compose
+    assert policy.capabilities.docker
     assert policy.capabilities.storage_modes == (
         RuntimeExecutionStorageMode.EPHEMERAL,
         RuntimeExecutionStorageMode.NONE,
-    )
-    assert policy.capabilities.network_modes == (
-        RuntimeExecutionNetworkMode.DIRECT,
-        RuntimeExecutionNetworkMode.NONE,
-        RuntimeExecutionNetworkMode.RESTRICTED,
     )
 
 
