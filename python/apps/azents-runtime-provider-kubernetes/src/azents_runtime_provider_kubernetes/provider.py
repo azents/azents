@@ -579,7 +579,7 @@ class KubernetesRuntimeProvider:
             return False
         if pod.spec.security_context != expected.spec.security_context:
             return False
-        if pod.spec.service_account_name is not None:
+        if pod.spec.service_account_name not in {None, "default"}:
             return False
         if pod.spec.automount_service_account_token:
             return False
