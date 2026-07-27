@@ -1,7 +1,7 @@
 """add external channel route access policy
 
 Revision ID: f17b4c8d6a21
-Revises: e0615474dc27
+Revises: c1d4e7f2a9b0
 Create Date: 2026-07-27 06:30:00.000000
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f17b4c8d6a21"
-down_revision: str | Sequence[str] | None = "e0615474dc27"
+down_revision: str | Sequence[str] | None = "c1d4e7f2a9b0"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
