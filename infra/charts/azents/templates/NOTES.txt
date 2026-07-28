@@ -25,3 +25,10 @@ Prepare existing Secrets with these keys before installing:
 Configure adminWeb.publicUrl for the externally visible Admin Web base and web.adminWebUrl to expose the role-gated Main Web link.
 
 Optional components remain default-off. Enabling snapshotter requires privileged workload support, hostPath access to containerd.sock, node scheduling constraints, and registry push credentials. Enabling mcpEgressProxy injects AZ_MCP_PROXY_URL into server workloads.
+
+{{ if and .Values.server.runtimeControl.enabled (eq .Values.objectStorage.mode "external") }}
+Runtime Transfer uses externally managed object storage. Before cutover, set all
+server.runtimeControl.transfer.lifecycleAcknowledgement values to the verified transfer-prefix
+expiration and incomplete-multipart-abort intervals, the evidence owner and timestamp, and the
+rollback owner. Rendering fails when any acknowledgement field is omitted.
+{{ end }}

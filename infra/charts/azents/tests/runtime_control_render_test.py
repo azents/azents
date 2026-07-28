@@ -32,6 +32,11 @@ def _helm_template(*values: str) -> str:
         f"runtimeProviderKubernetes.engineImage.digest={_ENGINE_DIGEST}",
         "secrets.existingSecrets.redis=azents-redis",
         "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
+        "server.runtimeControl.transfer.lifecycleAcknowledgement.prefixExpirationHours=24",
+        "server.runtimeControl.transfer.lifecycleAcknowledgement.incompleteMultipartAbortHours=24",
+        "server.runtimeControl.transfer.lifecycleAcknowledgement.owner=platform",
+        "server.runtimeControl.transfer.lifecycleAcknowledgement.evidenceTimestamp=2026-07-26T00:00:00Z",
+        "server.runtimeControl.transfer.lifecycleAcknowledgement.rollbackOwner=platform",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])
@@ -85,6 +90,12 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE" in rendered
     assert "azents-runtime-control-tls" in rendered
     assert "AZ_RUNTIME_RUNNER_IMAGE" in rendered
+    assert "AZ_RUNTIME_CONTROL_TRANSFER_BACKEND" in rendered
+    assert 'value: "redis"' in rendered
+    assert "AZ_RUNTIME_CONTROL_TRANSFER_OBJECT_PREFIX" in rendered
+    assert "AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT" in rendered
+    assert "AZ_RUNTIME_TRANSFER_COORDINATOR_TLS_CA_FILE" in rendered
+    assert "AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE" in rendered
     assert "AZ_CREDENTIAL_ENCRYPTION_KEY" in rendered
     assert "azents-auth" in rendered
     assert f"repo/runner:sha@{_RUNNER_DIGEST}" in rendered
@@ -97,6 +108,32 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert 'name: "azents-server"' in tokenreview_binding
     assert 'namespace: "default"' in tokenreview_binding
     assert "azents-runtime-provider-kubernetes" not in tokenreview_binding
+    assert rendered.count("mountPath: /var/run/secrets/azents/runtime-control-tls") == 3
+
+
+def test_runtime_control_renders_dedicated_workspace_s3_credential_aliases() -> None:
+    """Only Runtime Control receives the aliases consumed by its transfer S3 client."""
+    rendered = _helm_template(
+        "server.runtimeControl.enabled=true",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "server.runtimeControl.runnerImage.tag=sha",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        "objectStorage.external.endpoint=https://s3.internal",
+        "objectStorage.external.bucket=workspace-bucket",
+        "secrets.existingSecrets.objectStorage=workspace-s3-credentials",
+    )
+    start = rendered.index("kind: Deployment\nmetadata:\n  name: runtime-control")
+    runtime_control = rendered[start : rendered.index("\n---\n", start)]
+
+    assert "AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL" in rendered
+    assert "AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET" in rendered
+    assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL") == 1
+    assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET") == 1
+    assert "name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID" in runtime_control
+    assert "name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY" in runtime_control
+    assert 'name: "workspace-s3-credentials"' in runtime_control
+    assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID") == 1
+    assert rendered.count("AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY") == 1
 
 
 def test_runtime_control_enables_token_review_for_kubernetes_provider() -> None:
@@ -147,6 +184,122 @@ def test_runtime_control_runner_requires_immutable_digest() -> None:
     assert "server.runtimecontrol.runnerimage.digest is required" in (
         raised.value.stderr.lower()
     )
+
+
+def test_runtime_control_rejects_memory_transfer_state_with_hpa() -> None:
+    """Memory transfer state cannot route requests across Control replicas."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.transfer.stateBackend=memory",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        )
+
+    assert "memory Runtime Transfer state requires exactly one" in raised.value.stderr
+
+
+def test_runtime_control_requires_external_storage_lifecycle_evidence() -> None:
+    """External object storage cutover fails without operator lifecycle evidence."""
+    helm = shutil.which("helm")
+    if helm is None:
+        pytest.skip("helm binary is not available")
+    command = [
+        helm,
+        "template",
+        "azents",
+        str(CHART_DIR),
+        "--set",
+        "server.image.repository=repo/server",
+        "--set",
+        "server.image.tag=sha",
+        "--set",
+        "web.image.repository=repo/web",
+        "--set",
+        "web.image.tag=sha",
+        "--set",
+        "adminWeb.image.repository=repo/admin-web",
+        "--set",
+        "adminWeb.image.tag=sha",
+        "--set",
+        "secrets.existingSecrets.redis=azents-redis",
+        "--set",
+        "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
+        "--set",
+        "server.runtimeControl.enabled=true",
+        "--set",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "--set",
+        "server.runtimeControl.runnerImage.tag=sha",
+        "--set",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=CHART_DIR,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "lifecycle acknowledgement evidence" in completed.stderr
+
+
+def test_runtime_control_requires_external_multipart_abort_evidence() -> None:
+    """External storage cannot rely on default lifecycle intervals."""
+    helm = shutil.which("helm")
+    if helm is None:
+        pytest.skip("helm binary is not available")
+    command = [
+        helm,
+        "template",
+        "azents",
+        str(CHART_DIR),
+        "--set",
+        "server.image.repository=repo/server",
+        "--set",
+        "server.image.tag=sha",
+        "--set",
+        "web.image.repository=repo/web",
+        "--set",
+        "web.image.tag=sha",
+        "--set",
+        "adminWeb.image.repository=repo/admin-web",
+        "--set",
+        "adminWeb.image.tag=sha",
+        "--set",
+        "secrets.existingSecrets.redis=azents-redis",
+        "--set",
+        "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
+        "--set",
+        "server.runtimeControl.enabled=true",
+        "--set",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "--set",
+        "server.runtimeControl.runnerImage.tag=sha",
+        "--set",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        "--set",
+        "server.runtimeControl.transfer.lifecycleAcknowledgement.prefixExpirationHours=24",
+        "--set",
+        "server.runtimeControl.transfer.lifecycleAcknowledgement.owner=platform",
+        "--set",
+        "server.runtimeControl.transfer.lifecycleAcknowledgement.evidenceTimestamp=2026-07-26T00:00:00Z",
+        "--set",
+        "server.runtimeControl.transfer.lifecycleAcknowledgement.rollbackOwner=platform",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=CHART_DIR,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "incomplete multipart abort" in completed.stderr
 
 
 def test_runtime_control_rejects_removed_shared_auth_values() -> None:

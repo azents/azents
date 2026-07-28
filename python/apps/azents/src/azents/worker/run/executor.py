@@ -115,7 +115,6 @@ from azents.engine.run.types import (
 from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import (
-    get_external_channel_toolkit_provider,
     get_goal_toolkit_provider,
     get_todo_toolkit_provider,
     get_toolkit_registry,
@@ -187,6 +186,7 @@ from azents.worker.deps import (
     get_toolkit_repository,
     get_worker_broker,
     get_worker_config,
+    get_worker_external_channel_toolkit_provider,
 )
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.finalizer import (
@@ -377,7 +377,7 @@ class RunExecutor:
     ]
     external_channel_toolkit_provider: Annotated[
         ExternalChannelToolkitProvider,
-        Depends(get_external_channel_toolkit_provider),
+        Depends(get_worker_external_channel_toolkit_provider),
     ]
     skill_toolkit_provider: Annotated[
         SkillToolkitProvider, Depends(get_skill_toolkit_provider)

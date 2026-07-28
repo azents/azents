@@ -1,4 +1,13 @@
 {{- if and .Values.server.enabled .Values.server.runtimeControl.enabled }}
+{{- $transfer := .Values.server.runtimeControl.transfer }}
+{{- $objectStorageEndpoint := include "azents.objectStorageEndpoint" . }}
+{{- $objectStorageBucket := include "azents.objectStorageBucket" . }}
+{{- if and (eq $transfer.stateBackend "memory") (or (ne (int .Values.server.runtimeControl.replicas) 1) .Values.server.runtimeControl.autoscaling.enabled) }}
+{{- fail "memory Runtime Transfer state requires exactly one runtime-control replica and disabled autoscaling" }}
+{{- end }}
+{{- if and (eq .Values.objectStorage.mode "external") (or (not $transfer.lifecycleAcknowledgement.prefixExpirationHours) (not $transfer.lifecycleAcknowledgement.incompleteMultipartAbortHours) (not $transfer.lifecycleAcknowledgement.owner) (not $transfer.lifecycleAcknowledgement.evidenceTimestamp) (not $transfer.lifecycleAcknowledgement.rollbackOwner)) }}
+{{- fail "external object storage requires Runtime Transfer lifecycle acknowledgement evidence for prefix expiration, incomplete multipart abort, owner, timestamp, and rollback owner" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,6 +58,50 @@ spec:
               value: {{ .Values.server.runtimeControl.lifecycleRetryDelaySeconds | quote }}
             - name: AZ_RUNTIME_CONTROL_START_TIMEOUT_SECONDS
               value: {{ .Values.server.runtimeControl.startTimeoutSeconds | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_BACKEND
+              value: {{ $transfer.stateBackend | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_REDIS_NAMESPACE
+              value: {{ $transfer.redisNamespace | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_PER_RUNTIME_ATTEMPTS
+              value: {{ $transfer.perRuntimeAttempts | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_PER_RUNTIME_BYTES
+              value: {{ $transfer.perRuntimeBytes | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_DEPLOYMENT_ATTEMPTS
+              value: {{ $transfer.deploymentAttempts | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_DEPLOYMENT_BYTES
+              value: {{ $transfer.deploymentBytes | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_ADMISSION_LEASE_SECONDS
+              value: {{ $transfer.admissionLeaseSeconds | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_CONSUMER_LEASE_SECONDS
+              value: {{ $transfer.consumerLeaseSeconds | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_STREAM_LEASE_SECONDS
+              value: {{ $transfer.streamLeaseSeconds | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_TERMINAL_TTL_SECONDS
+              value: {{ $transfer.terminalTtlSeconds | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_LIST_PAGE_SIZE
+              value: {{ $transfer.listPageSize | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_MAX_CONCURRENT_DOWNLOADS
+              value: {{ $transfer.maxConcurrentDownloads | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_MAX_CONCURRENT_UPLOADS
+              value: {{ $transfer.maxConcurrentUploads | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_CHUNK_BYTES
+              value: {{ $transfer.chunkBytes | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_MULTIPART_PART_BYTES
+              value: {{ $transfer.multipartPartBytes | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_REPAIR_INTERVAL_SECONDS
+              value: {{ $transfer.repairIntervalSeconds | quote }}
+            - name: AZ_RUNTIME_CONTROL_TRANSFER_OBJECT_PREFIX
+              value: {{ $transfer.objectPrefix | quote }}
+            - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_PREFIX
+              value: {{ default "v1" (index .Values.server.env "AZ_WORKSPACE_S3_PREFIX") | quote }}
+            {{- if $objectStorageEndpoint }}
+            - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL
+              value: {{ $objectStorageEndpoint | quote }}
+            {{- end }}
+            {{- if $objectStorageBucket }}
+            - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET
+              value: {{ $objectStorageBucket | quote }}
+            {{- end }}
             - name: AZ_RUNTIME_CONTROL_ALLOW_INSECURE
               value: "false"
             - name: AZ_RUNTIME_CONTROL_KUBERNETES_TOKEN_REVIEW_ENABLED
@@ -63,8 +116,11 @@ spec:
               value: {{ include "azents.serverRuntimeRunnerImage" . | quote }}
             - name: AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT
               value: {{ include "azents.runtimeControlEndpoint" . | quote }}
+            - name: AZ_RUNTIME_RUNNER_TRANSFER_ENDPOINT
+              value: {{ include "azents.runtimeControlEndpoint" . | quote }}
             {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}
+            {{- include "azents.runtimeControlWorkspaceS3SecretEnv" . | nindent 12 }}
           volumeMounts:
             - name: runtime-control-tls
               mountPath: /var/run/secrets/azents/runtime-control-tls

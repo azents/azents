@@ -105,6 +105,8 @@ _DEFAULT_START_TIMEOUT_SECONDS = 300.0
 _DEFAULT_LIFECYCLE_RETRY_DELAY_SECONDS = 15.0
 _DEFAULT_TRANSFER_REPAIR_INTERVAL_SECONDS = 5.0
 _DEFAULT_TRANSFER_OBJECT_PREFIX = "runtime-transfer"
+_MAX_TRANSFER_TTL_SECONDS = 3_600
+_MAX_TRANSFER_PROCESS_BUFFER_BYTES = 64 * 1024 * 1024
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -163,6 +165,7 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_tls_ca_file: str | None = None
     runtime_runner_image: str
     runtime_runner_control_endpoint: str
+    runtime_runner_transfer_endpoint: str
     credential_encryption_key: str
     rdb_host: str = "localhost"
     rdb_port: int = 5432
@@ -189,6 +192,7 @@ async def runtime_control_server_lifespan(
     settings: RuntimeControlSettings,
 ) -> AsyncGenerator[grpc.aio.Server]:
     """Manage runtime-control gRPC server resources."""
+    validate_runtime_control_transfer_settings(settings)
     redis = create_redis_client(settings.redis_url)
     coordination_store = RedisRuntimeCoordinationStore(redis)
     clock = _utc_now
@@ -294,6 +298,7 @@ async def runtime_control_server_lifespan(
         config=RuntimeLifecycleDispatchConfig(
             runner_image=settings.runtime_runner_image,
             runner_control_endpoint=settings.runtime_runner_control_endpoint,
+            runner_transfer_endpoint=settings.runtime_runner_transfer_endpoint,
             runner_credential_identifier=runner_credential_verifier,
             runner_control_tls_ca_pem=transport.ca_pem,
             allow_insecure_runner_control=transport.allow_insecure,
@@ -560,6 +565,49 @@ def _coordinator_credential_lifetime(
             "Runtime transfer coordinator credential lifetime must be within 60 seconds"
         )
     return lifetime
+
+
+def validate_runtime_control_transfer_settings(
+    settings: RuntimeControlSettings,
+) -> None:
+    """Reject unsafe or unbounded Runtime Transfer deployment settings."""
+    positive = {
+        "per-runtime attempts": settings.runtime_control_transfer_per_runtime_attempts,
+        "per-runtime bytes": settings.runtime_control_transfer_per_runtime_bytes,
+        "deployment attempts": settings.runtime_control_transfer_deployment_attempts,
+        "deployment bytes": settings.runtime_control_transfer_deployment_bytes,
+        "list page size": settings.runtime_control_transfer_list_page_size,
+        "maximum concurrent downloads": (
+            settings.runtime_control_transfer_max_concurrent_downloads
+        ),
+        "maximum concurrent uploads": (
+            settings.runtime_control_transfer_max_concurrent_uploads
+        ),
+        "chunk bytes": settings.runtime_control_transfer_chunk_bytes,
+        "multipart part bytes": settings.runtime_control_transfer_multipart_part_bytes,
+    }
+    if any(value <= 0 for value in positive.values()):
+        raise ValueError("Runtime transfer limits must be positive")
+    bounded_ttls = {
+        "admission lease": settings.runtime_control_transfer_admission_lease_seconds,
+        "consumer lease": settings.runtime_control_transfer_consumer_lease_seconds,
+        "stream lease": settings.runtime_control_transfer_stream_lease_seconds,
+        "terminal TTL": settings.runtime_control_transfer_terminal_ttl_seconds,
+    }
+    if any(
+        not 0 < value <= _MAX_TRANSFER_TTL_SECONDS for value in bounded_ttls.values()
+    ):
+        raise ValueError("Runtime transfer TTL settings must be within 3,600 seconds")
+    if not settings.runtime_control_transfer_redis_namespace.strip():
+        raise ValueError("Runtime transfer Redis namespace is required")
+    if settings.runtime_control_transfer_multipart_part_bytes < 5 * 1024 * 1024:
+        raise ValueError("Runtime transfer multipart part bytes must be at least 5 MiB")
+    concurrent_buffers = (
+        settings.runtime_control_transfer_max_concurrent_downloads
+        + settings.runtime_control_transfer_max_concurrent_uploads
+    ) * settings.runtime_control_transfer_chunk_bytes
+    if concurrent_buffers > _MAX_TRANSFER_PROCESS_BUFFER_BYTES:
+        raise ValueError("Runtime transfer process buffers exceed the configured bound")
 
 
 def _utc_now() -> datetime:

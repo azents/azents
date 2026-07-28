@@ -95,6 +95,30 @@ _RUNNER_UID = 1000
 _RUNNER_GID = 1000
 _ENGINE_SOCKET_GROUP = "azents-runner"
 _FS_GROUP_CHANGE_POLICY = "OnRootMismatch"
+_TRANSFER_STAGING_MOUNT_PATH = "/var/run/azents-transfer"
+_TRANSFER_STAGING_DIRECTORY = _TRANSFER_STAGING_MOUNT_PATH
+_PVC_ROOT_MOUNT_PATH = "/var/run/azents-workspace-volume"
+_WORKSPACE_SUB_PATH = "workspace"
+_TRANSFER_STAGING_SUB_PATH = "transfer-staging"
+_STAGING_INIT_CONTAINER_NAME = "initialize-transfer-staging"
+_STAGING_INIT_COMMAND = (
+    "sh",
+    "-ec",
+    (
+        "for path in workspace transfer-staging; do "
+        "if [ -L /var/run/azents-workspace-volume/$path ] || "
+        "{ [ -e /var/run/azents-workspace-volume/$path ] && "
+        "[ ! -d /var/run/azents-workspace-volume/$path ]; }; then "
+        "exit 1; fi; "
+        "done\n"
+        "mkdir -p /var/run/azents-workspace-volume/workspace "
+        "/var/run/azents-workspace-volume/transfer-staging\n"
+        "chown 1000:1000 /var/run/azents-workspace-volume/workspace\n"
+        "chmod 0755 /var/run/azents-workspace-volume/workspace\n"
+        "chown 0:0 /var/run/azents-workspace-volume/transfer-staging\n"
+        "chmod 0700 /var/run/azents-workspace-volume/transfer-staging"
+    ),
+)
 
 _LABEL_MANAGED_BY = "azents/managed-by"
 _LABEL_PROVIDER_ID = "azents/runtime-provider-id"
@@ -112,6 +136,7 @@ _ANNOTATION_POLICY_SOURCE_VERSIONS = "azents/execution-policy-source-versions"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
+_ENV_TRANSFER_ENDPOINT = "AZ_RUNTIME_TRANSFER_ENDPOINT"
 _ENV_CONTROL_TLS_CA_PEM = "AZ_RUNTIME_CONTROL_TLS_CA_PEM"
 _ENV_CONTROL_ALLOW_INSECURE = "AZ_RUNTIME_CONTROL_ALLOW_INSECURE"
 _ENV_RUNTIME_ID = "AZ_RUNTIME_ID"
@@ -132,6 +157,7 @@ _ENV_DOCKER_HOST = "DOCKER_HOST"
 _ENV_TESTCONTAINERS_HOST_OVERRIDE = "TESTCONTAINERS_HOST_OVERRIDE"
 _ENV_TESTCONTAINERS_CONNECTION_MODE = "TESTCONTAINERS_CONNECTION_MODE"
 _ENV_TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE = "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE"
+_ENV_TRANSFER_STAGING_DIRECTORY = "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -601,6 +627,11 @@ class KubernetesRuntimeProvider:
             return False
         if pod.spec.automount_service_account_token:
             return False
+        if not _container_specs_equal(
+            pod.spec.init_containers,
+            expected.spec.init_containers,
+        ):
+            return False
         if dict(pod.spec.node_selector) != dict(expected.spec.node_selector):
             return False
         if not set(self._config.pod_tolerations).issubset(set(pod.spec.tolerations)):
@@ -688,6 +719,7 @@ class KubernetesRuntimeProvider:
                         else ()
                     ),
                 ),
+                init_containers=self._init_containers(command),
             ),
         )
 
@@ -696,13 +728,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
         policy: RuntimeExecutionPolicy,
     ) -> tuple[ContainerSpec, ...]:
-        runner_mounts = [
-            VolumeMount(
-                name=_WORKSPACE_VOLUME_NAME,
-                mount_path=self._workspace_mount_path,
-                read_only=False,
-            )
-        ]
+        runner_mounts = list(self._runner_volume_mounts())
         docker_enabled = policy.docker.enabled
         runner_env = self._env(command)
         docker_resources = _docker_resources(policy) if docker_enabled else None
@@ -732,10 +758,7 @@ class KubernetesRuntimeProvider:
             args=(),
             working_dir=self._workspace_mount_path,
             resources=self._config.runner_resources,
-            security_context=_unprivileged_security_context(
-                uid=_RUNNER_UID,
-                gid=_RUNNER_GID,
-            ),
+            security_context=_runner_supervisor_security_context(),
             readiness_probe=None,
             env=tuple(
                 EnvVar(name=key, value=value) for key, value in runner_env.items()
@@ -765,6 +788,7 @@ class KubernetesRuntimeProvider:
                     name=_WORKSPACE_VOLUME_NAME,
                     mount_path=self._workspace_mount_path,
                     read_only=False,
+                    sub_path=_WORKSPACE_SUB_PATH,
                 ),
                 VolumeMount(
                     name=_ENGINE_SOCKET_VOLUME_NAME,
@@ -813,6 +837,49 @@ class KubernetesRuntimeProvider:
                     _runtime_control_egress_rule(self._config),
                     *_permitted_egress_rules(self._config),
                 ),
+            ),
+        )
+
+    def _init_containers(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> tuple[ContainerSpec, ...]:
+        """Create the provider-owned filesystem boundary before Runner startup."""
+        return (
+            ContainerSpec(
+                name=_STAGING_INIT_CONTAINER_NAME,
+                image=command.runner_image,
+                command=_STAGING_INIT_COMMAND,
+                args=(),
+                working_dir=_PVC_ROOT_MOUNT_PATH,
+                resources=None,
+                security_context=_runner_supervisor_security_context(),
+                readiness_probe=None,
+                env=(),
+                volume_mounts=(
+                    VolumeMount(
+                        name=_WORKSPACE_VOLUME_NAME,
+                        mount_path=_PVC_ROOT_MOUNT_PATH,
+                        read_only=False,
+                    ),
+                ),
+            ),
+        )
+
+    def _runner_volume_mounts(self) -> tuple[VolumeMount, ...]:
+        """Return the only workspace and protected staging paths visible to Runner."""
+        return (
+            VolumeMount(
+                name=_WORKSPACE_VOLUME_NAME,
+                mount_path=self._workspace_mount_path,
+                read_only=False,
+                sub_path=_WORKSPACE_SUB_PATH,
+            ),
+            VolumeMount(
+                name=_WORKSPACE_VOLUME_NAME,
+                mount_path=_TRANSFER_STAGING_MOUNT_PATH,
+                read_only=False,
+                sub_path=_TRANSFER_STAGING_SUB_PATH,
             ),
         )
 
@@ -873,11 +940,13 @@ class KubernetesRuntimeProvider:
         identity = command.identity
         env = {
             _ENV_CONTROL_ENDPOINT: command.auth.control_endpoint,
+            _ENV_TRANSFER_ENDPOINT: command.auth.transfer_endpoint,
             _ENV_RUNTIME_ID: identity.runtime_id,
             _ENV_AGENT_ID: identity.agent_id,
             _ENV_WORKSPACE_ID: identity.workspace_id,
             _ENV_PROVIDER_ID: self._config.provider_id,
             _ENV_WORKSPACE_PATH: self._workspace_mount_path,
+            _ENV_TRANSFER_STAGING_DIRECTORY: _TRANSFER_STAGING_DIRECTORY,
         }
         if command.auth.control_tls_ca_pem is not None:
             env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
@@ -1061,24 +1130,6 @@ class KubernetesRuntimeProvider:
                 "Docker storage requires Docker to be enabled."
             )
         return policy
-
-
-def _unprivileged_security_context(
-    *,
-    uid: int,
-    gid: int,
-    read_only_root_filesystem: bool = False,
-) -> ContainerSecurityContext:
-    return ContainerSecurityContext(
-        privileged=False,
-        allow_privilege_escalation=False,
-        read_only_root_filesystem=read_only_root_filesystem,
-        run_as_non_root=True,
-        run_as_user=uid,
-        run_as_group=gid,
-        capabilities_add=(),
-        capabilities_drop=("ALL",),
-    )
 
 
 def _engine_security_context() -> ContainerSecurityContext:
@@ -1418,6 +1469,20 @@ def _quantity_value(value: KubernetesResourceQuantity) -> Decimal | None:
         return quantity * _QUANTITY_SUFFIX_MULTIPLIERS[suffix]
     except InvalidOperation, ValueError:
         return None
+
+
+def _runner_supervisor_security_context() -> ContainerSecurityContext:
+    """Allow the Runner supervisor to own protected staging and drop children."""
+    return ContainerSecurityContext(
+        privileged=False,
+        allow_privilege_escalation=False,
+        read_only_root_filesystem=False,
+        run_as_non_root=False,
+        run_as_user=0,
+        run_as_group=0,
+        capabilities_add=("SETGID", "SETUID"),
+        capabilities_drop=("ALL",),
+    )
 
 
 def _absolute_posix_path(raw_path: str) -> str:

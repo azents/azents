@@ -464,3 +464,21 @@ Render environment variables injected from external service Secrets.
       key: {{ .Values.objectStorage.external.secretAccessKeyKey | quote }}
 {{- end }}
 {{- end -}}
+
+{{/*
+Render the Runtime Control-only workspace S3 credential aliases.
+*/}}
+{{- define "azents.runtimeControlWorkspaceS3SecretEnv" -}}
+{{- if and (eq .Values.objectStorage.external.credentialMode "existingSecret") .Values.secrets.existingSecrets.objectStorage }}
+- name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.existingSecrets.objectStorage | quote }}
+      key: {{ .Values.objectStorage.external.accessKeyIdKey | quote }}
+- name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.existingSecrets.objectStorage | quote }}
+      key: {{ .Values.objectStorage.external.secretAccessKeyKey | quote }}
+{{- end }}
+{{- end -}}

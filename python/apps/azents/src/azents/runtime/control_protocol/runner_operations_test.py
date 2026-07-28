@@ -6,6 +6,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
+from azents_runtime_control.transfer import (
+    RUNNER_TRANSFER_CAPABILITY,
+    RUNNER_TRANSFER_PROTOCOL_VERSION,
+)
 
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
@@ -1503,8 +1507,10 @@ def _runner_registration() -> RuntimeRunnerRegistration:
     return RuntimeRunnerRegistration(
         runtime_id="runtime-1",
         runner_id="runner-1",
-        protocol_version="2026-05-25",
-        capabilities=RuntimeProtocolCapabilities(("bash", "files")),
+        protocol_version=RUNNER_TRANSFER_PROTOCOL_VERSION,
+        capabilities=RuntimeProtocolCapabilities(
+            ("bash", "files", RUNNER_TRANSFER_CAPABILITY)
+        ),
         health="ok",
         workspace_path="/workspace/agent",
         metadata={},

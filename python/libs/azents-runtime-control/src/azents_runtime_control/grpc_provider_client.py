@@ -391,6 +391,7 @@ def _command(
         runner_image=message.runner_image,
         auth=RuntimeContainerAuth(
             control_endpoint=message.control_endpoint,
+            transfer_endpoint=_required_transfer_endpoint(message.transfer_endpoint),
             runner_auth_token=message.runner_auth_token,
             runner_auth_credential_id=_required_runner_auth_credential_id(payload),
             control_tls_ca_pem=_optional_control_tls_ca_pem(payload),
@@ -419,6 +420,13 @@ def _required_runner_auth_credential_id(payload: dict[str, JsonValue]) -> str:
     normalized = credential_id.strip()
     if not normalized:
         raise ValueError("runner_auth_credential_id is required")
+    return normalized
+
+
+def _required_transfer_endpoint(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("transfer_endpoint is required")
     return normalized
 
 

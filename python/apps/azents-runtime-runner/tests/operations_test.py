@@ -22,11 +22,43 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 
+import azents_runtime_runner.operations as runner_operations
 from azents_runtime_runner.operations import (
     RunnerOperations,
     _extract_glob_dir_prefix,  # pyright: ignore[reportPrivateUsage] -- Validate root-prefix parsing without traversing the host root.
 )
 from azents_runtime_runner.workspace import Workspace
+
+
+def test_workload_filesystem_identity_only_applies_with_protected_staging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ordinary Runner files retain their existing identity semantics."""
+    calls: list[tuple[str, int]] = []
+
+    def set_fsuid(value: int) -> int:
+        calls.append(("uid", value))
+        return 0
+
+    def set_fsgid(value: int) -> int:
+        calls.append(("gid", value))
+        return 0
+
+    monkeypatch.setattr(runner_operations.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(runner_operations, "_setfsuid", set_fsuid)
+    monkeypatch.setattr(runner_operations, "_setfsgid", set_fsgid)
+
+    with runner_operations._workload_filesystem_identity(  # pyright: ignore[reportPrivateUsage] -- Validate protected staging identity restriction.
+        required=False
+    ):
+        pass
+    assert calls == []
+
+    with runner_operations._workload_filesystem_identity(  # pyright: ignore[reportPrivateUsage] -- Validate protected staging identity restriction.
+        required=True
+    ):
+        pass
+    assert calls == [("gid", 1000), ("uid", 1000), ("uid", 0), ("gid", 0)]
 
 
 class _FakeClient:
@@ -175,6 +207,32 @@ async def test_file_write_read_and_list_stay_in_workspace(tmp_path: Path) -> Non
             "modified_at": modified_at,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_file_delete_rejects_protected_staging_path(tmp_path: Path) -> None:
+    """Lexical native file operations cannot bypass the reserved staging boundary."""
+    staging = tmp_path / "transfer-staging"
+    staging.mkdir()
+    protected_file = staging / "protected.bin"
+    protected_file.write_bytes(b"protected")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        client=client,
+        workspace=Workspace(str(tmp_path), blocked_paths=(staging,)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.delete",
+            payload={"path": str(protected_file)},
+        )
+    )
+
+    assert protected_file.read_bytes() == b"protected"
+    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload["error_code"] == "INVALID_PATH"
+    await operations.close()
 
 
 @pytest.mark.asyncio

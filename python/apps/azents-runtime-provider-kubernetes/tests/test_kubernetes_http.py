@@ -1,5 +1,7 @@
 """Kubernetes HTTP resource mapping tests."""
 
+import dataclasses
+
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ContainerResourceClaim,
     ContainerResources,
@@ -94,6 +96,68 @@ def test_pod_manifest_preserves_image_pull_secrets() -> None:
     manifest = pod_manifest(pod)
 
     assert manifest["spec"]["imagePullSecrets"] == [{"name": "ecr-pull-secret"}]
+
+
+def test_pod_manifest_preserves_init_container_and_sub_path_mounts() -> None:
+    security_context = ContainerSecurityContext(
+        privileged=False,
+        allow_privilege_escalation=False,
+        read_only_root_filesystem=False,
+        run_as_non_root=False,
+        run_as_user=0,
+        run_as_group=0,
+        capabilities_add=("SETGID", "SETUID"),
+        capabilities_drop=("ALL",),
+    )
+    initializer = ContainerSpec(
+        name="initialize-transfer-staging",
+        image="runner:latest",
+        command=("sh", "-ec", "chmod 0700 /volume/transfer-staging"),
+        args=(),
+        working_dir="/volume",
+        resources=None,
+        security_context=security_context,
+        readiness_probe=None,
+        env=(),
+        volume_mounts=(
+            VolumeMount(
+                name="agent-workspace",
+                mount_path="/volume",
+                read_only=False,
+            ),
+        ),
+    )
+    pod = _pod(resources=None)
+    runner = dataclasses.replace(
+        pod.spec.containers[0],
+        security_context=security_context,
+        volume_mounts=(
+            VolumeMount(
+                name="agent-workspace",
+                mount_path="/workspace/agent",
+                read_only=False,
+                sub_path="workspace",
+            ),
+        ),
+    )
+    pod = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(
+            pod.spec, init_containers=(initializer,), containers=(runner,)
+        ),
+    )
+
+    manifest = pod_manifest(pod)
+
+    assert manifest["spec"]["initContainers"][0]["command"] == [
+        "sh",
+        "-ec",
+        "chmod 0700 /volume/transfer-staging",
+    ]
+    assert manifest["spec"]["containers"][0]["volumeMounts"][0]["subPath"] == (
+        "workspace"
+    )
+    assert pod_resource(manifest) == pod
 
 
 def test_pod_resource_returns_none_for_absent_container_resources() -> None:

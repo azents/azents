@@ -844,6 +844,141 @@
             "startTimeoutSeconds": {
               "type": "number"
             },
+            "transfer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "stateBackend",
+                "redisNamespace",
+                "perRuntimeAttempts",
+                "perRuntimeBytes",
+                "deploymentAttempts",
+                "deploymentBytes",
+                "admissionLeaseSeconds",
+                "consumerLeaseSeconds",
+                "streamLeaseSeconds",
+                "terminalTtlSeconds",
+                "listPageSize",
+                "maxConcurrentDownloads",
+                "maxConcurrentUploads",
+                "chunkBytes",
+                "multipartPartBytes",
+                "repairIntervalSeconds",
+                "objectPrefix",
+                "lifecycleAcknowledgement"
+              ],
+              "properties": {
+                "stateBackend": {
+                  "type": "string",
+                  "enum": [
+                    "memory",
+                    "redis"
+                  ]
+                },
+                "redisNamespace": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "perRuntimeAttempts": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "perRuntimeBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "deploymentAttempts": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "deploymentBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "admissionLeaseSeconds": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3600
+                },
+                "consumerLeaseSeconds": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3600
+                },
+                "streamLeaseSeconds": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3600
+                },
+                "terminalTtlSeconds": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 3600
+                },
+                "listPageSize": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxConcurrentDownloads": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxConcurrentUploads": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "chunkBytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "multipartPartBytes": {
+                  "type": "integer",
+                  "minimum": 5242880
+                },
+                "repairIntervalSeconds": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "objectPrefix": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "lifecycleAcknowledgement": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "owner",
+                    "evidenceTimestamp",
+                    "rollbackOwner"
+                  ],
+                  "properties": {
+                    "prefixExpirationHours": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "exclusiveMinimum": 0
+                    },
+                    "incompleteMultipartAbortHours": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "exclusiveMinimum": 0
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "evidenceTimestamp": {
+                      "type": "string"
+                    },
+                    "rollbackOwner": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
             "tls": {
               "$ref": "#/definitions/runtimeControlTls"
             },

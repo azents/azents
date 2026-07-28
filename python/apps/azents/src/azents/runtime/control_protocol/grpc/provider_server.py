@@ -812,6 +812,7 @@ def _provider_command(
         ),
         runner_image=_required_string(payload, "runner_image"),
         control_endpoint=_required_string(auth, "control_endpoint"),
+        transfer_endpoint=_required_string(auth, "transfer_endpoint"),
         runner_auth_token=runner_credential.token,
     )
     command.payload.update(cast(dict[str, object], payload))

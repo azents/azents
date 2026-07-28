@@ -55,6 +55,7 @@ class RuntimeContainerAuth:
     """Auth and connection material injected into the Runtime container."""
 
     control_endpoint: str
+    transfer_endpoint: str
     runner_auth_token: str
     runner_auth_credential_id: str
     control_tls_ca_pem: str | None

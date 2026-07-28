@@ -5,8 +5,10 @@ import dataclasses
 import json
 import logging
 import os
+import stat
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import grpc
 from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
@@ -114,20 +116,24 @@ def main() -> None:
 
 async def run_runtime_runner() -> None:
     endpoint = _required_env("AZ_RUNTIME_CONTROL_ENDPOINT")
-    transfer_endpoint = os.environ.get("AZ_RUNTIME_TRANSFER_ENDPOINT") or endpoint
+    transfer_endpoint = _required_env("AZ_RUNTIME_TRANSFER_ENDPOINT")
     runtime_id = _required_env("AZ_RUNTIME_ID")
     workspace_path = _required_env("AZ_AGENT_WORKSPACE_PATH")
     runner_id = os.environ.get("AZ_RUNTIME_RUNNER_ID") or f"runner-{uuid.uuid4()}"
     credential_id = _required_env("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID")
     runner_auth_token = _required_env("AZ_RUNTIME_RUNNER_AUTH_TOKEN")
     execution_policy = _execution_policy_evidence_from_env()
+    protected_staging_directory = _protected_staging_directory_from_env()
     control_tls = _control_tls_from_env()
     allow_insecure_control = _required_bool_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE")
     base_connection_id = (
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
     limit_config = runner_limit_config_from_env()
-    workspace = Workspace(workspace_path)
+    workspace = Workspace(
+        workspace_path,
+        blocked_paths=(protected_staging_directory,),
+    )
     registration = RunnerRegistration(
         runtime_id=runtime_id,
         runner_id=runner_id,
@@ -207,6 +213,7 @@ async def run_runtime_runner() -> None:
             control=client,
             transfer=transfer_client,
             accepted_generation=accepted_generation,
+            protected_staging_directory=protected_staging_directory,
         )
         client.set_transfer_intent_handler(transfer_manager.handle_intent)
         client.set_transfer_cancel_handler(transfer_manager.handle_cancel)
@@ -359,6 +366,26 @@ def _required_env(name: str) -> str:
     if not value:
         raise SystemExit(f"{name} is required")
     return value
+
+
+def _protected_staging_directory_from_env() -> Path:
+    """Return the root-owned same-filesystem staging directory."""
+    path = Path(_required_env("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"))
+    if not path.is_absolute() or os.geteuid() != 0:
+        raise SystemExit("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY is not protected")
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise SystemExit(
+            "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY is not protected"
+        ) from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise SystemExit("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY is not protected")
+    return path
 
 
 def _required_bool_env(name: str) -> bool:

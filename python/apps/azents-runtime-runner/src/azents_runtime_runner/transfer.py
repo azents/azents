@@ -7,11 +7,13 @@ import errno
 import hashlib
 import logging
 import os
+import re
 import stat
+import tempfile
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import Protocol
 
 import grpc
@@ -40,6 +42,11 @@ from azents_runtime_control.transfer import (
 _BUFFER_BYTES = MAX_TRANSFER_CHUNK_BYTES
 _DEFAULT_MAX_ACTIVE_TRANSFERS = 4
 _DEFAULT_MAX_TOMBSTONES = 256
+_WORKLOAD_UID = 1000
+_WORKLOAD_GID = 1000
+_PROTECTED_STAGE_MAX_AGE_SECONDS = 60 * 60
+_PROTECTED_STAGE_CLEANUP_LIMIT = 256
+_PROTECTED_STAGE_NAME = re.compile(r"\.transfer-attempt-[a-z0-9_]{8,}")
 _LOGGER = logging.getLogger(__name__)
 _AT_EMPTY_PATH = 0x1000
 _LIBC = ctypes.CDLL(None, use_errno=True)
@@ -119,6 +126,7 @@ class RunnerTransferManager:
         control: RunnerTransferResultSink,
         transfer: RunnerTransferClient,
         accepted_generation: Callable[[], int | None],
+        protected_staging_directory: Path | None = None,
         max_active_transfers: int = _DEFAULT_MAX_ACTIVE_TRANSFERS,
         max_tombstones: int = _DEFAULT_MAX_TOMBSTONES,
     ) -> None:
@@ -128,6 +136,7 @@ class RunnerTransferManager:
         self._control = control
         self._transfer = transfer
         self._accepted_generation = accepted_generation
+        self._protected_staging_directory = protected_staging_directory
         self._max_active_transfers = max_active_transfers
         self._max_tombstones = max_tombstones
         self._active: dict[_TransferKey, _ActiveTransfer] = {}
@@ -144,6 +153,11 @@ class RunnerTransferManager:
 
     async def start(self) -> None:
         """Provide a lifecycle hook without pathname-backed transfer state."""
+        if self._protected_staging_directory is not None:
+            await asyncio.to_thread(
+                _cleanup_protected_staging_directory,
+                self._protected_staging_directory,
+            )
         self._ensure_result_task()
 
     async def handle_intent(self, intent: RunnerTransferIntent) -> None:
@@ -258,8 +272,22 @@ class RunnerTransferManager:
             raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
         parent_fd, destination_name = _open_parent(intent.runtime_path, create=True)
         stage_fd: int | None = None
+        stage_dir_fd: int | None = None
+        stage_name: str | None = None
         try:
-            stage_fd = _open_unnamed_temporary_file(parent_fd)
+            if self._protected_staging_directory is None:
+                stage_fd = _open_unnamed_temporary_file(parent_fd)
+            else:
+                stage_dir_fd = _open_protected_staging_directory(
+                    self._protected_staging_directory
+                )
+                if os.fstat(stage_dir_fd).st_dev != os.fstat(parent_fd).st_dev:
+                    raise _TransferFailure(RunnerTransferFailure.DESTINATION_FAILED)
+                stage_fd, stage_path = tempfile.mkstemp(
+                    prefix=".transfer-attempt-",
+                    dir=f"/proc/self/fd/{stage_dir_fd}",
+                )
+                stage_name = Path(stage_path).name
             offset = 0
             digest = hashlib.sha256()
             complete: RunnerDownloadComplete | None = None
@@ -296,12 +324,35 @@ class RunnerTransferManager:
             assert stage_fd is not None
             async with self._commit_lock:
                 _check_stop(intent, cancelled)
-                _assert_empty_destination(parent_fd, destination_name)
-                _link_from_file_descriptor(
-                    stage_fd,
-                    destination_name,
-                    dst_dir_fd=parent_fd,
-                )
+                if stage_dir_fd is None or stage_name is None:
+                    _assert_empty_destination(parent_fd, destination_name)
+                    _link_from_file_descriptor(
+                        stage_fd,
+                        destination_name,
+                        dst_dir_fd=parent_fd,
+                    )
+                else:
+                    os.fchown(stage_fd, _WORKLOAD_UID, _WORKLOAD_GID)
+                    os.fchmod(stage_fd, 0o600)
+                if stage_dir_fd is not None and stage_name is not None and overwrite:
+                    os.replace(
+                        stage_name,
+                        destination_name,
+                        src_dir_fd=stage_dir_fd,
+                        dst_dir_fd=parent_fd,
+                    )
+                    stage_name = None
+                elif stage_dir_fd is not None and stage_name is not None:
+                    _assert_empty_destination(parent_fd, destination_name)
+                    os.link(
+                        stage_name,
+                        destination_name,
+                        src_dir_fd=stage_dir_fd,
+                        dst_dir_fd=parent_fd,
+                        follow_symlinks=False,
+                    )
+                    os.unlink(stage_name, dir_fd=stage_dir_fd)
+                    stage_name = None
             return RunnerTransferResult(
                 identity=intent.identity,
                 operation_id=intent.operation_id,
@@ -314,8 +365,13 @@ class RunnerTransferManager:
                 failure=None,
             )
         finally:
+            if stage_name is not None and stage_dir_fd is not None:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(stage_name, dir_fd=stage_dir_fd)
             if stage_fd is not None:
                 os.close(stage_fd)
+            if stage_dir_fd is not None:
+                os.close(stage_dir_fd)
             os.close(parent_fd)
 
     async def _upload(
@@ -643,12 +699,25 @@ def _open_parent(path: str, *, create: bool) -> tuple[int, str]:
             except FileNotFoundError:
                 if not create:
                     raise
-                os.mkdir(component, 0o700, dir_fd=parent_fd)
+                created = False
+                try:
+                    os.mkdir(component, 0o700, dir_fd=parent_fd)
+                    created = True
+                except FileExistsError:
+                    pass
                 next_fd = os.open(
                     component,
                     os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                     dir_fd=parent_fd,
                 )
+                try:
+                    if created:
+                        if os.geteuid() == 0:
+                            os.fchown(next_fd, _WORKLOAD_UID, _WORKLOAD_GID)
+                        os.fchmod(next_fd, 0o755)
+                except BaseException:
+                    os.close(next_fd)
+                    raise
             os.close(parent_fd)
             parent_fd = next_fd
         return parent_fd, candidate.name
@@ -687,6 +756,45 @@ def _open_unnamed_temporary_file(parent_fd: int) -> int:
         0o600,
         dir_fd=parent_fd,
     )
+
+
+def _open_protected_staging_directory(path: Path) -> int:
+    if not path.is_absolute():
+        raise _TransferFailure(RunnerTransferFailure.DESTINATION_FAILED)
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    metadata = os.fstat(descriptor)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        os.close(descriptor)
+        raise _TransferFailure(RunnerTransferFailure.DESTINATION_FAILED)
+    return descriptor
+
+
+def _cleanup_protected_staging_directory(path: Path) -> None:
+    """Remove bounded stale attempt files from one verified runtime staging boundary."""
+    descriptor = _open_protected_staging_directory(path)
+    try:
+        cutoff = datetime.now(UTC).timestamp() - _PROTECTED_STAGE_MAX_AGE_SECONDS
+        deleted = 0
+        for name in sorted(os.listdir(descriptor)):
+            if deleted >= _PROTECTED_STAGE_CLEANUP_LIMIT:
+                break
+            if _PROTECTED_STAGE_NAME.fullmatch(name) is None:
+                continue
+            metadata = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_mtime > cutoff
+            ):
+                continue
+            os.unlink(name, dir_fd=descriptor)
+            deleted += 1
+    finally:
+        os.close(descriptor)
 
 
 def _link_from_file_descriptor(

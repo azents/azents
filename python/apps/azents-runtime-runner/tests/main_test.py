@@ -4,14 +4,17 @@
 
 import json
 import logging
+from pathlib import Path
 
 import pytest
 from pytest import MonkeyPatch
 
+import azents_runtime_runner.main as runner_main
 from azents_runtime_runner.main import (
     RunnerLimitConfig,
     StructuredLogFormatter,
     _execution_policy_evidence_from_env,
+    _protected_staging_directory_from_env,
     run_runtime_runner,
     runner_limit_config_from_env,
 )
@@ -23,6 +26,7 @@ async def test_runner_requires_auth_credential_id(
 ) -> None:
     """Runner startup requires the provider-injected credential identifier."""
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
+    monkeypatch.setenv("AZ_RUNTIME_TRANSFER_ENDPOINT", "runtime-transfer:8031")
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
     monkeypatch.setenv("AZ_RUNTIME_ID", "runtime-1")
     monkeypatch.setenv("AZ_AGENT_WORKSPACE_PATH", "/workspace/agent")
@@ -38,6 +42,7 @@ async def test_runner_requires_auth_token(
 ) -> None:
     """Runner startup requires the provider-injected signed credential."""
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
+    monkeypatch.setenv("AZ_RUNTIME_TRANSFER_ENDPOINT", "runtime-transfer:8031")
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
     monkeypatch.setenv("AZ_RUNTIME_ID", "runtime-1")
     monkeypatch.setenv("AZ_AGENT_WORKSPACE_PATH", "/workspace/agent")
@@ -69,6 +74,48 @@ def test_runner_reads_provider_injected_policy_evidence(
     assert evidence.snapshot_id == "snapshot-1"
     assert evidence.desired_generation == 3
     assert evidence.source_versions["agent"] == 4
+
+
+@pytest.mark.asyncio
+async def test_runner_requires_explicit_transfer_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runner startup rejects a deployment without transfer endpoint wiring."""
+    monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
+    monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
+    monkeypatch.delenv("AZ_RUNTIME_TRANSFER_ENDPOINT", raising=False)
+
+    with pytest.raises(SystemExit, match="AZ_RUNTIME_TRANSFER_ENDPOINT"):
+        await run_runtime_runner()
+
+
+def test_protected_staging_requires_provider_created_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    staging = tmp_path / "missing-staging"
+    monkeypatch.setenv("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY", str(staging))
+    monkeypatch.setattr(runner_main.os, "geteuid", lambda: 0)
+
+    with pytest.raises(SystemExit, match="AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"):
+        _protected_staging_directory_from_env()
+
+    assert not staging.exists()
+
+
+def test_protected_staging_rejects_symlink(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    staging = tmp_path / "staging"
+    staging.symlink_to(target, target_is_directory=True)
+    monkeypatch.setenv("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY", str(staging))
+    monkeypatch.setattr(runner_main.os, "geteuid", lambda: 0)
+
+    with pytest.raises(SystemExit, match="AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"):
+        _protected_staging_directory_from_env()
 
 
 _LIMIT_ENV_NAMES = (
