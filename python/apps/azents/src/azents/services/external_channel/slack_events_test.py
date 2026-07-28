@@ -1,7 +1,9 @@
 """Slack External Channel event normalization and API adapter tests."""
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs
 
 import httpx
@@ -1338,6 +1340,93 @@ async def test_channel_action_rejects_over_limit_markdown_without_request() -> N
     assert calls == 0
     assert result.status == "failed"
     assert result.error_kind == "provider_payload_invalid"
+
+
+@pytest.mark.asyncio
+async def test_file_reply_does_not_start_after_logical_deadline() -> None:
+    """A Runtime delivery deadline overrides the client's ordinary timeout."""
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("Slack must not receive an expired delivery request")
+
+    async def content() -> AsyncIterator[bytes]:
+        yield b"abc"
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_file_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="Attached report",
+            files=[
+                SlackOutboundFile(
+                    filename="report.txt",
+                    length=3,
+                    content=content,
+                )
+            ],
+            deadline_at=datetime.now(UTC) - timedelta(seconds=1),
+        )
+
+    assert calls == 0
+    assert result.status == "unknown"
+    assert result.error_kind == "provider_ambiguous"
+
+
+@pytest.mark.asyncio
+async def test_file_reply_absolute_deadline_cancels_in_flight_stream() -> None:
+    """One provider operation cannot outlive its Runtime delivery deadline."""
+    paths: list[str] = []
+    closed = False
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/files.getUploadURLExternal":
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "upload_url": "https://upload.slack.test/upload/1",
+                    "file_id": "F1",
+                },
+            )
+        await request.aread()
+        return httpx.Response(200, text="OK")
+
+    async def content() -> AsyncIterator[bytes]:
+        nonlocal closed
+        try:
+            yield b"a"
+            await asyncio.sleep(0.25)
+            yield b"bc"
+        finally:
+            closed = True
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_file_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="Attached report",
+            files=[
+                SlackOutboundFile(
+                    filename="report.txt",
+                    length=3,
+                    content=content,
+                )
+            ],
+            deadline_at=datetime.now(UTC) + timedelta(milliseconds=100),
+        )
+
+    assert result.status == "unknown"
+    assert result.error_kind == "provider_ambiguous"
+    assert closed
+    assert paths == ["/api/files.getUploadURLExternal"]
 
 
 @pytest.mark.asyncio

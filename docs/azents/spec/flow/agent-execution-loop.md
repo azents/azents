@@ -20,6 +20,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/io/user_input.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/tools/**
+  - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
@@ -725,9 +726,12 @@ An active root External Channel binding may additionally expose
 provider-neutral opaque locator and one Runtime destination, performs ownership and
 capability checks before provider access, and writes only the selected bounded file.
 `channel_action.files` accepts up to 20 absolute Runtime paths, requires conversational
-text, preflights all sources before the action commit, and later streams them through the
-existing run-scoped `FileStorage` dependency. The Agent never receives Slack credentials,
-private URLs, or provider transfer procedures.
+text, and preflights all sources before the action commit. Runtime sources require the
+run-scoped trusted provider-delivery capability, which performs one verified Runtime upload
+per source and exposes only bounded provider-native streams; capability absence fails before
+provider mutation. Exchange sources retain their authority-resolved bounded stream path. The
+Agent never receives Slack credentials, private URLs, storage identity, or provider transfer
+procedures.
 
 GPT-compatible prepared calls may expose `apply_patch` in exactly one selected wire dialect:
 `json_function` with structured `base_path` and patch fields, or `plaintext_custom` with one strict
@@ -1182,6 +1186,9 @@ with a channel/message icon rather than presenting it as Goal continuation.
 - **2026-07-26** (spec_version 133) — Added the parameterless manual orphan Git-worktree
   cleanup TurnAction, bounded structured candidate results, active-root protection, cancellation
   reconciliation, and no-replay terminalization.
+- **2026-07-26** (spec_version 134) — Replaced `channel_action` Runtime file range-read
+  relay with capability-gated verified Runtime provider streams and fail-closed pre-cutover
+  behavior.
 - **2026-07-24** (spec_version 132) — Promoted routing-only broker signals,
   owner-generation-first canonical PostgreSQL snapshots, and Userless Team Session execution.
 - **2026-07-24** (spec_version 131) — Added safe structured OpenAI Responses terminal-event

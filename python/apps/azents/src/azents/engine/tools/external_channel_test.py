@@ -117,6 +117,15 @@ class _ActionService:
         self.find_calls.append((session_id, client_tool_call_id))
         return self.existing
 
+    async def drain_runtime_provider_settlements(
+        self,
+        *,
+        provider_delivery_capability: object | None,
+        limit: int = 20,
+    ) -> int:
+        del provider_delivery_capability, limit
+        return 0
+
     async def execute(self, **kwargs: object) -> ChannelActionCommit:
         self.calls.append(kwargs)
         return ChannelActionCommit(
@@ -194,6 +203,7 @@ def _toolkit(
                 projects=(),
                 transfer_capability=None,
                 publication_capability=None,
+                provider_delivery_capability=None,
             )
         )
         toolkit.set_runtime_context_store(store)

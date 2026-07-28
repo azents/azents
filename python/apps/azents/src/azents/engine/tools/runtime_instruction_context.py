@@ -10,6 +10,9 @@ from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.present_file_publication import (
     PresentFilePublicationRequest,
 )
+from azents.runtime.transfer.runtime_to_provider import (
+    RuntimeToProviderDeliveryCapability,
+)
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeTarget,
     ServerToRuntimeTransferRequest,
@@ -87,6 +90,7 @@ class RuntimeInstructionContext:
     projects: tuple[SessionWorkspaceProject, ...]
     transfer_capability: RuntimeTransferCapability | None
     publication_capability: RuntimeToServerPublicationCapability | None
+    provider_delivery_capability: RuntimeToProviderDeliveryCapability | None
 
 
 class RuntimeInstructionContextStore:

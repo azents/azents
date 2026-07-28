@@ -1,11 +1,12 @@
 """Slack event normalization and bounded conversation API operations."""
 
+import asyncio
 import datetime
 import hashlib
 import json
 import logging
 import re
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
@@ -891,6 +892,41 @@ class SlackConversationClient:
         thread_ts: str,
         markdown_text: str,
         files: Sequence[SlackOutboundFile],
+        before_provider_request: Callable[[], Awaitable[None]] | None = None,
+        deadline_at: datetime.datetime | None = None,
+    ) -> SlackControlMessageResult:
+        """Upload ordered files under one absolute provider-operation deadline."""
+        try:
+            async with asyncio.timeout(self._delivery_timeout(deadline_at)):
+                return await self._post_file_message(
+                    bot_token=bot_token,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    markdown_text=markdown_text,
+                    files=files,
+                    before_provider_request=before_provider_request,
+                    deadline_at=deadline_at,
+                )
+        except TimeoutError, SlackProviderTemporaryError:
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary="Slack file reply outcome is unknown.",
+            )
+
+    async def _post_file_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
+        markdown_text: str,
+        files: Sequence[SlackOutboundFile],
+        before_provider_request: Callable[[], Awaitable[None]] | None,
+        deadline_at: datetime.datetime | None,
     ) -> SlackControlMessageResult:
         """Upload ordered files and publish them through one Slack completion."""
         if (
@@ -907,6 +943,8 @@ class SlackConversationClient:
         uploaded_files: list[dict[str, str]] = []
         try:
             for file in files:
+                if before_provider_request is not None:
+                    await before_provider_request()
                 upload_target = self._success_payload(
                     await self._request(
                         "POST",
@@ -916,6 +954,7 @@ class SlackConversationClient:
                             "filename": file.filename,
                             "length": str(file.length),
                         },
+                        timeout=self._delivery_timeout(deadline_at),
                     )
                 )
                 upload_url = upload_target.get("upload_url")
@@ -941,6 +980,8 @@ class SlackConversationClient:
                         error_summary="Slack returned an invalid file upload URL.",
                     )
                 try:
+                    if before_provider_request is not None:
+                        await before_provider_request()
                     upload_response = await self.http_client.request(
                         "POST",
                         upload_url,
@@ -949,6 +990,7 @@ class SlackConversationClient:
                             "Content-Length": str(file.length),
                         },
                         content=file.content(),
+                        timeout=self._delivery_timeout(deadline_at),
                     )
                 except SlackOutboundFileContentError:
                     return SlackControlMessageResult(
@@ -967,28 +1009,33 @@ class SlackConversationClient:
                         error_kind="provider_ambiguous",
                         error_summary="Slack file upload outcome is unknown.",
                     )
-                if upload_response.status_code >= 500:
-                    return SlackControlMessageResult(
-                        status="unknown",
-                        provider_message_key=None,
-                        error_kind="provider_ambiguous",
-                        error_summary="Slack file upload outcome is unknown.",
-                    )
-                if upload_response.status_code == 429:
-                    return SlackControlMessageResult(
-                        status="failed",
-                        provider_message_key=None,
-                        error_kind="rate_limited",
-                        error_summary="Slack rate limited the file upload.",
-                    )
-                if upload_response.status_code != 200:
-                    return SlackControlMessageResult(
-                        status="failed",
-                        provider_message_key=None,
-                        error_kind="provider_rejected",
-                        error_summary="Slack rejected the external file upload.",
-                    )
-                uploaded_files.append({"id": file_id, "title": file.filename})
+                try:
+                    if upload_response.status_code >= 500:
+                        return SlackControlMessageResult(
+                            status="unknown",
+                            provider_message_key=None,
+                            error_kind="provider_ambiguous",
+                            error_summary="Slack file upload outcome is unknown.",
+                        )
+                    if upload_response.status_code == 429:
+                        return SlackControlMessageResult(
+                            status="failed",
+                            provider_message_key=None,
+                            error_kind="rate_limited",
+                            error_summary="Slack rate limited the file upload.",
+                        )
+                    if upload_response.status_code != 200:
+                        return SlackControlMessageResult(
+                            status="failed",
+                            provider_message_key=None,
+                            error_kind="provider_rejected",
+                            error_summary=("Slack rejected the external file upload."),
+                        )
+                    uploaded_files.append({"id": file_id, "title": file.filename})
+                finally:
+                    await upload_response.aclose()
+            if before_provider_request is not None:
+                await before_provider_request()
             self._success_payload(
                 await self._request(
                     "POST",
@@ -1003,6 +1050,7 @@ class SlackConversationClient:
                         "thread_ts": thread_ts,
                         "initial_comment": markdown_text,
                     },
+                    timeout=self._delivery_timeout(deadline_at),
                 )
             )
         except SlackProviderPermissionDenied as error:
@@ -1067,6 +1115,18 @@ class SlackConversationClient:
             error_kind=None,
             error_summary=None,
         )
+
+    @staticmethod
+    def _delivery_timeout(deadline_at: datetime.datetime | None) -> float | None:
+        """Return the remaining logical delivery time for one provider request."""
+        if deadline_at is None:
+            return None
+        remaining = (deadline_at - datetime.datetime.now(datetime.UTC)).total_seconds()
+        if remaining <= 0:
+            raise SlackProviderTemporaryError(
+                "Slack file delivery deadline expired before the provider request."
+            )
+        return remaining
 
     async def update_message(
         self,
@@ -1388,6 +1448,7 @@ class SlackConversationClient:
         params: dict[str, str | int] | None = None,
         json_body: dict[str, object] | None = None,
         form_data: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
         if json_body is not None and form_data is not None:
             raise ValueError(
@@ -1401,6 +1462,7 @@ class SlackConversationClient:
                     headers={"Authorization": f"Bearer {bot_token}"},
                     params=params,
                     json=json_body,
+                    timeout=timeout,
                 )
             elif form_data is not None:
                 response = await self.http_client.request(
@@ -1409,6 +1471,7 @@ class SlackConversationClient:
                     headers={"Authorization": f"Bearer {bot_token}"},
                     params=params,
                     data=form_data,
+                    timeout=timeout,
                 )
             else:
                 response = await self.http_client.request(
@@ -1416,6 +1479,7 @@ class SlackConversationClient:
                     f"{slack_api_base_url()}{path}",
                     headers={"Authorization": f"Bearer {bot_token}"},
                     params=params,
+                    timeout=timeout,
                 )
         except httpx.RequestError as error:
             raise SlackProviderTemporaryError(

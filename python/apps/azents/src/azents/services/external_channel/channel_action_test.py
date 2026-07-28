@@ -1,7 +1,8 @@
 """Channel Action commit-before-delivery orchestration tests."""
 
+import asyncio
 import datetime
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
@@ -27,12 +28,23 @@ from azents.core.external_channel_file import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.exchange_file.data import ExchangeFile
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.work import (
+    ExternalChannelWorkRepository,
+    RuntimeProviderDeliveryCompletion,
+)
 from azents.repos.external_channel.work_data import (
     ChannelActionCommit,
     ChannelDeliveryTarget,
     ChannelWorkDelivery,
 )
+from azents.runtime.transfer.runtime_to_provider import (
+    RuntimeToProviderDeliveryCapability,
+    RuntimeToProviderRecovery,
+    RuntimeToProviderRecoveryError,
+    RuntimeToProviderSource,
+    RuntimeToProviderTransferError,
+)
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.exchange_file import ExchangeFileDownload, ExchangeFileService
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
@@ -69,10 +81,12 @@ class _RepositoryDouble:
     def __init__(self, events: list[str]) -> None:
         self.events = events
         self.recovery_delivery_ids: list[str | None] = []
+        self.runtime_settlement_delivery_ids: list[str] = []
         self.finished: list[
             tuple[ExternalChannelDeliveryStatus, str | None, str | None]
         ] = []
         self.recorded_delivery_channels: list[tuple[str, str]] = []
+        self.runtime_provider_states: list[tuple[str, dict[str, object]]] = []
         self.target = ChannelDeliveryTarget(
             delivery_attempt_id="delivery-1",
             operation=ExternalChannelDeliveryOperation.REPLY,
@@ -120,9 +134,98 @@ class _RepositoryDouble:
         *,
         delivery_attempt_id: str,
         now: datetime.datetime,
-    ) -> bool:
-        del session, delivery_attempt_id, now
+        runtime_target: object | None,
+    ) -> ChannelDeliveryTarget | None:
+        del now, runtime_target
         self.events.append("start")
+        return await self.get_delivery_target(
+            session,
+            delivery_attempt_id=delivery_attempt_id,
+        )
+
+    async def record_runtime_provider_state(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        state: str,
+        recovery_payload: dict[str, object],
+        provider_message_key: str | None,
+    ) -> bool:
+        del session, delivery_attempt_id, provider_message_key
+        self.events.append(f"runtime-{state}")
+        self.runtime_provider_states.append((state, recovery_payload))
+        return True
+
+    async def complete_runtime_provider_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        recovery_payload: dict[str, object],
+        provider_message_key: str | None,
+        now: datetime.datetime,
+    ) -> RuntimeProviderDeliveryCompletion:
+        del session, delivery_attempt_id, now
+        self.events.append("runtime-provider_completed")
+        self.runtime_provider_states.append(("provider_completed", recovery_payload))
+        self.finished.append(
+            (ExternalChannelDeliveryStatus.DELIVERED, provider_message_key, None)
+        )
+        return RuntimeProviderDeliveryCompletion(
+            accepted=True,
+            recovery_delivery_id=None,
+        )
+
+    async def revalidate_runtime_delivery_authority(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        runtime_target: object,
+        provider_started: bool,
+        now: datetime.datetime,
+    ) -> bool:
+        del session, delivery_attempt_id, runtime_target, now
+        self.events.append(f"revalidate:{provider_started}")
+        return True
+
+    async def list_runtime_provider_settlement_delivery_ids(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[str]:
+        del session
+        return self.runtime_settlement_delivery_ids[:limit]
+
+    async def complete_runtime_provider_recovery(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        provider_message_key: str | None,
+        now: datetime.datetime,
+    ) -> str | None:
+        del session, delivery_attempt_id, now
+        self.events.append("recover-runtime")
+        self.finished.append(
+            (ExternalChannelDeliveryStatus.DELIVERED, provider_message_key, None)
+        )
+        return None
+
+    async def skip_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        error_kind: str,
+        error_summary: str,
+        now: datetime.datetime,
+    ) -> bool:
+        del session, delivery_attempt_id, error_summary, now
+        self.events.append("skip")
+        self.finished.append((ExternalChannelDeliveryStatus.FAILED, None, error_kind))
         return True
 
     async def finish_delivery(
@@ -260,10 +363,22 @@ class _SlackClient:
         assert kwargs["thread_ts"] == "1.000001"
         assert kwargs["markdown_text"] == "Reply"
         files = cast(list[SlackOutboundFile], kwargs["files"])
+        before_provider_request = kwargs.get("before_provider_request")
+        callback = (
+            None
+            if before_provider_request is None
+            else cast(Callable[[], Awaitable[None]], before_provider_request)
+        )
         for file in files:
+            if callback is not None:
+                await callback()
             body = b"".join([chunk async for chunk in file.content()])
             assert len(body) == file.length
             self.uploaded.append((file.filename, body))
+            if callback is not None:
+                await callback()
+        if callback is not None:
+            await callback()
         return self._result()
 
     async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
@@ -361,6 +476,109 @@ class _RangedStorage:
     ) -> bytes:
         self.calls.append((path, agent_id, offset, max_bytes))
         return self.body[offset : offset + max_bytes]
+
+
+class _RuntimeProviderBatch:
+    def __init__(
+        self,
+        bodies: tuple[bytes, ...],
+        *,
+        cleanup_fails: bool = False,
+        settlement_fails: bool = False,
+    ) -> None:
+        self.bodies = bodies
+        self.cleanup_fails = cleanup_fails
+        self.settlement_fails = settlement_fails
+        self.streamed: list[int] = []
+        self.provider_completed_calls = 0
+        self.acknowledgement_calls = 0
+        self.abandon_calls = 0
+        self.close_calls = 0
+        self.deadline_at = _at(59)
+
+    async def ensure_active(self) -> None:
+        return None
+
+    async def iter_source_chunks(self, source_index: int) -> AsyncIterator[bytes]:
+        self.streamed.append(source_index)
+        yield self.bodies[source_index]
+
+    async def provider_completed(self) -> tuple[object, ...]:
+        self.provider_completed_calls += 1
+        assert sorted(self.streamed) == list(range(len(self.bodies)))
+        return self.recovery_evidence()
+
+    def recovery_evidence(self) -> tuple[RuntimeToProviderRecovery, ...]:
+        return tuple(
+            RuntimeToProviderRecovery(
+                transfer_id=f"transfer-{index}",
+                attempt_id=f"attempt-{index}",
+                consumer_claim_id=f"claim-{index}",
+                revision=1,
+                runtime_id="runtime-1",
+                desired_generation=1,
+                operation_id=f"operation-{index}",
+                session_id="session-1",
+                agent_id="agent-1",
+                deadline_at=self.deadline_at,
+            )
+            for index in range(len(self.bodies))
+        )
+
+    async def acknowledge_and_settle(self) -> None:
+        self.acknowledgement_calls += 1
+        if self.settlement_fails:
+            raise RuntimeToProviderTransferError("settlement unavailable")
+
+    async def abandon_or_cancel(self) -> None:
+        self.abandon_calls += 1
+        if self.cleanup_fails:
+            raise RuntimeToProviderTransferError("cleanup failed")
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
+
+class _RuntimeProviderCapability:
+    def __init__(
+        self,
+        bodies: dict[str, bytes],
+        *,
+        cleanup_fails: bool = False,
+        settlement_fails: bool = False,
+        recovery_error: RuntimeToProviderTransferError | None = None,
+    ) -> None:
+        self.bodies = bodies
+        self.cleanup_fails = cleanup_fails
+        self.settlement_fails = settlement_fails
+        self.recovery_error = recovery_error
+        self.requests: list[dict[str, object]] = []
+        self.batches: list[_RuntimeProviderBatch] = []
+        self.recoveries: list[tuple[RuntimeToProviderRecovery, ...]] = []
+        self.target = ServerToRuntimeTarget(
+            runtime_id="runtime-1",
+            desired_generation=1,
+        )
+
+    async def prepare(self, **kwargs: object) -> _RuntimeProviderBatch:
+        self.requests.append(kwargs)
+        sources = cast(tuple[RuntimeToProviderSource, ...], kwargs["sources"])
+        batch = _RuntimeProviderBatch(
+            tuple(self.bodies[source.runtime_path] for source in sources),
+            cleanup_fails=self.cleanup_fails,
+            settlement_fails=self.settlement_fails,
+        )
+        self.batches.append(batch)
+        return batch
+
+    async def recover(
+        self,
+        *,
+        recoveries: tuple[RuntimeToProviderRecovery, ...],
+    ) -> None:
+        self.recoveries.append(recoveries)
+        if self.recovery_error is not None:
+            raise self.recovery_error
 
 
 class _ExchangeFileService:
@@ -490,8 +708,8 @@ async def test_delivery_crosses_attempting_commit_before_provider_call() -> None
 
 
 @pytest.mark.asyncio
-async def test_prepared_delivery_survives_connection_secret_purge() -> None:
-    """Disconnect cleanup uses the in-memory target captured before terminalization."""
+async def test_prepared_delivery_revalidates_secret_before_provider() -> None:
+    """A credential revoked after preparation cannot reach the provider."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     slack_client = _SlackClient(
@@ -516,8 +734,11 @@ async def test_prepared_delivery_survives_connection_secret_purge() -> None:
 
     await service.attempt_prepared_delivery(target)
 
-    assert events == ["start", "commit", "provider", "finish", "commit"]
-    assert slack_client.bot_tokens == ["xoxb-secret"]
+    assert events == ["start", "commit", "finish", "commit"]
+    assert slack_client.bot_tokens == []
+    assert repository.finished == [
+        (ExternalChannelDeliveryStatus.FAILED, None, "credentials_missing")
+    ]
 
 
 @pytest.mark.asyncio
@@ -744,8 +965,8 @@ async def test_discord_file_delivery_streams_the_current_runtime_source() -> Non
 
 
 @pytest.mark.asyncio
-async def test_file_delivery_streams_only_from_the_immediate_run_source() -> None:
-    """The post-commit attempt consumes the current run-scoped Runtime source."""
+async def test_runtime_file_delivery_uses_verified_provider_stream() -> None:
+    """The post-commit attempt streams one verified Runtime upload to Slack."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     repository.target = repository.target.model_copy(
@@ -772,21 +993,648 @@ async def test_file_delivery_streams_only_from_the_immediate_run_source() -> Non
             error_summary=None,
         ),
     )
-    storage = _RangedStorage(b"report")
-    service = _service(events, repository, slack_client)
+    capability = _RuntimeProviderCapability({"/workspace/agent/report.txt": b"report"})
+    exchange_file_service = _ExchangeFileService()
+    service = _service(
+        events,
+        repository,
+        slack_client,
+        exchange_file_service=exchange_file_service,
+    )
 
     await service.attempt_delivery(
         "delivery-1",
-        file_storage=cast(FileStorage, storage),
-        agent_id="agent-1",
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
     )
 
-    assert events == ["start", "commit", "provider", "finish", "commit"]
-    assert slack_client.uploaded == [("report.txt", b"report")]
-    assert storage.calls == [
-        ("/workspace/agent/report.txt", "agent-1", 0, 6),
-        ("/workspace/agent/report.txt", "agent-1", 6, 1),
+    assert events[:2] == ["start", "commit"]
+    assert events[-1] == "commit"
+    assert "runtime-provider_completed" in events
+    assert events.count("provider") == 1
+    assert [state for state, _ in repository.runtime_provider_states] == [
+        "prepared",
+        "provider_started",
+        "provider_completed",
+        "settled",
     ]
+    assert slack_client.uploaded == [("report.txt", b"report")]
+    assert len(capability.requests) == 1
+    request = capability.requests[0]
+    assert request["operation_id"] == "external-channel-delivery:delivery-1"
+    assert request["batch_id"] == "delivery-1"
+    assert request["sources"] == (
+        RuntimeToProviderSource(
+            runtime_path="/workspace/agent/report.txt",
+            filename="report.txt",
+            media_type="text/plain",
+            expected_size=6,
+        ),
+    )
+    assert callable(request["before_source_admission"])
+    assert capability.batches[0].provider_completed_calls == 1
+    assert capability.batches[0].acknowledgement_calls == 1
+    assert capability.batches[0].abandon_calls == 0
+    assert exchange_file_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_file_provider_failure_abandons_unacknowledged_batch() -> None:
+    """A confirmed Slack failure releases every unacknowledged Runtime claim."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        path="/workspace/agent/report.txt",
+                        filename="report.txt",
+                        media_type="text/plain",
+                        expected_size=6,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    capability = _RuntimeProviderCapability({"/workspace/agent/report.txt": b"report"})
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="provider_rejected",
+                error_summary="Slack rejected the external file upload.",
+            ),
+        ),
+    )
+
+    await service.attempt_delivery(
+        "delivery-1",
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
+    )
+
+    assert capability.batches[0].provider_completed_calls == 0
+    assert capability.batches[0].acknowledgement_calls == 0
+    assert capability.batches[0].abandon_calls == 1
+    assert repository.finished == [
+        (ExternalChannelDeliveryStatus.FAILED, None, "provider_rejected")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_file_failed_delivery_cleanup_unknown() -> None:
+    """A failed Slack result remains unknown until Runtime cleanup is confirmed."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        path="/workspace/agent/report.txt",
+                        filename="report.txt",
+                        media_type="text/plain",
+                        expected_size=6,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    capability = _RuntimeProviderCapability(
+        {"/workspace/agent/report.txt": b"report"},
+        cleanup_fails=True,
+    )
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="provider_rejected",
+                error_summary="Slack rejected the external file upload.",
+            ),
+        ),
+    )
+
+    await service.attempt_delivery(
+        "delivery-1",
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
+    )
+
+    assert capability.batches[0].abandon_calls == 1
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.UNKNOWN,
+            None,
+            "runtime_transfer_cleanup_unknown",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_file_provider_ambiguity_retains_batch_for_expiry() -> None:
+    """An ambiguous provider outcome never abandons or replays Runtime bytes."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        path="/workspace/agent/report.txt",
+                        filename="report.txt",
+                        media_type="text/plain",
+                        expected_size=6,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    capability = _RuntimeProviderCapability({"/workspace/agent/report.txt": b"report"})
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary="Slack file upload outcome is unknown.",
+            ),
+        ),
+    )
+
+    await service.attempt_delivery(
+        "delivery-1",
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
+    )
+
+    assert capability.batches[0].provider_completed_calls == 0
+    assert capability.batches[0].acknowledgement_calls == 0
+    assert capability.batches[0].abandon_calls == 0
+    assert repository.finished == [
+        (ExternalChannelDeliveryStatus.UNKNOWN, None, "provider_ambiguous")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_provider_completion_stays_delivered_when_settlement_fails() -> (
+    None
+):
+    """Confirmed Slack completion remains delivered while exact cleanup is pending."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        path="/workspace/agent/report.txt",
+                        filename="report.txt",
+                        media_type="text/plain",
+                        expected_size=6,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    capability = _RuntimeProviderCapability(
+        {"/workspace/agent/report.txt": b"report"},
+        settlement_fails=True,
+    )
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery(
+        "delivery-1",
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
+    )
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert events.count("provider") == 1
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.DELIVERED,
+            "slack:T1:C1:2.000001",
+            None,
+        )
+    ]
+    assert capability.batches[0].acknowledgement_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_provider_started_cancellation_closes_batch_without_replay() -> (
+    None
+):
+    """Cancellation after request ownership persists stops renewal but keeps claims."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        path="/workspace/agent/report.txt",
+                        filename="report.txt",
+                        media_type="text/plain",
+                        expected_size=6,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    capability = _RuntimeProviderCapability({"/workspace/agent/report.txt": b"report"})
+
+    class _CancellingSlackClient(_SlackClient):
+        async def post_file_message(
+            self, **kwargs: object
+        ) -> SlackControlMessageResult:
+            callback = cast(
+                Callable[[], Awaitable[None]], kwargs["before_provider_request"]
+            )
+            await callback()
+            raise asyncio.CancelledError
+
+    service = _service(
+        events,
+        repository,
+        _CancellingSlackClient(
+            events,
+            SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary="Slack file upload outcome is unknown.",
+            ),
+        ),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.attempt_delivery(
+            "delivery-1",
+            provider_delivery_capability=cast(
+                RuntimeToProviderDeliveryCapability,
+                capability,
+            ),
+        )
+
+    assert capability.batches[0].close_calls >= 1
+    assert capability.batches[0].abandon_calls == 0
+    assert [state for state, _ in repository.runtime_provider_states] == [
+        "prepared",
+        "provider_started",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_provider_authority_revocation_after_upload_is_unknown() -> None:
+    """Authority loss after a Slack upload begins never becomes not-attempted."""
+    events: list[str] = []
+
+    class _RevokingRepository(_RepositoryDouble):
+        async def revalidate_runtime_delivery_authority(
+            self,
+            session: AsyncSession,
+            *,
+            delivery_attempt_id: str,
+            runtime_target: object,
+            provider_started: bool,
+            now: datetime.datetime,
+        ) -> bool:
+            del session, delivery_attempt_id, runtime_target, now
+            self.events.append(f"revalidate:{provider_started}")
+            return not provider_started
+
+    repository = _RevokingRepository(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "request_payload": {
+                **repository.target.request_payload,
+                "files": [
+                    ExternalChannelOutboundFileManifest(
+                        path="/workspace/agent/report.txt",
+                        filename="report.txt",
+                        media_type="text/plain",
+                        expected_size=6,
+                    ).model_dump(mode="json")
+                ],
+            }
+        }
+    )
+    capability = _RuntimeProviderCapability({"/workspace/agent/report.txt": b"report"})
+    slack_client = _SlackClient(
+        events,
+        SlackControlMessageResult(
+            status="delivered",
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
+        ),
+    )
+    service = _service(events, repository, slack_client)
+
+    result = await service.attempt_delivery(
+        "delivery-1",
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
+    )
+
+    assert result is ExternalChannelDeliveryStatus.UNKNOWN
+    assert slack_client.uploaded == [("report.txt", b"report")]
+    assert events.count("revalidate:False") == 1
+    assert events.count("revalidate:True") == 1
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.UNKNOWN,
+            None,
+            "runtime_transfer_ambiguous",
+        )
+    ]
+    assert capability.batches[0].abandon_calls == 0
+    assert capability.batches[0].close_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_completion_recovery_settles_without_slack_replay() -> None:
+    """A persisted Slack success invokes only exact Runtime settlement recovery."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "status": ExternalChannelDeliveryStatus.UNKNOWN,
+            "request_payload": {
+                **repository.target.request_payload,
+                "runtime_provider_recovery": {
+                    "state": "provider_completed",
+                    "provider_message_key": "slack:T1:C1:2.000001",
+                    "claims": [
+                        {
+                            "transfer_id": "transfer-1",
+                            "attempt_id": "attempt-1",
+                            "consumer_claim_id": "claim-1",
+                            "revision": 1,
+                            "runtime_id": "runtime-1",
+                            "desired_generation": 1,
+                            "operation_id": "operation-1",
+                            "session_id": "session-1",
+                            "agent_id": "agent-1",
+                            "deadline_at": _at(59).isoformat(),
+                        }
+                    ],
+                },
+            },
+        }
+    )
+    capability = _RuntimeProviderCapability({})
+    slack_client = _SlackClient(
+        events,
+        SlackControlMessageResult(
+            status="delivered",
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
+        ),
+    )
+    service = _service(events, repository, slack_client)
+
+    result = await service.attempt_delivery(
+        "delivery-1",
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
+    )
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert capability.requests == []
+    assert len(capability.recoveries) == 1
+    assert "provider" not in events
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.DELIVERED,
+            "slack:T1:C1:2.000001",
+            None,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_settlement_recovery_persists_advanced_claim_revision() -> None:
+    """A failed exact recovery retains its observed claim revision."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "status": ExternalChannelDeliveryStatus.DELIVERED,
+            "request_payload": {
+                **repository.target.request_payload,
+                "runtime_provider_recovery": {
+                    "state": "provider_completed",
+                    "provider_message_key": "slack:T1:C1:2.000001",
+                    "claims": [
+                        {
+                            "transfer_id": "transfer-1",
+                            "attempt_id": "attempt-1",
+                            "consumer_claim_id": "claim-1",
+                            "revision": 1,
+                            "runtime_id": "runtime-1",
+                            "desired_generation": 1,
+                            "operation_id": "operation-1",
+                            "session_id": "session-1",
+                            "agent_id": "agent-1",
+                            "deadline_at": _at(59).isoformat(),
+                        }
+                    ],
+                },
+            },
+        }
+    )
+    advanced_recoveries = (
+        RuntimeToProviderRecovery(
+            transfer_id="transfer-1",
+            attempt_id="attempt-1",
+            consumer_claim_id="claim-1",
+            revision=2,
+            runtime_id="runtime-1",
+            desired_generation=1,
+            operation_id="operation-1",
+            session_id="session-1",
+            agent_id="agent-1",
+            deadline_at=_at(59),
+        ),
+    )
+    capability = _RuntimeProviderCapability(
+        {},
+        recovery_error=RuntimeToProviderRecoveryError(
+            "settlement pending",
+            recoveries=advanced_recoveries,
+        ),
+    )
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery(
+        "delivery-1",
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
+    )
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert capability.requests == []
+    assert capability.recoveries == [
+        (
+            RuntimeToProviderRecovery(
+                transfer_id="transfer-1",
+                attempt_id="attempt-1",
+                consumer_claim_id="claim-1",
+                revision=1,
+                runtime_id="runtime-1",
+                desired_generation=1,
+                operation_id="operation-1",
+                session_id="session-1",
+                agent_id="agent-1",
+                deadline_at=_at(59),
+            ),
+        )
+    ]
+    assert repository.runtime_provider_states == [
+        (
+            "provider_completed",
+            {
+                "claims": [
+                    {
+                        "transfer_id": "transfer-1",
+                        "attempt_id": "attempt-1",
+                        "consumer_claim_id": "claim-1",
+                        "revision": 2,
+                        "runtime_id": "runtime-1",
+                        "desired_generation": 1,
+                        "operation_id": "operation-1",
+                        "session_id": "session-1",
+                        "agent_id": "agent-1",
+                        "deadline_at": _at(59).isoformat(),
+                    }
+                ],
+                "provider_message_key": "slack:T1:C1:2.000001",
+            },
+        )
+    ]
+    assert "provider" not in events
+
+
+@pytest.mark.asyncio
+async def test_runtime_settlement_drain_recovers_completed_delivery_without_slack() -> (
+    None
+):
+    """The durable drain settles only persisted provider completion claims."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.runtime_settlement_delivery_ids = ["delivery-1"]
+    repository.target = repository.target.model_copy(
+        update={
+            "status": ExternalChannelDeliveryStatus.DELIVERED,
+            "request_payload": {
+                **repository.target.request_payload,
+                "runtime_provider_recovery": {
+                    "state": "provider_completed",
+                    "provider_message_key": "slack:T1:C1:2.000001",
+                    "claims": [
+                        {
+                            "transfer_id": "transfer-1",
+                            "attempt_id": "attempt-1",
+                            "consumer_claim_id": "claim-1",
+                            "revision": 1,
+                            "runtime_id": "runtime-1",
+                            "desired_generation": 1,
+                            "operation_id": "operation-1",
+                            "session_id": "session-1",
+                            "agent_id": "agent-1",
+                            "deadline_at": _at(59).isoformat(),
+                        }
+                    ],
+                },
+            },
+        }
+    )
+    capability = _RuntimeProviderCapability({})
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    recovered = await service.drain_runtime_provider_settlements(
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
+    )
+
+    assert recovered == 1
+    assert capability.requests == []
+    assert len(capability.recoveries) == 1
+    assert "provider" not in events
+    assert [state for state, _ in repository.runtime_provider_states] == ["settled"]
 
 
 @pytest.mark.asyncio

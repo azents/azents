@@ -522,8 +522,13 @@ Included behavior:
 - External Channel Runtime-source preflight, admission, upload, verified-object
   claim, provider stream, terminal delivery result, and acknowledgement.
 - No Exchange, Artifact, ModelFile, or FilePart side effect for provider relay.
-- Provider retry only while the original unacknowledged attempt remains within
-  its absolute expiry; later retry creates a new attempt.
+- Provider mutation is at most once. Claim/admission preparation may recover
+  before any provider request, and acknowledgement/settlement may recover after
+  a durably recorded provider success; provider upload and completion are not
+  replayed automatically.
+- A multi-file provider completion owns one batch of Runtime consumer claims.
+  Each claim remains live through the single provider completion boundary, and
+  all claims are acknowledged and settled only after that completion succeeds.
 - Removal of repeated `read_range` complete-file relay from the adopted
   production path.
 
@@ -539,9 +544,10 @@ Primary validation:
   revalidation, failure, retry, acknowledgement, expiry, and cleanup tests.
 - Files above 4 MiB proving one Runtime upload attempt, bounded provider
   streaming, no product-file side effect, and no repeated ordinary file reads.
-- Provider-delivery cancellation tests proving upload stops, consumer state is
-  abandoned or settled, admission releases, and no provider success is
-  reported.
+- Provider-delivery cancellation and ambiguous-outcome tests proving provider
+  mutation is not replayed, consumer state is abandoned before provider work or
+  retained for expiry/reconciliation after provider ambiguity, admission
+  releases, and no provider success is reported without completion evidence.
 
 ## Phase 9: Deployment and coordinated cutover
 

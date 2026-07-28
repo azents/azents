@@ -57,6 +57,7 @@ from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import ChannelWorkTask
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.testing.model_selection import make_test_model_selection_dict
 
 
@@ -372,7 +373,14 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
     agent_session = await rdb_session.scalar(
         sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
     )
+    agent = await rdb_session.get(RDBAgent, agent_id)
+    connection = await rdb_session.scalar(sa.select(RDBExternalChannelConnection))
     assert agent_session is not None
+    assert agent is not None
+    assert connection is not None
+    agent.avatar = {"kind": "generated", "seed": "channel-work-agent"}
+    connection.capabilities = {"upload_files": True}
+    await rdb_session.flush()
     repository = ExternalChannelWorkRepository()
     await repository.ensure_active_work(rdb_session, binding_id=binding_id)
     work = await _seed_activity_tracker(rdb_session, binding_id=binding_id)
@@ -397,11 +405,15 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
         now=_at(2),
     )
     update_delivery = continued.deliveries[0]
-    assert await repository.start_delivery(
+    target = await repository.start_delivery(
         rdb_session,
         delivery_attempt_id=update_delivery.id,
         now=_at(3),
     )
+    assert target is not None
+    assert target.capabilities == connection.capabilities
+    assert target.agent_name == agent.name
+    assert target.agent_avatar == agent.avatar
     await repository.finish_delivery(
         rdb_session,
         delivery_attempt_id=update_delivery.id,
@@ -1058,6 +1070,65 @@ async def test_recovery_terminalizes_pending_and_attempting_without_execution(
         ExternalChannelDeliveryStatus.UNKNOWN,
         ExternalChannelDeliveryStatus.NOT_ATTEMPTED,
     ]
+
+
+async def test_runtime_authority_revocation_after_provider_start_is_unknown(
+    rdb_session: AsyncSession,
+) -> None:
+    """A later authority revocation cannot erase durable provider-start evidence."""
+    agent_id, binding_id = await _setup_binding(rdb_session)
+    agent_session = await rdb_session.scalar(
+        sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+    )
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert agent_session is not None
+    assert binding is not None
+    repository = ExternalChannelWorkRepository()
+    await repository.ensure_active_work(rdb_session, binding_id=binding_id)
+    committed = await repository.commit_action(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent_id,
+        run_id=None,
+        client_tool_call_id="call-runtime-authority-revoked",
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="Uploading the report.",
+        title=None,
+        tasks=None,
+        files=(),
+        now=_at(2),
+    )
+    delivery_id = committed.deliveries[0].id
+    assert await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=delivery_id,
+        now=_at(3),
+        runtime_target=None,
+    )
+    attempt = await rdb_session.get(RDBExternalChannelDeliveryAttempt, delivery_id)
+    assert attempt is not None
+    attempt.request_payload = {
+        **attempt.request_payload,
+        "runtime_provider_recovery": {"state": "provider_started"},
+    }
+    binding.activation_status = ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    await rdb_session.flush()
+
+    current = await repository.revalidate_runtime_delivery_authority(
+        rdb_session,
+        delivery_attempt_id=delivery_id,
+        runtime_target=ServerToRuntimeTarget(
+            runtime_id="runtime-1",
+            desired_generation=1,
+        ),
+        provider_started=False,
+        now=_at(4),
+    )
+
+    assert not current
+    assert attempt.status is ExternalChannelDeliveryStatus.UNKNOWN
+    assert attempt.error_kind == "delivery_authority_revoked"
 
 
 async def test_active_work_snapshot_fences_session_and_agent_lifecycle(
