@@ -5,6 +5,7 @@ from urllib.parse import quote, urlsplit
 
 from pydantic import ValidationError
 
+from azents.core.enums import ExternalChannelAppMode
 from azents.repos.external_channel.work_data import ChannelDeliveryTarget
 from azents.services.external_channel.data import ExternalChannelCapabilitySnapshot
 from azents.services.uploads.schema import StoredImage
@@ -19,6 +20,7 @@ class SlackAgentPresentation:
     name: str
     markdown_line: str
     icon_url: str | None
+    show_name: bool = True
 
 
 def resolve_slack_agent_presentation(
@@ -39,6 +41,7 @@ def resolve_slack_agent_presentation(
             avatar=target.agent_avatar,
             avatar_cdn_base_url=avatar_cdn_base_url,
         ),
+        show_name=target.app_mode is ExternalChannelAppMode.MULTI,
     )
 
 
@@ -69,7 +72,7 @@ def prepend_agent_markdown(
     text: str,
 ) -> str:
     """Prepend the visible bold Agent line to one Markdown message."""
-    if presentation is None:
+    if presentation is None or not presentation.show_name:
         return text
     return f"{presentation.markdown_line}\n{text}"
 
@@ -79,7 +82,7 @@ def prepend_agent_fallback(
     text: str,
 ) -> str:
     """Prepend the current Agent name to one top-level fallback string."""
-    if presentation is None:
+    if presentation is None or not presentation.show_name:
         return text
     return f"{presentation.name}\n{text}"
 
@@ -89,7 +92,7 @@ def prepend_agent_blocks(
     blocks: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     """Prepend one minimal Agent-name section without replacing native blocks."""
-    if presentation is None:
+    if presentation is None or not presentation.show_name:
         return blocks
     return [
         {

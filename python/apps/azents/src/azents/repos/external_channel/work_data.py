@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 from azents.core.enums import (
     ExternalChannelActionMode,
+    ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
@@ -73,6 +74,7 @@ class ChannelDeliveryTarget(_Record):
     resource_id: str | None
     connection_id: str
     provider: ExternalChannelProvider
+    app_mode: ExternalChannelAppMode
     encrypted_credentials: str | None
     provider_tenant_id: str | None
     capabilities: dict[str, Any] | None

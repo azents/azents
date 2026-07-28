@@ -412,6 +412,7 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
     )
     assert target is not None
     assert target.capabilities == connection.capabilities
+    assert target.app_mode is connection.app_mode
     assert target.agent_name == agent.name
     assert target.agent_avatar == agent.avatar
     await repository.finish_delivery(

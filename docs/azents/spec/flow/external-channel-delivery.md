@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-28
-spec_version: 18
+spec_version: 19
 ---
 
 # External Channel Delivery and Channel Work
@@ -80,11 +80,13 @@ The ordinary Session Todo toolkit is not the Channel Work source of truth.
 
 ## Agent Presentation
 
-Every Slack output associated with an Agent starts with that Agent's current display
-name in bold. This applies to conversational replies, checking/progress controls,
-route-resolved approval controls, errors, and file-bearing publication. App-level
-selector controls have no selected Agent and do not invent one. The name is provider
-presentation only and does not alter canonical source text or execution authority.
+On multi-app connections, every Slack or Discord output associated with an Agent
+starts with that Agent's current display name in bold. This applies to conversational
+replies, checking/progress controls, route-resolved approval controls, errors, and
+file-bearing publication. Single-app connections rely on their dedicated App identity
+and do not repeat an Agent-name line above messages. App-level selector controls have
+no selected Agent and do not invent one. The name is provider presentation only and
+does not alter canonical source text or execution authority.
 
 When the validated Slack installation exposes the required message-customization
 capability and the Agent has a provider-safe image URL, delivery may override the
@@ -272,6 +274,7 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-28** (spec_version 19) — Limited visible Slack and Discord Agent-name prefixes to multi-app connections; single-app delivery now relies on the dedicated App identity.
 - **2026-07-28** (spec_version 18) — Replaced dynamic Channel Work prompt injection with a minimal capability-aware static publication boundary, deferred Channel tools through Tool Search, and kept only unfinished-work continuity in compaction.
 
 - **2026-07-28** (spec_version 17) — Promoted the completed Runtime File Transfer
