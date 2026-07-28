@@ -63,22 +63,26 @@ from azents.services.session_resource_authority import SessionResourceAuthority
 EXTERNAL_CHANNEL_TOOLKIT_SLUG = "external_channel"
 _COMPACTION_HEADING = "## Channel Work Snapshot"
 _STATIC_PROMPT = (
-    "External Channel requests must be handled through Channel tools. Ordinary "
-    "assistant output is not delivered to the external channel. Invoke "
-    "`channel_action` before completing the request."
+    "For a current input explicitly marked as an External Channel turn or "
+    "continuation, ordinary assistant output is not delivered to the external "
+    "channel. Invoke `channel_action` before completing that request."
 )
 _STATIC_PROMPT_WITH_TOOL_SEARCH = (
-    "External Channel requests must be handled through Channel tools. Ordinary "
-    "assistant output is not delivered to the external channel. Use Tool Search "
-    "to discover the appropriate Channel tool, and invoke `channel_action` before "
-    "completing the request."
+    "For a current input explicitly marked as an External Channel turn or "
+    "continuation, ordinary assistant output is not delivered to the external "
+    "channel. Use Tool Search to discover the appropriate Channel tool, and invoke "
+    "`channel_action` before completing that request."
 )
 _CHANNEL_ACTION_DESCRIPTION = (
-    "Publish replies and progress to one active External Channel binding. Use "
-    "`finish` when the request can be answered completely now. Use `continue` "
-    "when additional work remains; it may send an intermediate reply and replace "
-    "the complete ordered Channel Work task list. After the remaining work is "
-    "complete, use `finish` with the final reply."
+    "Publish replies and progress to one active External Channel binding. Invoke "
+    "this tool only for the current External Channel turn or continuation, or when "
+    "an ordinary user explicitly requests external publication. An active binding "
+    "or prior External Channel history alone does not make the current ordinary "
+    "user input an External Channel request. Otherwise, answer the user normally "
+    "without invoking this tool. Use `finish` when the request can be answered "
+    "completely now. Use `continue` when additional work remains; it may send an "
+    "intermediate reply and replace the complete ordered Channel Work task list. "
+    "After the remaining work is complete, use `finish` with the final reply."
 )
 _DOWNLOAD_EXTERNAL_FILE_DESCRIPTION = (
     "Materialize one selected External Channel file into the Runtime. External "
