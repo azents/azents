@@ -39,7 +39,6 @@ from azents.core.runtime_runner_credential import (
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeRunnerOperation,
-    RuntimeRunnerRegistration,
 )
 from azents.runtime.control_protocol.grpc.runner_server import (
     RuntimeRunnerControlGrpcServicer,
@@ -84,13 +83,6 @@ class _Authenticator:
 class _StateSink:
     async def record_runner_state(self, report: object) -> None:
         del report
-
-    async def validate_runner_registration(
-        self,
-        registration: RuntimeRunnerRegistration,
-    ) -> bool:
-        del registration
-        return True
 
 
 class _TransferResultSink:
@@ -743,13 +735,6 @@ def _register() -> control_pb.RunnerMessage:
             health="ok",
             workspace_path="/workspace",
             auth_credential_id="credential-1",
-            execution_policy=control_pb.RunnerExecutionPolicyEvidence(
-                snapshot_id="snapshot-1",
-                digest="d" * 64,
-                desired_generation=1,
-                module_versions={"runtime.resources": 1},
-                source_versions={"workspace": 1},
-            ),
         ),
     )
 
