@@ -3,7 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import Annotated, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,6 +12,8 @@ from azcommon.result import Failure, Success
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorTransferFailure,
 )
+from fastapi import Depends
+from fastapi.dependencies.utils import get_dependant
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -121,6 +123,20 @@ class _Repository:
         del session
         self.source_calls.append((resource_id, provider_file_id))
         return self.source
+
+
+def test_file_transfer_dependency_graph_allows_unconfigured_inbound_staging() -> None:
+    """Non-Worker graphs explicitly disable Worker-only provider staging."""
+
+    def endpoint(
+        service: Annotated[
+            ExternalChannelFileTransferService,
+            Depends(ExternalChannelFileTransferService),
+        ],
+    ) -> None:
+        del service
+
+    assert get_dependant(path="/", call=endpoint).dependencies
 
 
 class _CredentialsCodec:

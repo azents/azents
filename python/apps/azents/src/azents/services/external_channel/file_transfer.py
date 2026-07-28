@@ -172,6 +172,13 @@ def get_discord_file_client(
     return DiscordChannelClient(http_client)
 
 
+def get_unconfigured_external_channel_inbound_staging_configuration() -> (
+    ExternalChannelInboundStagingConfiguration | None
+):
+    """Disable provider staging outside the Worker-owned transfer boundary."""
+    return None
+
+
 @dataclass
 class ExternalChannelFileTransferService:
     """Authorize and materialize one selected provider file into the Runtime."""
@@ -204,9 +211,10 @@ class ExternalChannelFileTransferService:
         SystemSettingsService,
         Depends(SystemSettingsService),
     ]
-    inbound_staging_configuration: ExternalChannelInboundStagingConfiguration | None = (
-        None
-    )
+    inbound_staging_configuration: Annotated[
+        ExternalChannelInboundStagingConfiguration | None,
+        Depends(get_unconfigured_external_channel_inbound_staging_configuration),
+    ] = None
 
     async def download(
         self,
