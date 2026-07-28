@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Annotated, assert_never, cast
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import Depends
@@ -487,7 +488,15 @@ class ExternalChannelActionService:
                 text = payload.get("text")
                 if not isinstance(text, str):
                     return _discord_invalid_payload()
+                components = _discord_components(payload.get("components"))
+                if payload.get("components") is not None and components is None:
+                    return _discord_invalid_payload()
+                embeds = _discord_embeds(payload.get("embeds"))
+                if payload.get("embeds") is not None and embeds is None:
+                    return _discord_invalid_payload()
                 if files:
+                    if components is not None or embeds is not None:
+                        return _discord_invalid_payload()
                     runtime_files = [
                         file
                         for file in files
@@ -547,20 +556,31 @@ class ExternalChannelActionService:
                         ),
                         delivery_attempt_id=target.delivery_attempt_id,
                     )
+                if components is None and embeds is None:
+                    return await self.discord_client.create_message(
+                        bot_token=bot_token,
+                        guild_id=guild_id,
+                        channel_id=delivery_channel_id,
+                        content=_discord_agent_content(target, text),
+                        delivery_attempt_id=target.delivery_attempt_id,
+                    )
                 return await self.discord_client.create_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
                     content=_discord_agent_content(target, text),
                     delivery_attempt_id=target.delivery_attempt_id,
+                    components=components,
+                    embeds=embeds,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
                 text = payload.get("text")
+                embeds = _discord_embeds(payload.get("embeds"))
                 message_id = _discord_provider_message_id(
                     payload.get("provider_message_key"),
                     guild_id=guild_id,
                 )
-                if not isinstance(text, str) or message_id is None:
+                if not isinstance(text, str) or embeds is None or message_id is None:
                     return _discord_invalid_payload()
                 return await self.discord_client.update_message(
                     bot_token=bot_token,
@@ -568,6 +588,7 @@ class ExternalChannelActionService:
                     channel_id=delivery_channel_id,
                     message_id=message_id,
                     content=_discord_agent_content(target, text),
+                    embeds=embeds,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
                 message_id = _discord_provider_message_id(
@@ -916,3 +937,92 @@ def _blocks(value: object) -> list[dict[str, object]] | None:
     ):
         return None
     return [block for block in value if isinstance(block, dict)]
+
+
+def _discord_components(value: object) -> list[dict[str, object]] | None:
+    """Validate one bounded Discord component payload."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) > 5:
+        return None
+    rows: list[dict[str, object]] = []
+    for row in value:
+        if (
+            not isinstance(row, dict)
+            or row.get("type") != 1
+            or set(row) != {"type", "components"}
+            or not isinstance(row.get("components"), list)
+            or not row["components"]
+            or len(row["components"]) > 5
+        ):
+            return None
+        components = row["components"]
+        if not all(_discord_button(component) for component in components):
+            return None
+        rows.append(row)
+    return rows
+
+
+def _discord_button(value: object) -> bool:
+    """Permit the generated Button forms without accepting raw provider JSON."""
+    if not isinstance(value, dict) or value.get("type") != 2:
+        return False
+    label = value.get("label")
+    style = value.get("style")
+    if (
+        not isinstance(label, str)
+        or not label
+        or len(label) > 80
+        or not isinstance(style, int)
+        or style not in {1, 2, 3, 4, 5}
+    ):
+        return False
+    if style == 5:
+        url = value.get("url")
+        parsed = urlparse(url) if isinstance(url, str) else None
+        return (
+            set(value) == {"type", "style", "label", "url"}
+            and parsed is not None
+            and parsed.scheme in {"http", "https"}
+            and bool(parsed.netloc)
+        )
+    custom_id = value.get("custom_id")
+    return (
+        set(value) == {"type", "style", "label", "custom_id"}
+        and isinstance(custom_id, str)
+        and bool(custom_id)
+        and len(custom_id) <= 100
+    )
+
+
+def _discord_embeds(value: object) -> list[dict[str, object]] | None:
+    """Validate the generated bounded Embed subset persisted for delivery."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or not value or len(value) > 10:
+        return None
+    embeds: list[dict[str, object]] = []
+    for embed in value:
+        if not isinstance(embed, dict) or set(embed) - {
+            "title",
+            "description",
+            "color",
+        }:
+            return None
+        title = embed.get("title")
+        description = embed.get("description")
+        color = embed.get("color")
+        if (
+            not isinstance(title, str)
+            or not title
+            or len(title) > 256
+            or not isinstance(description, str)
+            or not description
+            or len(description) > 4_096
+            or not isinstance(color, int)
+            or not 0 <= color <= 0xFFFFFF
+            or len(title) + len(description) > 6_000
+        ):
+            return None
+        embeds.append(embed)
+    return embeds

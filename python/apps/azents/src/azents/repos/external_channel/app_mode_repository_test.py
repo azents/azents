@@ -121,13 +121,14 @@ async def _agent(session: AsyncSession, workspace_id: str, slug: str) -> RDBAgen
 def _connection_create(
     workspace_id: str,
     *,
+    provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
     provider_app_id: str = "A1",
     provider_tenant_id: str = "T1",
 ) -> ExternalChannelConnectionCreate:
     """Build a Single-compatible connection writer payload."""
     return ExternalChannelConnectionCreate(
         workspace_id=workspace_id,
-        provider=ExternalChannelProvider.SLACK,
+        provider=provider,
         transport=ExternalChannelTransport.HTTP,
         app_mode=ExternalChannelAppMode.SINGLE,
         status=ExternalChannelConnectionStatus.ACTIVE,
@@ -1479,6 +1480,94 @@ async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
     )
 
 
+async def test_workspace_multi_management_uses_provider_neutral_stable_pagination(
+    rdb_session: AsyncSession,
+) -> None:
+    """One list page orders Slack and Discord Multi Apps before applying offset."""
+    workspace_id = await _workspace(rdb_session, "management-multi-page")
+    repository = ExternalChannelRepository()
+    management = ExternalChannelManagementRepository()
+    created_connections = [
+        await repository.create_connection(
+            rdb_session,
+            _connection_create(
+                workspace_id,
+                provider=ExternalChannelProvider.SLACK,
+                provider_app_id="MP1",
+                provider_tenant_id="MT1",
+            ).model_copy(update={"app_mode": ExternalChannelAppMode.MULTI}),
+        ),
+        await repository.create_connection(
+            rdb_session,
+            _connection_create(
+                workspace_id,
+                provider=ExternalChannelProvider.DISCORD,
+                provider_app_id="MP2",
+                provider_tenant_id="MT2",
+            ).model_copy(update={"app_mode": ExternalChannelAppMode.MULTI}),
+        ),
+        await repository.create_connection(
+            rdb_session,
+            _connection_create(
+                workspace_id,
+                provider=ExternalChannelProvider.SLACK,
+                provider_app_id="MP3",
+                provider_tenant_id="MT3",
+            ).model_copy(update={"app_mode": ExternalChannelAppMode.MULTI}),
+        ),
+    ]
+    connections: list[RDBExternalChannelConnection] = []
+    for created_connection in created_connections:
+        connection = await rdb_session.get(
+            RDBExternalChannelConnection,
+            created_connection.id,
+        )
+        assert connection is not None
+        connections.append(connection)
+    connections[0].created_at = _at(2)
+    connections[1].created_at = _at(1)
+    connections[2].created_at = _at(2)
+    await rdb_session.flush()
+    expected = sorted(
+        connections,
+        key=lambda connection: (connection.created_at, connection.id),
+    )
+
+    first_page = await management.list_multi_connections(
+        rdb_session,
+        workspace_id=workspace_id,
+        provider=None,
+        offset=0,
+        limit=2,
+    )
+    second_page = await management.list_multi_connections(
+        rdb_session,
+        workspace_id=workspace_id,
+        provider=None,
+        offset=2,
+        limit=2,
+    )
+    slack_page = await management.list_multi_connections(
+        rdb_session,
+        workspace_id=workspace_id,
+        provider=ExternalChannelProvider.SLACK,
+        offset=0,
+        limit=2,
+    )
+
+    assert [connection.id for connection in first_page] == [
+        connection.id for connection in expected[:2]
+    ]
+    assert [connection.id for connection in second_page] == [
+        connection.id for connection in expected[2:]
+    ]
+    assert [connection.id for connection in slack_page] == [
+        connection.id
+        for connection in expected
+        if connection.provider == ExternalChannelProvider.SLACK
+    ]
+
+
 async def test_disconnect_lookup_uses_detached_single_route_snapshot(
     rdb_session: AsyncSession,
 ) -> None:
@@ -1816,6 +1905,8 @@ async def test_multi_management_handoff_requires_completed_unexpired_channel_sco
         transitioned_at=_at(1),
     )
     assert processing is not None
+    assert processing.status is ExternalChannelInteractionStatus.PROCESSING
+    assert processing.updated_at == _at(1)
     completed = await repo.transition_interaction(
         rdb_session,
         interaction_id=admission.interaction.id,
@@ -1825,6 +1916,8 @@ async def test_multi_management_handoff_requires_completed_unexpired_channel_sco
         transitioned_at=_at(2),
     )
     assert completed is not None
+    assert completed.status is ExternalChannelInteractionStatus.COMPLETED
+    assert completed.updated_at == _at(2)
 
     handoff = await management.load_multi_management_handoff(
         rdb_session,

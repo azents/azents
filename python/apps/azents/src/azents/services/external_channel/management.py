@@ -318,11 +318,11 @@ class ExternalChannelManagementService:
         self,
         *,
         workspace_id: str,
-        provider: ExternalChannelProvider,
+        provider: ExternalChannelProvider | None,
         offset: int,
         limit: int,
     ) -> list[ManagedMultiConnection]:
-        """List redacted Workspace-owned Multi Apps for one provider."""
+        """List redacted Workspace-owned Multi Apps for one optional provider."""
         async with self.session_manager() as session:
             return await self.repository.list_multi_connections(
                 session,

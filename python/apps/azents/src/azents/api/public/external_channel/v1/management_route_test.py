@@ -868,6 +868,24 @@ def test_multi_lists_are_provider_scoped(
     )
 
 
+def test_multi_list_uses_one_provider_neutral_page() -> None:
+    """Workspace integrations receive one stable page across Slack and Discord."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.list_multi_connections.return_value = []
+
+    response = _client(service, role=WorkspaceUserRole.MANAGER).get(
+        "/external-channel/v1/workspaces/ws/external-channels/multi"
+    )
+
+    assert response.status_code == 200
+    service.list_multi_connections.assert_awaited_once_with(
+        workspace_id="workspace-1",
+        provider=None,
+        offset=0,
+        limit=50,
+    )
+
+
 def test_multi_route_removal_rejects_stale_generation() -> None:
     """Stale destructive Multi mutations surface one conflict response."""
     service = AsyncMock(spec=ExternalChannelManagementService)

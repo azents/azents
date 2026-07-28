@@ -3401,9 +3401,29 @@ def test_discord_root_target_is_shared_by_session_link_and_progress() -> None:
         )
     } == target
     assert session_link["text"] == (
-        "Open this Azents session: "
+        "Your Azents session is ready. "
         "[Open session](https://azents.example/w/test/agents/agent/sessions/session)"
     )
+    assert session_link["embeds"] == [
+        {
+            "title": "Azents session ready",
+            "description": "Continue this conversation in the linked Azents session.",
+            "color": 0x5865F2,
+        }
+    ]
+    assert session_link["components"] == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Open Azents session",
+                    "url": "https://azents.example/w/test/agents/agent/sessions/session",
+                }
+            ],
+        }
+    ]
 
 
 async def test_pending_context_is_trimmed_by_count_and_size(

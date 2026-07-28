@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
+    ExternalChannelConnectionStatus,
     ExternalChannelConversationAdmissionStatus,
+    ExternalChannelProvider,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -223,6 +225,70 @@ class ExternalChannelSelectorService:
                 admission=selected,
                 binding=None,
             )
+
+    async def validate_discord_component_scope(
+        self,
+        *,
+        admission_id: str,
+        principal_id: str,
+        guild_id: str | None,
+        channel_id: str | None,
+        now: datetime.datetime,
+    ) -> None:
+        """Revalidate Discord component actor and conversation scope."""
+        async with self.session_manager() as session:
+            admission = await self.repository.get_conversation_admission(
+                session,
+                admission_id=admission_id,
+            )
+            if admission is None or admission.initiating_principal_id != principal_id:
+                raise ExternalChannelSelectorError("Selector admission is unavailable.")
+            connection = await self.repository.get_connection(
+                session,
+                connection_id=admission.connection_id,
+            )
+            resource = await self.repository.get_resource(
+                session,
+                resource_id=admission.resource_id,
+            )
+            if (
+                connection is None
+                or connection.provider is not ExternalChannelProvider.DISCORD
+                or connection.app_mode is not ExternalChannelAppMode.MULTI
+                or connection.status
+                not in {
+                    ExternalChannelConnectionStatus.ACTIVE,
+                    ExternalChannelConnectionStatus.DEGRADED,
+                }
+                or resource is None
+                or admission.status
+                is not ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
+                or admission.expires_at <= now
+                or not isinstance(guild_id, str)
+                or guild_id != connection.provider_tenant_id
+                or not isinstance(channel_id, str)
+            ):
+                raise ExternalChannelSelectorError(
+                    "Selector component scope is unavailable."
+                )
+            labels = resource.labels or {}
+            scoped_channels = {
+                value
+                for key in (
+                    "source_channel_id",
+                    "parent_channel_id",
+                    "root_message_id",
+                    "thread_channel_id",
+                    "delivery_channel_id",
+                    "channel_id",
+                    "thread_id",
+                )
+                if isinstance(value := labels.get(key), str) and value
+            }
+            if channel_id not in scoped_channels:
+                raise ExternalChannelSelectorError(
+                    "Selector component scope is unavailable."
+                )
 
     async def _visible_candidates(
         self,

@@ -17,10 +17,18 @@ DISCORD_DELIVERY_TEXT_LIMIT = (
 
 
 @dataclass(frozen=True)
+class DiscordProgressPage:
+    """One bounded accessible fallback and native Embed presentation."""
+
+    text: str
+    embeds: list[dict[str, object]]
+
+
+@dataclass(frozen=True)
 class DiscordProgressPresentation:
     """Ordered Discord-native pages for one canonical Channel Work snapshot."""
 
-    pages: tuple[str, ...]
+    pages: tuple[DiscordProgressPage, ...]
 
 
 def split_discord_markdown(text: str) -> tuple[str, ...]:
@@ -63,18 +71,63 @@ def render_discord_progress(
     """Lower one canonical progress snapshot to stable bounded Discord pages."""
     del work_id, desired_progress_revision
     if progress.state == "checking":
-        return DiscordProgressPresentation(pages=("Agent is checking your message",))
+        return DiscordProgressPresentation(
+            pages=(
+                DiscordProgressPage(
+                    text="Agent is checking your message.",
+                    embeds=[
+                        {
+                            "title": "Agent is checking your message",
+                            "description": (
+                                "The Agent is preparing the first response for this "
+                                "conversation."
+                            ),
+                            "color": 0x5865F2,
+                        }
+                    ],
+                ),
+            )
+        )
     if progress.title is None:
         raise AssertionError("Validated working progress must contain a title.")
     summary = _progress_summary(progress.tasks)
     overview = f"## {progress.title}\n{summary}"
-    task_text = "\n\n".join(_task_page(task) for task in progress.tasks)
-    return DiscordProgressPresentation(
-        pages=(
-            *split_discord_markdown(overview),
-            *split_discord_markdown(task_text),
+    pages = [
+        DiscordProgressPage(
+            text=overview,
+            embeds=[
+                {
+                    "title": _bounded_embed_title(progress.title),
+                    "description": summary,
+                    "color": 0x5865F2,
+                }
+            ],
         )
-    )
+    ]
+    for task in progress.tasks:
+        task_text = _task_page(task)
+        parts = split_discord_markdown(task_text)
+        pages.extend(
+            DiscordProgressPage(
+                text=part,
+                embeds=[
+                    {
+                        "title": _bounded_embed_title(
+                            f"{_task_status_label(task.status)} — {task.title}"
+                            + (
+                                f" ({ordinal + 1}/{len(parts)})"
+                                if len(parts) > 1
+                                else ""
+                            )
+                        ),
+                        "description": part,
+                        "color": _task_status_color(task.status),
+                    }
+                ],
+            )
+            for ordinal, part in enumerate(parts)
+        )
+    return DiscordProgressPresentation(pages=tuple(pages))
 
 
 def render_discord_persisted_progress(
@@ -162,3 +215,24 @@ def _task_status_label(status: ExternalChannelWorkTaskStatus) -> str:
             return "Failed"
         case _ as unreachable:
             assert_never(unreachable)
+
+
+def _task_status_color(status: ExternalChannelWorkTaskStatus) -> int:
+    """Use a stable visual status without retaining provider-specific work state."""
+    match status:
+        case ExternalChannelWorkTaskStatus.PENDING:
+            return 0x99AAB5
+        case ExternalChannelWorkTaskStatus.IN_PROGRESS:
+            return 0x5865F2
+        case ExternalChannelWorkTaskStatus.COMPLETED:
+            return 0x57F287
+        case ExternalChannelWorkTaskStatus.FAILED:
+            return 0xED4245
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _bounded_embed_title(value: str) -> str:
+    """Keep each generated title inside Discord's bounded Embed title field."""
+    maximum = 256
+    return value if len(value) <= maximum else f"{value[: maximum - 1]}…"

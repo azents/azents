@@ -2590,6 +2590,148 @@ def test_discord_single_activation_interaction_and_gateway_journey(
     assert "X-Signature-Ed25519" not in rendered_state
 
 
+def test_discord_message_command_selector_and_component_journey(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    discord_provider_fake_url: str,
+    azents_engine_worker_container: Container,
+) -> None:
+    """Exercise Message Command source projection and transient selector scope."""
+    del azents_engine_worker_container
+    source_message_id = "500000000000000002"
+    source_content = "Private selected Discord source"
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/configure",
+        json={
+            "application_id": _DISCORD_MULTI_APPLICATION_ID,
+            "root_messages": [
+                {
+                    "id": source_message_id,
+                    "channel_id": _DISCORD_CHANNEL_ID,
+                    "content": source_content,
+                    "timestamp": "2026-07-28T00:00:00.000000+00:00",
+                    "author": {"id": "600000000000000002"},
+                }
+            ],
+            "allow_synthetic_roots": True,
+        },
+        timeout=5,
+    ).raise_for_status()
+    owner_token, _, handle, agent_ids = _create_workspace_agents(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        agent_count=2,
+        runtime_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {owner_token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_multi_discord_connection(
+        handle=handle,
+        discord_connection_setup_request=DiscordConnectionSetupRequest(
+            app_id=_DISCORD_MULTI_APPLICATION_ID,
+            configuration=DiscordConnectionConfiguration(
+                target_guild_id=_DISCORD_GUILD_ID
+            ),
+            credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
+        ),
+        _headers=headers,
+    )
+    wait_until(
+        lambda: bool(
+            _discord_provider_state(discord_provider_fake_url).get(
+                "interaction_configurations"
+            )
+        ),
+        timeout=15,
+        interval=0.2,
+        message="Discord interaction callback was not configured",
+    )
+    routes = [
+        external_api.external_channel_v1_add_multi_discord_route(
+            connection_id=setup.connection.id,
+            handle=handle,
+            multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_id),
+            _headers=headers,
+        )
+        for agent_id in agent_ids
+    ]
+    interaction = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": "700000000000000003",
+            "type": 2,
+            "application_id": _DISCORD_MULTI_APPLICATION_ID,
+            "guild_id": _DISCORD_GUILD_ID,
+            "channel_id": _DISCORD_CHANNEL_ID,
+            "member": {"user": {"id": "600000000000000002"}},
+            "data": {
+                "type": 3,
+                "name": "Ask an Azents Agent",
+                "target_id": source_message_id,
+                "resolved": {
+                    "messages": {
+                        source_message_id: {
+                            "id": source_message_id,
+                            "channel_id": _DISCORD_CHANNEL_ID,
+                            "content": source_content,
+                            "timestamp": "2026-07-28T00:00:00.000000+00:00",
+                            "author": {"id": "600000000000000002"},
+                        }
+                    }
+                },
+            },
+        },
+        timeout=10,
+    )
+    interaction.raise_for_status()
+    assert interaction.json() == {"status": 200, "response_type": 4}
+    selector = wait_until(
+        lambda: (
+            requests.get(
+                f"{discord_provider_fake_url}/__testenv/transient-selector",
+                timeout=5,
+            )
+            .json()
+            .get("custom_id")
+        ),
+        timeout=15,
+        interval=0.2,
+        message="Discord Message Command selector response was not rendered",
+    )
+    assert isinstance(selector, str)
+    assert selector.startswith("azents-selector:")
+    component = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": "700000000000000004",
+            "type": 3,
+            "application_id": _DISCORD_MULTI_APPLICATION_ID,
+            "guild_id": _DISCORD_GUILD_ID,
+            "channel_id": _DISCORD_CHANNEL_ID,
+            "member": {"user": {"id": "600000000000000002"}},
+            "message": {"id": "800000000000000001"},
+            "data": {"custom_id": selector, "values": [routes[1].id]},
+        },
+        timeout=10,
+    )
+    component.raise_for_status()
+    assert component.json() == {"status": 200, "response_type": 7}
+    state = _discord_provider_state(discord_provider_fake_url)
+    rendered = str(state)
+    interactions = cast(list[dict[str, object]], state["interactions"])
+    assert [item["response_type"] for item in interactions] == [4, 7]
+    assert source_content not in rendered
+    assert _DISCORD_BOT_TOKEN not in rendered
+    assert selector not in rendered
+
+
 def test_discord_multi_management_and_lifecycle_journey(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,

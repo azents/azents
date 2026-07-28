@@ -1,8 +1,6 @@
 """Discord-native rendering for durable External Channel Agent selection."""
 
-import base64
 import datetime
-import hashlib
 import hmac
 from dataclasses import dataclass
 from typing import Annotated
@@ -11,6 +9,9 @@ from fastapi import Depends
 
 from azents.core.config import Config
 from azents.core.deps import get_config
+from azents.services.external_channel.discord_selector_scope import (
+    build_discord_selector_custom_id,
+)
 from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
 )
@@ -20,10 +21,10 @@ from azents.services.external_channel.selector import (
 )
 
 _DISCORD_SELECTOR_PREFIX = "azents-selector"
+_DISCORD_SELECTOR_ACTION_OPEN = "open"
 _DISCORD_SELECTOR_ACTION_SELECT = "select"
 _DISCORD_SELECTOR_ACTION_PREVIOUS = "previous"
 _DISCORD_SELECTOR_ACTION_NEXT = "next"
-_DISCORD_SELECTOR_TOKEN_SIGNATURE_BYTES = 16
 _DISCORD_SELECTOR_PAGE_SIZE = 20
 
 
@@ -79,6 +80,13 @@ class DiscordSelectorResponseService:
             "data": {
                 "flags": 64,
                 "content": "Select an Agent for this conversation.",
+                "embeds": _selector_embeds(
+                    title="Select an Agent",
+                    description=(
+                        "Choose the Agent that should continue this conversation."
+                    ),
+                    color=0x5865F2,
+                ),
                 "components": _selector_components(
                     catalog=catalog,
                     admission_id=admission_id,
@@ -94,6 +102,8 @@ class DiscordSelectorResponseService:
         custom_id: str,
         selected_route_id: str | None,
         principal_id: str,
+        guild_id: str | None,
+        channel_id: str | None,
         now: datetime.datetime,
     ) -> DiscordSelectorComponentResponse:
         """Revalidate one component action against its current durable admission."""
@@ -101,6 +111,23 @@ class DiscordSelectorResponseService:
             custom_id=custom_id,
             secret=self.config.auth.jwt.secret_key,
         )
+        await self.selector_service.validate_discord_component_scope(
+            admission_id=scope.admission_id,
+            principal_id=principal_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            now=now,
+        )
+        if scope.action == _DISCORD_SELECTOR_ACTION_OPEN:
+            return DiscordSelectorComponentResponse(
+                response=await self.initial_response(
+                    admission_id=scope.admission_id,
+                    principal_id=principal_id,
+                    now=now,
+                ),
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            )
         if scope.action in {
             _DISCORD_SELECTOR_ACTION_PREVIOUS,
             _DISCORD_SELECTOR_ACTION_NEXT,
@@ -117,6 +144,14 @@ class DiscordSelectorResponseService:
                     "type": 7,
                     "data": {
                         "content": "Select an Agent for this conversation.",
+                        "embeds": _selector_embeds(
+                            title="Select an Agent",
+                            description=(
+                                "Choose the Agent that should continue this "
+                                "conversation."
+                            ),
+                            color=0x5865F2,
+                        ),
                         "components": _selector_components(
                             catalog=catalog,
                             admission_id=scope.admission_id,
@@ -138,10 +173,14 @@ class DiscordSelectorResponseService:
         )
         if selection.status == "expired":
             content = "This Agent selection has expired. Start a new conversation."
+            title = "Agent selection expired"
+            color = 0x99AAB5
             control_delivery_attempt_id = None
             connection_id = None
         elif selection.status == "already_bound":
             content = "This conversation is already linked to an Agent."
+            title = "Conversation already linked"
+            color = 0xFEE75C
             control_delivery_attempt_id = None
             connection_id = None
         else:
@@ -155,6 +194,12 @@ class DiscordSelectorResponseService:
                 if continuation.status == "awaiting_access"
                 else "Agent selected. Continuing this conversation."
             )
+            title = (
+                "Access approval required"
+                if continuation.status == "awaiting_access"
+                else "Agent selected"
+            )
+            color = 0xFEE75C if continuation.status == "awaiting_access" else 0x57F287
             control_delivery_attempt_id = continuation.control_delivery_attempt_id
             connection_id = (
                 selection.admission.connection_id
@@ -166,6 +211,11 @@ class DiscordSelectorResponseService:
                 "type": 7,
                 "data": {
                     "content": content,
+                    "embeds": _selector_embeds(
+                        title=title,
+                        description=content,
+                        color=color,
+                    ),
                     "components": [],
                 },
             },
@@ -186,35 +236,6 @@ class DiscordSelectorResponseService:
         )
 
 
-def build_discord_selector_custom_id(
-    *,
-    secret: str,
-    admission_id: str,
-    action: str,
-    offset: int = 0,
-) -> str:
-    """Sign the compact admission scope that fits Discord's custom-ID bound."""
-    if action not in {
-        _DISCORD_SELECTOR_ACTION_SELECT,
-        _DISCORD_SELECTOR_ACTION_PREVIOUS,
-        _DISCORD_SELECTOR_ACTION_NEXT,
-    }:
-        raise ValueError("Discord selector action is invalid.")
-    if not admission_id or len(admission_id) > 64:
-        raise ValueError("Discord selector admission is invalid.")
-    if offset < 0:
-        raise ValueError("Discord selector offset is invalid.")
-    payload = f"{action}:{admission_id}:{offset}".encode()
-    signature = hmac.new(secret.encode(), payload, hashlib.sha256).digest()[
-        :_DISCORD_SELECTOR_TOKEN_SIGNATURE_BYTES
-    ]
-    encoded_signature = base64.urlsafe_b64encode(signature).decode().rstrip("=")
-    return (
-        f"{_DISCORD_SELECTOR_PREFIX}:{action}:{admission_id}:{offset}:"
-        f"{encoded_signature}"
-    )
-
-
 def parse_discord_selector_custom_id(
     *,
     custom_id: str,
@@ -228,6 +249,7 @@ def parse_discord_selector_custom_id(
     if prefix != _DISCORD_SELECTOR_PREFIX:
         raise ValueError("Discord selector scope is invalid.")
     if action not in {
+        _DISCORD_SELECTOR_ACTION_OPEN,
         _DISCORD_SELECTOR_ACTION_SELECT,
         _DISCORD_SELECTOR_ACTION_PREVIOUS,
         _DISCORD_SELECTOR_ACTION_NEXT,
@@ -241,15 +263,13 @@ def parse_discord_selector_custom_id(
         raise ValueError("Discord selector scope is invalid.") from error
     if offset < 0:
         raise ValueError("Discord selector scope is invalid.")
-    payload = f"{action}:{admission_id}:{offset}".encode()
-    expected = hmac.new(secret.encode(), payload, hashlib.sha256).digest()[
-        :_DISCORD_SELECTOR_TOKEN_SIGNATURE_BYTES
-    ]
-    try:
-        supplied = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
-    except ValueError as error:
-        raise ValueError("Discord selector scope is invalid.") from error
-    if not hmac.compare_digest(supplied, expected):
+    expected = build_discord_selector_custom_id(
+        secret=secret,
+        admission_id=admission_id,
+        action=action,
+        offset=offset,
+    ).rsplit(":", 1)[-1]
+    if not signature or not hmac.compare_digest(signature, expected):
         raise ValueError("Discord selector scope is invalid.")
     return DiscordSelectorScope(
         admission_id=admission_id,
@@ -354,3 +374,13 @@ def _selector_components(
 def _candidate_label(agent_name: str, access: str) -> str:
     suffix = "" if access == "available" else " — Access required"
     return (agent_name + suffix)[:100]
+
+
+def _selector_embeds(
+    *,
+    title: str,
+    description: str,
+    color: int,
+) -> list[dict[str, object]]:
+    """Return one fixed-size Discord Embed for selector interaction feedback."""
+    return [{"title": title, "description": description, "color": color}]

@@ -1614,6 +1614,7 @@ class ExternalChannelRepository:
         if transitioned_at is not None:
             rdb.updated_at = transitioned_at
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelInteraction.model_validate(rdb)
 
     async def create_conversation_admission_idempotent(
@@ -2198,6 +2199,35 @@ class ExternalChannelRepository:
             )
         )
         return self._as(ExternalChannelResource, rdb)
+
+    async def get_discord_resource_by_delivery_channel(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        guild_id: str,
+        delivery_channel_id: str,
+    ) -> ExternalChannelResource | None:
+        """Fetch one Discord resource by its retained conversation thread identity."""
+        rows = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelResource)
+                .where(
+                    RDBExternalChannelResource.connection_id == connection_id,
+                    RDBExternalChannelResource.labels.contains(
+                        {
+                            "provider": ExternalChannelProvider.DISCORD.value,
+                            "guild_id": guild_id,
+                            "delivery_channel_id": delivery_channel_id,
+                        }
+                    ),
+                )
+                .limit(2)
+            )
+        )
+        if len(rows) != 1:
+            return None
+        return ExternalChannelResource.model_validate(rows[0])
 
     async def get_resource(
         self,

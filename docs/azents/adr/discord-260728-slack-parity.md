@@ -131,6 +131,37 @@ projection, and generated-client/UI behavior together.
 **Rejected alternative**: Marking parity complete from adapter unit tests. The audit
 showed that primitives can exist while the user-visible journey remains disconnected.
 
+### D8. Preserve connected-conversation continuation and lower operational semantics into Discord-native rich content
+
+**Decision**: A Discord mention or Message Command establishes a resource only for the
+first connection. Once a resource has an active binding and a retained delivery-thread
+identity, every eligible human Gateway message whose channel is that thread resolves
+the same resource and continues the bound Session without a mention. A repeated mention
+is ordinary continuation, not a new invocation.
+
+Automatic access is evaluated before approval creation for every binding state. An
+open-access route therefore never creates an approval request or provider approval
+control for an eligible human principal; block and grant fences still take precedence.
+
+Slack Block Kit operational meaning lowers through a provider-specific Discord rich
+presentation model. Session navigation and approval use labelled link buttons, and
+checking/Channel Work use embeds and components with accessible fallback content.
+Canonical binding, access, work, and delivery records retain provider-neutral data only;
+Discord embed/component JSON is validated delivery-layer payload state.
+
+**Rationale**: `discord-260728/REQ-1`, `REQ-3`, `REQ-4`, and `REQ-5` require a usable
+conversation rather than a one-shot mention response or text-only approximation.
+Retained thread identity is the authoritative bridge between a root source and later
+Gateway messages. Lowering canonical operational state at the provider boundary keeps
+Slack as the semantic source of truth without coupling the domain to Block Kit or
+Discord wire objects.
+
+**Rejected alternative**: Requiring every continuation to mention the App breaks the
+connected-channel interaction model. Treating open access as approval-required during
+activation leaks contradictory product state. Flattening structured Slack operational
+messages into ordinary Discord text loses hierarchy and primary actions even when the
+words are the same.
+
 ## Consequences
 
 - No alternative authorization, Session, binding, work, or lifecycle model is added.
@@ -140,6 +171,10 @@ showed that primitives can exist while the user-visible journey remains disconne
   canonical persistence graph remains the source of truth.
 - Existing Slack flows remain unchanged while shared orchestration is generalized only
   where necessary to admit Discord.
+- Discord provider resource lookup recognizes the retained thread delivery identity
+  without broadening admission to arbitrary parent-channel traffic.
+- Open-access continuation cannot create an approval request merely because no
+  principal-specific grant exists.
 - API schema and generated client changes are required for Discord Multi management.
 - Current living specifications that describe unimplemented Discord parity behavior
   must be re-verified against the final implementation rather than treated as evidence

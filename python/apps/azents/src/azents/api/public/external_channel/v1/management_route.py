@@ -133,6 +133,26 @@ class ConnectionAccessPolicyRequest(ExternalChannelAccessPolicyInput):
     """Dedicated External Channel ingress policy request."""
 
 
+@router.get("/workspaces/{handle}/external-channels/multi")
+async def list_multi_connections(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> ManagedMultiConnectionListResponse:
+    """List Workspace-owned Multi Apps across providers in one stable page."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_READ)
+    return ManagedMultiConnectionListResponse(
+        items=await service.list_multi_connections(
+            workspace_id=member.workspace_id,
+            provider=None,
+            offset=offset,
+            limit=limit,
+        )
+    )
+
+
 @router.get("/workspaces/{handle}/external-channels/slack/multi")
 async def list_multi_slack_connections(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],

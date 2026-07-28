@@ -82,7 +82,7 @@ function isDiscordDraftComplete(draft: DiscordMultiConnectionDraft): boolean {
 }
 
 function SlackMultiAppGuide(): ReactElement {
-  const t = useTranslations("workspace.slackApps");
+  const t = useTranslations("workspace.integrations");
 
   return (
     <Alert color="blue" title={t("slackGuideTitle")}>
@@ -97,7 +97,7 @@ function SlackMultiAppGuide(): ReactElement {
 }
 
 function DiscordMultiAppGuide(): ReactElement {
-  const t = useTranslations("workspace.slackApps");
+  const t = useTranslations("workspace.integrations");
 
   return (
     <Alert color="blue" title={t("discordGuideTitle")}>
@@ -119,7 +119,7 @@ function CredentialFields({
   draft: MultiConnectionDraft;
   onChange: (draft: MultiConnectionDraft) => void;
 }): ReactElement {
-  const t = useTranslations("workspace.slackApps");
+  const t = useTranslations("workspace.integrations");
 
   return (
     <Stack gap="xs">
@@ -204,7 +204,7 @@ function DiscordCredentialFields({
   draft: DiscordMultiConnectionDraft;
   onChange: (draft: DiscordMultiConnectionDraft) => void;
 }): ReactElement {
-  const t = useTranslations("workspace.slackApps");
+  const t = useTranslations("workspace.integrations");
 
   return (
     <Stack gap="xs">
@@ -248,7 +248,7 @@ function Pagination({
   count: number;
   onChange: (offset: number) => void;
 }): ReactElement {
-  const t = useTranslations("workspace.slackApps");
+  const t = useTranslations("workspace.integrations");
 
   return (
     <Group justify="flex-end" gap="xs">
@@ -284,7 +284,7 @@ function FocusedHandoff({
 }: {
   props: WorkspaceSlackAppsContainerOutput;
 }): ReactElement {
-  const t = useTranslations("workspace.slackApps");
+  const t = useTranslations("workspace.integrations");
   const handoff = props.handoffState.handoff;
 
   if (props.state.type === "LOADING") {
@@ -456,7 +456,7 @@ function FocusedHandoff({
 export function WorkspaceSlackApps(
   props: WorkspaceSlackAppsContainerOutput,
 ): ReactElement {
-  const t = useTranslations("workspace.slackApps");
+  const t = useTranslations("workspace.integrations");
 
   if (props.focusedHandoff) {
     return <FocusedHandoff props={props} />;

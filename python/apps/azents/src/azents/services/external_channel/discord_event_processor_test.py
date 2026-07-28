@@ -54,10 +54,17 @@ _NOW = datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC)
 class _Repository:
     """Capture Discord canonical-persistence operations without database I/O."""
 
-    def __init__(self, *, resource: ExternalChannelResource | None) -> None:
+    def __init__(
+        self,
+        *,
+        resource: ExternalChannelResource | None,
+        delivery_channel_resource: ExternalChannelResource | None = None,
+    ) -> None:
         self.resource = resource
+        self.delivery_channel_resource = delivery_channel_resource
         self.created: list[ExternalChannelResourceCreate] = []
         self.lookups: list[str] = []
+        self.delivery_channel_lookups: list[tuple[str, str]] = []
 
     async def lock_connection_for_routing(
         self,
@@ -78,6 +85,19 @@ class _Repository:
         assert provider_resource_key.startswith("discord:guild-1:")
         self.lookups.append(provider_resource_key)
         return self.resource
+
+    async def get_discord_resource_by_delivery_channel(
+        self,
+        _session: AsyncSession,
+        *,
+        connection_id: str,
+        guild_id: str,
+        delivery_channel_id: str,
+    ) -> ExternalChannelResource | None:
+        assert connection_id == "connection-1"
+        assert guild_id == "guild-1"
+        self.delivery_channel_lookups.append((guild_id, delivery_channel_id))
+        return self.delivery_channel_resource
 
     async def create_resource_idempotent(
         self,
@@ -303,6 +323,34 @@ async def test_unlinked_non_mention_is_excluded_after_wait_window() -> None:
     assert repository.created == []
     assert processor.persisted == []
     assert processor.completed == []
+
+
+@pytest.mark.asyncio
+async def test_bound_thread_message_continues_without_mention() -> None:
+    """A bound Discord thread accepts later human messages without another mention."""
+    resource = cast(
+        ExternalChannelResource,
+        SimpleNamespace(
+            id="resource-1",
+            status=ExternalChannelResourceStatus.ACTIVE,
+        ),
+    )
+    repository = _Repository(
+        resource=None,
+        delivery_channel_resource=resource,
+    )
+    processor = _Processor(repository=repository)
+
+    await processor._process_discord_claimed_event(  # pyright: ignore[reportPrivateUsage]
+        event=_event(content="Continue this work", mentioned=False, received_at=_NOW),
+        configuration=_configuration(),
+    )
+
+    assert repository.lookups == ["discord:guild-1:200"]
+    assert repository.delivery_channel_lookups == [("guild-1", "200")]
+    assert repository.created == []
+    assert processor.persisted[0]["resource"] is resource
+    assert len(processor.completed) == 1
 
 
 @pytest.mark.asyncio

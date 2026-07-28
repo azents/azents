@@ -159,6 +159,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_list_multi_connections(self) -> None:
+        """Test case for external_channel_v1_list_multi_connections
+
+        List Multi Connections
+        """
+        pass
+
     def test_external_channel_v1_list_multi_discord_channel_defaults(self) -> None:
         """Test case for external_channel_v1_list_multi_discord_channel_defaults
 

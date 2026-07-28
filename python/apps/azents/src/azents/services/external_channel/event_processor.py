@@ -104,6 +104,9 @@ from azents.services.external_channel.discord_history import (
     DiscordHistoryResourceUnavailable,
     DiscordHistoryResponseMalformed,
 )
+from azents.services.external_channel.discord_selector_scope import (
+    build_discord_selector_custom_id,
+)
 from azents.services.external_channel.presentation import (
     normalize_slack_agent_name,
     prepend_agent_blocks,
@@ -472,7 +475,10 @@ class ExternalChannelEventProcessorService:
                 principal_id=principal_id,
                 agent_session_id=None,
             )
-            if grant is not None:
+            if grant is not None or _route_has_automatic_access(
+                route,
+                source_message.author_type,
+            ):
                 binding = await self._create_granted_initial_binding(
                     session,
                     route=route,
@@ -480,6 +486,7 @@ class ExternalChannelEventProcessorService:
                     trigger_message=source_message,
                     expected_admission_id=admission.id,
                     provider=connection.provider,
+                    now=now,
                 )
                 await self._record_trim(
                     session,
@@ -1174,6 +1181,17 @@ class ExternalChannelEventProcessorService:
                 provider_resource_key=existing_resource_key,
             )
             if resource is None:
+                resource = (
+                    await self.repository.get_discord_resource_by_delivery_channel(
+                        session,
+                        connection_id=event.connection_id,
+                        guild_id=tenant_id,
+                        delivery_channel_id=(
+                            normalized.thread_id or normalized.channel_id
+                        ),
+                    )
+                )
+            if resource is None:
                 if not normalized.invocation:
                     if now - event.received_at < _UNLINKED_EVENT_WAIT:
                         raise _DeferredEvent(
@@ -1427,6 +1445,30 @@ class ExternalChannelEventProcessorService:
                 error_kind="routing_state_changed",
                 error_summary="External Channel admission changed during routing.",
             )
+        recovery_attempt_id = None
+        if (
+            binding is not None
+            and message.revision_kind is ExternalChannelMessageRevisionKind.DELETE
+        ):
+            recovery_attempt_id = (
+                await self.work_repository.recover_deleted_discord_progress(
+                    session,
+                    binding_id=binding.id,
+                    resource_labels=resource.labels,
+                    deleted_provider_message_key=message.provider_message_key,
+                    origin_id=event.id,
+                    now=now,
+                )
+            )
+        if recovery_attempt_id is not None:
+            await session.commit()
+            return ExternalChannelPersistedMessage(
+                resource_id=resource.id,
+                hydration_required=False,
+                control_delivery_attempt_id=None,
+                activity_delivery_attempt_id=recovery_attempt_id,
+                wake_up=None,
+            )
         persisted_revision = await self._persist_normalized_message(
             session,
             resource=resource,
@@ -1451,6 +1493,21 @@ class ExternalChannelEventProcessorService:
             now=now,
         )
         if route is None:
+            control_delivery_attempt_id = (
+                await self._create_selector_control_intent(
+                    session,
+                    resource=resource,
+                    admission=admission,
+                    provider=ExternalChannelProvider.DISCORD,
+                )
+                if (
+                    admission is not None
+                    and admission.status
+                    is ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
+                    and message.invocation
+                )
+                else None
+            )
             await session.commit()
             return ExternalChannelPersistedMessage(
                 resource_id=resource.id,
@@ -1458,7 +1515,7 @@ class ExternalChannelEventProcessorService:
                     message.invocation
                     and not _hydration_terminal(resource.hydration_status)
                 ),
-                control_delivery_attempt_id=None,
+                control_delivery_attempt_id=control_delivery_attempt_id,
                 activity_delivery_attempt_id=None,
                 wake_up=None,
             )
@@ -1564,7 +1621,7 @@ class ExternalChannelEventProcessorService:
                             status=ExternalChannelConversationAdmissionStatus.BOUND,
                             selected_route_id=route.id,
                         )
-                elif grant is None:
+                elif not authorized and grant is None:
                     participant_provider_user_id = message.provider_user_id
                     if participant_provider_user_id is None:
                         raise RuntimeError(
@@ -1992,6 +2049,7 @@ class ExternalChannelEventProcessorService:
                         session,
                         resource=resource,
                         admission=admission,
+                        provider=ExternalChannelProvider.SLACK,
                     )
                     if (
                         admission is not None
@@ -2108,7 +2166,7 @@ class ExternalChannelEventProcessorService:
                                 status=ExternalChannelConversationAdmissionStatus.BOUND,
                                 selected_route_id=route.id,
                             )
-                    elif grant is None:
+                    elif not authorized and grant is None:
                         participant_provider_user_id = message.provider_user_id
                         if participant_provider_user_id is None:
                             raise RuntimeError(
@@ -2437,21 +2495,65 @@ class ExternalChannelEventProcessorService:
         *,
         resource: ExternalChannelResource,
         admission: ExternalChannelConversationAdmission,
+        provider: ExternalChannelProvider,
     ) -> str | None:
         """Create or reuse the one thread selector control for a retained source."""
-        labels = resource.labels or {}
-        tenant_id = labels.get("tenant_id")
-        channel_id = labels.get("channel_id")
-        thread_ts = labels.get("thread_ts")
-        if (
-            not isinstance(tenant_id, str)
-            or not tenant_id
-            or not isinstance(channel_id, str)
-            or not channel_id
-            or not isinstance(thread_ts, str)
-            or not thread_ts
-        ):
-            return None
+        if provider is ExternalChannelProvider.DISCORD:
+            request_payload: dict[str, object] = {
+                "provider": "discord",
+                "control_kind": "agent_selector",
+                **_provider_thread_target(resource),
+                "conversation_admission_id": admission.id,
+                "text": "Select an Agent to continue this conversation.",
+                "embeds": [
+                    {
+                        "title": "Select an Agent",
+                        "description": (
+                            "Choose the Agent that should continue this conversation."
+                        ),
+                        "color": 0x5865F2,
+                    }
+                ],
+                "components": [
+                    {
+                        "type": 1,
+                        "components": [
+                            {
+                                "type": 2,
+                                "style": 1,
+                                "label": "Select Agent",
+                                "custom_id": build_discord_selector_custom_id(
+                                    secret=self.config.auth.jwt.secret_key,
+                                    admission_id=admission.id,
+                                    action="open",
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+        else:
+            labels = resource.labels or {}
+            tenant_id = labels.get("tenant_id")
+            channel_id = labels.get("channel_id")
+            thread_ts = labels.get("thread_ts")
+            if (
+                not isinstance(tenant_id, str)
+                or not tenant_id
+                or not isinstance(channel_id, str)
+                or not channel_id
+                or not isinstance(thread_ts, str)
+                or not thread_ts
+            ):
+                return None
+            request_payload = {
+                "provider": "slack",
+                "control_kind": "agent_selector",
+                "tenant_id": tenant_id,
+                "channel_id": channel_id,
+                "thread_ts": thread_ts,
+                "conversation_admission_id": admission.id,
+            }
         attempt = await self.repository.create_delivery_attempt_idempotent(
             session,
             ExternalChannelDeliveryAttemptCreate(
@@ -2461,14 +2563,7 @@ class ExternalChannelEventProcessorService:
                 channel_action_id=None,
                 binding_id=None,
                 operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                request_payload={
-                    "provider": "slack",
-                    "control_kind": "agent_selector",
-                    "tenant_id": tenant_id,
-                    "channel_id": channel_id,
-                    "thread_ts": thread_ts,
-                    "conversation_admission_id": admission.id,
-                },
+                request_payload=request_payload,
                 status=ExternalChannelDeliveryStatus.PENDING,
                 provider_message_key=None,
                 error_kind=None,
@@ -2774,6 +2869,19 @@ class ExternalChannelEventProcessorService:
                 "participant_provider_user_id": participant_provider_user_id,
                 "text": (
                     _render_discord_access_request_control(approval_url)
+                    if approval_url is not None
+                    else None
+                ),
+                "embeds": (
+                    _discord_access_request_embeds()
+                    if approval_url is not None
+                    else None
+                ),
+                "components": (
+                    _discord_link_button(
+                        label="Review access",
+                        url=approval_url,
+                    )
                     if approval_url is not None
                     else None
                 ),
@@ -4187,6 +4295,37 @@ def _render_discord_access_request_control(approval_url: str) -> str:
     )
 
 
+def _discord_access_request_embeds() -> list[dict[str, object]]:
+    """Render one provider-native approval boundary without participant disclosure."""
+    return [
+        {
+            "title": "Access approval required",
+            "description": (
+                "A Workspace member must approve this participant before the Agent "
+                "can continue the conversation."
+            ),
+            "color": 0xFEE75C,
+        }
+    ]
+
+
+def _discord_link_button(*, label: str, url: str) -> list[dict[str, object]]:
+    """Return one bounded Discord link button row for an approved web action."""
+    return [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": label,
+                    "url": url,
+                }
+            ],
+        }
+    ]
+
+
 def _is_shortcut_source_event(event: ExternalChannelEvent) -> bool:
     """Avoid creating a mention selector control for a shortcut-owned source."""
     return event.provider_event_id.startswith("shortcut-")
@@ -4304,7 +4443,20 @@ def _session_link_payload(
     if provider is ExternalChannelProvider.DISCORD:
         return {
             **_provider_thread_target(resource),
-            "text": f"Open this Azents session: [Open session]({session_url})",
+            "text": (f"Your Azents session is ready. [Open session]({session_url})"),
+            "embeds": [
+                {
+                    "title": "Azents session ready",
+                    "description": (
+                        "Continue this conversation in the linked Azents session."
+                    ),
+                    "color": 0x5865F2,
+                }
+            ],
+            "components": _discord_link_button(
+                label="Open Azents session",
+                url=session_url,
+            ),
         }
     session_link = render_slack_session_link(session_url)
     return {

@@ -104,6 +104,7 @@ class FakeState:
             self.interaction_configurations: list[dict[str, object]] = []
             self.interactions: list[dict[str, object]] = []
             self._interaction_endpoint_url: str | None = None
+            self._transient_selector_custom_ids: list[str] = []
             self.deliveries: list[dict[str, object]] = []
             self.gateway_connections = 0
             self.gateway_initial_opcodes: list[int] = []
@@ -193,6 +194,7 @@ class FakeState:
             self.interaction_configurations = []
             self.interactions = []
             self._interaction_endpoint_url = None
+            self._transient_selector_custom_ids = []
             self.deliveries = []
             self.gateway_connections = 0
             self.gateway_initial_opcodes = []
@@ -392,6 +394,7 @@ class FakeState:
             response_status = 0
             response_payload = None
         with self.lock:
+            self._capture_transient_selector_custom_ids(response_payload)
             evidence: dict[str, object] = {
                 "interaction_id": interaction_id,
                 "interaction_type": interaction_type,
@@ -415,6 +418,26 @@ class FakeState:
                     )
             self.interactions.append(evidence)
         return response_status, cast(object, response_payload)
+
+    def consume_transient_selector_custom_id(self) -> str | None:
+        """Consume one request-local selector ID without adding it to evidence."""
+        with self.lock:
+            if not self._transient_selector_custom_ids:
+                return None
+            return self._transient_selector_custom_ids.pop(0)
+
+    def _capture_transient_selector_custom_ids(self, value: object) -> None:
+        """Retain selector IDs only transiently for the next test interaction."""
+        if isinstance(value, dict):
+            for key, nested in cast(dict[object, object], value).items():
+                if key == "custom_id" and isinstance(nested, str):
+                    if nested.startswith("azents-selector:"):
+                        self._transient_selector_custom_ids.append(nested)
+                else:
+                    self._capture_transient_selector_custom_ids(nested)
+        elif isinstance(value, list):
+            for nested in cast(list[object], value):
+                self._capture_transient_selector_custom_ids(nested)
 
     def create_message(
         self,
@@ -638,6 +661,12 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/__testenv/barrier":
             self._json_response(200, self.state.delivery_barrier_evidence())
+            return
+        if parsed.path == "/__testenv/transient-selector":
+            self._json_response(
+                200,
+                {"custom_id": self.state.consume_transient_selector_custom_id()},
+            )
             return
         if parsed.path == f"{_API_PREFIX}/oauth2/applications/@me":
             if self._controlled_response(self._operation("get_current_application")):

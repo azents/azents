@@ -172,6 +172,8 @@ class DiscordHTTPAdmissionService:
                         custom_id=envelope.selector_custom_id,
                         selected_route_id=envelope.selected_route_id,
                         principal_id=principal_id,
+                        guild_id=envelope.guild_id,
+                        channel_id=envelope.channel_id,
                         now=received_at,
                     )
                 )
@@ -232,6 +234,16 @@ class DiscordHTTPAdmissionService:
                             "content": (
                                 "This conversation is already linked to an Agent."
                             ),
+                            "embeds": [
+                                {
+                                    "title": "Conversation already linked",
+                                    "description": (
+                                        "This conversation is already linked to an "
+                                        "Agent."
+                                    ),
+                                    "color": 0xFEE75C,
+                                }
+                            ],
                         },
                     }
                 else:

@@ -64,6 +64,23 @@ class _SelectorDouble:
         self.catalog_calls.append((admission_id, principal_id, search, offset))
         return self.catalog
 
+    async def validate_discord_component_scope(
+        self,
+        *,
+        admission_id: str,
+        principal_id: str,
+        guild_id: str | None,
+        channel_id: str | None,
+        now: datetime.datetime,
+    ) -> None:
+        assert (admission_id, principal_id, guild_id, channel_id, now) == (
+            "admission-1",
+            "principal-1",
+            "guild-1",
+            "channel-1",
+            _NOW,
+        )
+
     async def select_route(
         self,
         *,
@@ -183,6 +200,8 @@ async def test_component_next_requeries_signed_offset() -> None:
         custom_id=custom_id,
         selected_route_id=None,
         principal_id="principal-1",
+        guild_id="guild-1",
+        channel_id="channel-1",
         now=_NOW,
     )
 
@@ -208,6 +227,8 @@ async def test_component_selection_continues_durable_admission_once() -> None:
         custom_id=custom_id,
         selected_route_id="route-1",
         principal_id="principal-1",
+        guild_id="guild-1",
+        channel_id="channel-1",
         now=_NOW,
     )
 
@@ -217,6 +238,13 @@ async def test_component_selection_continues_durable_admission_once() -> None:
         "type": 7,
         "data": {
             "content": "Agent selected. Continuing this conversation.",
+            "embeds": [
+                {
+                    "title": "Agent selected",
+                    "description": "Agent selected. Continuing this conversation.",
+                    "color": 0x57F287,
+                }
+            ],
             "components": [],
         },
     }

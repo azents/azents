@@ -20,9 +20,11 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
+    ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
+    ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
 from azents.rdb.models.agent import RDBAgent
@@ -44,6 +46,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelPendingContext,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
+    RDBExternalChannelWorkProjectionPart,
 )
 from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
@@ -149,6 +152,14 @@ class ExternalChannelLifecycleRepository:
                 if created_id is not None:
                     created_progress_delete_intent_count += 1
                     progress_delete_intent_ids.append(created_id)
+        discord_cleanup_ids = await self._create_discord_projection_delete_intents(
+            session,
+            binding_ids=binding_ids,
+            origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+            now=now,
+        )
+        progress_delete_intent_ids.extend(discord_cleanup_ids)
+        created_progress_delete_intent_count += len(discord_cleanup_ids)
         deleted_pending_context_count = await self._delete(
             session,
             RDBExternalChannelPendingContext,
@@ -1322,8 +1333,127 @@ class ExternalChannelLifecycleRepository:
             created_id = result.scalar_one_or_none()
             if created_id is not None:
                 progress_delete_intent_ids.append(created_id)
+        progress_delete_intent_ids.extend(
+            await self._create_discord_projection_delete_intents(
+                session,
+                binding_ids=binding_ids,
+                origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                now=now,
+            )
+        )
         await session.flush()
         return tuple(progress_delete_intent_ids)
+
+    async def _create_discord_projection_delete_intents(
+        self,
+        session: AsyncSession,
+        *,
+        binding_ids: Sequence[str],
+        origin_type: ExternalChannelDeliveryOriginType,
+        now: datetime.datetime,
+    ) -> tuple[str, ...]:
+        """Create ordered deletes for current Discord projection parts."""
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelWorkProjectionPart,
+                    RDBExternalChannelWork,
+                    RDBExternalChannelResource,
+                )
+                .join(
+                    RDBExternalChannelWork,
+                    RDBExternalChannelWork.id
+                    == RDBExternalChannelWorkProjectionPart.work_id,
+                )
+                .join(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelBinding.id == RDBExternalChannelWork.binding_id,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelBinding.route_id,
+                )
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .where(
+                    RDBExternalChannelWork.binding_id.in_(binding_ids),
+                    RDBExternalChannelConnection.provider
+                    == ExternalChannelProvider.DISCORD,
+                    RDBExternalChannelWorkProjectionPart.status
+                    == ExternalChannelWorkProjectionStatus.PRESENT,
+                    RDBExternalChannelWorkProjectionPart.provider_message_key.is_not(
+                        None
+                    ),
+                )
+                .order_by(
+                    RDBExternalChannelWork.binding_id,
+                    RDBExternalChannelWorkProjectionPart.part_ordinal,
+                )
+                .with_for_update()
+            )
+        ).all()
+        created_ids: list[str] = []
+        for part, work, resource in rows:
+            labels = resource.labels or {}
+            guild_id = labels.get("guild_id")
+            channel_id = labels.get("delivery_channel_id") or labels.get("thread_id")
+            message_key = part.provider_message_key
+            if (
+                not isinstance(guild_id, str)
+                or not guild_id
+                or not isinstance(channel_id, str)
+                or not channel_id
+                or not isinstance(message_key, str)
+                or not message_key
+            ):
+                continue
+            payload: dict[str, object] = {
+                "provider": "discord",
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+                "provider_message_key": message_key,
+                "work_id": work.id,
+            }
+            if labels.get("delivery_channel_id") is None:
+                parent_channel_id = labels.get("parent_channel_id")
+                root_message_id = labels.get("root_message_id")
+                if (
+                    isinstance(parent_channel_id, str)
+                    and isinstance(root_message_id, str)
+                    and root_message_id == channel_id
+                ):
+                    payload["thread_parent_channel_id"] = parent_channel_id
+                    payload["thread_root_message_id"] = root_message_id
+            attempt = RDBExternalChannelDeliveryAttempt(
+                origin_type=origin_type,
+                origin_id=work.binding_id,
+                channel_action_id=None,
+                binding_id=work.binding_id,
+                operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                request_payload=payload,
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=message_key,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+                part_ordinal=part.part_ordinal,
+            )
+            session.add(attempt)
+            await session.flush()
+            part.status = ExternalChannelWorkProjectionStatus.PENDING
+            part.latest_delivery_attempt_id = attempt.id
+            created_ids.append(attempt.id)
+        return tuple(created_ids)
 
     async def _locked_bindings(
         self,

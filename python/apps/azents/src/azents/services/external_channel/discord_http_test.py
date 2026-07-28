@@ -162,6 +162,8 @@ class _SelectorResponseDouble:
         custom_id: str,
         selected_route_id: str | None,
         principal_id: str,
+        guild_id: str | None,
+        channel_id: str | None,
         now: datetime.datetime,
     ) -> object:
         self.calls.append((custom_id, principal_id, now))
@@ -412,7 +414,7 @@ async def test_message_command_materializes_safe_source_before_claim() -> None:
     )
 
     create, _, source_event = admission.inputs[0]
-    assert create.projection["command_name"] == "Ask an Azents Agent"
+    assert create.projection["command_kind"] == "message_command"
     assert create.projection["source_message_id"] == "100"
     assert isinstance(source_event, ExternalChannelEventCreate)
     assert source_event.provider_event_id == (
