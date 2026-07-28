@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-28
-spec_version: 21
+spec_version: 22
 ---
 
 # External Channel
@@ -130,6 +130,13 @@ contain multiple independent bindings.
   Missing legacy fields are unavailable. A file locator is valid only for the current
   Agent, Session, active binding, route, and active or degraded connection; provider
   authorization remains authoritative at download time.
+- File-bearing External Channel state retains provider metadata, opaque locators,
+  bounded Runtime transfer manifests, consumer-claim identity, and terminal delivery
+  evidence only. Provider bodies enter the common Server-to-Runtime transfer path only
+  after a current authorization recheck. Runtime bodies leave through one verified
+  Runtime-to-provider transfer per source. No External Channel row, event, prompt,
+  queue payload, or delivery record stores transfer bytes, provider upload URLs,
+  object-store credentials, object keys, or trusted object handles.
 - A Discord connection is scoped to its validated Application and target Guild. The
   callback selector is opaque and retained only as a hash; the Application public key,
   Bot identity, and required Guild Message Command identifier are
@@ -266,6 +273,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-28** (spec_version 22) — Promoted Runtime File Transfer as the current
+  inbound/outbound file boundary: metadata-only durable state, authorized
+  provider-to-Runtime staging, verified Runtime-to-provider publication, and no
+  transfer-object authority outside trusted services.
 - **2026-07-28** (spec_version 21) — Replaced custom Discord Gateway transport
   state with high-level typed `discord.py` callbacks, SDK-owned reconnect/Resume,
   provider-event idempotency, and lease-fenced canonical admission.

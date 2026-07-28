@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-27 | 58 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-26 | 133 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-28 | 21 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-28 | 22 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-26 | 12 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
@@ -32,16 +32,16 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-27 | 135 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-28 | 39 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-28 | 40 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-28 | 12 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-28 | 10 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-28 | 16 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-28 | 17 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-28 | 18 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-28 | 15 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-26 | 31 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-28 | 32 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
@@ -380,7 +380,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections Historical Requirements Reconstruction](requirements/toolkit-260623-toolkit-level-mcp-oauth.md) | toolkit-260623 | 2026-06-23 | - |
 | [Toolkit Wake-Up Snapshot Revision Requirements](requirements/toolkit-260721-wakeup-snapshot-revision.md) | toolkit-260721 | 2026-07-21 | 2026-07-21 |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/tracker-260723-slack-activity-lifecycle.md) | tracker-260723 | 2026-07-23 | - |
-| [Runtime File Transfer Requirements](requirements/transfer-260725-runtime-file-transfer.md) | transfer-260725 | 2026-07-25 | - |
+| [Runtime File Transfer Requirements](requirements/transfer-260725-runtime-file-transfer.md) | transfer-260725 | 2026-07-25 | 2026-07-28 |
 | [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
 | [Expose Typed Actionable Profile Resolution Failures Historical Requirements Reconstruction](requirements/typed-260710-typed-profile-resolution-failures.md) | typed-260710 | 2026-07-10 | - |
 | [Unified OAuth Authentication Flow Historical Requirements Reconstruction](requirements/unified-260327-unified-oauth.md) | unified-260327 | 2026-03-27 | 2026-03-27 |
