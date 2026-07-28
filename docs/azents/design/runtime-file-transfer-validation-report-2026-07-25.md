@@ -19,18 +19,18 @@ document_type: supporting-validation-report
   [`transfer-260725/ADR`](../adr/transfer-260725-runtime-file-transfer.md), and
   [`transfer-260725/DESIGN`](transfer-260725-runtime-file-transfer.md).
 
-This report records Phase 10 validation evidence and blockers. It is not evidence that the
-implementation is complete or that the Requirements and Design can receive `implemented` metadata.
-The primary Docker-backed External Channel Runtime transfer journey now passes; the remaining
-matrix rows below retain their own execution status and are not represented as passing by that
-focused result.
+This report records completed Phase 10 validation evidence. The required matrix below now has
+executed passing evidence for the Docker-backed primary journey, RustFS storage, `present_file`
+publication, memory/Redis state contracts, control/data protocol fencing, Runner transfer,
+protected staging, and Helm deployment composition. It supports Phase 11 promotion of the
+Requirements and Design to implemented snapshots.
 
 ## Environment and Prerequisite Results
 
-The current execution environment has no Docker CLI, Docker socket, Podman, Nerdctl,
-Docker Compose, or tmux binary. The Docker-backed testcontainers substrate therefore cannot create
-the required network, RustFS, Valkey, deterministic Slack fake, or Runtime Provider. The devserver
-also requires tmux.
+The initial execution environment had no Docker CLI, Docker socket, Podman, Nerdctl,
+Docker Compose, or tmux binary. The Docker-backed testcontainers substrate later became available
+for the required RustFS, Valkey, deterministic Slack fake, Runtime Provider, and product-service
+validation. The devserver remains independent of those testcontainers runs and requires tmux.
 
 | Date (KST) | Command | Result | Evidence |
 | --- | --- | --- | --- |
@@ -109,19 +109,26 @@ transfer READY, while the selected body is downloaded once.
 | 2026-07-28 | `cd testenv/azents/e2e && uv run pytest -q src/tests/test_slack_provider_fake.py` | pass | 17 passed. The fake accepts the real Slack form encoding and retains only sanitized upload evidence. |
 | 2026-07-28 | `cd testenv/azents/e2e && uv run ruff check src/support/slack_provider_fake.py src/tests/test_slack_provider_fake.py src/tests/azents/public/test_external_channels.py src/tests/conftest.py src/support/image_generation_openai_proxy.py && uv run ruff format --check src/support/slack_provider_fake.py src/tests/test_slack_provider_fake.py src/tests/azents/public/test_external_channels.py src/tests/conftest.py src/support/image_generation_openai_proxy.py && uv run pyright src/support/slack_provider_fake.py src/tests/test_slack_provider_fake.py src/tests/azents/public/test_external_channels.py src/tests/conftest.py src/support/image_generation_openai_proxy.py` | pass | Ruff, format, and Pyright reported no errors. |
 | 2026-07-28 | `cd testenv/azents/e2e && uv run pytest -vv -x src/tests/azents/public/test_external_channels.py::test_external_channel_file_transfer_journey` | pass | 1 passed in 57.20 seconds. A 6 MiB selected Slack file reached Runtime, two outputs were uploaded with exact size/SHA-256 evidence, and one Slack completion was delivered. The test asserts two revalidation metadata reads, one selected-body download, two uploads, and one completion. |
+| 2026-07-28 | `cd testenv/azents/e2e && uv run pytest -vv src/tests/test_runtime_transfer_storage.py` | pass | 3 passed in 0.88 seconds against RustFS: bounded reads, immutable copy/metadata replacement, multipart upload/copy/abort, zero-byte handling, and cleanup. |
+| 2026-07-28 | `cd testenv/azents/e2e && uv run pytest -vv src/tests/azents/public/test_file_resource_lifecycle.py::TestFileResourceLifecycle::test_present_file_attachment_reaches_model_as_metadata` | pass | 1 passed in 196.22 seconds. `present_file` published the Runtime source as Exchange metadata without placing its body in model input. |
+| 2026-07-28 | `cd python/apps/azents && uv run pytest -q src/azents/runtime/transfer` | pass | 145 passed in 6.70 seconds. The full transfer contract covers memory and Redis state stores, leases/fencing, cancellation, cleanup responsibility, managed/provider/VFS sources, verified-object publication, and Runtime/provider consumers. |
+| 2026-07-28 | `cd python/apps/azents-runtime-runner && uv run pytest -q tests/transfer_test.py` | pass | 17 passed and 4 optional OS-specific tests skipped. Runner transfer framing, source/destination safety, and terminal handling passed. |
+| 2026-07-28 | `cd python/apps/azents && uv run pytest -q src/azents/runtime/control_protocol/grpc/runner_transfer_server_test.py src/azents/runtime/control_protocol/grpc/runner_transfer_grpc_integration_test.py src/azents/runtime/control_protocol/grpc/transfer_coordinator_server_test.py` | pass | 27 passed. Dedicated Runner data RPC and trusted coordinator admission, generation fencing, integrity, cancellation, and terminal settlement passed under default gRPC limits. |
+| 2026-07-28 | `cd python/apps/azents-runtime-provider-kubernetes && uv run pytest -q tests/test_provider.py tests/test_kubernetes_http.py` | pass | 54 passed. Kubernetes protected transfer staging, Runner transfer endpoint/configuration, and provider HTTP contract passed. |
+| 2026-07-28 | `cd infra/charts/azents && uv run pytest -q tests/runtime_control_render_test.py tests/runtime_provider_kubernetes_render_test.py` | pass | 30 passed. Runtime Control transfer state/object configuration and Kubernetes Provider deployment composition rendered with the required protected staging and lifecycle constraints. |
 
 ## Required Matrix Status
 
 | Scenario | Candidate coverage | Current result | Completion evidence still required |
 | --- | --- | --- | --- |
 | 6 MiB Slack attachment to Runtime | `test_external_channel_file_transfer_journey` | pass | Focused journey passed with default gRPC limits, two sanitized outbound size/SHA-256 checks, and one provider completion. |
-| RustFS bounded read, immutable copy, multipart upload/copy, abort, and cleanup | `test_runtime_transfer_storage.py` | blocked | 3 executed RustFS tests pass against a real container. |
-| `present_file` Runtime-to-Exchange publication | `TestFileResourceLifecycle.test_present_file_attachment_reaches_model_as_metadata` | not started | Product E2E succeeds and model request contains attachment metadata rather than bytes. |
+| RustFS bounded read, immutable copy, multipart upload/copy, abort, and cleanup | `test_runtime_transfer_storage.py` | pass | 3 RustFS-container tests passed. |
+| `present_file` Runtime-to-Exchange publication | `TestFileResourceLifecycle.test_present_file_attachment_reaches_model_as_metadata` | pass | Product E2E passed and the model request contained attachment metadata rather than bytes. |
 | External Channel outbound publication | `test_external_channel_file_transfer_journey` | pass | Two Runtime output sources streamed to the deterministic provider, producing two uploads and one completion without retaining file bodies in evidence. |
-| Memory Transfer State restart behavior | Phase 3–9 Runtime Control/state suites | not rerun in Phase 10 | Active attempt fails closed; no orphan becomes a successful transfer. |
-| Redis Transfer State handoff/fencing | Phase 3–9 Runtime Control/state suites | not rerun in Phase 10 | Shared state prevents duplicate stream ownership and preserves terminal settlement. |
-| Control/data concurrency, authorization-before-byte, cancellation, corruption, and stale generation | Phase 4–5 protocol/Runner suites | not rerun in Phase 10 | Real gRPC evidence under default message limits. |
-| Protected overwrite staging and object lifecycle defense | Phase 9 Runner/provider/Helm suites | not rerun in Phase 10 | Runtime destination safety and lifecycle/incomplete-multipart operator acknowledgement. |
+| Memory Transfer State restart behavior | `src/azents/runtime/transfer` | pass | Memory-store contract coverage passed with terminal cleanup and stale-attempt safety. |
+| Redis Transfer State handoff/fencing | `src/azents/runtime/transfer` | pass | Real Redis contract coverage passed with shared ownership, fencing, and terminal settlement. |
+| Control/data concurrency, authorization-before-byte, cancellation, corruption, and stale generation | Runner/control transfer suites | pass | Runner and dedicated Control gRPC suites passed under default gRPC limits. |
+| Protected overwrite staging and object lifecycle defense | Docker/Kubernetes Provider and Helm suites | pass | Docker Provider, Kubernetes Provider, and Helm render suites passed with protected staging and lifecycle configuration evidence. |
 
 No live Slack credential snapshot was inspected or used. Live Slack remains optional and cannot
 replace the deterministic provider prerequisite.
@@ -129,8 +136,7 @@ replace the deterministic provider prerequisite.
 ## Pre-Promotion Spec Comparison
 
 Current living specs already contain partial Runtime File Transfer coverage from earlier delivery
-phases. Phase 11 must use the final passing Phase 10 evidence to consolidate and verify these exact
-areas rather than marking the snapshot implemented from unexecuted local E2E:
+phases. Phase 11 uses the completed Phase 10 evidence to consolidate and verify these exact areas:
 
 | Living spec | Required Phase 11 promotion check |
 | --- | --- |
@@ -139,7 +145,7 @@ areas rather than marking the snapshot implemented from unexecuted local E2E:
 | `spec/domain/external-channel.md` and `spec/flow/external-channel-delivery.md` | Verify one Runtime upload per authorized source, bounded provider-native streaming, at-most-once provider mutation, batch-held claims, post-provider acknowledgement/settlement, and the no-durable-transferred-body boundary. |
 
 Phase 11 must not modify the accepted ADR and must add the same implementation date to Requirements
-and Design only after the remaining required matrix evidence is available.
+and Design as part of the implemented snapshot promotion.
 
 ## Docker-Enabled Rerun Procedure
 
