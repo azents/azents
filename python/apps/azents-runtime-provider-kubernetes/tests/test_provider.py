@@ -362,6 +362,8 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     workspace_volume = pod.spec.volumes[0]
     assert isinstance(workspace_volume, PersistentVolumeClaimVolume)
     assert workspace_volume.claim_name == pvc.metadata.name
+    assert [volume.name for volume in pod.spec.volumes] == ["agent-workspace"]
+    assert [mount.name for mount in container.volume_mounts] == ["agent-workspace"]
     assert pvc.spec.storage_class_name == "gp3"
     assert pvc.spec.storage_request == "20Gi"
     assert "azents/workspace-path" not in pod.metadata.labels
@@ -645,6 +647,8 @@ async def test_start_reuses_pod_with_canonicalized_kubernetes_quantities() -> No
     engine = pod.spec.containers[-1]
     assert engine.resources is not None
     assert engine.resources.limits is not None
+    shared_tmp = pod.spec.volumes[-2]
+    assert isinstance(shared_tmp, EmptyDirVolume)
     engine_storage = pod.spec.volumes[-1]
     assert isinstance(engine_storage, EmptyDirVolume)
     api.pods[pod_key] = dataclasses.replace(
@@ -667,7 +671,11 @@ async def test_start_reuses_pod_with_canonicalized_kubernetes_quantities() -> No
                 ),
             ),
             volumes=(
-                *pod.spec.volumes[:-1],
+                *pod.spec.volumes[:-2],
+                dataclasses.replace(
+                    shared_tmp,
+                    size_limit="10Gi",
+                ),
                 dataclasses.replace(
                     engine_storage,
                     size_limit="8Gi",
@@ -1405,6 +1413,7 @@ async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
     assert {mount.name for mount in runner.volume_mounts} == {
         "agent-workspace",
         "container-engine-socket",
+        "runtime-shared-tmp",
     }
     runner_engine_mount = next(
         mount
@@ -1421,10 +1430,21 @@ async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
         "/var/run/azents-engine/docker.sock"
     )
     assert {mount.name for mount in engine.volume_mounts} == {
+        "agent-workspace",
         "container-engine-socket",
         "container-engine-storage",
+        "runtime-shared-tmp",
     }
-    assert all(mount.name != "agent-workspace" for mount in engine.volume_mounts)
+    runner_mounts = {mount.name: mount for mount in runner.volume_mounts}
+    engine_mounts = {mount.name: mount for mount in engine.volume_mounts}
+    assert runner_mounts["agent-workspace"].mount_path == "/workspace/agent"
+    assert engine_mounts["agent-workspace"].mount_path == "/workspace/agent"
+    assert runner_mounts["agent-workspace"].read_only is False
+    assert engine_mounts["agent-workspace"].read_only is False
+    assert runner_mounts["runtime-shared-tmp"].mount_path == "/tmp"
+    assert engine_mounts["runtime-shared-tmp"].mount_path == "/tmp"
+    assert runner_mounts["runtime-shared-tmp"].read_only is False
+    assert engine_mounts["runtime-shared-tmp"].read_only is False
     assert engine.args[-1] == "--group=azents-runner"
     assert engine.readiness_probe is not None
     engine_probe = engine.readiness_probe.exec_action.command
@@ -1433,6 +1453,11 @@ async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
     engine_storage = pod.spec.volumes[-1]
     assert isinstance(engine_storage, EmptyDirVolume)
     assert engine_storage.size_limit == "8589934592"
+    shared_tmp = pod.spec.volumes[-2]
+    assert isinstance(shared_tmp, EmptyDirVolume)
+    assert shared_tmp.name == "runtime-shared-tmp"
+    assert shared_tmp.medium is None
+    assert shared_tmp.size_limit == "10737418240"
     assert len(api.pvcs) == 1
 
     network_policy = api.network_policies[

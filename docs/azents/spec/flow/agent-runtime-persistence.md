@@ -18,7 +18,7 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
 last_verified_at: 2026-07-28
-spec_version: 11
+spec_version: 12
 ---
 
 # Agent Runtime Persistence
@@ -133,6 +133,12 @@ Docker-disabled Runtime contains only the unprivileged Runner. A Docker-enabled 
 privileged DIND sidecar and mounts its Runtime-private Unix socket read-only into the Runner. There
 is no Docker API Gateway or partial operation allowlist. The complete Docker capability supports
 CLI, Compose, SDK, Testcontainers, Ryuk, and port-binding workflows supported by the daemon.
+The Runner and DIND sidecar mount the Agent Workspace PVC at the same provider-reported absolute
+path and mount one Pod-local shared temporary volume at `/tmp`, bounded by the Profile's Runtime
+ephemeral-storage allocation. Docker bind mounts sourced from the Agent Workspace or `/tmp`,
+including Compose paths relative to the Agent Workspace, therefore resolve to the same files from
+the Docker daemon's mount namespace. Other Runner root-filesystem paths are not shared bind-mount
+sources.
 
 The Runner and nested workloads do not receive the Provider ServiceAccount, Provider credentials,
 host Docker socket, or another Runtime's DIND socket. Agent Workspace PVC storage remains distinct
@@ -186,6 +192,7 @@ Required checks:
 
 ## Changelog
 
+- **2026-07-28 (spec_version=12)** — Mounted the Agent Workspace and Pod-local `/tmp` into the Runner and DIND sidecar at identical paths to support ordinary Docker and Compose bind mounts.
 - **2026-07-28 (spec_version=11)** — Replaced the policy Gateway with a direct Runtime-private DIND socket, collapsed Docker operations into one capability, and removed unenforceable PID, nested-container, and Profile network controls while retaining Kubernetes resource, storage, and deployment hard-cap boundaries.
 - **2026-07-27 (spec_version=10)** — Added all implemented Profile network modes, Kubernetes request/limit resource semantics, and Profile-controlled PVC expansion with destructive shrink application.
 - **2026-07-27 (spec_version=9)** — Removed Platform execution-policy state and made the selected Profile the complete versioned ceiling and snapshot source.
