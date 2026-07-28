@@ -24,8 +24,8 @@ focused tests, required E2E evidence, documentation impact, and PR CI are comple
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Delivery diagnostics and provider operation correctness | In progress | Phase 1 implementation, focused tests, and independent review complete; PR and CI pending |
-| Activation, hydration, and pre-execution ordering | In progress | Deterministic pre-delivery barrier E2E passed; PR and CI pending |
+| Delivery diagnostics and provider operation correctness | In progress | Phase 1 implementation, focused tests, and independent review complete; PR #985 is open; CI pending |
+| Activation, hydration, and pre-execution ordering | In progress | Deterministic pre-delivery barrier E2E passed; PR #985 is open; CI pending |
 | Invocation and selected-message entry points | Pending | |
 | Multi App selector and access flow | Pending | |
 | Thread-scoped delivery | Pending | |
@@ -333,27 +333,27 @@ focused tests, required E2E evidence, documentation impact, and PR CI are comple
 
 | ID | Status | Finding | Resolution PR | Validation |
 | --- | --- | --- | --- | --- |
-| `FIND-01` | In progress | Initial Discord delivery attempts can fail or become unknown while Session wake still proceeds. | Phase 1 branch | Local ordering tests and deterministic barrier E2E passed; PR and CI pending |
-| `FIND-02` | In progress | New Discord bindings are marked active and released before hydration, contrary to Requirements and living specs. | Phase 1 branch | Local hydration, activation, run-loop, and E2E validation passed; PR and CI pending |
+| `FIND-01` | In progress | Initial Discord delivery attempts can fail or become unknown while Session wake still proceeds. | Phase 1 branch | Local ordering tests and deterministic barrier E2E passed; PR #985 is open; CI pending |
+| `FIND-02` | In progress | New Discord bindings are marked active and released before hydration, contrary to Requirements and living specs. | Phase 1 branch | Local hydration, activation, run-loop, and E2E validation passed; PR #985 is open; CI pending |
 | `FIND-03` | In progress | Production control, progress, and reply delivery returned `provider_ambiguous` without a useful safe category. | | |
 | `FIND-04` | In progress | Participant E2E stops at interaction/Gateway admission and does not prove the complete Discord conversation journey. | | |
 | `FIND-05` | In progress | Discord Workspace management has API E2E but no browser E2E. | | |
 | `FIND-06` | In progress | Progress recovery, lifecycle cleanup, replies, and files have focused tests but no integrated Discord E2E. | | |
 | `FIND-07` | In progress | Living specs claim hydration-fenced Discord activation that current code does not implement. | | |
-| `FIND-08` | In progress | Discord selected-admission continuation and Allow paths retain Slack defaults or immediate release behavior. | Phase 1 branch | Provider-specific focused tests and independent review passed; PR and CI pending |
-| `FIND-09` | In progress | Root-message approval controls can target the parent channel because thread metadata is not added correctly. | Phase 1 branch | Thread-target focused tests and independent review passed; PR and CI pending |
+| `FIND-08` | In progress | Discord selected-admission continuation and Allow paths retain Slack defaults or immediate release behavior. | Phase 1 branch | Provider-specific focused tests and independent review passed; PR #985 is open; CI pending |
+| `FIND-09` | In progress | Root-message approval controls can target the parent channel because thread metadata is not added correctly. | Phase 1 branch | Thread-target focused tests and independent review passed; PR #985 is open; CI pending |
 | `FIND-10` | In progress | Lifecycle cleanup ignores authoritative Discord progress projection parts and can orphan provider pages. | | |
 | `FIND-11` | In progress | Confirmed missing Discord progress pages and inbound message deletes do not recreate active desired pages. | | |
 | `FIND-12` | In progress | Direct Discord Workspace connection deep links do not restore the selected provider. | | |
 | `FIND-13` | In progress | Shared-offset Slack/Discord list queries do not provide stable combined pagination. | | |
-| `FIND-14` | In progress | Concurrent initial deliveries can race root-thread provisioning because the provider mutation is not claimed under a canonical resource fence. | Phase 1 branch | Root-thread convergence and at-most-once focused tests passed; PR and CI pending |
+| `FIND-14` | In progress | Concurrent initial deliveries can race root-thread provisioning because the provider mutation is not claimed under a canonical resource fence. | Phase 1 branch | Root-thread convergence and at-most-once focused tests passed; PR #985 is open; CI pending |
 
 ## PR Stack Ledger
 
 | Order | Branch | PR | Scope | Status |
 | --- | --- | --- | --- | --- |
 | 1 | `fix/discord-slack-parity-completion` | [#984](https://github.com/azents/azents/pull/984) | Implementation plan and checklist | Completed |
-| 2 | `fix/discord-parity-delivery-activation` | | Delivery diagnostics and activation ordering | Local validation and review complete; PR pending |
+| 2 | `fix/discord-parity-delivery-activation` | [#985](https://github.com/azents/azents/pull/985) | Delivery diagnostics and activation ordering | Open; local validation and review complete |
 | 3 | | | Participant, work, and lifecycle completion | Pending |
 | 4 | | | Administration UI and browser evidence | Pending |
 | 5 | | | Integrated E2E validation and fixes | Pending |
