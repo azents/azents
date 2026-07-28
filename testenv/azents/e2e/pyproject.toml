@@ -27,6 +27,7 @@ dependencies = [
 dev = [
     "ruff>=0.14.5",
     "pyright>=1.1.400",
+    "pytest-asyncio>=1.3.0",
 ]
 
 [tool.uv]
