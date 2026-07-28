@@ -1,7 +1,7 @@
 ---
 title: "Runtime File Transfer Validation Report"
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-28
 tags: [runtime, files, transfer, validation, e2e, testenv, security]
 document_role: supporting
 document_type: supporting-validation-report
@@ -20,9 +20,10 @@ document_type: supporting-validation-report
   [`transfer-260725/DESIGN`](transfer-260725-runtime-file-transfer.md).
 
 This report records Phase 10 validation evidence and blockers. It is not evidence that the
-implementation is complete, that a core test was skipped successfully, or that the Requirements and
-Design can receive `implemented` metadata. Required Docker-backed E2E execution is currently
-blocked in this runtime environment.
+implementation is complete or that the Requirements and Design can receive `implemented` metadata.
+The primary Docker-backed External Channel Runtime transfer journey now passes; the remaining
+matrix rows below retain their own execution status and are not represented as passing by that
+focused result.
 
 ## Environment and Prerequisite Results
 
@@ -39,6 +40,7 @@ also requires tmux.
 | 2026-07-26 | `cd testenv/azents && uv run testenv bootstrap local` | blocked | The bootstrap stopped at `devserver-down` because tmux is not installed. It did not attempt to represent the missing substrate as ready. |
 | 2026-07-26 | `cd testenv/azents/e2e && uv run pytest -vv src/tests/test_runtime_transfer_storage.py` | blocked | All three RustFS tests reached Testcontainers setup and failed with a Docker client connection error before any product test body executed. |
 | 2026-07-26 | `cd testenv/azents/e2e && uv run pytest --collect-only -q src/tests/test_runtime_transfer_storage.py src/tests/azents/public/test_external_channels.py src/tests/azents/public/test_file_resource_lifecycle.py` | pass | 12 focused tests collected. Collection confirms the RustFS, deterministic External Channel, and `present_file` candidates are syntactically discoverable; it does not substitute for execution. |
+| 2026-07-28 | Docker-backed deterministic Runtime fixture prerequisites | pass | Testcontainers created Runtime Control, Runner, RustFS, Redis coordination, Docker Runtime Provider, deterministic Slack fake, and product services for the focused journey. No live Slack credential snapshot was used. |
 
 ## Grounded Validation Correction
 
@@ -57,8 +59,8 @@ digests after the existing user-facing sequence:
 4. The fake verifies the exact output lengths and digests, while evidence excludes input/output
    bodies, credentials, private URLs, and file names.
 
-This correction is collected locally but has not run because the required Docker-backed Runtime
-substrate is unavailable.
+The correction ran successfully on 2026-07-28 against the Docker-backed Runtime substrate with the
+default gRPC configuration. No gRPC message limit was increased.
 
 ## Static Validation and Correction Reruns
 
@@ -80,14 +82,42 @@ Two test-code mistakes were found and corrected during static validation:
 These static results validate the deterministic fixture and evidence boundary only. They do not
 replace real Docker-backed Runtime execution.
 
+## Docker-Backed Focused Rerun
+
+The first real focused run exposed two deterministic-fixture defects rather than a Runtime transfer
+defect:
+
+1. The Slack fake accepted JSON request bodies but not Slack's form-encoded
+   `files.getUploadURLExternal` and `files.completeUploadExternal` requests. It therefore rejected
+   the first upload-target request with `invalid_arguments` before any Runtime upload was
+   dispatched.
+2. Initial form parsing restored every JSON-looking value. That incorrectly converted numeric-looking
+   Slack thread timestamps into numbers, so the fake lost the thread identifier during completion.
+
+The fake now restores only `length` and structured `files`/`blocks` fields while preserving provider
+identifiers as strings. A focused fake contract test covers the form-encoded upload URL, binary
+upload, and completion flow. The E2E expected metadata count was also aligned with the existing
+security contract: `files.info` is fetched once at admission and once immediately before Runtime
+transfer READY, while the selected body is downloaded once.
+
+| Date (KST) | Command | Result | Evidence |
+| --- | --- | --- | --- |
+| 2026-07-28 | `cd python/apps/azents-runtime-provider-docker && uv run pytest -q tests/test_provider.py` | pass | 20 passed. The Docker Provider prepares a root-owned `0700` protected staging child inside its sticky workspace without exposing a separate Runner-writable staging bind. |
+| 2026-07-28 | `cd python/apps/azents-runtime-provider-docker && uv run ruff check src/azents_runtime_provider_docker/provider.py tests/test_provider.py && uv run ruff format --check src/azents_runtime_provider_docker/provider.py tests/test_provider.py && uv run pyright src/azents_runtime_provider_docker/provider.py tests/test_provider.py` | pass | Ruff, format, and Pyright reported no errors. |
+| 2026-07-28 | `cd python/apps/azents && uv run pytest -q src/azents/runtime/transfer/coordinator_test.py` | pass | 9 passed. The metadata-only download intent derives the expected SHA-256 from the Control-verified staged object. |
+| 2026-07-28 | `cd python/apps/azents && uv run ruff check src/azents/runtime/transfer/coordinator.py src/azents/runtime/transfer/coordinator_test.py && uv run ruff format --check src/azents/runtime/transfer/coordinator.py src/azents/runtime/transfer/coordinator_test.py && uv run pyright src/azents/runtime/transfer/coordinator.py src/azents/runtime/transfer/coordinator_test.py` | pass | Ruff, format, and Pyright reported no errors. |
+| 2026-07-28 | `cd testenv/azents/e2e && uv run pytest -q src/tests/test_slack_provider_fake.py` | pass | 17 passed. The fake accepts the real Slack form encoding and retains only sanitized upload evidence. |
+| 2026-07-28 | `cd testenv/azents/e2e && uv run ruff check src/support/slack_provider_fake.py src/tests/test_slack_provider_fake.py src/tests/azents/public/test_external_channels.py src/tests/conftest.py src/support/image_generation_openai_proxy.py && uv run ruff format --check src/support/slack_provider_fake.py src/tests/test_slack_provider_fake.py src/tests/azents/public/test_external_channels.py src/tests/conftest.py src/support/image_generation_openai_proxy.py && uv run pyright src/support/slack_provider_fake.py src/tests/test_slack_provider_fake.py src/tests/azents/public/test_external_channels.py src/tests/conftest.py src/support/image_generation_openai_proxy.py` | pass | Ruff, format, and Pyright reported no errors. |
+| 2026-07-28 | `cd testenv/azents/e2e && uv run pytest -vv -x src/tests/azents/public/test_external_channels.py::test_external_channel_file_transfer_journey` | pass | 1 passed in 57.20 seconds. A 6 MiB selected Slack file reached Runtime, two outputs were uploaded with exact size/SHA-256 evidence, and one Slack completion was delivered. The test asserts two revalidation metadata reads, one selected-body download, two uploads, and one completion. |
+
 ## Required Matrix Status
 
 | Scenario | Candidate coverage | Current result | Completion evidence still required |
 | --- | --- | --- | --- |
-| 6 MiB Slack attachment to Runtime | `test_external_channel_file_transfer_journey` | blocked | Complete Runtime transfer and exact fake-provider output digest/size assertions with default gRPC limits. |
+| 6 MiB Slack attachment to Runtime | `test_external_channel_file_transfer_journey` | pass | Focused journey passed with default gRPC limits, two sanitized outbound size/SHA-256 checks, and one provider completion. |
 | RustFS bounded read, immutable copy, multipart upload/copy, abort, and cleanup | `test_runtime_transfer_storage.py` | blocked | 3 executed RustFS tests pass against a real container. |
 | `present_file` Runtime-to-Exchange publication | `TestFileResourceLifecycle.test_present_file_attachment_reaches_model_as_metadata` | not started | Product E2E succeeds and model request contains attachment metadata rather than bytes. |
-| External Channel outbound publication | `test_external_channel_file_transfer_journey` | blocked | One Runtime upload per source, two provider uploads, one completion mutation, and post-provider settlement. |
+| External Channel outbound publication | `test_external_channel_file_transfer_journey` | pass | Two Runtime output sources streamed to the deterministic provider, producing two uploads and one completion without retaining file bodies in evidence. |
 | Memory Transfer State restart behavior | Phase 3–9 Runtime Control/state suites | not rerun in Phase 10 | Active attempt fails closed; no orphan becomes a successful transfer. |
 | Redis Transfer State handoff/fencing | Phase 3–9 Runtime Control/state suites | not rerun in Phase 10 | Shared state prevents duplicate stream ownership and preserves terminal settlement. |
 | Control/data concurrency, authorization-before-byte, cancellation, corruption, and stale generation | Phase 4–5 protocol/Runner suites | not rerun in Phase 10 | Real gRPC evidence under default message limits. |
@@ -108,9 +138,8 @@ areas rather than marking the snapshot implemented from unexecuted local E2E:
 | `spec/flow/file-exchange-storage.md` | Verify transfer-prefix object staging, S3-native copy/publication, consumer leases/acknowledgement, bounded preview/read paths, one-hour logical validity, best-effort physical cleanup, and retained product-resource ownership. |
 | `spec/domain/external-channel.md` and `spec/flow/external-channel-delivery.md` | Verify one Runtime upload per authorized source, bounded provider-native streaming, at-most-once provider mutation, batch-held claims, post-provider acknowledgement/settlement, and the no-durable-transferred-body boundary. |
 
-Phase 11 remains blocked until the core matrix above passes. It must not modify the accepted ADR and
-must add the same implementation date to Requirements and Design only after completion evidence is
-available.
+Phase 11 must not modify the accepted ADR and must add the same implementation date to Requirements
+and Design only after the remaining required matrix evidence is available.
 
 ## Docker-Enabled Rerun Procedure
 

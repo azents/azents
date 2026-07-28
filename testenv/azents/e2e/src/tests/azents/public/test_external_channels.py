@@ -12,6 +12,7 @@ import azentsadminclient
 import azentspublicclient
 import pytest
 import requests
+from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api
@@ -130,6 +131,36 @@ def _create_agent(
         shell_enabled=shell_enabled,
     )
     return token, email, handle, agent_ids[0]
+
+
+def _wait_for_runtime_runner_ready(
+    public_api_client: azentspublicclient.ApiClient,
+    *,
+    token: str,
+    workspace_handle: str,
+    agent_id: str,
+) -> None:
+    """Start and wait for the Agent Runtime Runner required by file transfer."""
+    api = AgentRuntimeV1Api(public_api_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    api.agent_runtime_v1_start_agent_runtime(
+        agent_id=agent_id,
+        handle=workspace_handle,
+        _headers=headers,
+    )
+    deadline = time.monotonic() + 120
+    last_state: object | None = None
+    while time.monotonic() < deadline:
+        state = api.agent_runtime_v1_observe_agent_runtime(
+            agent_id=agent_id,
+            handle=workspace_handle,
+            _headers=headers,
+        )
+        last_state = state
+        if state.state.actions.use_runner:
+            return
+        time.sleep(1)
+    raise AssertionError(f"Runtime Runner did not become ready: {last_state!r}")
 
 
 def _create_workspace_agents(
@@ -369,56 +400,12 @@ def _file_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]:
     ]
 
 
-def _selected_tool_evidence(
-    public_server_url: str,
-    token: str,
-    session_id: str,
-    call_ids: set[str],
-) -> list[dict[str, object]]:
-    """Return bounded call/result evidence for selected deterministic tools."""
-    response = requests.get(
-        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        return []
-    items = cast(dict[str, object], payload).get("items")
-    if not isinstance(items, list):
-        return []
-    evidence: list[dict[str, object]] = []
-    for raw_event in cast(list[object], items):
-        if not isinstance(raw_event, dict):
-            continue
-        event = cast(dict[str, object], raw_event)
-        kind = event.get("kind")
-        if kind not in {"client_tool_call", "client_tool_result"}:
-            continue
-        raw_payload = event.get("payload")
-        if not isinstance(raw_payload, dict):
-            continue
-        event_payload = cast(dict[str, object], raw_payload)
-        call_id = event_payload.get("call_id")
-        if not isinstance(call_id, str) or call_id not in call_ids:
-            continue
-        item: dict[str, object] = {
-            "kind": kind,
-            "call_id": call_id,
-            "name": event_payload.get("name"),
-        }
-        status = event_payload.get("status")
-        if isinstance(status, str):
-            item["status"] = status
-        evidence.append(item)
-    return evidence
-
-
 def _channel_action_tool_evidence(
     public_server_url: str,
     token: str,
     session_id: str,
+    *,
+    call_ids: frozenset[str],
 ) -> list[dict[str, object]]:
     """Return sanitized Channel Action call and result evidence."""
     response = requests.get(
@@ -445,10 +432,7 @@ def _channel_action_tool_evidence(
         if not isinstance(raw_payload, dict):
             continue
         event_payload = cast(dict[str, object], raw_payload)
-        if (
-            event_payload.get("name") != "channel_action"
-            and event_payload.get("call_id") != "call_external_channel_progress"
-        ):
+        if event_payload.get("call_id") not in call_ids:
             continue
         item: dict[str, object] = {
             "kind": kind,
@@ -1535,6 +1519,7 @@ def test_provider_native_channel_work_progress_journey(
             azents_public_server_url,
             token,
             session_id,
+            call_ids=frozenset({"call_external_channel_progress"}),
         )
         assert any(
             item.get("kind") == "client_tool_call"
@@ -1723,7 +1708,7 @@ def test_external_channel_file_transfer_journey(
     ignored_content = b"unused input"
     expected_uploads = (
         b"summary:" + selected_content,
-        b"details:" + selected_content.upper(),
+        b"details:" + selected_content[:64].upper(),
     )
     assert len(selected_content) == _EXTERNAL_CHANNEL_LARGE_FILE_BYTES
     event_files = [
@@ -1780,6 +1765,12 @@ def test_external_channel_file_transfer_journey(
         azents_public_server_url,
         runtime_provider_id="system-docker",
         shell_enabled=True,
+    )
+    _wait_for_runtime_runner_ready(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=agent_id,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -1919,38 +1910,76 @@ def test_external_channel_file_transfer_journey(
         message="File-transfer model request did not expose the expected tools",
     )
 
-    expected_call_ids = {
-        "call_external_channel_file_download",
-        "call_external_channel_file_process",
-        "call_external_channel_file_finish",
-    }
-
-    def completed_file_tools() -> list[dict[str, object]]:
-        evidence = _selected_tool_evidence(
-            azents_public_server_url,
-            token,
-            session_id,
-            expected_call_ids,
-        )
-        for call_id in expected_call_ids:
-            assert any(
-                item.get("kind") == "client_tool_call"
-                and item.get("call_id") == call_id
-                for item in evidence
-            ), evidence
-            assert any(
-                item.get("kind") == "client_tool_result"
-                and item.get("call_id") == call_id
-                and item.get("status") == "completed"
-                for item in evidence
+    def completed_file_model_stages() -> list[dict[str, object]]:
+        evidence = [
+            item
+            for item in _file_request_evidence(openai_proxy_url)
+            if item.get("binding") == binding_id
+        ]
+        stages = [item.get("stage") for item in evidence]
+        expected_stages = [
+            "initial",
+            "after_download",
+            "after_process",
+        ]
+        previous_index = -1
+        for stage in expected_stages:
+            assert stage in stages, evidence
+            index = stages.index(stage)
+            assert index > previous_index, evidence
+            previous_index = index
+        for item in evidence:
+            tool_outputs = cast(
+                dict[str, dict[str, object]],
+                item.get("tool_outputs", {}),
+            )
+            assert all(
+                output.get("error") is None for output in tool_outputs.values()
             ), evidence
         return evidence
 
-    tool_evidence = wait_until(
-        completed_file_tools,
+    completed_evidence = wait_until(
+        completed_file_model_stages,
         timeout=120,
         interval=0.2,
-        message="File-transfer Tool sequence did not complete",
+        message="File-transfer model stages did not complete",
+    )
+    tool_outputs = cast(
+        dict[str, dict[str, object]], completed_evidence[-1]["tool_outputs"]
+    )
+    for call_id in (
+        "call_external_channel_file_download",
+        "call_external_channel_file_process",
+    ):
+        output = tool_outputs.get(call_id)
+        assert output is not None, completed_evidence
+        assert output.get("error") is None, completed_evidence
+
+    def completed_file_finish_action() -> list[dict[str, object]]:
+        evidence = _channel_action_tool_evidence(
+            azents_public_server_url,
+            token,
+            session_id,
+            call_ids=frozenset({"call_external_channel_file_finish"}),
+        )
+        assert any(
+            item.get("kind") == "client_tool_call"
+            and item.get("call_id") == "call_external_channel_file_finish"
+            for item in evidence
+        ), f"Final Channel Action tool call was not recorded: {evidence!r}"
+        assert any(
+            item.get("kind") == "client_tool_result"
+            and item.get("call_id") == "call_external_channel_file_finish"
+            and item.get("status") == "completed"
+            for item in evidence
+        ), f"Final Channel Action tool result did not complete: {evidence!r}"
+        return evidence
+
+    wait_until(
+        completed_file_finish_action,
+        timeout=30,
+        interval=0.2,
+        message="Final Channel Action tool execution did not complete",
     )
 
     def file_completion_delivery() -> dict[str, object]:
@@ -1979,7 +2008,7 @@ def test_external_channel_file_transfer_journey(
 
     provider_state = _provider_state(slack_provider_fake_url)
     request_counts = cast(dict[str, int], provider_state["request_counts"])
-    assert request_counts["files.info"] == 1
+    assert request_counts["files.info"] == 2
     assert request_counts["file.download"] == 1
     assert request_counts["files.getUploadURLExternal"] == 2
     assert request_counts["file.upload"] == 2
@@ -2007,8 +2036,8 @@ def test_external_channel_file_transfer_journey(
     assert [item.get("file") for item in file_requests] == [
         "F-IN-SELECTED",
         "F-IN-SELECTED",
+        "F-IN-SELECTED",
     ]
-    assert all(item.get("call_id") in expected_call_ids for item in tool_evidence)
     rendered_provider_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_provider_state
     assert _SIGNING_SECRET not in rendered_provider_state

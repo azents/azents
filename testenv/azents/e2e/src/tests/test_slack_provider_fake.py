@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import json
 import threading
 from collections.abc import Generator
 from http.server import ThreadingHTTPServer
@@ -501,6 +502,56 @@ def test_slack_fake_controls_file_scope_and_size_rejection(
     assert "files:read" in auth.headers["X-OAuth-Scopes"]
     assert "files:write" not in auth.headers["X-OAuth-Scopes"]
     assert upload.status_code == 400
+
+
+def test_slack_fake_accepts_url_encoded_file_upload_requests(
+    slack_fake_url: str,
+) -> None:
+    """Match Slack's form-encoded external upload API request format."""
+    target = requests.post(
+        f"{slack_fake_url}/api/files.getUploadURLExternal",
+        data={"filename": "encoded.txt", "length": "3"},
+        timeout=5,
+    ).json()
+    assert target["ok"] is True
+
+    upload = requests.post(
+        target["upload_url"],
+        data=b"abc",
+        timeout=5,
+    )
+    assert upload.status_code == 200
+
+    completion = requests.post(
+        f"{slack_fake_url}/api/files.completeUploadExternal",
+        data={
+            "files": json.dumps(
+                [{"id": target["file_id"], "title": "encoded.txt"}],
+                separators=(",", ":"),
+            ),
+            "channel_id": "C-E2E",
+            "thread_ts": "1721600000.000001",
+            "initial_comment": "Encoded upload",
+        },
+        timeout=5,
+    ).json()
+    assert completion["ok"] is True
+    state = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert state["deliveries"] == [
+        {
+            "operation": "files.completeUploadExternal",
+            "channel": "C-E2E",
+            "thread_ts": "1721600000.000001",
+            "file_ids": [target["file_id"]],
+            "file_count": 1,
+            "total_bytes": 3,
+            "has_initial_comment": True,
+            "outcome": "delivered",
+        }
+    ]
 
 
 @pytest.mark.parametrize(

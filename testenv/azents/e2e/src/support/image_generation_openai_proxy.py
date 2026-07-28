@@ -185,6 +185,54 @@ def request_has_tool_output(value: object, call_id: str) -> bool:
     return False
 
 
+def external_channel_file_tool_output_evidence(
+    value: object,
+) -> dict[str, dict[str, object]]:
+    """Return bounded diagnostic metadata without retaining tool output bodies."""
+    call_ids = {
+        _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID,
+        _EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID,
+        _EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID,
+    }
+    evidence: dict[str, dict[str, object]] = {}
+
+    def visit(item: object) -> None:
+        if isinstance(item, dict):
+            payload = cast(dict[str, object], item)
+            call_id = payload.get("call_id")
+            item_type = payload.get("type")
+            if (
+                isinstance(call_id, str)
+                and call_id in call_ids
+                and item_type in {"function_call_output", "custom_tool_call_output"}
+            ):
+                output = payload.get("output")
+                if isinstance(output, str):
+                    error_match = re.search(
+                        r"(?i)\b(error|failed|unavailable|denied|invalid)\b",
+                        output,
+                    )
+                    evidence[call_id] = {
+                        "present": True,
+                        "length": len(output),
+                        "error": (output[:512] if error_match is not None else None),
+                    }
+                else:
+                    evidence[call_id] = {
+                        "present": True,
+                        "length": None,
+                        "error": None,
+                    }
+            for child in payload.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in cast(list[object], item):
+                visit(child)
+
+    visit(value)
+    return evidence
+
+
 def external_channel_binding(request: dict[str, object]) -> str | None:
     """Extract the dynamic binding handle from the Channel Work prompt."""
     serialized = json.dumps(request, ensure_ascii=False)
@@ -367,6 +415,9 @@ class _Handler(BaseHTTPRequestHandler):
         serialized = json.dumps(request, ensure_ascii=False)
         if is_external_channel_file_request(request):
             file_evidence = external_channel_file_evidence(request)
+            file_evidence["tool_outputs"] = external_channel_file_tool_output_evidence(
+                request
+            )
             file_evidence["path"] = self.path
             file_evidence["stage"] = (
                 "after_finish"
@@ -466,7 +517,7 @@ class _Handler(BaseHTTPRequestHandler):
                                 f"Path('{_EXTERNAL_CHANNEL_FILE_OUTPUT_PATHS[0]}')"
                                 ".write_text('summary:' + data); "
                                 f"Path('{_EXTERNAL_CHANNEL_FILE_OUTPUT_PATHS[1]}')"
-                                ".write_text('details:' + data.upper())\""
+                                ".write_text('details:' + data[:64].upper())\""
                             ),
                             "workdir": "/workspace/agent",
                         },

@@ -830,6 +830,19 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         raw_body = self.rfile.read(content_length)
         if not raw_body:
             return {}
+        content_type = self.headers.get("Content-Type", "")
+        if content_type.startswith("application/x-www-form-urlencoded"):
+            try:
+                encoded = raw_body.decode()
+            except UnicodeDecodeError:
+                return {}
+            return {
+                key: _form_value(key, values)
+                for key, values in parse_qs(
+                    encoded,
+                    keep_blank_values=True,
+                ).items()
+            }
         try:
             payload: object = json.loads(raw_body)
         except UnicodeDecodeError:
@@ -961,6 +974,27 @@ def _object_list_or_empty(value: object) -> list[dict[str, object]]:
         return _object_list(value)
     except ValueError:
         return []
+
+
+def _form_value(key: str, values: list[str]) -> object:
+    """Restore typed Slack form fields while preserving identifiers as strings."""
+    if len(values) != 1:
+        return values
+    value = values[0]
+    if key == "length":
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return value
+        if isinstance(parsed, int) and not isinstance(parsed, bool):
+            return parsed
+        return value
+    if key not in {"files", "blocks"}:
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
 
 
 def _object_pages(value: object) -> list[list[dict[str, object]]]:

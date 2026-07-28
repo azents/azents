@@ -44,7 +44,7 @@ _WORKSPACE_DIR_MODE = 0o755
 _NON_ROOT_WORKSPACE_DIR_MODE = 0o777
 _CONTROL_HOST_ALIAS = "host.docker.internal:host-gateway"
 _LOGGER = logging.getLogger(__name__)
-_TRANSFER_STAGING_MOUNT_PATH = "/var/run/azents-transfer"
+_TRANSFER_STAGING_DIRECTORY_NAME = ".azents-transfer-staging"
 
 _LABEL_MANAGED_BY = "azents/managed-by"
 _LABEL_PROVIDER_ID = "azents/runtime-provider-id"
@@ -410,7 +410,10 @@ class DockerRuntimeProvider:
             _ENV_WORKSPACE_ID: identity.workspace_id,
             _ENV_PROVIDER_ID: self._config.provider_id,
             _ENV_WORKSPACE_PATH: self._workspace_mount_path,
-            _ENV_TRANSFER_STAGING_DIRECTORY: _TRANSFER_STAGING_MOUNT_PATH,
+            _ENV_TRANSFER_STAGING_DIRECTORY: str(
+                PurePosixPath(self._workspace_mount_path)
+                / _TRANSFER_STAGING_DIRECTORY_NAME
+            ),
         }
         if command.auth.control_tls_ca_pem is not None:
             env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
@@ -447,10 +450,6 @@ class DockerRuntimeProvider:
             DockerBindMount(
                 host_path=str(self._tmp_host_dir(runtime_id)),
                 container_path=self._tmp_mount_path,
-            ),
-            DockerBindMount(
-                host_path=str(self._transfer_staging_host_dir(runtime_id)),
-                container_path=_TRANSFER_STAGING_MOUNT_PATH,
             ),
         )
 
@@ -526,10 +525,10 @@ class DockerRuntimeProvider:
         return self._runtime_root(runtime_id) / "tmp-agent"
 
     def _transfer_staging_host_dir(self, runtime_id: str) -> Path:
-        return self._runtime_root(runtime_id) / "transfer-staging"
+        return self._workspace_host_dir(runtime_id) / _TRANSFER_STAGING_DIRECTORY_NAME
 
     def _ensure_workspace_dirs(self, runtime_id: str) -> None:
-        _ensure_writable_dir(self._workspace_host_dir(runtime_id))
+        _ensure_workspace_dir(self._workspace_host_dir(runtime_id))
         _ensure_writable_dir(self._tmp_host_dir(runtime_id))
         _ensure_protected_staging_dir(self._transfer_staging_host_dir(runtime_id))
 
@@ -557,6 +556,19 @@ def _ensure_writable_dir(path: Path) -> None:
     if os.geteuid() == 0:
         os.chown(path, _RUNNER_UID, _RUNNER_GID)
         expected_mode = _WORKSPACE_DIR_MODE
+    else:
+        expected_mode = _NON_ROOT_WORKSPACE_DIR_MODE
+    current_mode = stat.S_IMODE(path.stat().st_mode)
+    if current_mode != expected_mode:
+        path.chmod(expected_mode)  # noqa: S103
+
+
+def _ensure_workspace_dir(path: Path) -> None:
+    """Prepare a sticky workspace that protects its root-owned staging child."""
+    path.mkdir(parents=True, exist_ok=True)
+    if os.geteuid() == 0:
+        os.chown(path, 0, 0)
+        expected_mode = 0o1777
     else:
         expected_mode = _NON_ROOT_WORKSPACE_DIR_MODE
     current_mode = stat.S_IMODE(path.stat().st_mode)
