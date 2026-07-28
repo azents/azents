@@ -15,7 +15,7 @@ services:
   # datatranslated Stage 1c translated translated translated translated translated translated translated.
 
   db:
-    image: public.ecr.aws/docker/library/postgres:18-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     ports:
       - "${AZENTS_TESTENV_DB_PORT:-5433}:5432"
@@ -25,7 +25,7 @@ services:
       POSTGRES_DB: azents
 
   valkey:
-    image: public.ecr.aws/valkey/valkey:9-alpine
+    image: valkey/valkey:9-alpine
     restart: unless-stopped
     ports:
       - "${AZENTS_TESTENV_VALKEY_PORT:-6379}:6379"

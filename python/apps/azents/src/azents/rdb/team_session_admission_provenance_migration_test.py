@@ -7,7 +7,6 @@ import pytest
 import sqlalchemy as sa
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from azcommon.testing.images import get_docker_hub_image
 from sqlalchemy.exc import IntegrityError
 from testcontainers.postgres import PostgresContainer
 
@@ -28,7 +27,7 @@ _ACTION_EXECUTION_ID = "action-execution-migration"
 def _migration_database() -> Generator[tuple[AlembicConfig, sa.Engine], None, None]:
     """Create an isolated PostgreSQL database for one migration test."""
     with PostgresContainer(
-        get_docker_hub_image("postgres:17"),
+        "postgres:17",
         driver="psycopg",
     ) as postgres:
         url = postgres.get_connection_url()

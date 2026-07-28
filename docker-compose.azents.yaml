@@ -1,7 +1,7 @@
 name: azents
 services:
   db:
-    image: public.ecr.aws/docker/library/postgres:18-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     ports:
       - "${AZENTS_DB_PORT:-5433}:5432"
@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: azents
       POSTGRES_DB: azents
   valkey:
-    image: public.ecr.aws/valkey/valkey:9-alpine
+    image: valkey/valkey:9-alpine
     restart: unless-stopped
     ports:
       - "${AZENTS_VALKEY_PORT:-6379}:6379"
