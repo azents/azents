@@ -467,10 +467,10 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
     assert snapshots[0].projection_drift == "none"
 
 
-async def test_discord_progress_pages_update_only_changed_page_and_finish_cleanup(
+async def test_discord_progress_updates_one_tracker_and_finishes_cleanup(
     rdb_session: AsyncSession,
 ) -> None:
-    """Discord Tracker pages retain stable ordinals through update and cleanup."""
+    """Discord retains one compact Tracker through update and cleanup."""
     agent_id, binding_id = await _setup_binding(rdb_session)
     await _as_discord_binding(rdb_session, binding_id=binding_id)
     agent_session = await rdb_session.scalar(
@@ -501,7 +501,6 @@ async def test_discord_progress_pages_update_only_changed_page_and_finish_cleanu
 
     assert [delivery.operation for delivery in initial.deliveries] == [
         ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
     ]
     create_rows = list(
         await rdb_session.scalars(
@@ -512,7 +511,7 @@ async def test_discord_progress_pages_update_only_changed_page_and_finish_cleanu
             .order_by(RDBExternalChannelDeliveryAttempt.part_ordinal)
         )
     )
-    assert [row.part_ordinal for row in create_rows] == [0, 1]
+    assert [row.part_ordinal for row in create_rows] == [0]
     for ordinal, row in enumerate(create_rows):
         assert await repository.start_delivery(
             rdb_session,
@@ -556,8 +555,8 @@ async def test_discord_progress_pages_update_only_changed_page_and_finish_cleanu
         update.deliveries[0].id,
     )
     assert update_row is not None
-    assert update_row.part_ordinal == 1
-    assert update_row.request_payload["provider_message_key"] == "discord:111:501"
+    assert update_row.part_ordinal == 0
+    assert update_row.request_payload["provider_message_key"] == "discord:111:500"
     assert await repository.start_delivery(
         rdb_session,
         delivery_attempt_id=update_row.id,
@@ -568,7 +567,7 @@ async def test_discord_progress_pages_update_only_changed_page_and_finish_cleanu
             rdb_session,
             delivery_attempt_id=update_row.id,
             status=ExternalChannelDeliveryStatus.DELIVERED,
-            provider_message_key="discord:111:501",
+            provider_message_key="discord:111:500",
             error_kind=None,
             error_summary=None,
             now=_at(9),
@@ -652,7 +651,7 @@ async def test_discord_progress_pages_update_only_changed_page_and_finish_cleanu
             .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
         )
     )
-    assert len(cleanup_ids) == 2
+    assert len(cleanup_ids) == 1
     assert all(
         part.status is ExternalChannelWorkProjectionStatus.DELETED for part in parts
     )
