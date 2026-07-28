@@ -63,59 +63,37 @@ Before implementation:
 
 If Requirements are missing or unconfirmed, the core document basenames do not match, the ADR is missing, or the Design still has open product decisions, return to `feature-design` first. Current Azents core documents must use dated shared snapshot basenames; do not create numbered ADR files or treat legacy numbered ADRs as current records.
 
-## Phase 1: Assemble the delivery team and create the implementation plan
+## Phase 1: Choose execution roles and create the implementation plan
 
-After the Design is approved, create one stable delivery team for the complete
-feature stack before implementation planning begins.
+After the Design is approved:
 
-1. Identify the smallest set of durable implementation workstreams required by
-   the approved Design. Default to one implementation role. Split roles only for
-   independent domains such as frontend, backend, runtime, infrastructure, or
-   testenv work that benefit from separate ownership.
-2. Create one implementation subagent for each durable workstream and one
-   independent review subagent for the complete stack. Assign roles for the
-   feature, not for individual phases. Add a specialist reviewer only for an
-   explicit review requirement that the primary reviewer cannot cover.
-   Record the independent reviewer's exact agent name or path and give it to
-   every implementation owner that will request review.
-3. Brief each role from the approved Requirements, ADR, Design, relevant specs,
-   applicable project rules, and its initial role boundary.
-4. Ask each implementation role to perform read-only codebase discovery and
-   report relevant paths, interfaces, existing tests and fixtures, dependencies,
-   risks, validation commands, and genuine blockers. Do not allow implementation
-   edits before the phase execution plan gate.
-5. Ask the independent reviewer to perform read-only baseline discovery and
-   prepare review risks and criteria without contributing implementation or
-   owning implementation paths.
-6. While the role agents perform discovery, have the primary agent draft the
-   multi-phase implementation plan. Reconcile the discovery reports before
-   finalizing the plan.
+1. Keep implementation with the primary agent by default.
+2. Delegate only work that can run independently in parallel without overlapping
+   paths or shared interface decisions, or that needs isolated specialization.
+3. Assign one independent reviewer before the first review. Record the exact
+   agent name or path and give it to every implementation owner. Add a specialist
+   only for an explicit review requirement the primary reviewer cannot cover.
+4. Have the primary agent discover primary-owned scope. Limit delegated
+   discovery to the assigned paths, interfaces, tests, dependencies, risks,
+   validation, and blockers.
+5. Have the primary agent create the tracked multi-phase plan from the approved
+   documents and concise delegated discovery reports.
 
-Keep each implementation role and the independent reviewer assigned to the same
-subagent throughout the stack. A phase change alone is never a reason to create
-a new subagent. Add or replace a role only when a genuinely new durable
-workstream appears, an existing role becomes unavailable, or its ownership is
-no longer compatible with the plan. Record the reason and ownership change. If
-no compatible owner is available, report the blocker instead of silently
-collapsing or combining roles.
+Reuse delegated owners and the reviewer while their context remains relevant
+and compact. At each phase boundary, use the checkpoint and review evidence to
+continue, reset, or reassign them. Record every role change and redistribute an
+updated reviewer path before the next review.
 
 Create the multi-phase implementation plan as a tracked document.
 
 The plan must include:
 
-- Feature summary, Requirements short ID, ADR links, and design link
-- Phase list with explicit PR boundaries
-- Dependencies between phases
-- Dependency and parallelization map identifying sequential phases and independent workstreams
-- Stable delivery team roster identifying each role, assigned subagent,
-  persistent ownership, planned phases, and any approved reassignment
-- Data/API/runtime changes by phase
-- Test strategy by phase
-- E2E primary validation matrix for all added or changed user-facing behavior
-- Fixture/prerequisite support requirements and why they are needed
-- Blockers, missing prerequisites, or external/manual actions, including which phase they block
-- Spec impact candidates
-- Rollout and cleanup notes
+- Feature summary and Requirements, ADR, and Design links
+- PR phases, dependencies, and parallelization boundaries
+- Execution roster for primary-owned work, delegated work, reviewer, and
+  context checkpoints
+- Data/API/runtime changes, test strategy, E2E matrix, and fixture prerequisites
+- Blockers, external actions, spec impact, rollout, and cleanup
 
 Do not put file-by-file implementation details for every phase in the multi-phase
 plan. Every implementation PR must add its own phase execution plan before code
@@ -150,115 +128,61 @@ Use this required structure:
 - Independent review: `<scope, criteria, inputs, output>`
 - Final validation: `<commands>`
 - Scope-drift check: `<diff and non-goal comparison>`
+- Context checkpoint: `<completed behavior, changed interfaces, evidence, remaining scope, relevant paths, risks>`
 ```
 
 Report the plan when starting the phase, then begin implementation immediately
 unless it exposes a product decision that requires requester confirmation.
 
-### Document-based handoff
+### Execution boundaries
 
-Treat the approved Requirements, ADR, Design, multi-phase implementation plan,
-and current phase execution plan as the handoff contract for every subagent.
+- The primary agent owns orchestration, shared decisions, primary-owned
+  implementation, reviewer assignment, and final integration.
+- Delegated owners work only within their phase-plan paths and interfaces. Run
+  them in parallel only when dependencies are satisfied and paths do not overlap.
+- Every implementation owner runs focused checks and directly requests the
+  assigned reviewer.
+- The reviewer starts from the phase contract and diff at review time, remains
+  read-only, and reports to the requesting owner.
 
-- Keep each handoff complete enough for an implementation or review subagent to
-  perform its assigned work without relying on conversation history.
-- For initial discovery, provide the approved core documents, relevant specs,
-  project rules, and role boundary. After planning, every subagent task must also
-  cite the relevant plans and restate its workstream, owned paths, inputs,
-  outputs, non-goals, and validation.
-- When the written contract lacks implementation detail, update the multi-phase
-  or current phase plan before assigning or continuing work.
-- When Requirements, ADR, or Design intent is missing or inconsistent, return
-  to `feature-design` and requester confirmation instead of resolving product
-  intent in an implementation plan.
-- Treat the written contract as authoritative even when the same subagent
-  continues across phases.
-- For each new phase, the current phase plan replaces prior task-level scope,
-  owned paths, non-goals, and validation instructions. Requirements, ADR,
-  Design, and the multi-phase plan remain the higher-level contract.
+### Handoff and context control
 
-### Delivery role boundaries
-
-- The primary agent is the sole orchestrator for this workflow. It owns
-  planning, interface and scope decisions, coordination, implementation
-  verification, assignment of the exact independent reviewer, and final
-  integrated verification.
-- The primary agent alone controls phase progression and role-level
-  orchestration. It creates, assigns, coordinates, continues, replaces, or
-  stops implementation owners and independent reviewers, decides workstream
-  reassignment, and tells each implementation owner which reviewer to use.
-- Implementation subagents own bounded feature implementation and focused
-  validation defined by the phase execution plan. After validation, each
-  implementation owner directly requests review from the exact independent
-  reviewer assigned by the primary agent.
-- A separate subagent that did not participate in implementation performs the
-  independent code review as a read-only task and reports findings to the
-  requesting implementation owner.
-
-### Long-running subagent work
-
-- Assume implementation and review workstreams may take a long time. Never ask
-  a subagent to finalize early, shorten validation, or return a partial result
-  merely because the primary agent is waiting.
-- When coordination needs visibility, ask for a progress update covering
-  completed scope, remaining scope, current validation, and genuine blockers.
-  Explicitly tell the subagent to continue the complete written contract after
-  reporting progress.
-- While waiting, use primary-agent time to inspect repository state, research
-  the next phase, identify applicable conventions, and prepare future phase-plan
-  inputs. Do not edit later-phase implementation code, assign later-phase
-  implementation, create the next phase branch, or advance the stack before the
-  current phase PR exists.
-- Treat silence or a long runtime as ongoing work, not as evidence that scope
-  should be reduced. Wait for the complete workstream or a genuine blocker.
-
-### Parallel implementation rules
-
-- Continue the stable implementation role owners for concrete, bounded
-  workstreams after the phase plan fixes their contracts and ownership.
-- Run workstreams in parallel only when their dependencies are satisfied and
-  their owned paths do not overlap.
-- Assign each path to one owner at a time. Reserve shared integration files for
-  the integrating agent.
-- Put explicit inputs, outputs, non-goals, owned paths, and validation commands
-  from the phase plan into every implementation subagent task.
-- Do not let a subagent implement a later phase, broaden an interface, or edit an
-  unowned path. Stop and revise the phase plan first when scope must change.
+- Use tracked Requirements, ADR, Design, specs, and plans as authoritative
+  sources. Give each subagent only the relevant sections, paths, interfaces,
+  inputs, outputs, non-goals, rules, and validation commands.
+- Update the plan when the contract is incomplete. Return unresolved product
+  intent to `feature-design`.
+- Set a time, turn, tool-call, or milestone checkpoint for delegated and review
+  work. At that boundary, collect progress, remaining scope, validation,
+  blockers, and repeated failures; then continue, rescope, reset, or stop.
+- Before opening a phase PR, record completed behavior, changed interfaces,
+  validation evidence, remaining scope, relevant paths, risks, and blockers.
+- Start the next phase from this checkpoint and review evidence. Continue a
+  role only while its retained context remains useful and compact.
+- While waiting, prepare later-phase inputs without starting later-phase work or
+  advancing the stack. Silence alone is not evidence of progress.
 
 ## Phase 2: Implement phases as stacked PRs
 
 For each implementation phase:
 
-1. Create a branch stacked on the previous phase branch.
-2. Read relevant project instructions and conventions.
-3. Write and report the mandatory phase execution plan.
-4. Verify that interfaces and ownership are sufficient for safe parallel work.
-5. Have the primary agent continue the existing implementation role owners that
-   participate in this phase. Give each owner the current phase plan and its
-   bounded implementation and test work.
-6. Create a new role owner only when the stable delivery team rules require an
-   approved addition or replacement, then update the multi-phase and phase plans
-   before implementation continues.
-7. Confirm completed workstreams satisfy their documented interfaces and
-   dependency order.
-8. Update specs in the same PR only when the phase directly changes current behavior and cannot wait for the spec-promotion phase.
-9. Compare the diff against the phase deliverables, owned paths, and non-goals.
-10. Move later-phase or unrelated work out of the branch before committing.
-11. Have each participating implementation owner run its documented validation
-    and directly continue the exact independent reviewer assigned by the
-    primary agent. Provide the current phase contract, owned scope, and diff.
-12. Have the independent reviewer perform a read-only review and report
-    grounded findings to the requesting implementation owner.
-13. Address required findings in one correction pass and run affected checks.
-    Use the `/code-review` re-review criteria. When required, have the
-    implementation owner directly request targeted re-review from the same
-    reviewer.
-14. Have the primary agent perform final scope, integration, and validation
-    verification. If final verification changes the diff, rerun affected
-    validation. When required, have the implementation owner directly request
-    targeted re-review from the same reviewer.
-15. Re-run the phase's final validation commands.
-16. Commit and open the PR before starting implementation for the next phase.
+1. Create the stacked branch, read project rules, and write the phase plan.
+2. Assign each workstream to the primary agent or a qualified delegated owner.
+3. Implement the workstreams and integrate them in dependency order.
+4. Update specs when the phase changes current behavior and cannot wait for spec
+   promotion. Remove unrelated or later-phase changes.
+5. Have each owner run focused checks and directly request review from the exact
+   assigned reviewer with the relevant contract, scope, diff, and rules.
+6. Have the reviewer perform one read-only review. Batch required corrections,
+   run affected checks, and use `/code-review` for targeted re-review decisions.
+   When required, the implementation owner directly requests the same reviewer.
+7. Have the primary agent verify scope, integration, and validation evidence.
+   Apply affected checks and re-review criteria to any resulting diff change.
+8. Run final validation once on the stable integrated diff. Reuse evidence only
+   while the diff is unchanged, prerequisite snapshots are fresh, and the
+   environment is equivalent. Refresh invalidated checks and required E2E
+   evidence.
+9. Record the phase checkpoint, commit, and open the PR before the next phase.
 
 Keep each phase reviewable. Do not mix unrelated refactors, cleanup, or future phases.
 
@@ -277,11 +201,13 @@ Include:
 - A strict comparison table between implemented behavior and current specs, including missing implementation or spec drift
 
 If validation finds a bug, address it in the validation PR or responsible
-earlier phase and run affected validation. Use the `/code-review` re-review
-criteria and, when required, have the implementation owner directly request
-targeted re-review from the existing independent reviewer. Then have the primary
-agent perform final verification and rebase following branches when an earlier
-phase changes.
+earlier phase and run affected checks. Repeat only validation entries whose
+evidence may have been invalidated; rerun the full matrix when the correction
+crosses interfaces or shared behavior. Use the `/code-review` re-review criteria
+and, when required, have the implementation owner directly request targeted
+re-review from the existing independent reviewer. Then have the primary agent
+perform final verification and rebase following branches when an earlier phase
+changes.
 
 ## Phase 4: Spec promotion PR
 
@@ -330,7 +256,7 @@ When starting the shipping workflow, report:
 - Requirements: `<path>` (`<short-id>`)
 - Design: `<path>`
 - Multi-phase implementation plan: `<path under the documentation plans directory>`
-- Stable delivery team: `<implementation role owners and independent reviewer>`
+- Execution roles: `<primary-owned work, delegated owners, and independent reviewer>`
 - Stack prefix: `{feature-name}`
 - Planned PRs:
   1. Design
@@ -347,15 +273,10 @@ implementation role owners.
 For each completed phase, report:
 
 - PR URL
-- Branch/base
-- Phase plan path
-- Scope completed
-- Scope-drift result
-- Implementation workstreams and the documents used for their handoff
-- Stable role owners continued, added, or reassigned
-- Primary-agent verification results
-- Independent review result
-- Review findings, re-review decision or result, and final validation results
+- Branch/base and phase plan
+- Completed scope and scope-drift result
+- Execution roles, handoffs, and next-phase context decision
+- Review, re-review, and final validation results
 - Next stacked branch
 
 ## Guardrails
@@ -365,21 +286,12 @@ For each completed phase, report:
 - Do not edit phase implementation code or assign implementation subagents before
   the mandatory phase execution plan is stored in the documentation plans
   directory and reported.
-- Do not create phase-specific implementation or review subagents when the
-  stable role owner remains available and compatible with the workstream.
-- Keep implementation and independent review assigned to separate subagents.
 - Keep phase progression and role-level orchestration with the primary agent.
-  The primary agent must name the exact reviewer to each implementation owner.
-  Implementation subagents may directly request and continue only that assigned
-  reviewer; they do not appoint or replace reviewers, reassign role owners, or
-  advance the phase workflow.
-- Keep independent review read-only and limit re-review to the targeted cases
-  defined by the `/code-review` criteria.
+- Keep implementation and independent review separate. Use the exact reviewer
+  assigned by the primary agent and the `/code-review` re-review criteria.
 - Do not start the next phase before the current phase PR is created.
 - Do not ship an Azents feature when its new-format Requirements, ADR, and primary Design use different basenames.
 - Do not collapse a large feature into one PR when phased delivery is expected.
 - Do not leave stale plan documents after implementation is complete.
 - Do not update generated clients manually; regenerate them from OpenAPI when API routes or schemas change.
-- Do not pressure implementation or review subagents to finish early; ask for
-  progress and research later phases while waiting.
 - Keep all tracked docs, PR titles, PR bodies, comments, and examples in English.
