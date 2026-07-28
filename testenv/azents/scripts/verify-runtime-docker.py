@@ -96,6 +96,7 @@ def _wait_for_engine(client: list[str], engine_name: str) -> None:
 
 
 def _verify_cli(client: list[str]) -> None:
+    _run([*client, "docker", "buildx", "version"])
     dockerfile = textwrap.dedent(
         """
         FROM alpine:3.22
@@ -104,7 +105,16 @@ def _verify_cli(client: list[str]) -> None:
         """
     )
     _run(
-        [*client, "docker", "build", "--tag", "azents-runtime-docker-proof:latest", "-"],
+        [
+            *client,
+            "docker",
+            "buildx",
+            "build",
+            "--load",
+            "--tag",
+            "azents-runtime-docker-proof:latest",
+            "-",
+        ],
         input_text=dockerfile,
     )
     result = _run(
