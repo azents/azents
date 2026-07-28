@@ -793,54 +793,6 @@ class ExternalChannelRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def update_discord_gateway_checkpoint(
-        self,
-        session: AsyncSession,
-        *,
-        connection_id: str,
-        lease_owner: str,
-        lease_generation: int,
-        now: datetime.datetime,
-        encrypted_checkpoint: str,
-        checkpoint_version: int,
-        checkpoint_session_fingerprint: str,
-        sequence: int,
-    ) -> bool:
-        """Persist a session-scoped monotonic checkpoint for the fenced owner."""
-        result = await session.execute(
-            sa.update(RDBExternalChannelIngressLease)
-            .where(
-                _discord_gateway_lease_fence(
-                    connection_id=connection_id,
-                    lease_owner=lease_owner,
-                    lease_generation=lease_generation,
-                    now=now,
-                ),
-                sa.or_(
-                    RDBExternalChannelIngressLease.last_handled_dispatch_sequence.is_(
-                        None
-                    ),
-                    RDBExternalChannelIngressLease.checkpoint_session_fingerprint.is_(
-                        None
-                    ),
-                    RDBExternalChannelIngressLease.checkpoint_session_fingerprint
-                    != checkpoint_session_fingerprint,
-                    RDBExternalChannelIngressLease.last_handled_dispatch_sequence
-                    < sequence,
-                ),
-            )
-            .values(
-                encrypted_checkpoint=encrypted_checkpoint,
-                checkpoint_version=checkpoint_version,
-                checkpoint_session_fingerprint=checkpoint_session_fingerprint,
-                last_handled_dispatch_sequence=sequence,
-                heartbeat_at=now,
-                gap_reason=None,
-            )
-            .returning(RDBExternalChannelIngressLease.id)
-        )
-        return result.scalar_one_or_none() is not None
-
     async def admit_discord_gateway_event(
         self,
         session: AsyncSession,
@@ -850,11 +802,8 @@ class ExternalChannelRepository:
         lease_generation: int,
         now: datetime.datetime,
         create: ExternalChannelEventCreate,
-        encrypted_checkpoint: str,
-        checkpoint_version: int,
-        sequence: int,
     ) -> ExternalChannelEventAdmission | None:
-        """Atomically admit one Discord Dispatch and its fenced resume checkpoint."""
+        """Admit one typed Discord event under the current lease fence."""
         owned_lease = await session.scalar(
             sa.select(RDBExternalChannelIngressLease)
             .join(
@@ -879,15 +828,7 @@ class ExternalChannelRepository:
         )
         if owned_lease is None:
             return None
-        if (
-            owned_lease.last_handled_dispatch_sequence is not None
-            and owned_lease.last_handled_dispatch_sequence > sequence
-        ):
-            return None
         admission = await self.admit_event(session, create)
-        owned_lease.encrypted_checkpoint = encrypted_checkpoint
-        owned_lease.checkpoint_version = checkpoint_version
-        owned_lease.last_handled_dispatch_sequence = sequence
         owned_lease.heartbeat_at = now
         await session.flush()
         return admission

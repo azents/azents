@@ -5,6 +5,8 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+import discord
+
 from azents.core.enums import (
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
@@ -20,13 +22,13 @@ from azents.core.external_channel_file import (
     ExternalChannelFileUnsupportedReason,
 )
 from azents.repos.external_channel.data import ExternalChannelEventCreate
-from azents.services.external_channel.discord_gateway import DiscordGatewayDispatch
+from azents.services.external_channel.discord_gateway import DiscordGatewayMessageEvent
 
 _MAX_DISCORD_MESSAGE_CONTENT_BYTES = 64 * 1024
 _MESSAGE_EVENT_TYPES = {
-    "MESSAGE_CREATE": "discord_message_create",
-    "MESSAGE_UPDATE": "discord_message_update",
-    "MESSAGE_DELETE": "discord_message_delete",
+    "message_create": "discord_message_create",
+    "message_update": "discord_message_update",
+    "message_delete": "discord_message_delete",
 }
 
 
@@ -58,42 +60,40 @@ class DiscordNormalizedMessage:
     lifecycle: ExternalChannelMessageLifecycle
     author_type: ExternalChannelPrincipalAuthorType
     provider_user_id: str | None
+    sender_display_name: str | None
     normalized_body: str | None
     attachment_metadata: dict[str, object] | None
+    reference_mappings: dict[str, dict[str, str]]
+    channel_display_name: str | None
     normalized_size: int
     provider_created_at: datetime.datetime | None
     provider_updated_at: datetime.datetime | None
     invocation: bool
 
 
-def project_discord_gateway_dispatch(
+def project_discord_gateway_event(
     *,
     connection_id: str,
     provider_app_id: str | None,
     target_guild_id: str,
-    dispatch: DiscordGatewayDispatch,
+    event: DiscordGatewayMessageEvent,
     received_at: datetime.datetime,
 ) -> ExternalChannelEventCreate | None:
-    """Build a bounded canonical event without retaining raw Gateway payload data."""
-    event_type = _MESSAGE_EVENT_TYPES.get(dispatch.event_name)
-    if event_type is None:
-        return None
-    message = dispatch.data
-    guild_id = _required_string(message, "guild_id")
+    """Build a canonical event exclusively from typed discord.py objects."""
+    event_type = _MESSAGE_EVENT_TYPES[event.event_type]
+    guild_id = str(event.channel.guild.id)
     if guild_id != target_guild_id:
         return None
-    if not dispatch.session_id:
-        raise ValueError("Discord Gateway Dispatch is missing a session ID.")
-    projection = project_discord_message(message=message, guild_id=guild_id)
+    projection = _project_discord_sdk_event(event=event, guild_id=guild_id)
     channel_id = _required_string(projection, "channel_id")
+    provider_event_id = _discord_gateway_event_id(
+        event_type=event_type,
+        projection=projection,
+    )
     return ExternalChannelEventCreate(
         connection_id=connection_id,
-        provider_event_id=(
-            f"discord-gateway:{dispatch.session_id}:{dispatch.sequence}"
-        ),
-        transport_envelope_id=(
-            f"discord-gateway:{dispatch.session_id}:{dispatch.sequence}"
-        ),
+        provider_event_id=provider_event_id,
+        transport_envelope_id=provider_event_id,
         event_type=event_type,
         provider_app_id=provider_app_id,
         provider_tenant_id=guild_id,
@@ -102,9 +102,118 @@ def project_discord_gateway_dispatch(
         eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
         envelope={"message": projection},
         status=ExternalChannelEventStatus.ACCEPTED,
-        provider_occurred_at=_discord_timestamp(message.get("timestamp")),
+        provider_occurred_at=_discord_timestamp(projection.get("timestamp")),
         received_at=received_at,
     )
+
+
+def _project_discord_sdk_event(
+    *,
+    event: DiscordGatewayMessageEvent,
+    guild_id: str,
+) -> dict[str, object]:
+    """Project public SDK attributes into the bounded provider-neutral envelope."""
+    channel_id = str(event.channel.id)
+    if event.event_type == "message_delete":
+        deleted = event.deleted_message
+        if deleted is None:
+            raise ValueError("Discord delete event is missing its typed payload.")
+        source: dict[str, object] = {
+            "id": str(deleted.message_id),
+            "channel_id": channel_id,
+            "guild_id": guild_id,
+        }
+    else:
+        message = event.message
+        if message is None:
+            raise ValueError("Discord message event is missing its typed Message.")
+        if message.guild is None or str(message.guild.id) != guild_id:
+            raise ValueError("Discord Message Guild identity is invalid.")
+        if message.channel.id != event.channel.id:
+            raise ValueError("Discord Message channel identity is invalid.")
+        source = {
+            "id": str(message.id),
+            "channel_id": channel_id,
+            "guild_id": guild_id,
+            "content": message.content,
+            "timestamp": message.created_at.isoformat(),
+            "author": _sdk_user(message.author),
+            "mentions": [_sdk_user(mention) for mention in message.mentions],
+            "attachments": [
+                {
+                    "id": str(attachment.id),
+                    "filename": attachment.filename,
+                    "size": attachment.size,
+                    **(
+                        {"content_type": attachment.content_type}
+                        if attachment.content_type is not None
+                        else {}
+                    ),
+                }
+                for attachment in message.attachments
+            ],
+        }
+        if message.edited_at is not None:
+            source["edited_timestamp"] = message.edited_at.isoformat()
+    channel_name = getattr(event.channel, "name", None)
+    if isinstance(channel_name, str) and channel_name:
+        source["channel_name"] = channel_name
+    if isinstance(event.channel, discord.Thread):
+        parent_id = event.channel.parent_id
+        if parent_id == event.channel.id:
+            raise ValueError("Discord Thread parent identity is invalid.")
+        source["thread"] = {
+            "id": channel_id,
+            "parent_id": str(parent_id),
+            **(
+                {"name": channel_name}
+                if isinstance(channel_name, str) and channel_name
+                else {}
+            ),
+        }
+        parent = event.channel.parent
+        parent_name = getattr(parent, "name", None)
+        if isinstance(parent_name, str) and parent_name:
+            source["parent_channel_name"] = parent_name
+    return project_discord_message(message=source, guild_id=guild_id)
+
+
+def _sdk_user(user: discord.abc.User) -> dict[str, object]:
+    """Project public Discord user attributes without profile URLs."""
+    global_name = getattr(user, "global_name", None)
+    return {
+        "id": str(user.id),
+        "username": user.name,
+        **(
+            {"global_name": global_name}
+            if isinstance(global_name, str) and global_name
+            else {}
+        ),
+        **({"bot": True} if user.bot else {}),
+        **({"system": True} if user.system else {}),
+    }
+
+
+def _discord_gateway_event_id(
+    *,
+    event_type: str,
+    projection: dict[str, object],
+) -> str:
+    """Return a stable provider identity without Gateway session internals."""
+    guild_id = _required_string(projection, "guild_id")
+    channel_id = _required_string(projection, "channel_id")
+    message_id = _required_string(projection, "id")
+    identity = f"discord:{event_type}:{guild_id}:{channel_id}:{message_id}"
+    if event_type != "discord_message_update":
+        return identity
+    revision = hashlib.sha256(
+        json.dumps(
+            projection,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    return f"{identity}:{revision}"
 
 
 def project_discord_message_command_source_event(
@@ -156,6 +265,10 @@ def project_discord_message(
         value = message.get(key)
         if isinstance(value, str) and value:
             projection[key] = value
+    for key in ("channel_name", "parent_channel_name"):
+        value = message.get(key)
+        if isinstance(value, str) and value:
+            projection[key] = value[:MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH]
     content = message.get("content")
     if isinstance(content, str):
         if len(content.encode()) > _MAX_DISCORD_MESSAGE_CONTENT_BYTES:
@@ -203,7 +316,9 @@ def normalize_projected_discord_event(
         raise DiscordEventExcluded("Discord event Guild does not match the connection.")
     message_id = _required_string(raw_message, "id")
     channel_id = _required_string(raw_message, "channel_id")
-    author_type, provider_user_id = _author(raw_message.get("author"))
+    author_type, provider_user_id, sender_display_name = _author(
+        raw_message.get("author")
+    )
     if connected_bot_user_id is not None and provider_user_id == connected_bot_user_id:
         author_type = ExternalChannelPrincipalAuthorType.BOT
     normalized_body = (
@@ -219,6 +334,7 @@ def normalize_projected_discord_event(
         raw_message.get("mentions"),
         connected_bot_user_id=connected_bot_user_id,
     )
+    reference_mappings = _reference_mappings(raw_message)
     return DiscordNormalizedMessage(
         tenant_id=tenant_id,
         channel_id=channel_id,
@@ -238,9 +354,16 @@ def normalize_projected_discord_event(
         lifecycle=lifecycle,
         author_type=author_type,
         provider_user_id=provider_user_id,
+        sender_display_name=sender_display_name,
         normalized_body=normalized_body,
         attachment_metadata=attachment_metadata,
-        normalized_size=_normalized_size(normalized_body, attachment_metadata),
+        reference_mappings=reference_mappings,
+        channel_display_name=_bounded_string(raw_message.get("channel_name")),
+        normalized_size=_normalized_size(
+            normalized_body,
+            attachment_metadata,
+            reference_mappings,
+        ),
         provider_created_at=created_at,
         provider_updated_at=updated_at,
         invocation=invocation,
@@ -276,7 +399,7 @@ def _project_author(author: dict[str, object]) -> dict[str, object]:
 def _project_thread(thread: dict[str, object]) -> dict[str, object]:
     """Retain IDs needed to distinguish a Discord thread from its parent."""
     projected: dict[str, object] = {}
-    for key in ("id", "parent_id"):
+    for key in ("id", "parent_id", "name"):
         value = _bounded_string(thread.get(key))
         if value is not None:
             projected[key] = value
@@ -284,14 +407,19 @@ def _project_thread(thread: dict[str, object]) -> dict[str, object]:
 
 
 def _project_mentions(mentions: list[object]) -> list[dict[str, object]]:
-    """Retain bounded mentioned-user identifiers without profile fields or URLs."""
+    """Retain bounded mentioned-user identities without profile URLs."""
     projected: list[dict[str, object]] = []
     for mention in mentions[:MAX_EXTERNAL_CHANNEL_FILES]:
         if not isinstance(mention, dict):
             continue
         mention_id = _bounded_string(mention.get("id"))
         if mention_id is not None:
-            projected.append({"id": mention_id})
+            projected_mention: dict[str, object] = {"id": mention_id}
+            for key in ("username", "global_name"):
+                value = _bounded_string(mention.get(key))
+                if value is not None:
+                    projected_mention[key] = value
+            projected.append(projected_mention)
     return projected
 
 
@@ -402,15 +530,72 @@ def _message_lifecycle(
 
 def _author(
     value: object,
-) -> tuple[ExternalChannelPrincipalAuthorType, str | None]:
+) -> tuple[ExternalChannelPrincipalAuthorType, str | None, str | None]:
     if not isinstance(value, dict):
-        return ExternalChannelPrincipalAuthorType.SYSTEM, None
+        return ExternalChannelPrincipalAuthorType.SYSTEM, None, None
     provider_user_id = _bounded_string(value.get("id"))
+    display_name = _discord_display_name(value)
     if value.get("system") is True:
-        return ExternalChannelPrincipalAuthorType.SYSTEM, provider_user_id
+        return (
+            ExternalChannelPrincipalAuthorType.SYSTEM,
+            provider_user_id,
+            display_name,
+        )
     if value.get("bot") is True:
-        return ExternalChannelPrincipalAuthorType.BOT, provider_user_id
-    return ExternalChannelPrincipalAuthorType.HUMAN, provider_user_id
+        return ExternalChannelPrincipalAuthorType.BOT, provider_user_id, display_name
+    return ExternalChannelPrincipalAuthorType.HUMAN, provider_user_id, display_name
+
+
+def _reference_mappings(
+    message: dict[str, object],
+) -> dict[str, dict[str, str]]:
+    """Return bounded Discord user and channel display-name mappings."""
+    users: dict[str, str] = {}
+    channels: dict[str, str] = {}
+    author = message.get("author")
+    if isinstance(author, dict):
+        author_id = _bounded_string(author.get("id"))
+        display_name = _discord_display_name(author)
+        if author_id is not None and display_name is not None:
+            users[author_id] = display_name
+    mentions = message.get("mentions")
+    if isinstance(mentions, list):
+        for mention in mentions:
+            if not isinstance(mention, dict):
+                continue
+            mention_id = _bounded_string(mention.get("id"))
+            display_name = _discord_display_name(mention)
+            if mention_id is not None and display_name is not None:
+                users[mention_id] = display_name
+    channel_id = _bounded_string(message.get("channel_id"))
+    channel_name = _bounded_string(message.get("channel_name"))
+    if channel_id is not None and channel_name is not None:
+        channels[channel_id] = channel_name
+    thread = message.get("thread")
+    if isinstance(thread, dict):
+        thread_id = _bounded_string(thread.get("id"))
+        thread_name = _bounded_string(thread.get("name"))
+        if thread_id is not None and thread_name is not None:
+            channels[thread_id] = thread_name
+        parent_id = _bounded_string(thread.get("parent_id"))
+        parent_name = _bounded_string(message.get("parent_channel_name"))
+        if parent_id is not None and parent_name is not None:
+            channels[parent_id] = parent_name
+    return {
+        category: mappings
+        for category, mappings in (
+            ("users", users),
+            ("channels", channels),
+        )
+        if mappings
+    }
+
+
+def _discord_display_name(value: dict[str, object]) -> str | None:
+    """Prefer a Discord global display name and fall back to username."""
+    return _bounded_string(value.get("global_name")) or _bounded_string(
+        value.get("username")
+    )
 
 
 def _optional_content(message: dict[str, object]) -> str | None:
@@ -495,14 +680,32 @@ def _revision_key(
 def _normalized_size(
     body: str | None,
     attachment_metadata: dict[str, object] | None,
+    reference_mappings: dict[str, dict[str, str]],
 ) -> int:
+    """Return a conservative byte budget for stored and model-visible content."""
     body_size = 0 if body is None else len(body.encode())
     attachment_size = (
         0
         if attachment_metadata is None
         else len(json.dumps(attachment_metadata, separators=(",", ":")).encode())
     )
-    return body_size + attachment_size
+    mapping_lines = ["Identity Mappings:"]
+    mapping_lines.extend(
+        f"- User {identifier}: {display_name}"
+        for identifier, display_name in sorted(
+            reference_mappings.get("users", {}).items()
+        )
+    )
+    mapping_lines.extend(
+        f"- Channel {identifier}: {display_name}"
+        for identifier, display_name in sorted(
+            reference_mappings.get("channels", {}).items()
+        )
+    )
+    mapping_size = (
+        0 if len(mapping_lines) == 1 else len("\n".join(mapping_lines).encode())
+    )
+    return body_size + attachment_size + mapping_size
 
 
 def _discord_timestamp(value: object) -> datetime.datetime | None:

@@ -1234,6 +1234,11 @@ class ExternalChannelEventProcessorService:
                                 "parent_channel_id": parent_channel_id,
                                 "root_message_id": root_message_id,
                                 **(
+                                    {"display_name": (normalized.channel_display_name)}
+                                    if normalized.channel_display_name is not None
+                                    else {}
+                                ),
+                                **(
                                     {"thread_channel_id": thread_channel_id}
                                     if thread_channel_id is not None
                                     else {}
@@ -1475,8 +1480,8 @@ class ExternalChannelEventProcessorService:
             message=message,
             source_event_id=event.id,
             now=now,
-            original_url=None,
-            reference_mappings={},
+            original_url=_discord_original_url(message),
+            reference_mappings=message.reference_mappings,
             provider=ExternalChannelProvider.DISCORD,
         )
         canonical_message = persisted_revision.message
@@ -2235,6 +2240,11 @@ class ExternalChannelEventProcessorService:
     ) -> ExternalChannelPersistedRevision:
         principal_id = None
         if message.provider_user_id is not None:
+            display_name = reference_mappings.get("users", {}).get(
+                message.provider_user_id
+            )
+            if isinstance(message, DiscordNormalizedMessage):
+                display_name = message.sender_display_name or display_name
             principal = await self.repository.create_principal_idempotent(
                 session,
                 ExternalChannelPrincipalCreate(
@@ -2242,9 +2252,7 @@ class ExternalChannelEventProcessorService:
                     provider_tenant_id=message.tenant_id,
                     provider_user_id=message.provider_user_id,
                     author_type=message.author_type,
-                    display_name=reference_mappings.get("users", {}).get(
-                        message.provider_user_id
-                    ),
+                    display_name=display_name,
                     avatar_url=None,
                     profile=None,
                 ),
@@ -3760,8 +3768,8 @@ class ExternalChannelEventProcessorService:
                             message=history_message,
                             source_event_id=None,
                             now=_now(),
-                            original_url=None,
-                            reference_mappings={},
+                            original_url=_discord_original_url(history_message),
+                            reference_mappings=history_message.reference_mappings,
                             provider=ExternalChannelProvider.DISCORD,
                         )
                         trim = (
@@ -4443,16 +4451,7 @@ def _session_link_payload(
     if provider is ExternalChannelProvider.DISCORD:
         return {
             **_provider_thread_target(resource),
-            "text": (f"Your Azents session is ready. [Open session]({session_url})"),
-            "embeds": [
-                {
-                    "title": "Azents session ready",
-                    "description": (
-                        "Continue this conversation in the linked Azents session."
-                    ),
-                    "color": 0x5865F2,
-                }
-            ],
+            "text": "",
             "components": _discord_link_button(
                 label="Open Azents session",
                 url=session_url,
@@ -4508,6 +4507,18 @@ def _resource_correlation_key(resource: ExternalChannelResource) -> str:
 def _discord_resource_key(*, tenant_id: str, thread_id: str) -> str:
     """Return the canonical connection-scoped key for one Discord thread."""
     return f"discord:{tenant_id}:{thread_id}"
+
+
+def _discord_original_url(message: DiscordNormalizedMessage) -> str | None:
+    """Return one canonical Discord message URL from validated snowflakes."""
+    identifiers = (
+        message.tenant_id,
+        message.channel_id,
+        message.message_id,
+    )
+    if not all(identifier.isdigit() for identifier in identifiers):
+        return None
+    return f"https://discord.com/channels/{'/'.join(identifiers)}"
 
 
 def _resource_reference_mappings(

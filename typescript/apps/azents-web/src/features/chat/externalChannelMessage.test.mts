@@ -113,6 +113,47 @@ void test("normalizes live event reference mappings for presentation", () => {
   assert.equal(projected?.body, "@azents please review #incidents.");
 });
 
+void test("renders mapped Discord snowflake references and resource names", () => {
+  const projected = externalChannelMessagePresentation(
+    message(
+      {
+        content: "<@123456789012345678> continued in <#234567890123456789>.",
+      },
+      {
+        provider: "discord",
+        resource_label: "234567890123456789",
+        provider_user_id: "123456789012345678",
+        sender_display_name: "",
+        reference_mappings: JSON.stringify({
+          users: { "123456789012345678": "Alice" },
+          channels: { "234567890123456789": "deployment" },
+        }),
+      },
+    ),
+  );
+
+  assert.ok(projected);
+  assert.equal(projected.resourceLabel, "deployment");
+  assert.equal(projected.senderDisplayName, "Alice");
+  assert.equal(projected.body, "@Alice continued in deployment.");
+});
+
+void test("renders mapped Discord nickname mentions", () => {
+  const projected = externalChannelMessagePresentation(
+    message(
+      { content: "<@!123456789> asked for help." },
+      {
+        provider: "discord",
+        reference_mappings: JSON.stringify({
+          users: { "123456789": "Alice" },
+        }),
+      },
+    ),
+  );
+
+  assert.equal(projected?.body, "@Alice asked for help.");
+});
+
 void test("ignores malformed reference mappings", () => {
   const projected = externalChannelMessagePresentation(
     message({ content: "<@U1>" }, { reference_mappings: "not-json" }),

@@ -1,398 +1,284 @@
-"""Discord Gateway protocol primitives for the dedicated ingress worker."""
+"""High-level discord.py Gateway integration."""
 
 import asyncio
 import dataclasses
-import datetime
-import json
 from collections.abc import Awaitable, Callable
-from typing import Protocol
+from typing import Literal, Protocol, TypeGuard
 
-from websockets.asyncio.client import connect as websocket_connect
-from websockets.exceptions import ConnectionClosed
+import discord
 
-from azents.services.external_channel.discord_endpoint import (
-    discord_gateway_url_allowed,
-)
-
-MAX_DISCORD_GATEWAY_MESSAGE_BYTES = 256 * 1024
 DISCORD_GATEWAY_INTENTS = 1 | 512 | 32768
-_DEFAULT_PROPERTIES = {
-    "os": "linux",
-    "browser": "azents",
-    "device": "azents",
-}
+
+type DiscordMessageChannel = (
+    discord.TextChannel | discord.Thread | discord.VoiceChannel | discord.StageChannel
+)
+type DiscordGatewayMessageEventType = Literal[
+    "message_create",
+    "message_update",
+    "message_delete",
+]
 
 
-class DiscordGatewayError(ValueError):
-    """Base class for controlled Discord Gateway protocol failures."""
+class DiscordGatewayError(RuntimeError):
+    """Base class for controlled Discord library failures."""
 
 
-class DiscordGatewayInvalidPayload(DiscordGatewayError):
-    """Discord sent an invalid or unsupported Gateway payload."""
+class DiscordGatewayCredentialError(DiscordGatewayError):
+    """Discord rejected the configured Bot credential."""
 
 
-@dataclasses.dataclass(frozen=True)
-class DiscordGatewayCheckpoint:
-    """Resumable Discord Gateway state owned by the current lease."""
-
-    session_id: str
-    resume_gateway_url: str
-    sequence: int
+class DiscordGatewayIntentsError(DiscordGatewayError):
+    """Discord rejected the Gateway intents required by the connection."""
 
 
 @dataclasses.dataclass(frozen=True)
 class DiscordGatewayConnectionResult:
-    """Reason one Discord Gateway connection stopped."""
+    """Reason one high-level discord.py client stopped."""
 
     reconnect: bool
-    can_resume: bool
     reason: str
-    checkpoint: DiscordGatewayCheckpoint | None
-
-
-class DiscordGatewayConnection(Protocol):
-    """Minimal WebSocket surface required by the Gateway runner."""
-
-    async def recv(self) -> str | bytes:
-        """Receive one Gateway frame."""
-        ...
-
-    async def send(self, message: str) -> None:
-        """Send one Gateway frame."""
-        ...
-
-    async def close(self) -> None:
-        """Close the Gateway WebSocket."""
-        ...
-
-
-type DiscordGatewayConnector = Callable[
-    [str, float, float, int],
-    Awaitable[DiscordGatewayConnection],
-]
-type DiscordGatewayCheckpointSink = Callable[
-    [DiscordGatewayCheckpoint],
-    Awaitable[None],
-]
-type DiscordGatewayDispatchHandler = Callable[
-    ["DiscordGatewayDispatch"],
-    Awaitable[bool],
-]
-type DiscordGatewayClock = Callable[[], datetime.datetime]
 
 
 @dataclasses.dataclass(frozen=True)
-class DiscordGatewayDispatch:
-    """One bounded Gateway Dispatch delivered before checkpoint persistence."""
+class DiscordGatewayMessageEvent:
+    """One typed discord.py message lifecycle event."""
 
-    session_id: str
-    resume_gateway_url: str
-    sequence: int
-    event_name: str
-    data: dict[str, object]
-
-
-async def _connect_gateway(
-    endpoint_url: str,
-    ping_interval_seconds: float,
-    ping_timeout_seconds: float,
-    max_size: int,
-) -> DiscordGatewayConnection:
-    """Open one direct Discord Gateway WebSocket."""
-    return await websocket_connect(
-        endpoint_url,
-        ping_interval=ping_interval_seconds,
-        ping_timeout=ping_timeout_seconds,
-        max_size=max_size,
-    )
+    event_type: DiscordGatewayMessageEventType
+    channel: DiscordMessageChannel
+    message: discord.Message | None = None
+    deleted_message: discord.RawMessageDeleteEvent | None = None
 
 
-def _utc_now() -> datetime.datetime:
-    """Return a timezone-aware timestamp for protocol bookkeeping."""
-    return datetime.datetime.now(datetime.UTC)
+type DiscordGatewayEventHandler = Callable[
+    [DiscordGatewayMessageEvent],
+    Awaitable[None],
+]
+type DiscordGatewayEventFactory = Callable[
+    [],
+    Awaitable[DiscordGatewayMessageEvent],
+]
 
 
-class DiscordGatewayClient:
-    """Run one fenced Discord Gateway connection with callback-owned routing."""
-
-    def __init__(
-        self,
-        *,
-        connector: DiscordGatewayConnector = _connect_gateway,
-        clock: DiscordGatewayClock = _utc_now,
-        ping_interval_seconds: float = 20.0,
-        ping_timeout_seconds: float = 20.0,
-    ) -> None:
-        """Initialize a Gateway client with transport dependencies."""
-        if ping_interval_seconds <= 0:
-            raise ValueError("Discord Gateway ping interval must be positive.")
-        if ping_timeout_seconds <= 0:
-            raise ValueError("Discord Gateway ping timeout must be positive.")
-        self.connector = connector
-        self.clock = clock
-        self.ping_interval_seconds = ping_interval_seconds
-        self.ping_timeout_seconds = ping_timeout_seconds
+class DiscordGatewayRunner(Protocol):
+    """High-level discord.py client consumed by the lease manager."""
 
     async def run_connection(
         self,
         *,
-        endpoint_url: str,
         bot_token: str,
-        checkpoint: DiscordGatewayCheckpoint | None,
-        persist_checkpoint: DiscordGatewayCheckpointSink,
-        handle_dispatch: DiscordGatewayDispatchHandler,
+        target_guild_id: str,
+        handle_event: DiscordGatewayEventHandler,
     ) -> DiscordGatewayConnectionResult:
-        """Run one Gateway session until Discord requests reconnection or closes it."""
-        connection = await self.connector(
-            endpoint_url,
-            self.ping_interval_seconds,
-            self.ping_timeout_seconds,
-            MAX_DISCORD_GATEWAY_MESSAGE_BYTES,
+        """Run until the SDK client closes or a terminal failure occurs."""
+        ...
+
+
+class _DiscordLibraryClient(discord.Client):
+    """Translate high-level discord.py callbacks into serialized typed events."""
+
+    def __init__(
+        self,
+        *,
+        target_guild_id: int,
+        handle_event: DiscordGatewayEventHandler,
+    ) -> None:
+        intents = discord.Intents.none()
+        intents.guilds = True
+        intents.guild_messages = True
+        intents.message_content = True
+        super().__init__(
+            intents=intents,
+            member_cache_flags=discord.MemberCacheFlags.none(),
+            chunk_guilds_at_startup=False,
         )
-        active_checkpoint = checkpoint
-        try:
-            hello = _parse_payload(await connection.recv())
-            heartbeat_interval_seconds = _heartbeat_interval_seconds(hello)
-            await connection.send(
-                json.dumps(
-                    _initial_payload(bot_token=bot_token, checkpoint=checkpoint),
-                    separators=(",", ":"),
-                )
+        self.target_guild_id = target_guild_id
+        self.handle_event = handle_event
+        self.event_lock = asyncio.Lock()
+        self.event_error: Exception | None = None
+
+    async def on_message(self, message: discord.Message) -> None:
+        """Admit one typed message-create callback."""
+        if message.guild is None or message.guild.id != self.target_guild_id:
+            return
+
+        async def event_factory() -> DiscordGatewayMessageEvent:
+            channel = await self._resolve_guild_channel(message.channel)
+            return DiscordGatewayMessageEvent(
+                event_type="message_create",
+                channel=channel,
+                message=message,
             )
-            while True:
-                try:
-                    message = await asyncio.wait_for(
-                        connection.recv(),
-                        timeout=heartbeat_interval_seconds,
-                    )
-                except TimeoutError:
-                    await connection.send(
-                        json.dumps(
-                            {
-                                "op": 1,
-                                "d": (
-                                    active_checkpoint.sequence
-                                    if active_checkpoint is not None
-                                    else None
-                                ),
-                            },
-                            separators=(",", ":"),
-                        )
-                    )
-                    continue
-                payload = _parse_payload(message)
-                op = payload["op"]
-                if op == 0:
-                    dispatch = _dispatch(payload)
-                    checkpoint_persisted = False
-                    if dispatch.event_name != "READY":
-                        if active_checkpoint is None:
-                            raise DiscordGatewayInvalidPayload(
-                                "Discord Gateway Dispatch arrived before READY."
-                            )
-                        checkpoint_persisted = await handle_dispatch(
-                            dataclasses.replace(
-                                dispatch,
-                                session_id=active_checkpoint.session_id,
-                                resume_gateway_url=active_checkpoint.resume_gateway_url,
-                            )
-                        )
-                    active_checkpoint = _advance_checkpoint(
-                        payload=payload,
-                        checkpoint=active_checkpoint,
-                    )
-                    if active_checkpoint is not None and not checkpoint_persisted:
-                        await persist_checkpoint(active_checkpoint)
-                    continue
-                if op == 1:
-                    await connection.send(
-                        json.dumps(
-                            {
-                                "op": 1,
-                                "d": (
-                                    active_checkpoint.sequence
-                                    if active_checkpoint is not None
-                                    else None
-                                ),
-                            },
-                            separators=(",", ":"),
-                        )
-                    )
-                    continue
-                if op == 7:
-                    return DiscordGatewayConnectionResult(
-                        reconnect=True,
-                        can_resume=active_checkpoint is not None,
-                        reason="reconnect_requested",
-                        checkpoint=active_checkpoint,
-                    )
-                if op == 9:
-                    can_resume = payload["d"] is True and active_checkpoint is not None
-                    return DiscordGatewayConnectionResult(
-                        reconnect=True,
-                        can_resume=can_resume,
-                        reason="invalid_session",
-                        checkpoint=active_checkpoint if can_resume else None,
-                    )
-        except ConnectionClosed as error:
-            close_code = error.rcvd.code if error.rcvd is not None else None
-            terminal_reasons = {
-                4004: "gateway_credentials_rejected",
-                4013: "intents_invalid",
-                4014: "intents_disallowed",
-            }
-            if close_code in terminal_reasons:
-                return DiscordGatewayConnectionResult(
-                    reconnect=False,
-                    can_resume=False,
-                    reason=terminal_reasons[close_code],
-                    checkpoint=active_checkpoint,
-                )
-            if close_code == 4008:
-                return DiscordGatewayConnectionResult(
+
+        await self._emit(event_factory)
+
+    async def on_raw_message_edit(
+        self,
+        payload: discord.RawMessageUpdateEvent,
+    ) -> None:
+        """Admit one typed message-update callback without reading raw data."""
+        if payload.guild_id != self.target_guild_id:
+            return
+
+        async def event_factory() -> DiscordGatewayMessageEvent:
+            channel = await self._resolve_message_channel_id(payload.channel_id)
+            message = await channel.fetch_message(payload.message_id)
+            return DiscordGatewayMessageEvent(
+                event_type="message_update",
+                channel=channel,
+                message=message,
+            )
+
+        await self._emit(event_factory)
+
+    async def on_raw_message_delete(
+        self,
+        payload: discord.RawMessageDeleteEvent,
+    ) -> None:
+        """Admit one typed message-delete callback."""
+        if payload.guild_id != self.target_guild_id:
+            return
+
+        async def event_factory() -> DiscordGatewayMessageEvent:
+            channel = await self._resolve_message_channel_id(payload.channel_id)
+            return DiscordGatewayMessageEvent(
+                event_type="message_delete",
+                channel=channel,
+                deleted_message=payload,
+            )
+
+        await self._emit(event_factory)
+
+    async def _emit(self, event_factory: DiscordGatewayEventFactory) -> None:
+        """Serialize typed resolution and admission; close on any failure."""
+        async with self.event_lock:
+            if self.event_error is not None:
+                return
+            try:
+                event = await event_factory()
+                await self.handle_event(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                self.event_error = error
+                await self.close()
+
+    async def _resolve_guild_channel(
+        self,
+        channel: discord.abc.MessageableChannel,
+    ) -> DiscordMessageChannel:
+        if _is_message_channel(channel):
+            return channel
+        return await self._resolve_message_channel_id(channel.id)
+
+    async def _resolve_message_channel_id(
+        self,
+        channel_id: int,
+    ) -> DiscordMessageChannel:
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            channel = await self.fetch_channel(channel_id)
+        if not _is_message_channel(channel) or channel.guild.id != self.target_guild_id:
+            raise discord.InvalidData(
+                "Discord channel does not belong to the configured Guild."
+            )
+        return channel
+
+
+class DiscordGatewayClient:
+    """Run discord.py exclusively through its public high-level client API."""
+
+    async def run_connection(
+        self,
+        *,
+        bot_token: str,
+        target_guild_id: str,
+        handle_event: DiscordGatewayEventHandler,
+    ) -> DiscordGatewayConnectionResult:
+        """Let discord.py own discovery, heartbeat, reconnect, and Resume."""
+        if not target_guild_id.isdigit():
+            raise DiscordGatewayError("Discord Guild identity is invalid.")
+        client = _DiscordLibraryClient(
+            target_guild_id=int(target_guild_id),
+            handle_event=handle_event,
+        )
+        result = DiscordGatewayConnectionResult(
+            reconnect=True,
+            reason="gateway_client_closed",
+        )
+        try:
+            try:
+                await client.start(bot_token, reconnect=True)
+            except discord.LoginFailure as error:
+                raise DiscordGatewayCredentialError(
+                    "Discord rejected the configured Bot credential."
+                ) from error
+            except discord.PrivilegedIntentsRequired as error:
+                raise DiscordGatewayIntentsError(
+                    "Discord rejected the required Message Content intent."
+                ) from error
+            except discord.ConnectionClosed as error:
+                result = _closed_connection_result(error)
+            except (
+                discord.GatewayNotFound,
+                discord.HTTPException,
+                discord.InvalidData,
+                OSError,
+            ) as error:
+                result = DiscordGatewayConnectionResult(
                     reconnect=True,
-                    can_resume=active_checkpoint is not None,
-                    reason="gateway_rate_limited",
-                    checkpoint=active_checkpoint,
+                    reason=_transport_failure_reason(error),
                 )
-            return DiscordGatewayConnectionResult(
-                reconnect=True,
-                can_resume=active_checkpoint is not None,
-                reason="connection_closed",
-                checkpoint=active_checkpoint,
-            )
         finally:
-            await connection.close()
+            if not client.is_closed():
+                await client.close()
+        if client.event_error is not None:
+            if isinstance(client.event_error, DiscordGatewayError):
+                raise client.event_error
+            raise DiscordGatewayError(
+                "Discord typed callback processing failed."
+            ) from client.event_error
+        return result
 
 
-def _parse_payload(message: str | bytes) -> dict[str, object]:
-    """Parse one bounded Gateway frame into a minimal protocol object."""
-    if isinstance(message, bytes):
-        try:
-            message = message.decode()
-        except UnicodeDecodeError as error:
-            raise DiscordGatewayInvalidPayload(
-                "Discord Gateway frame is not valid UTF-8."
-            ) from error
-    if len(message.encode()) > MAX_DISCORD_GATEWAY_MESSAGE_BYTES:
-        raise DiscordGatewayInvalidPayload("Discord Gateway frame is too large.")
-    try:
-        value: object = json.loads(message)
-    except json.JSONDecodeError as error:
-        raise DiscordGatewayInvalidPayload(
-            "Discord Gateway frame is invalid JSON."
-        ) from error
-    if not isinstance(value, dict):
-        raise DiscordGatewayInvalidPayload("Discord Gateway frame must be an object.")
-    op = value.get("op")
-    if not isinstance(op, int) or isinstance(op, bool):
-        raise DiscordGatewayInvalidPayload(
-            "Discord Gateway frame has an invalid opcode."
-        )
-    return value
-
-
-def _heartbeat_interval_seconds(payload: dict[str, object]) -> float:
-    """Return the Hello heartbeat interval or reject a malformed Hello frame."""
-    if payload["op"] != 10:
-        raise DiscordGatewayInvalidPayload("Discord Gateway must begin with Hello.")
-    data = payload.get("d")
-    if not isinstance(data, dict):
-        raise DiscordGatewayInvalidPayload("Discord Gateway Hello is malformed.")
-    interval = data.get("heartbeat_interval")
-    if (
-        not isinstance(interval, int | float)
-        or isinstance(interval, bool)
-        or interval <= 0
-    ):
-        raise DiscordGatewayInvalidPayload(
-            "Discord Gateway Hello has an invalid heartbeat interval."
-        )
-    return float(interval) / 1000
-
-
-def _initial_payload(
-    *,
-    bot_token: str,
-    checkpoint: DiscordGatewayCheckpoint | None,
-) -> dict[str, object]:
-    """Build a Resume when durable state exists, otherwise an Identify."""
-    if checkpoint is not None:
-        return {
-            "op": 6,
-            "d": {
-                "token": bot_token,
-                "session_id": checkpoint.session_id,
-                "seq": checkpoint.sequence,
-            },
-        }
-    return {
-        "op": 2,
-        "d": {
-            "token": bot_token,
-            "intents": DISCORD_GATEWAY_INTENTS,
-            "properties": _DEFAULT_PROPERTIES,
-        },
-    }
-
-
-def _advance_checkpoint(
-    *,
-    payload: dict[str, object],
-    checkpoint: DiscordGatewayCheckpoint | None,
-) -> DiscordGatewayCheckpoint | None:
-    """Advance durable resume state after one safely handled Dispatch."""
-    sequence = payload.get("s")
-    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
-        raise DiscordGatewayInvalidPayload(
-            "Discord Gateway Dispatch has an invalid sequence."
-        )
-    event_name = payload.get("t")
-    data = payload.get("d")
-    if event_name == "READY":
-        if not isinstance(data, dict):
-            raise DiscordGatewayInvalidPayload("Discord READY payload is malformed.")
-        session_id = data.get("session_id")
-        resume_gateway_url = data.get("resume_gateway_url")
-        if not isinstance(session_id, str) or not session_id:
-            raise DiscordGatewayInvalidPayload("Discord READY is missing a session ID.")
-        if not isinstance(resume_gateway_url, str) or not discord_gateway_url_allowed(
-            resume_gateway_url
-        ):
-            raise DiscordGatewayInvalidPayload(
-                "Discord READY has an invalid resume Gateway URL."
-            )
-        return DiscordGatewayCheckpoint(
-            session_id=session_id,
-            resume_gateway_url=resume_gateway_url,
-            sequence=sequence,
-        )
-    if checkpoint is None:
-        return None
-    return dataclasses.replace(checkpoint, sequence=sequence)
-
-
-def _dispatch(payload: dict[str, object]) -> DiscordGatewayDispatch:
-    """Extract one bounded Dispatch before it is acknowledged by checkpoint state."""
-    sequence = payload.get("s")
-    event_name = payload.get("t")
-    data = payload.get("d")
-    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
-        raise DiscordGatewayInvalidPayload(
-            "Discord Gateway Dispatch has an invalid sequence."
-        )
-    if not isinstance(event_name, str) or not event_name:
-        raise DiscordGatewayInvalidPayload(
-            "Discord Gateway Dispatch has an invalid event name."
-        )
-    if not isinstance(data, dict):
-        raise DiscordGatewayInvalidPayload(
-            "Discord Gateway Dispatch data must be an object."
-        )
-    return DiscordGatewayDispatch(
-        session_id="",
-        resume_gateway_url="",
-        sequence=sequence,
-        event_name=event_name,
-        data=data,
+def _is_message_channel(channel: object) -> TypeGuard[DiscordMessageChannel]:
+    return isinstance(
+        channel,
+        (
+            discord.TextChannel,
+            discord.Thread,
+            discord.VoiceChannel,
+            discord.StageChannel,
+        ),
     )
+
+
+def _closed_connection_result(
+    error: discord.ConnectionClosed,
+) -> DiscordGatewayConnectionResult:
+    """Classify public SDK close outcomes for manager lifecycle handling."""
+    terminal_reasons = {
+        4004: "gateway_credentials_rejected",
+        4013: "intents_invalid",
+        4014: "intents_disallowed",
+    }
+    reason = terminal_reasons.get(error.code)
+    if reason is not None:
+        return DiscordGatewayConnectionResult(reconnect=False, reason=reason)
+    return DiscordGatewayConnectionResult(
+        reconnect=True,
+        reason="connection_closed",
+    )
+
+
+def _transport_failure_reason(
+    error: (
+        discord.GatewayNotFound | discord.HTTPException | discord.InvalidData | OSError
+    ),
+) -> str:
+    """Classify public SDK failures without exposing provider details."""
+    if isinstance(error, discord.HTTPException) and error.status == 429:
+        return "gateway_rate_limited"
+    cause = error.__cause__
+    if isinstance(cause, discord.HTTPException) and cause.status == 429:
+        return "gateway_rate_limited"
+    return "gateway_transport_unavailable"

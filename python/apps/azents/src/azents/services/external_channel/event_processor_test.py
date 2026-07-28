@@ -2869,8 +2869,11 @@ async def _prepare_discord_reconcile_fixture(
                 lifecycle=ExternalChannelMessageLifecycle.CURRENT,
                 author_type=ExternalChannelPrincipalAuthorType.HUMAN,
                 provider_user_id="U1",
+                sender_display_name="User One",
                 normalized_body="Please investigate",
                 attachment_metadata=None,
+                reference_mappings={"users": {"U1": "User One"}},
+                channel_display_name=None,
                 normalized_size=18,
                 provider_created_at=_at(1),
                 provider_updated_at=None,
@@ -3238,8 +3241,11 @@ async def test_discord_first_binding_releases_context_and_creates_deliveries(
             lifecycle=ExternalChannelMessageLifecycle.CURRENT,
             author_type=ExternalChannelPrincipalAuthorType.HUMAN,
             provider_user_id="U1",
+            sender_display_name="User One",
             normalized_body="Please investigate",
             attachment_metadata=None,
+            reference_mappings={"users": {"U1": "User One"}},
+            channel_display_name=None,
             normalized_size=len("Please investigate"),
             provider_created_at=_at(1),
             provider_updated_at=None,
@@ -3400,17 +3406,7 @@ def test_discord_root_target_is_shared_by_session_link_and_progress() -> None:
             "thread_root_message_id",
         )
     } == target
-    assert session_link["text"] == (
-        "Your Azents session is ready. "
-        "[Open session](https://azents.example/w/test/agents/agent/sessions/session)"
-    )
-    assert session_link["embeds"] == [
-        {
-            "title": "Azents session ready",
-            "description": "Continue this conversation in the linked Azents session.",
-            "color": 0x5865F2,
-        }
-    ]
+    assert session_link["text"] == ""
     assert session_link["components"] == [
         {
             "type": 1,
@@ -3419,11 +3415,14 @@ def test_discord_root_target_is_shared_by_session_link_and_progress() -> None:
                     "type": 2,
                     "style": 5,
                     "label": "Open Azents session",
-                    "url": "https://azents.example/w/test/agents/agent/sessions/session",
+                    "url": (
+                        "https://azents.example/w/test/agents/agent/sessions/session"
+                    ),
                 }
             ],
         }
     ]
+    assert "embeds" not in session_link
 
 
 async def test_pending_context_is_trimmed_by_count_and_size(

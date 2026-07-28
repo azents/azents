@@ -3,7 +3,9 @@
 import datetime
 import json
 from typing import cast
+from unittest.mock import MagicMock
 
+import discord
 import pytest
 
 from azents.services.external_channel.discord_events import (
@@ -11,78 +13,110 @@ from azents.services.external_channel.discord_events import (
     DiscordEventNormalizationError,
     DiscordMessageContentUnavailable,
     normalize_projected_discord_event,
-    project_discord_gateway_dispatch,
+    project_discord_gateway_event,
 )
-from azents.services.external_channel.discord_gateway import DiscordGatewayDispatch
+from azents.services.external_channel.discord_gateway import (
+    DiscordGatewayMessageEvent,
+    DiscordGatewayMessageEventType,
+)
 
 
-def _dispatch(
+def _guild(*, guild_id: int = 300) -> MagicMock:
+    guild = MagicMock(spec=discord.Guild)
+    guild.id = guild_id
+    return guild
+
+
+def _channel(*, guild_id: int = 300) -> MagicMock:
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.id = 200
+    channel.guild = _guild(guild_id=guild_id)
+    channel.name = "incidents"
+    return channel
+
+
+def _event(
     *,
-    event_name: str = "MESSAGE_CREATE",
-    guild_id: str = "guild-1",
-) -> DiscordGatewayDispatch:
-    """Build one representative Discord message Dispatch."""
-    return DiscordGatewayDispatch(
-        session_id="gateway-session-1",
-        resume_gateway_url="wss://gateway.discord.gg",
-        sequence=42,
-        event_name=event_name,
-        data={
-            "id": "message-1",
-            "channel_id": "channel-1",
-            "guild_id": guild_id,
-            "content": "Please help with this.",
-            "timestamp": "2026-07-26T00:00:00.000000+00:00",
-            "author": {
-                "id": "user-1",
-                "username": "Example",
-                "avatar": "https://cdn.discordapp.com/avatars/private",
-            },
-            "attachments": [
-                {
-                    "id": "attachment-1",
-                    "filename": "report.pdf",
-                    "content_type": "application/pdf",
-                    "size": 123,
-                    "url": "https://cdn.discordapp.com/attachments/private",
-                    "proxy_url": "https://media.discordapp.net/attachments/private",
-                }
-            ],
-        },
+    event_type: DiscordGatewayMessageEventType = "message_create",
+    guild_id: int = 300,
+) -> DiscordGatewayMessageEvent:
+    """Build one representative typed discord.py event."""
+    channel = _channel(guild_id=guild_id)
+    if event_type == "message_delete":
+        deleted = MagicMock(spec=discord.RawMessageDeleteEvent)
+        deleted.message_id = 100
+        deleted.channel_id = 200
+        deleted.guild_id = guild_id
+        return DiscordGatewayMessageEvent(
+            event_type=event_type,
+            channel=channel,
+            deleted_message=deleted,
+        )
+    author = MagicMock(spec=discord.User)
+    author.id = 400
+    author.name = "Example"
+    author.global_name = None
+    author.bot = False
+    author.system = False
+    attachment = MagicMock(spec=discord.Attachment)
+    attachment.id = 500
+    attachment.filename = "report.pdf"
+    attachment.content_type = "application/pdf"
+    attachment.size = 123
+    message = MagicMock(spec=discord.Message)
+    message.id = 100
+    message.guild = channel.guild
+    message.channel = channel
+    message.content = "Please help with this."
+    message.created_at = datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC)
+    message.edited_at = (
+        datetime.datetime(2026, 7, 26, 0, 1, tzinfo=datetime.UTC)
+        if event_type == "message_update"
+        else None
+    )
+    message.author = author
+    message.mentions = []
+    message.attachments = [attachment]
+    return DiscordGatewayMessageEvent(
+        event_type=event_type,
+        channel=channel,
+        message=message,
     )
 
 
 def test_projects_message_event_without_attachment_urls_or_raw_payload() -> None:
     """Admission retains message data plus metadata-only attachment details."""
-    event = project_discord_gateway_dispatch(
+    event = project_discord_gateway_event(
         connection_id="connection-1",
         provider_app_id="app-1",
-        target_guild_id="guild-1",
-        dispatch=_dispatch(),
+        target_guild_id="300",
+        event=_event(),
         received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
     )
 
     assert event is not None
-    assert event.provider_event_id == "discord-gateway:gateway-session-1:42"
-    assert event.transport_envelope_id == "discord-gateway:gateway-session-1:42"
+    assert event.provider_event_id == "discord:discord_message_create:300:200:100"
+    assert event.transport_envelope_id == event.provider_event_id
     assert event.event_type == "discord_message_create"
-    assert event.resource_correlation_key == "guild-1:channel-1"
+    assert event.resource_correlation_key == "300:200"
     assert event.envelope == {
         "message": {
-            "id": "message-1",
-            "channel_id": "channel-1",
-            "guild_id": "guild-1",
-            "timestamp": "2026-07-26T00:00:00.000000+00:00",
+            "id": "100",
+            "channel_id": "200",
+            "guild_id": "300",
+            "timestamp": "2026-07-26T00:00:00+00:00",
+            "channel_name": "incidents",
             "content": "Please help with this.",
             "author": {
-                "id": "user-1",
+                "id": "400",
                 "username": "Example",
             },
+            "mentions": [],
             "attachments": {
                 "files": [
                     {
                         "provider": "discord",
-                        "provider_file_id": "attachment-1",
+                        "provider_file_id": "500",
                         "name": "report.pdf",
                         "title": None,
                         "media_type": "application/pdf",
@@ -92,7 +126,7 @@ def test_projects_message_event_without_attachment_urls_or_raw_payload() -> None
                         "file_access": None,
                         "supported": True,
                         "unsupported_reason": None,
-                        "source_channel_id": "channel-1",
+                        "source_channel_id": "200",
                     }
                 ]
             },
@@ -100,72 +134,59 @@ def test_projects_message_event_without_attachment_urls_or_raw_payload() -> None
         }
     }
     serialized = json.dumps(event.envelope)
-    assert "cdn.discordapp.com" not in serialized
     assert "proxy_url" not in serialized
     assert '"url"' not in serialized
     assert '"avatar"' not in serialized
 
 
 @pytest.mark.parametrize(
-    "event_name",
-    ("MESSAGE_CREATE", "MESSAGE_UPDATE", "MESSAGE_DELETE"),
+    "event_type",
+    ("message_create", "message_update", "message_delete"),
 )
-def test_projects_all_supported_message_lifecycle_events(event_name: str) -> None:
-    """Every supported Discord message lifecycle dispatch has its own event type."""
-    event = project_discord_gateway_dispatch(
+def test_projects_all_supported_message_lifecycle_events(event_type: str) -> None:
+    """Every supported typed lifecycle callback has its own event type."""
+    typed_event_type = cast(DiscordGatewayMessageEventType, event_type)
+    event = project_discord_gateway_event(
         connection_id="connection-1",
         provider_app_id="app-1",
-        target_guild_id="guild-1",
-        dispatch=_dispatch(event_name=event_name),
+        target_guild_id="300",
+        event=_event(event_type=typed_event_type),
         received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
     )
 
     assert event is not None
-    expected_event_type = (
-        f"discord_message_{event_name.removeprefix('MESSAGE_').lower()}"
-    )
-    assert event.event_type == expected_event_type
+    assert event.event_type == f"discord_{event_type}"
+    if event_type == "message_update":
+        assert event.provider_event_id.startswith(
+            "discord:discord_message_update:300:200:100:"
+        )
 
 
-def test_ignores_cross_guild_and_unsupported_dispatches() -> None:
-    """A connection never admits another Guild's events or unrelated Dispatches."""
-    received_at = datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC)
-
-    cross_guild = project_discord_gateway_dispatch(
+def test_ignores_cross_guild_typed_events() -> None:
+    """A connection never admits another Guild's typed event."""
+    cross_guild = project_discord_gateway_event(
         connection_id="connection-1",
         provider_app_id="app-1",
-        target_guild_id="guild-1",
-        dispatch=_dispatch(guild_id="guild-2"),
-        received_at=received_at,
-    )
-    unsupported = project_discord_gateway_dispatch(
-        connection_id="connection-1",
-        provider_app_id="app-1",
-        target_guild_id="guild-1",
-        dispatch=_dispatch(event_name="GUILD_CREATE"),
-        received_at=received_at,
+        target_guild_id="300",
+        event=_event(guild_id=301),
+        received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
     )
 
     assert cross_guild is None
-    assert unsupported is None
 
 
-def test_rejects_malformed_message_dispatch_before_admission() -> None:
-    """Reject a lifecycle event without its canonical message identity."""
-    dispatch = DiscordGatewayDispatch(
-        session_id="gateway-session-1",
-        resume_gateway_url="wss://gateway.discord.gg",
-        sequence=42,
-        event_name="MESSAGE_CREATE",
-        data={"guild_id": "guild-1", "channel_id": "channel-1"},
+def test_rejects_typed_create_without_message() -> None:
+    malformed = DiscordGatewayMessageEvent(
+        event_type="message_create",
+        channel=_channel(),
     )
 
-    with pytest.raises(ValueError, match="'id' is missing"):
-        project_discord_gateway_dispatch(
+    with pytest.raises(ValueError, match="typed Message"):
+        project_discord_gateway_event(
             connection_id="connection-1",
             provider_app_id="app-1",
-            target_guild_id="guild-1",
-            dispatch=dispatch,
+            target_guild_id="300",
+            event=malformed,
             received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
         )
 
@@ -211,6 +232,7 @@ def test_normalizes_create_with_principal_and_attachment_metadata() -> None:
     assert normalized.provider_message_key == "discord:guild-1:100"
     assert normalized.provider_position == "00000000000000000100"
     assert normalized.provider_user_id == "300"
+    assert normalized.sender_display_name == "participant"
     assert normalized.normalized_body == "Ask the connected App."
     assert normalized.thread_id == "400"
     assert normalized.parent_channel_id == "200"
@@ -220,6 +242,45 @@ def test_normalizes_create_with_principal_and_attachment_metadata() -> None:
     assert isinstance(files, list)
     assert isinstance(files[0], dict)
     assert files[0]["provider_file_id"] == "500"
+    assert normalized.reference_mappings == {
+        "users": {"300": "participant"},
+    }
+    assert normalized.normalized_size > len(normalized.normalized_body.encode())
+
+
+def test_identity_mapping_render_budget_is_included_in_pending_size() -> None:
+    """Discord display names consume the same bounded pending-context budget."""
+    without_mappings = normalize_projected_discord_event(
+        event_type="discord_message_create",
+        tenant_id="guild-1",
+        connected_bot_user_id=None,
+        envelope={
+            "message": {
+                "id": "100",
+                "channel_id": "200",
+                "guild_id": "guild-1",
+                "content": "hello",
+            }
+        },
+    )
+    with_mappings = normalize_projected_discord_event(
+        event_type="discord_message_create",
+        tenant_id="guild-1",
+        connected_bot_user_id=None,
+        envelope={
+            "message": {
+                "id": "100",
+                "channel_id": "200",
+                "channel_name": "incidents",
+                "guild_id": "guild-1",
+                "content": "hello",
+                "author": {"id": "300", "global_name": "Participant"},
+            }
+        },
+    )
+
+    assert without_mappings.normalized_size == len(b"hello")
+    assert with_mappings.normalized_size > without_mappings.normalized_size
 
 
 @pytest.mark.parametrize(

@@ -1481,8 +1481,9 @@ def _external_resource_label(item: ExternalChannelInvocationProjectionItem) -> s
     if not isinstance(labels, dict) or not labels:
         raise ValueError("External invocation is missing resource labels.")
     channel_id = (
-        labels.get("channel_id")
+        labels.get("display_name")
         or labels.get("channel_name")
+        or labels.get("channel_id")
         or labels.get("parent_channel_id")
         or labels.get("thread_id")
     )

@@ -594,11 +594,11 @@ class TestExternalChannelRepository:
         assert claim.connection_id == replacement.id
         assert claim.claim_generation == 2
 
-    async def test_discord_gateway_admission_atomically_fences_checkpoint(
+    async def test_discord_gateway_admission_is_lease_fenced(
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """Gateway event identity and resume state converge under one current lease."""
+        """Typed Gateway admission remains idempotent under one current lease."""
         workspace_id = await _create_workspace(
             rdb_session,
             "discord-gateway-admission",
@@ -650,10 +650,13 @@ class TestExternalChannelRepository:
             lease_until=_at(10),
         )
         assert claim is not None
+        first_provider_event_id = (
+            "discord:discord_message_create:guild-1:channel-1:message-1"
+        )
         create = _event_create(connection.id).model_copy(
             update={
-                "provider_event_id": "discord-gateway:session-1:5",
-                "transport_envelope_id": "discord-gateway:session-1:5",
+                "provider_event_id": first_provider_event_id,
+                "transport_envelope_id": first_provider_event_id,
                 "event_type": "discord_message_create",
                 "provider_app_id": "discord-app-1",
                 "provider_tenant_id": "guild-1",
@@ -675,9 +678,6 @@ class TestExternalChannelRepository:
             lease_generation=claim.lease.lease_generation,
             now=_at(3),
             create=create,
-            encrypted_checkpoint="checkpoint-5",
-            checkpoint_version=1,
-            sequence=5,
         )
         duplicate = await repo.admit_discord_gateway_event(
             rdb_session,
@@ -686,9 +686,6 @@ class TestExternalChannelRepository:
             lease_generation=claim.lease.lease_generation,
             now=_at(4),
             create=create,
-            encrypted_checkpoint="checkpoint-5",
-            checkpoint_version=1,
-            sequence=5,
         )
         lease = await rdb_session.scalar(
             sa.select(RDBExternalChannelIngressLease).where(
@@ -701,46 +698,6 @@ class TestExternalChannelRepository:
         assert duplicate is not None
         assert duplicate.created is False
         assert lease is not None
-        assert lease.last_handled_dispatch_sequence == 5
-        assert lease.encrypted_checkpoint == "checkpoint-5"
-
-        first_checkpoint = await repo.update_discord_gateway_checkpoint(
-            rdb_session,
-            connection_id=connection.id,
-            lease_owner="manager-1",
-            lease_generation=claim.lease.lease_generation,
-            now=_at(5),
-            encrypted_checkpoint="checkpoint-session-1-5",
-            checkpoint_version=1,
-            checkpoint_session_fingerprint="session-1-fingerprint",
-            sequence=5,
-        )
-        stale_checkpoint = await repo.update_discord_gateway_checkpoint(
-            rdb_session,
-            connection_id=connection.id,
-            lease_owner="manager-1",
-            lease_generation=claim.lease.lease_generation,
-            now=_at(6),
-            encrypted_checkpoint="checkpoint-session-1-4",
-            checkpoint_version=1,
-            checkpoint_session_fingerprint="session-1-fingerprint",
-            sequence=4,
-        )
-        reset_checkpoint = await repo.update_discord_gateway_checkpoint(
-            rdb_session,
-            connection_id=connection.id,
-            lease_owner="manager-1",
-            lease_generation=claim.lease.lease_generation,
-            now=_at(7),
-            encrypted_checkpoint="checkpoint-session-2-1",
-            checkpoint_version=1,
-            checkpoint_session_fingerprint="session-2-fingerprint",
-            sequence=1,
-        )
-
-        assert first_checkpoint is True
-        assert stale_checkpoint is False
-        assert reset_checkpoint is True
 
         rdb_connection = await rdb_session.get(
             RDBExternalChannelConnection,
@@ -749,6 +706,9 @@ class TestExternalChannelRepository:
         assert rdb_connection is not None
         rdb_connection.configuration_generation += 1
         await rdb_session.flush()
+        second_provider_event_id = (
+            "discord:discord_message_create:guild-1:channel-1:message-2"
+        )
         fenced = await repo.admit_discord_gateway_event(
             rdb_session,
             connection_id=connection.id,
@@ -757,13 +717,10 @@ class TestExternalChannelRepository:
             now=_at(5),
             create=create.model_copy(
                 update={
-                    "provider_event_id": "discord-gateway:session-1:6",
-                    "transport_envelope_id": "discord-gateway:session-1:6",
+                    "provider_event_id": second_provider_event_id,
+                    "transport_envelope_id": second_provider_event_id,
                 }
             ),
-            encrypted_checkpoint="checkpoint-6",
-            checkpoint_version=1,
-            sequence=6,
         )
 
         assert fenced is None
@@ -771,7 +728,7 @@ class TestExternalChannelRepository:
             await repo.get_event_by_provider_identity(
                 rdb_session,
                 connection_id=connection.id,
-                provider_event_id="discord-gateway:session-1:6",
+                provider_event_id=second_provider_event_id,
             )
             is None
         )

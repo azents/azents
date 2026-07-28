@@ -65,10 +65,7 @@ def test_progress_uses_a_summary_page_then_ordered_bounded_task_pages() -> None:
         desired_progress_revision=7,
     )
 
-    assert presentation.pages[0].text == (
-        "## Investigating the issue…\n"
-        "2 task(s) · 1 in progress · 1 pending · 0 completed · 0 failed"
-    )
+    assert presentation.pages[0].text == ""
     assert presentation.pages[0].embeds == [
         {
             "title": "Investigating the issue…",
@@ -78,14 +75,18 @@ def test_progress_uses_a_summary_page_then_ordered_bounded_task_pages() -> None:
             "color": 0x5865F2,
         }
     ]
-    assert "Inspect the current incident" in "".join(
-        page.text for page in presentation.pages[1:]
-    )
-    assert "Report the outcome" in "".join(page.text for page in presentation.pages[1:])
+    descriptions: list[str] = []
+    for page in presentation.pages[1:]:
+        if page.embeds:
+            description = page.embeds[0]["description"]
+            if isinstance(description, str):
+                descriptions.append(description)
+    assert "Inspect the current incident" in "".join(descriptions)
+    assert "Report the outcome" in "".join(descriptions)
+    assert all(page.text == "" for page in presentation.pages)
     assert all(
-        len(page.text) <= DISCORD_DELIVERY_TEXT_LIMIT for page in presentation.pages
-    )
-    assert all(
-        page.embeds and page.embeds[0]["description"] == page.text
+        page.embeds
+        and isinstance(page.embeds[0]["description"], str)
+        and len(page.embeds[0]["description"]) <= DISCORD_DELIVERY_TEXT_LIMIT
         for page in presentation.pages[1:]
     )

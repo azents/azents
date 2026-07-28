@@ -1,361 +1,327 @@
-"""Deterministic protocol tests for the Discord Gateway client."""
+"""Tests for the high-level discord.py Gateway integration boundary."""
 
-import json
-from collections.abc import Awaitable, Callable
+from unittest.mock import AsyncMock, MagicMock
 
+import discord
 import pytest
-from pytest import MonkeyPatch
-from websockets.exceptions import ConnectionClosedError
-from websockets.frames import Close
 
 from azents.services.external_channel.discord_gateway import (
     DISCORD_GATEWAY_INTENTS,
-    DiscordGatewayCheckpoint,
     DiscordGatewayClient,
-    DiscordGatewayDispatch,
-    DiscordGatewayInvalidPayload,
+    DiscordGatewayConnectionResult,
+    DiscordGatewayCredentialError,
+    DiscordGatewayError,
+    DiscordGatewayMessageEvent,
+    _DiscordLibraryClient,  # pyright: ignore[reportPrivateUsage]
 )
 
 
-class _Socket:
-    """Script one Gateway WebSocket exchange without a network dependency."""
-
-    def __init__(self, messages: list[dict[str, object] | BaseException]) -> None:
-        self.messages = [
-            json.dumps(message) if isinstance(message, dict) else message
-            for message in messages
-        ]
-        self.sent: list[dict[str, object]] = []
-        self.closed = False
-
-    async def recv(self) -> str:
-        message = self.messages.pop(0)
-        if isinstance(message, BaseException):
-            raise message
-        return message
-
-    async def send(self, message: str) -> None:
-        value = json.loads(message)
-        assert isinstance(value, dict)
-        self.sent.append(value)
-
-    async def close(self) -> None:
-        self.closed = True
+def _guild(*, guild_id: int = 300) -> MagicMock:
+    guild = MagicMock(spec=discord.Guild)
+    guild.id = guild_id
+    return guild
 
 
-async def _connector(
-    socket: _Socket,
-    _endpoint_url: str,
-    _ping_interval_seconds: float,
-    _ping_timeout_seconds: float,
-    _max_size: int,
-) -> _Socket:
-    return socket
+def _channel(*, channel_id: int = 200, guild_id: int = 300) -> MagicMock:
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.id = channel_id
+    channel.guild = _guild(guild_id=guild_id)
+    channel.name = "general"
+    return channel
+
+
+def _message(
+    *,
+    channel: MagicMock | None = None,
+    guild_id: int = 300,
+) -> MagicMock:
+    resolved_channel = channel or _channel(guild_id=guild_id)
+    message = MagicMock(spec=discord.Message)
+    message.id = 100
+    message.guild = resolved_channel.guild
+    message.channel = resolved_channel
+    return message
+
+
+def test_library_client_requests_required_intents() -> None:
+    """Only Guild message and message-content events are requested."""
+    client = _DiscordLibraryClient(
+        target_guild_id=300,
+        handle_event=AsyncMock(),
+    )
+
+    assert client.intents.value == DISCORD_GATEWAY_INTENTS
+    assert client.intents.guilds is True
+    assert client.intents.guild_messages is True
+    assert client.intents.message_content is True
+    assert client.intents.members is False
 
 
 @pytest.mark.asyncio
-async def test_identify_persists_ready_checkpoint_before_reconnect() -> None:
-    """A fresh session identifies and saves READY sequence state before reconnecting."""
-    socket = _Socket(
-        [
-            {"op": 10, "d": {"heartbeat_interval": 60_000}},
-            {
-                "op": 0,
-                "s": 4,
-                "t": "READY",
-                "d": {
-                    "session_id": "session-1",
-                    "resume_gateway_url": "wss://gateway.discord.gg",
-                },
-            },
-            {"op": 7, "d": None},
-        ]
+async def test_message_callback_emits_typed_sdk_event() -> None:
+    """The public on_message callback forwards the SDK Message unchanged."""
+    handler = AsyncMock()
+    client = _DiscordLibraryClient(
+        target_guild_id=300,
+        handle_event=handler,
     )
-    checkpoints: list[DiscordGatewayCheckpoint] = []
-    client = DiscordGatewayClient(
-        connector=lambda *args: _connector(socket, *args),
-    )
+    channel = _channel()
+    message = _message(channel=channel)
 
-    result = await client.run_connection(
-        endpoint_url="wss://gateway.discord.gg",
-        bot_token="redacted-token",
-        checkpoint=None,
-        persist_checkpoint=_checkpoint_sink(checkpoints),
-        handle_dispatch=_dispatch_sink([]),
-    )
+    await client.on_message(message)
 
-    assert socket.sent[0] == {
-        "op": 2,
-        "d": {
-            "token": "redacted-token",
-            "intents": DISCORD_GATEWAY_INTENTS,
-            "properties": {
-                "os": "linux",
-                "browser": "azents",
-                "device": "azents",
-            },
-        },
-    }
-    assert checkpoints == [
-        DiscordGatewayCheckpoint(
-            session_id="session-1",
-            resume_gateway_url="wss://gateway.discord.gg",
-            sequence=4,
-        )
-    ]
-    assert result.reconnect is True
-    assert result.can_resume is True
-    assert result.reason == "reconnect_requested"
-    assert socket.closed is True
+    await_args = handler.await_args
+    assert await_args is not None
+    event = await_args.args[0]
+    assert isinstance(event, DiscordGatewayMessageEvent)
+    assert event.event_type == "message_create"
+    assert event.message is message
+    assert event.channel is channel
+    assert event.deleted_message is None
 
 
 @pytest.mark.asyncio
-async def test_test_gateway_ready_can_checkpoint_an_explicit_ws_fake(
-    monkeypatch: MonkeyPatch,
+async def test_update_callback_fetches_complete_typed_message() -> None:
+    """Message updates fetch a complete Message without reading payload.data."""
+    handler = AsyncMock()
+    client = _DiscordLibraryClient(
+        target_guild_id=300,
+        handle_event=handler,
+    )
+    channel = _channel()
+    message = _message(channel=channel)
+    channel.fetch_message = AsyncMock(return_value=message)
+    client.get_channel = MagicMock(return_value=channel)
+    payload = MagicMock(spec=discord.RawMessageUpdateEvent)
+    payload.guild_id = 300
+    payload.channel_id = 200
+    payload.message_id = 100
+    payload.data = MagicMock(side_effect=AssertionError("raw data accessed"))
+
+    await client.on_raw_message_edit(payload)
+
+    channel.fetch_message.assert_awaited_once_with(100)
+    await_args = handler.await_args
+    assert await_args is not None
+    event = await_args.args[0]
+    assert event.event_type == "message_update"
+    assert event.message is message
+
+
+@pytest.mark.asyncio
+async def test_delete_callback_resolves_channel_through_public_sdk_api() -> None:
+    """Cache misses use Client.fetch_channel and retain a typed channel."""
+    handler = AsyncMock()
+    client = _DiscordLibraryClient(
+        target_guild_id=300,
+        handle_event=handler,
+    )
+    channel = _channel()
+    client.get_channel = MagicMock(return_value=None)
+    client.fetch_channel = AsyncMock(return_value=channel)
+    payload = MagicMock(spec=discord.RawMessageDeleteEvent)
+    payload.guild_id = 300
+    payload.channel_id = 200
+    payload.message_id = 100
+
+    await client.on_raw_message_delete(payload)
+
+    client.fetch_channel.assert_awaited_once_with(200)
+    await_args = handler.await_args
+    assert await_args is not None
+    event = await_args.args[0]
+    assert event.event_type == "message_delete"
+    assert event.deleted_message is payload
+    assert event.channel is channel
+
+
+@pytest.mark.asyncio
+async def test_cross_guild_callbacks_are_ignored() -> None:
+    handler = AsyncMock()
+    client = _DiscordLibraryClient(
+        target_guild_id=300,
+        handle_event=handler,
+    )
+
+    await client.on_message(_message(guild_id=301))
+
+    handler.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handler_failure_closes_client_and_is_retained() -> None:
+    """Admission failures stop the SDK connection instead of being logged and lost."""
+    error = DiscordGatewayError("admission failed")
+    client = _DiscordLibraryClient(
+        target_guild_id=300,
+        handle_event=AsyncMock(side_effect=error),
+    )
+    client.close = AsyncMock()
+
+    await client.on_message(_message())
+
+    assert client.event_error is error
+    client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_typed_message_fetch_failure_closes_client() -> None:
+    """SDK resolution failures stop the connection before admission continues."""
+    error = RuntimeError("typed message lookup failed")
+    channel = _channel()
+    channel.fetch_message = AsyncMock(side_effect=error)
+    handler = AsyncMock()
+    client = _DiscordLibraryClient(
+        target_guild_id=300,
+        handle_event=handler,
+    )
+    client.get_channel = MagicMock(return_value=channel)
+    client.close = AsyncMock()
+    payload = MagicMock(spec=discord.RawMessageUpdateEvent)
+    payload.guild_id = 300
+    payload.channel_id = 200
+    payload.message_id = 100
+
+    await client.on_raw_message_edit(payload)
+
+    assert client.event_error is error
+    handler.assert_not_awaited()
+    client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_public_start_with_sdk_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Allow a test-only fake URL through the same READY checkpoint boundary."""
-    monkeypatch.setenv(
-        "AZ_TESTENV_DISCORD_API_BASE_URL",
-        "http://discord-fake:8085/api/v10",
-    )
-    monkeypatch.setenv("AZ_TESTENV_DISCORD_ALLOW_INSECURE_GATEWAY", "true")
-    socket = _Socket(
-        [
-            {"op": 10, "d": {"heartbeat_interval": 60_000}},
-            {
-                "op": 0,
-                "s": 4,
-                "t": "READY",
-                "d": {
-                    "session_id": "session-1",
-                    "resume_gateway_url": "ws://discord-fake:8086",
-                },
-            },
-            {"op": 7, "d": None},
-        ]
-    )
-    checkpoints: list[DiscordGatewayCheckpoint] = []
-    client = DiscordGatewayClient(
-        connector=lambda *args: _connector(socket, *args),
-    )
+    """Discovery, heartbeat, reconnect, and Resume stay inside Client.start."""
+    started: list[tuple[str, bool]] = []
 
-    result = await client.run_connection(
-        endpoint_url="ws://discord-fake:8086",
+    async def start(
+        self: _DiscordLibraryClient,
+        token: str,
+        *,
+        reconnect: bool = True,
+    ) -> None:
+        started.append((token, reconnect))
+
+    async def close(self: _DiscordLibraryClient) -> None:
+        return None
+
+    monkeypatch.setattr(_DiscordLibraryClient, "start", start)
+    monkeypatch.setattr(_DiscordLibraryClient, "close", close)
+
+    result = await DiscordGatewayClient().run_connection(
         bot_token="redacted-token",
-        checkpoint=None,
-        persist_checkpoint=_checkpoint_sink(checkpoints),
-        handle_dispatch=_dispatch_sink([]),
+        target_guild_id="300",
+        handle_event=AsyncMock(),
     )
 
-    assert checkpoints == [
-        DiscordGatewayCheckpoint(
-            session_id="session-1",
-            resume_gateway_url="ws://discord-fake:8086",
-            sequence=4,
-        )
-    ]
-    assert result.can_resume is True
+    assert started == [("redacted-token", True)]
+    assert result == DiscordGatewayConnectionResult(
+        reconnect=True,
+        reason="gateway_client_closed",
+    )
 
 
 @pytest.mark.asyncio
-async def test_resume_advances_existing_checkpoint() -> None:
-    """A resumed session keeps its identity and advances dispatch sequence."""
-    checkpoint = DiscordGatewayCheckpoint(
-        session_id="session-1",
-        resume_gateway_url="wss://gateway.discord.gg",
-        sequence=4,
-    )
-    socket = _Socket(
-        [
-            {"op": 10, "d": {"heartbeat_interval": 60_000}},
-            {"op": 0, "s": 5, "t": "RESUMED", "d": {}},
-            {"op": 9, "d": False},
-        ]
-    )
-    checkpoints: list[DiscordGatewayCheckpoint] = []
-    client = DiscordGatewayClient(
-        connector=lambda *args: _connector(socket, *args),
-    )
+async def test_runner_wraps_uncontrolled_callback_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Typed callback failures enter the manager's controlled gap path."""
+    failure = RuntimeError("private failure detail")
 
-    result = await client.run_connection(
-        endpoint_url=checkpoint.resume_gateway_url,
-        bot_token="redacted-token",
-        checkpoint=checkpoint,
-        persist_checkpoint=_checkpoint_sink(checkpoints),
-        handle_dispatch=_dispatch_sink([]),
-    )
+    async def start(
+        self: _DiscordLibraryClient,
+        token: str,
+        *,
+        reconnect: bool = True,
+    ) -> None:
+        del token, reconnect
+        self.event_error = failure
 
-    assert socket.sent[0] == {
-        "op": 6,
-        "d": {
-            "token": "redacted-token",
-            "session_id": "session-1",
-            "seq": 4,
-        },
-    }
-    assert checkpoints == [
-        DiscordGatewayCheckpoint(
-            session_id="session-1",
-            resume_gateway_url="wss://gateway.discord.gg",
-            sequence=5,
-        )
-    ]
-    assert result.reconnect is True
-    assert result.can_resume is False
-    assert result.checkpoint is None
+    async def close(self: _DiscordLibraryClient) -> None:
+        return None
 
+    monkeypatch.setattr(_DiscordLibraryClient, "start", start)
+    monkeypatch.setattr(_DiscordLibraryClient, "close", close)
 
-@pytest.mark.asyncio
-async def test_authentication_close_terminalizes_gateway_session() -> None:
-    """Discord authentication rejection cannot enter a reconnect loop."""
-    socket = _Socket(
-        [
-            {"op": 10, "d": {"heartbeat_interval": 60_000}},
-            ConnectionClosedError(Close(4004, "authentication failed"), None),
-        ]
-    )
-    client = DiscordGatewayClient(
-        connector=lambda *args: _connector(socket, *args),
-    )
-
-    result = await client.run_connection(
-        endpoint_url="wss://gateway.discord.gg",
-        bot_token="redacted-token",
-        checkpoint=None,
-        persist_checkpoint=_checkpoint_sink([]),
-        handle_dispatch=_dispatch_sink([]),
-    )
-
-    assert result.reconnect is False
-    assert result.can_resume is False
-    assert result.reason == "gateway_credentials_rejected"
-    assert socket.closed is True
-
-
-@pytest.mark.asyncio
-async def test_rate_limited_close_reconnects_gateway_session() -> None:
-    """Discord rate limiting must reconnect only after manager backoff."""
-    socket = _Socket(
-        [
-            {"op": 10, "d": {"heartbeat_interval": 60_000}},
-            ConnectionClosedError(Close(4008, "rate limited"), None),
-        ]
-    )
-    client = DiscordGatewayClient(
-        connector=lambda *args: _connector(socket, *args),
-    )
-
-    result = await client.run_connection(
-        endpoint_url="wss://gateway.discord.gg",
-        bot_token="redacted-token",
-        checkpoint=None,
-        persist_checkpoint=_checkpoint_sink([]),
-        handle_dispatch=_dispatch_sink([]),
-    )
-
-    assert result.reconnect is True
-    assert result.can_resume is False
-    assert result.reason == "gateway_rate_limited"
-    assert socket.closed is True
-
-
-@pytest.mark.asyncio
-async def test_dispatch_handler_finishes_before_checkpoint_persistence() -> None:
-    """A dispatched event is admitted by its callback before resume state advances."""
-    socket = _Socket(
-        [
-            {"op": 10, "d": {"heartbeat_interval": 60_000}},
-            {
-                "op": 0,
-                "s": 4,
-                "t": "READY",
-                "d": {
-                    "session_id": "session-1",
-                    "resume_gateway_url": "wss://gateway.discord.gg",
-                },
-            },
-            {
-                "op": 0,
-                "s": 5,
-                "t": "MESSAGE_CREATE",
-                "d": {"id": "message-1"},
-            },
-            {"op": 7, "d": None},
-        ]
-    )
-    events: list[str] = []
-    client = DiscordGatewayClient(
-        connector=lambda *args: _connector(socket, *args),
-    )
-
-    async def handle_dispatch(dispatch: DiscordGatewayDispatch) -> bool:
-        assert dispatch.session_id == "session-1"
-        assert dispatch.resume_gateway_url == "wss://gateway.discord.gg"
-        assert dispatch.sequence == 5
-        assert dispatch.event_name == "MESSAGE_CREATE"
-        events.append("dispatch")
-        return False
-
-    async def persist_checkpoint(checkpoint: DiscordGatewayCheckpoint) -> None:
-        events.append(f"checkpoint:{checkpoint.sequence}")
-
-    await client.run_connection(
-        endpoint_url="wss://gateway.discord.gg",
-        bot_token="redacted-token",
-        checkpoint=None,
-        persist_checkpoint=persist_checkpoint,
-        handle_dispatch=handle_dispatch,
-    )
-
-    assert events == ["checkpoint:4", "dispatch", "checkpoint:5"]
-
-
-@pytest.mark.asyncio
-async def test_rejects_dispatch_without_a_sequence() -> None:
-    """Malformed Dispatches do not advance resumable state."""
-    socket = _Socket(
-        [
-            {"op": 10, "d": {"heartbeat_interval": 60_000}},
-            {"op": 0, "s": None, "t": "READY", "d": {}},
-        ]
-    )
-    client = DiscordGatewayClient(
-        connector=lambda *args: _connector(socket, *args),
-    )
-
-    with pytest.raises(DiscordGatewayInvalidPayload, match="invalid sequence"):
-        await client.run_connection(
-            endpoint_url="wss://gateway.discord.gg",
+    with pytest.raises(
+        DiscordGatewayError,
+        match="typed callback processing failed",
+    ) as raised:
+        await DiscordGatewayClient().run_connection(
             bot_token="redacted-token",
-            checkpoint=None,
-            persist_checkpoint=lambda _checkpoint: _unexpected_persist(),
-            handle_dispatch=_dispatch_sink([]),
+            target_guild_id="300",
+            handle_event=AsyncMock(),
         )
-    assert socket.closed is True
+
+    assert raised.value.__cause__ is failure
 
 
-async def _unexpected_persist() -> None:
-    raise AssertionError("Malformed Dispatch must not persist a checkpoint.")
+@pytest.mark.asyncio
+async def test_runner_preserves_controlled_callback_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lease and admission errors retain their controlled subtype."""
+    failure = DiscordGatewayError("controlled failure")
+
+    async def start(
+        self: _DiscordLibraryClient,
+        token: str,
+        *,
+        reconnect: bool = True,
+    ) -> None:
+        del token, reconnect
+        self.event_error = failure
+
+    async def close(self: _DiscordLibraryClient) -> None:
+        return None
+
+    monkeypatch.setattr(_DiscordLibraryClient, "start", start)
+    monkeypatch.setattr(_DiscordLibraryClient, "close", close)
+
+    with pytest.raises(DiscordGatewayError) as raised:
+        await DiscordGatewayClient().run_connection(
+            bot_token="redacted-token",
+            target_guild_id="300",
+            handle_event=AsyncMock(),
+        )
+
+    assert raised.value is failure
 
 
-def _checkpoint_sink(
-    checkpoints: list[DiscordGatewayCheckpoint],
-) -> Callable[[DiscordGatewayCheckpoint], Awaitable[None]]:
-    """Build an async sink that records one durable checkpoint write."""
+@pytest.mark.asyncio
+async def test_runner_classifies_public_login_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def start(
+        self: _DiscordLibraryClient,
+        token: str,
+        *,
+        reconnect: bool = True,
+    ) -> None:
+        del self, token, reconnect
+        raise discord.LoginFailure("rejected")
 
-    async def persist(checkpoint: DiscordGatewayCheckpoint) -> None:
-        checkpoints.append(checkpoint)
+    async def close(self: _DiscordLibraryClient) -> None:
+        return None
 
-    return persist
+    monkeypatch.setattr(_DiscordLibraryClient, "start", start)
+    monkeypatch.setattr(_DiscordLibraryClient, "close", close)
+
+    with pytest.raises(DiscordGatewayCredentialError):
+        await DiscordGatewayClient().run_connection(
+            bot_token="redacted-token",
+            target_guild_id="300",
+            handle_event=AsyncMock(),
+        )
 
 
-def _dispatch_sink(
-    dispatches: list[DiscordGatewayDispatch],
-) -> Callable[[DiscordGatewayDispatch], Awaitable[bool]]:
-    """Build an async sink that records dispatched payloads."""
-
-    async def handle(dispatch: DiscordGatewayDispatch) -> bool:
-        dispatches.append(dispatch)
-        return False
-
-    return handle
+@pytest.mark.asyncio
+async def test_runner_rejects_non_numeric_guild_identity() -> None:
+    with pytest.raises(DiscordGatewayError, match="Guild identity"):
+        await DiscordGatewayClient().run_connection(
+            bot_token="redacted-token",
+            target_guild_id="not-a-snowflake",
+            handle_event=AsyncMock(),
+        )

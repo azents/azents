@@ -855,7 +855,7 @@ class ExternalChannelAppClaim(_Record):
 
 
 class ExternalChannelIngressLease(_Record):
-    """Provider-neutral lease and resumable checkpoint for inbound ownership."""
+    """Provider-neutral fenced lease for inbound ownership."""
 
     id: str
     connection_id: str
@@ -867,10 +867,6 @@ class ExternalChannelIngressLease(_Record):
     required_app_claim_generation: int | None
     gap_detected_at: datetime.datetime | None
     gap_reason: str | None
-    encrypted_checkpoint: str | None
-    checkpoint_version: int | None
-    checkpoint_session_fingerprint: str | None
-    last_handled_dispatch_sequence: int | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
