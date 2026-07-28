@@ -67,6 +67,7 @@ from azents.repos.external_channel.work_data import (
     ExternalChannelFileAccessTarget,
     ExternalChannelFileSource,
 )
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.external_channel.discord_delivery import (
     DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
     DISCORD_DEFAULT_MAX_FILE_BYTES,
@@ -77,7 +78,6 @@ from azents.services.external_channel.discord_presentation import (
     render_discord_persisted_progress,
     split_discord_markdown,
 )
-from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
@@ -1232,6 +1232,7 @@ class ExternalChannelWorkRepository:
             operation=attempt.operation,
             status=ExternalChannelDeliveryStatus.ATTEMPTING,
             binding_id=attempt.binding_id,
+            resource_id=resource.id,
             connection_id=connection.id,
             provider=connection.provider,
             encrypted_credentials=connection.encrypted_credentials,
