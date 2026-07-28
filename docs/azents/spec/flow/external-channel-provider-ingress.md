@@ -13,6 +13,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/selector.py
   - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
   - python/apps/azents/src/azents/services/external_channel/slack_http.py
+  - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
   - python/apps/azents/src/azents/services/external_channel/slack_socket.py
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_blocks.py
@@ -39,7 +40,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-07-28
-spec_version: 15
+spec_version: 16
 ---
 
 # External Channel Provider Ingress
@@ -128,6 +129,13 @@ and one admission can select at most once.
 
 A connection-selected Socket worker acquires a fenced lease before opening `apps.connections.open` with the app-level token. The WebSocket client admits Events API envelopes through the same durable admission service and sends the exact envelope acknowledgement only after admission returns. Failed admission remains unacknowledged.
 
+Endpoint minting uses the public high-level `AsyncWebClient.apps_connections_open`
+method with SDK retries disabled. Azents then owns the direct WebSocket connection,
+ping configuration, receive loop, durable admission, acknowledgement ordering, and
+reconnect decisions. Public SDK `SocketModeRequest` and `SocketModeResponse` types
+validate received envelope structure and construct acknowledgements; no SDK Socket
+client owns or reconnects the transport.
+
 Socket refresh/reconnect reasons are normalized. Invalid authentication moves the
 connection to `reconnect_required` without changing its route catalog. Socket-only gap
 reasons are persisted for operators. Lease owner and expiry fence heartbeat, renew,
@@ -176,6 +184,10 @@ not provide a custom Gateway endpoint override.
 
 The worker claims admitted events in bounded batches with a claim owner and expiry. Processing is at-least-once and every canonical insert/update is idempotent.
 
+- The processor supervises each event-claim and waiting-binding reconciliation
+  iteration. Unexpected iteration failures are logged, followed by the normal idle
+  poll, and then retried by the still-live loop. Cancellation and shutdown continue
+  through the existing task lifecycle.
 - Provider health failures and token revocation update connection health without
   changing route catalog state, bindings, or work.
 - Every event-persistence and hydration-page transaction locks its `active` or
@@ -224,6 +236,11 @@ The worker claims admitted events in bounded batches with a claim owner and expi
   exists and pages an existing thread backward by message cursor. Both normalize pages
   into the same canonical message/revision identities and update the high-watermark and
   event boundary without persisting raw REST pages, tokens, or attachment URLs.
+- Slack validation, hydration, metadata, interaction, message, and upload-completion
+  operations use public high-level `AsyncWebClient` methods with SDK retries disabled.
+  Direct HTTP remains limited to authenticated private-file streaming and presigned
+  upload-body transfer, which are binary transport boundaries rather than Slack Web
+  API calls.
 - If routing becomes unavailable after hydration starts, hydration completes as
   `incomplete` with a routing-unavailable error rather than remaining `running`.
 - Rate limits and temporary read failures defer the event with bounded retry timing.
@@ -264,8 +281,16 @@ only. Authorization headers, signing secrets, bot/app tokens, callback URLs, raw
 payloads, message text, attachment names, attachment bytes, and transient URLs are
 excluded.
 
+Slack SDK clients use dedicated non-propagating loggers so SDK diagnostics cannot
+serialize provider request parameters, response bodies, or Socket endpoint details
+into application logs.
+
 ## Changelog
 
+- **2026-07-28** (spec_version 16) — Moved Slack Web API operations and Socket endpoint
+  minting to public high-level SDK methods with retries disabled, retained
+  Azents-owned WebSocket lifecycle with SDK typed envelopes and acknowledgements, and
+  supervised admitted-event processor iterations after transient failures.
 - **2026-07-28** (spec_version 15) — Restricted Discord Gateway ingress to public
   high-level `discord.py` APIs and complete typed message projections, and removed
   raw frame parsing, private SDK access, persisted Resume state, and custom endpoint

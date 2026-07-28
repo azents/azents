@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-28
-spec_version: 22
+spec_version: 23
 ---
 
 # External Channel
@@ -117,6 +117,16 @@ contain multiple independent bindings.
 - Provider health and reconnect do not rewrite route catalog state. New execution
   requires a locked `active` or `degraded` connection, an available route, and active
   Agent lifecycle.
+- Slack Web API operations use public high-level `slack_sdk.AsyncWebClient` methods
+  with SDK retry handlers disabled, so each provider mutation remains one attempt.
+  Direct HTTP is limited to authenticated private-file streaming and presigned upload
+  bodies. Dedicated non-propagating SDK loggers prevent provider request and response
+  content from entering application diagnostics.
+- Slack Socket Mode mints endpoints through the same high-level SDK client, but Azents
+  retains WebSocket connection, ping, admission, acknowledgement ordering, reconnect,
+  and lease ownership. SDK Socket Mode request and response types validate envelopes
+  and construct acknowledgements; Azents does not delegate transport lifecycle or
+  reconnect authority to an SDK Socket client.
 - An unbound resource resolves only through an existing binding, the Single App's
   sole route, a valid Multi App channel default, or explicit selector completion, in
   that order. It never chooses an arbitrary candidate. A resource has at most one
@@ -163,7 +173,10 @@ contain multiple independent bindings.
   authority, malformed metadata, and oversized streams fail closed.
 - Initial binding activation creates one separate Session navigation message and one
   checking work projection before Session wake-up. Slack lowers work through its
-  retained Tracker message; Discord lowers it through ordered durable page parts. A
+  retained Tracker message; Discord lowers each work snapshot to one retained compact
+  text Tracker with no Embed cards. The Discord Tracker keeps every ordered task title
+  and status marker, then uses the remaining bounded message budget for prioritized
+  details, output, and labeled sources. A
   Discord root source provisions or reuses one delivery thread after route resolution,
   persists that target, and sends approval controls, Session navigation, replies,
   files, progress, recovery, and cleanup to that thread. A delivered final answer
@@ -193,6 +206,10 @@ contain multiple independent bindings.
   connected Azents bot is excluded before persistence to prevent provider loops. A
   rejected author revision cannot enter a later invocation batch through another
   participant's trigger.
+- The shared admitted-event processor supervises each claim-and-reconciliation
+  iteration. An unexpected iteration exception is logged and followed by the normal
+  idle poll before another iteration, so one transient processing or reconciliation
+  failure cannot permanently stop later Slack or Discord event claims.
 - A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, route relationship, and active resource. Blocks take precedence.
 - Creating a new binding Session snapshots the routed Agent's current automatic
   Project policy into the root `SessionAgentContext` in the same transaction as
@@ -273,6 +290,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-28** (spec_version 23) — Aligned the provider boundary with high-level
+  Slack Web API methods and SDK typed Socket envelopes while retaining Azents-owned
+  Socket lifecycle, documented the single-message compact Discord Tracker, and made
+  admitted-event processing resilient to transient iteration failures.
 - **2026-07-28** (spec_version 22) — Promoted Runtime File Transfer as the current
   inbound/outbound file boundary: metadata-only durable state, authorized
   provider-to-Runtime staging, verified Runtime-to-provider publication, and no
