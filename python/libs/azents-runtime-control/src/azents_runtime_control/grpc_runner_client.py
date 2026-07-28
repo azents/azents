@@ -20,6 +20,7 @@ from azents_runtime_control.grpc_tls import (
 from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
     runtime_runner_control_pb2_grpc,
+    runtime_runner_transfer_pb2,
 )
 from azents_runtime_control.runner import (
     JsonValue,
@@ -35,6 +36,16 @@ from azents_runtime_control.runner import (
     RunnerStateReport,
     RuntimeRunnerEventType,
     RuntimeRunnerState,
+)
+from azents_runtime_control.runner_transfer import (
+    RunnerTransferCancel,
+    RunnerTransferCancelReason,
+    RunnerTransferDirection,
+    RunnerTransferFailure,
+    RunnerTransferIdentity,
+    RunnerTransferIntent,
+    RunnerTransferOutcome,
+    RunnerTransferResult,
 )
 
 
@@ -1403,6 +1414,159 @@ def _optional_datetime(
     return _datetime(message.deadline_at)
 
 
+def runner_transfer_intent_from_message(
+    message: runtime_runner_control_pb2.RunnerTransferIntent,
+) -> RunnerTransferIntent:
+    """Map one top-level Runner transfer intent.
+
+    :param message: protobuf Runner transfer intent
+    :returns: metadata-only Runner transfer intent
+    """
+    return RunnerTransferIntent(
+        identity=_transfer_identity(message.identity),
+        direction=_transfer_direction(message.direction),
+        operation_id=message.operation_id,
+        owner_session_id=(
+            message.owner_session_id if message.HasField("owner_session_id") else None
+        ),
+        runtime_path=message.runtime_path,
+        overwrite=message.overwrite if message.HasField("overwrite") else None,
+        expected_size=(
+            message.expected_size if message.HasField("expected_size") else None
+        ),
+        expected_sha256=(
+            message.expected_sha256 if message.HasField("expected_sha256") else None
+        ),
+        deadline_at=_datetime(message.deadline_at),
+        protocol_version=message.protocol_version,
+        capability=message.capability,
+        dispatch_id=message.dispatch_id,
+    )
+
+
+def runner_transfer_cancel_from_message(
+    message: runtime_runner_control_pb2.RunnerTransferCancel,
+) -> RunnerTransferCancel:
+    """Map one top-level Runner transfer cancellation.
+
+    :param message: protobuf Runner transfer cancellation
+    :returns: metadata-only Runner transfer cancellation
+    """
+    return RunnerTransferCancel(
+        identity=_transfer_identity(message.identity),
+        operation_id=message.operation_id,
+        dispatch_id=message.dispatch_id,
+        reason={
+            runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_CALLER: (
+                RunnerTransferCancelReason.CALLER
+            ),
+            runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_DEADLINE: (
+                RunnerTransferCancelReason.DEADLINE
+            ),
+            runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_SUPERSEDED: (
+                RunnerTransferCancelReason.SUPERSEDED
+            ),
+            runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_SHUTDOWN: (
+                RunnerTransferCancelReason.SHUTDOWN
+            ),
+        }[message.reason],
+    )
+
+
+def runner_transfer_result_from_message(
+    message: runtime_runner_control_pb2.RunnerTransferResult,
+    *,
+    direction: RunnerTransferDirection,
+) -> RunnerTransferResult:
+    """Map and validate one top-level Runner transfer result.
+
+    :param message: protobuf Runner transfer result
+    :param direction: direction correlated from the dispatched transfer
+    :returns: validated Runner transfer result
+    """
+    return RunnerTransferResult(
+        identity=_transfer_identity(message.identity),
+        operation_id=message.operation_id,
+        dispatch_id=message.dispatch_id,
+        direction=direction,
+        outcome={
+            runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_SUCCEEDED: (
+                RunnerTransferOutcome.SUCCEEDED
+            ),
+            runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_FAILED: (
+                RunnerTransferOutcome.FAILED
+            ),
+            runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_CANCELLED: (
+                RunnerTransferOutcome.CANCELLED
+            ),
+        }[message.outcome],
+        actual_size=(message.actual_size if message.HasField("actual_size") else None),
+        sha256=message.sha256 if message.HasField("sha256") else None,
+        destination_committed=(
+            message.destination_committed
+            if message.HasField("destination_committed")
+            else None
+        ),
+        failure=(
+            _transfer_failure(message.failure) if message.HasField("failure") else None
+        ),
+    )
+
+
+def _transfer_identity(
+    message: runtime_runner_transfer_pb2.TransferIdentity,
+) -> RunnerTransferIdentity:
+    return RunnerTransferIdentity(
+        transfer_id=message.transfer_id,
+        attempt_id=message.attempt_id,
+        runtime_id=message.runtime_id,
+        runner_generation=message.runner_generation,
+    )
+
+
+def _transfer_direction(value: int) -> RunnerTransferDirection:
+    return {
+        runtime_runner_transfer_pb2.TRANSFER_DIRECTION_DOWNLOAD: (
+            RunnerTransferDirection.DOWNLOAD
+        ),
+        runtime_runner_transfer_pb2.TRANSFER_DIRECTION_UPLOAD: (
+            RunnerTransferDirection.UPLOAD
+        ),
+    }[value]
+
+
+def _transfer_failure(value: int) -> RunnerTransferFailure:
+    return {
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_UNAVAILABLE: (
+            RunnerTransferFailure.UNAVAILABLE
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_ALREADY_CLAIMED: (
+            RunnerTransferFailure.ALREADY_CLAIMED
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_RESOURCE_EXHAUSTED: (
+            RunnerTransferFailure.RESOURCE_EXHAUSTED
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_DEADLINE_EXCEEDED: (
+            RunnerTransferFailure.DEADLINE_EXCEEDED
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_CANCELLED: (
+            RunnerTransferFailure.CANCELLED
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_INTEGRITY_FAILED: (
+            RunnerTransferFailure.INTEGRITY_FAILED
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_PROTOCOL_VIOLATION: (
+            RunnerTransferFailure.PROTOCOL_VIOLATION
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_STREAM_FAILED: (
+            RunnerTransferFailure.STREAM_FAILED
+        ),
+        runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_DESTINATION_FAILED: (
+            RunnerTransferFailure.DESTINATION_FAILED
+        ),
+    }[value]
+
+
 __all__ = [
     "GrpcRunnerControlClient",
     "RunnerControlStream",
@@ -1410,4 +1574,7 @@ __all__ = [
     "runner_execution_policy_evidence_from_message",
     "runner_event_from_message",
     "runner_state_report_from_message",
+    "runner_transfer_cancel_from_message",
+    "runner_transfer_intent_from_message",
+    "runner_transfer_result_from_message",
 ]

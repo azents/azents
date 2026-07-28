@@ -3,6 +3,7 @@ syntax = "proto3";
 package azents.runtime_control.v1;
 
 import "google/protobuf/timestamp.proto";
+import "runtime_runner_transfer.proto";
 
 // Runtime-internal Runners open this outbound stream to Runtime Control.
 service RuntimeRunnerControl {
@@ -20,6 +21,7 @@ message RunnerMessage {
     RunnerStateReport state_report = 20;
     RunnerOperationEvent operation_event = 21;
     RunnerOperationStart operation_start = 22;
+    RunnerTransferResult transfer_result = 23;
     RunnerError error = 40;
   }
 }
@@ -33,6 +35,8 @@ message RunnerControlMessage {
     RunnerOperationRequest operation_request = 20;
     RunnerOperationStartAck operation_start_ack = 21;
     RunnerOperationCancel operation_cancel = 22;
+    RunnerTransferIntent transfer_intent = 23;
+    RunnerTransferCancel transfer_cancel = 24;
     RunnerError error = 40;
   }
 }
@@ -77,6 +81,67 @@ message RunnerOperationStartAck {
 message RunnerOperationCancel {
   string runtime_id = 1;
   string operation_id = 2;
+}
+
+enum RunnerTransferCancelReason {
+  RUNNER_TRANSFER_CANCEL_REASON_UNSPECIFIED = 0;
+  RUNNER_TRANSFER_CANCEL_REASON_CALLER = 1;
+  RUNNER_TRANSFER_CANCEL_REASON_DEADLINE = 2;
+  RUNNER_TRANSFER_CANCEL_REASON_SUPERSEDED = 3;
+  RUNNER_TRANSFER_CANCEL_REASON_SHUTDOWN = 4;
+}
+
+enum RunnerTransferOutcome {
+  RUNNER_TRANSFER_OUTCOME_UNSPECIFIED = 0;
+  RUNNER_TRANSFER_OUTCOME_SUCCEEDED = 1;
+  RUNNER_TRANSFER_OUTCOME_FAILED = 2;
+  RUNNER_TRANSFER_OUTCOME_CANCELLED = 3;
+}
+
+enum RunnerTransferFailure {
+  RUNNER_TRANSFER_FAILURE_UNSPECIFIED = 0;
+  RUNNER_TRANSFER_FAILURE_UNAVAILABLE = 1;
+  RUNNER_TRANSFER_FAILURE_ALREADY_CLAIMED = 2;
+  RUNNER_TRANSFER_FAILURE_RESOURCE_EXHAUSTED = 3;
+  RUNNER_TRANSFER_FAILURE_DEADLINE_EXCEEDED = 4;
+  RUNNER_TRANSFER_FAILURE_CANCELLED = 5;
+  RUNNER_TRANSFER_FAILURE_INTEGRITY_FAILED = 6;
+  RUNNER_TRANSFER_FAILURE_PROTOCOL_VIOLATION = 7;
+  RUNNER_TRANSFER_FAILURE_STREAM_FAILED = 8;
+  RUNNER_TRANSFER_FAILURE_DESTINATION_FAILED = 9;
+}
+
+message RunnerTransferIntent {
+  TransferIdentity identity = 1;
+  TransferDirection direction = 2;
+  string operation_id = 3;
+  optional string owner_session_id = 4;
+  string runtime_path = 5;
+  optional bool overwrite = 6;
+  optional uint64 expected_size = 7;
+  optional string expected_sha256 = 8;
+  google.protobuf.Timestamp deadline_at = 9;
+  string protocol_version = 10;
+  string capability = 11;
+  string dispatch_id = 12;
+}
+
+message RunnerTransferCancel {
+  TransferIdentity identity = 1;
+  string operation_id = 2;
+  string dispatch_id = 3;
+  RunnerTransferCancelReason reason = 4;
+}
+
+message RunnerTransferResult {
+  TransferIdentity identity = 1;
+  string operation_id = 2;
+  string dispatch_id = 3;
+  RunnerTransferOutcome outcome = 4;
+  optional uint64 actual_size = 5;
+  optional string sha256 = 6;
+  optional bool destination_committed = 7;
+  optional RunnerTransferFailure failure = 8;
 }
 
 message RunnerStateReport {

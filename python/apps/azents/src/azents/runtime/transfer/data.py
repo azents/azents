@@ -45,6 +45,15 @@ class RuntimeTransferCleanupStatus(enum.StrEnum):
     RETRYABLE_FAILURE = "retryable_failure"
 
 
+class RuntimeTransferDispatchStatus(enum.StrEnum):
+    """Durable metadata-only dispatch delivery state."""
+
+    NOT_BOUND = "not_bound"
+    BOUND = "bound"
+    DELIVERABLE = "deliverable"
+    ENQUEUED = "enqueued"
+
+
 class RuntimeTransferFailure(enum.StrEnum):
     """Bounded failure classification without provider diagnostics."""
 
@@ -57,6 +66,15 @@ class RuntimeTransferFailure(enum.StrEnum):
     CONSUMER = "consumer"
 
 
+class RuntimeTransferCancellationReason(enum.StrEnum):
+    """Bounded reason for stopping one transfer attempt."""
+
+    CALLER = "caller"
+    DEADLINE = "deadline"
+    SUPERSEDED = "superseded"
+    SHUTDOWN = "shutdown"
+
+
 @dataclass(frozen=True)
 class RuntimeTransferConfig:
     """Explicit transfer-state limits selected by Runtime Control."""
@@ -67,6 +85,7 @@ class RuntimeTransferConfig:
     deployment_bytes: int
     admission_lease: timedelta
     consumer_lease: timedelta
+    stream_lease: timedelta
     terminal_ttl: timedelta
     list_page_size: int
 
@@ -84,7 +103,12 @@ class RuntimeTransferConfig:
         ):
             raise ValueError("transfer limits must be positive")
         if (
-            min(self.admission_lease, self.consumer_lease, self.terminal_ttl)
+            min(
+                self.admission_lease,
+                self.consumer_lease,
+                self.stream_lease,
+                self.terminal_ttl,
+            )
             <= timedelta()
         ):
             raise ValueError("transfer durations must be positive")
@@ -105,6 +129,7 @@ class RuntimeTransferAdmission:
     desired_generation: int
     operation_id: str
     session_id: str | None
+    agent_id: str | None
     runtime_path: str
     overwrite: bool
     expected_size: int
@@ -117,12 +142,16 @@ class RuntimeTransferAdmission:
 
     def __post_init__(self) -> None:
         """Validate trusted admission metadata."""
-        _required(self.transfer_id, "transfer_id")
-        _required(self.attempt_id, "attempt_id")
-        _required(self.runtime_id, "runtime_id")
-        _required(self.operation_id, "operation_id")
-        _required(self.runtime_path, "runtime_path")
-        _required(self.resource_class, "resource_class")
+        _bounded(self.transfer_id, "transfer_id", 128)
+        _bounded(self.attempt_id, "attempt_id", 128)
+        _bounded(self.runtime_id, "runtime_id", 128)
+        _bounded(self.operation_id, "operation_id", 128)
+        _bounded(self.runtime_path, "runtime_path", 4096)
+        _bounded(self.resource_class, "resource_class", 64)
+        if self.session_id is not None:
+            _bounded(self.session_id, "session_id", 128)
+        if self.agent_id is not None:
+            _bounded(self.agent_id, "agent_id", 128)
         if (
             min(
                 self.desired_generation,
@@ -168,6 +197,14 @@ class RuntimeTransferProgress:
 
 
 @dataclass(frozen=True)
+class RuntimeTransferSettlement:
+    """Canonical terminal outcome and failure pair."""
+
+    outcome: RuntimeTransferOutcome
+    failure: RuntimeTransferFailure | None
+
+
+@dataclass(frozen=True)
 class RuntimeTransferRecord:
     """Complete metadata-only attempt state."""
 
@@ -180,12 +217,22 @@ class RuntimeTransferRecord:
     updated_at: datetime
     logical_expires_at: datetime
     accepted_runner_generation: int | None
+    dispatch_id: str | None
+    dispatch_status: RuntimeTransferDispatchStatus
+    dispatch_request_id: str | None
     object: RuntimeTransferObject | None
     actual_size: int | None
     actual_sha256: str | None
     stream_claim_id: str | None
+    stream_owner_replica_id: str | None
+    stream_lease_expires_at: datetime | None
+    multipart_cleanup_handle: str | None
+    completed_object_cleanup_required: bool
     progress: RuntimeTransferProgress | None
+    upload_response_committed_at: datetime | None
+    runner_result_confirmed_at: datetime | None
     cancellation_requested_at: datetime | None
+    cancellation_reason: RuntimeTransferCancellationReason | None
     consumer_claim_id: str | None
     consumer_lease_expires_at: datetime | None
     consumer_acknowledged_at: datetime | None
@@ -211,6 +258,86 @@ class RuntimeTransferRecord:
             raise ValueError(
                 "logical_expires_at must be the authoritative absolute expiry"
             )
+        if self.accepted_runner_generation is not None and (
+            self.accepted_runner_generation <= 0
+        ):
+            raise ValueError("accepted_runner_generation must be positive")
+        if self.dispatch_status is RuntimeTransferDispatchStatus.NOT_BOUND:
+            if (
+                self.dispatch_id is not None
+                or self.dispatch_request_id is not None
+                or self.accepted_runner_generation is not None
+            ):
+                raise ValueError("unbound dispatch must not retain dispatch authority")
+        elif (
+            self.dispatch_id is None
+            or self.dispatch_request_id is None
+            or self.accepted_runner_generation is None
+        ):
+            raise ValueError("bound dispatch requires complete dispatch authority")
+        if self.stream_claim_id is None:
+            if (
+                self.stream_owner_replica_id is not None
+                or self.stream_lease_expires_at is not None
+            ):
+                raise ValueError("stream lease requires a stream claim")
+        elif (
+            self.stream_owner_replica_id is None or self.stream_lease_expires_at is None
+        ):
+            raise ValueError("stream claim requires complete owner lease")
+        if self.stream_owner_replica_id is not None:
+            _required(self.stream_owner_replica_id, "stream_owner_replica_id")
+        if self.stream_lease_expires_at is not None:
+            _aware(self.stream_lease_expires_at, "stream_lease_expires_at")
+        if self.multipart_cleanup_handle is not None:
+            _opaque_handle(self.multipart_cleanup_handle, "multipart_cleanup_handle")
+        if self.completed_object_cleanup_required and (
+            self.object is None
+            or self.cleanup_status is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+        ):
+            raise ValueError(
+                "completed object cleanup requires retryable object evidence"
+            )
+        if self.upload_response_committed_at is not None:
+            _aware(
+                self.upload_response_committed_at,
+                "upload_response_committed_at",
+            )
+            if (
+                self.admission.direction is not RuntimeTransferDirection.UPLOAD
+                or self.phase
+                not in {
+                    RuntimeTransferPhase.AVAILABLE,
+                    RuntimeTransferPhase.CONSUMING,
+                    RuntimeTransferPhase.CONSUMED,
+                    RuntimeTransferPhase.TERMINAL,
+                }
+                or self.cancellation_requested_at is not None
+            ):
+                raise ValueError(
+                    "Upload response commit requires durable uncancelled availability"
+                )
+        if self.runner_result_confirmed_at is not None:
+            _aware(self.runner_result_confirmed_at, "runner_result_confirmed_at")
+            if (
+                self.admission.direction is not RuntimeTransferDirection.UPLOAD
+                or self.phase
+                not in {
+                    RuntimeTransferPhase.AVAILABLE,
+                    RuntimeTransferPhase.CONSUMING,
+                    RuntimeTransferPhase.CONSUMED,
+                    RuntimeTransferPhase.TERMINAL,
+                }
+                or self.cancellation_requested_at is not None
+                or self.upload_response_committed_at is None
+            ):
+                raise ValueError(
+                    "Runner result confirmation requires an uncancelled upload"
+                )
+        if (self.cancellation_requested_at is None) != (
+            self.cancellation_reason is None
+        ):
+            raise ValueError("cancellation evidence must be complete")
         if self.actual_size is not None and self.actual_size < 0:
             raise ValueError("actual_size must not be negative")
         _sha(self.actual_sha256)
@@ -248,8 +375,57 @@ def logical_expiry(
 def validate_admission_time(admission: RuntimeTransferAdmission, now: datetime) -> None:
     """Reject an admission whose authoritative source is already expired."""
     _aware(now, "now")
+    if admission.deadline_at <= now:
+        raise ValueError("deadline_at must be in the future")
     if admission.source_expires_at is not None and admission.source_expires_at <= now:
         raise ValueError("source_expires_at must be in the future")
+
+
+def cancellation_settlement(
+    reason: RuntimeTransferCancellationReason,
+) -> RuntimeTransferSettlement:
+    """Return the canonical terminal authority for one cancellation reason."""
+    match reason:
+        case (
+            RuntimeTransferCancellationReason.CALLER
+            | RuntimeTransferCancellationReason.SHUTDOWN
+        ):
+            return RuntimeTransferSettlement(
+                RuntimeTransferOutcome.CANCELLED,
+                RuntimeTransferFailure.CANCELLED,
+            )
+        case RuntimeTransferCancellationReason.DEADLINE:
+            return RuntimeTransferSettlement(
+                RuntimeTransferOutcome.EXPIRED,
+                RuntimeTransferFailure.EXPIRED,
+            )
+        case RuntimeTransferCancellationReason.SUPERSEDED:
+            return RuntimeTransferSettlement(
+                RuntimeTransferOutcome.SUPERSEDED,
+                RuntimeTransferFailure.FENCED,
+            )
+
+
+def valid_settlement(
+    outcome: RuntimeTransferOutcome,
+    failure: RuntimeTransferFailure | None,
+) -> bool:
+    """Return whether one terminal pair is canonical."""
+    if outcome is RuntimeTransferOutcome.SUCCEEDED:
+        return failure is None
+    if outcome is RuntimeTransferOutcome.CANCELLED:
+        return failure is RuntimeTransferFailure.CANCELLED
+    if outcome is RuntimeTransferOutcome.EXPIRED:
+        return failure is RuntimeTransferFailure.EXPIRED
+    if outcome is RuntimeTransferOutcome.SUPERSEDED:
+        return failure is RuntimeTransferFailure.FENCED
+    return failure in {
+        RuntimeTransferFailure.ADMISSION,
+        RuntimeTransferFailure.FENCED,
+        RuntimeTransferFailure.INTEGRITY,
+        RuntimeTransferFailure.STREAM,
+        RuntimeTransferFailure.CONSUMER,
+    }
 
 
 def terminal_expiry(now: datetime, terminal_ttl: timedelta) -> datetime:
@@ -267,6 +443,12 @@ def _required(value: str, name: str) -> None:
         raise ValueError(f"{name} must not be empty")
 
 
+def _bounded(value: str, name: str, maximum_bytes: int) -> None:
+    _required(value, name)
+    if len(value.encode("utf-8")) > maximum_bytes:
+        raise ValueError(f"{name} exceeds {maximum_bytes} UTF-8 bytes")
+
+
 def _aware(value: datetime, name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{name} must be timezone-aware")
@@ -279,3 +461,8 @@ def _sha(value: str | None) -> None:
         or any(character not in "0123456789abcdef" for character in value)
     ):
         raise ValueError("SHA-256 must be lowercase hexadecimal")
+
+
+def _opaque_handle(value: str, name: str) -> None:
+    if not value or len(value.encode("utf-8")) > 512 or "://" in value:
+        raise ValueError(f"{name} must be a bounded opaque handle")

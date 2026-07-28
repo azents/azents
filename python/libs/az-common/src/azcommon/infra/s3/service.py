@@ -1,5 +1,6 @@
 """S3-compatible object storage operations."""
 
+import asyncio
 import base64
 import datetime
 import hashlib
@@ -86,6 +87,39 @@ class S3DeleteResult:
     deleted: tuple[S3ObjectIdentity, ...]
     failed: tuple[S3ObjectIdentity, ...]
     next_continuation_token: str | None
+
+
+class S3TransferCleanupRequired(RuntimeError):
+    """Raised when an attempted immutable write needs durable cleanup retry."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        multipart_cleanup_required: bool,
+        completed_object_cleanup_required: bool,
+    ) -> None:
+        if not multipart_cleanup_required and not completed_object_cleanup_required:
+            raise ValueError("At least one transfer cleanup artifact is required")
+        super().__init__(message)
+        self.multipart_cleanup_required = multipart_cleanup_required
+        self.completed_object_cleanup_required = completed_object_cleanup_required
+
+
+class S3TransferCancelled(asyncio.CancelledError):
+    """Cancellation that retains exact durable-cleanup responsibility."""
+
+    def __init__(
+        self,
+        *,
+        multipart_cleanup_required: bool,
+        completed_object_cleanup_required: bool,
+    ) -> None:
+        if not multipart_cleanup_required and not completed_object_cleanup_required:
+            raise ValueError("At least one transfer cleanup artifact is required")
+        super().__init__("S3 transfer cancelled with cleanup responsibility")
+        self.multipart_cleanup_required = multipart_cleanup_required
+        self.completed_object_cleanup_required = completed_object_cleanup_required
 
 
 class S3Service:
@@ -361,23 +395,80 @@ class S3Service:
                 expected_sha256=expected_sha256,
             )
         except BotoClientError as exc:
-            await self.abort_multipart_upload(upload=upload)
             if _is_precondition_failed_error(exc):
+                try:
+                    await self.abort_multipart_upload(upload=upload)
+                except BaseException as cleanup_error:
+                    raise S3TransferCleanupRequired(
+                        "Multipart upload requires durable abort",
+                        multipart_cleanup_required=True,
+                        completed_object_cleanup_required=False,
+                    ) from cleanup_error
                 raise FileExistsError(upload.identity.key) from exc
-            await self._delete_owned_destination(
-                upload.identity,
-                expected_size=expected_size,
-                expected_sha256=expected_sha256,
-            )
+            try:
+                await self._cleanup_failed_completion(
+                    upload=upload,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                )
+            except S3TransferCleanupRequired as cleanup_error:
+                raise cleanup_error from exc
             raise
-        except BaseException:
+        except BaseException as exc:
+            try:
+                await self._cleanup_failed_completion(
+                    upload=upload,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                )
+            except S3TransferCleanupRequired as cleanup_error:
+                if isinstance(exc, asyncio.CancelledError) or isinstance(
+                    cleanup_error.__cause__,
+                    asyncio.CancelledError,
+                ):
+                    raise S3TransferCancelled(
+                        multipart_cleanup_required=(
+                            cleanup_error.multipart_cleanup_required
+                        ),
+                        completed_object_cleanup_required=(
+                            cleanup_error.completed_object_cleanup_required
+                        ),
+                    ) from exc
+                raise cleanup_error from exc
+            raise
+
+    async def _cleanup_failed_completion(
+        self,
+        *,
+        upload: S3MultipartUpload,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> None:
+        """Best-effort both sides of an ambiguous multipart completion."""
+        cleanup_error: BaseException | None = None
+        multipart_cleanup_required = False
+        completed_object_cleanup_required = False
+        try:
             await self.abort_multipart_upload(upload=upload)
+        except BaseException as exc:
+            cleanup_error = exc
+            multipart_cleanup_required = True
+        try:
             await self._delete_owned_destination(
                 upload.identity,
                 expected_size=expected_size,
                 expected_sha256=expected_sha256,
             )
-            raise
+        except BaseException as exc:
+            completed_object_cleanup_required = True
+            if cleanup_error is None:
+                cleanup_error = exc
+        if cleanup_error is not None:
+            raise S3TransferCleanupRequired(
+                "Multipart completion requires durable cleanup",
+                multipart_cleanup_required=multipart_cleanup_required,
+                completed_object_cleanup_required=completed_object_cleanup_required,
+            ) from cleanup_error
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
         """Abort a multipart upload idempotently.
@@ -427,18 +518,40 @@ class S3Service:
         except BotoClientError as exc:
             if _is_precondition_failed_error(exc):
                 raise FileExistsError(destination.key) from exc
-            await self._delete_owned_destination(
-                destination,
-                expected_size=0,
-                expected_sha256=transfer_metadata.sha256,
-            )
+            try:
+                await self._delete_owned_destination(
+                    destination,
+                    expected_size=0,
+                    expected_sha256=transfer_metadata.sha256,
+                )
+            except BaseException as cleanup_error:
+                raise S3TransferCleanupRequired(
+                    "Empty object creation requires durable cleanup",
+                    multipart_cleanup_required=False,
+                    completed_object_cleanup_required=True,
+                ) from cleanup_error
             raise
-        except BaseException:
-            await self._delete_owned_destination(
-                destination,
-                expected_size=0,
-                expected_sha256=transfer_metadata.sha256,
-            )
+        except BaseException as exc:
+            try:
+                await self._delete_owned_destination(
+                    destination,
+                    expected_size=0,
+                    expected_sha256=transfer_metadata.sha256,
+                )
+            except BaseException as cleanup_error:
+                if isinstance(exc, asyncio.CancelledError) or isinstance(
+                    cleanup_error,
+                    asyncio.CancelledError,
+                ):
+                    raise S3TransferCancelled(
+                        multipart_cleanup_required=False,
+                        completed_object_cleanup_required=True,
+                    ) from exc
+                raise S3TransferCleanupRequired(
+                    "Empty object creation requires durable cleanup",
+                    multipart_cleanup_required=False,
+                    completed_object_cleanup_required=True,
+                ) from cleanup_error
             raise
 
     async def verify_transfer_object(
@@ -471,6 +584,26 @@ class S3Service:
         ):
             raise ValueError("object checksum does not match expected_sha256")
         return S3VerifiedObject(metadata=metadata, sha256=expected_sha256)
+
+    async def delete_verified_transfer_object(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> None:
+        """Delete one completed transfer object only under exact owned evidence.
+
+        :param identity: completed attempt object identity
+        :param expected_size: exact trusted object size
+        :param expected_sha256: exact trusted transfer SHA-256
+        """
+        _validate_sha256(expected_sha256)
+        await self._delete_owned_destination(
+            identity,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
 
     async def list_page(
         self,
@@ -790,6 +923,10 @@ class S3Service:
         except BotoClientError as exc:
             if _is_not_found_error(exc):
                 return
+            if _is_precondition_failed_error(exc):
+                raise RuntimeError(
+                    "owned destination changed before conditional cleanup"
+                ) from exc
             raise
 
 

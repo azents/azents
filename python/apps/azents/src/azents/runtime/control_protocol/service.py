@@ -1,8 +1,10 @@
 """Agent Runtime control protocol foundation service."""
 
 import dataclasses
+import logging
 import secrets
 from datetime import datetime
+from typing import Protocol
 
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
@@ -34,6 +36,30 @@ _DEFAULT_CONNECTION_TTL_SECONDS = 60
 _DEFAULT_OPERATION_TTL_SECONDS = 900
 _DEFAULT_REQUEST_RECLAIM_IDLE_SECONDS = 30.0
 _OPERATION_TTL_DEADLINE_BUFFER_SECONDS = 300
+_LOGGER = logging.getLogger(__name__)
+
+
+class RuntimeRunnerGenerationObserver(Protocol):
+    """Observe accepted Runner replacement and successful close generation fences."""
+
+    async def on_runner_replaced(
+        self,
+        *,
+        runtime_id: str,
+        previous_generation: int,
+        generation: int,
+    ) -> None:
+        """Observe one newly accepted replacement generation."""
+        ...
+
+    async def on_runner_revoked(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+    ) -> None:
+        """Observe one successfully revoked Runner generation."""
+        ...
 
 
 class RuntimeControlProtocolService:
@@ -48,6 +74,7 @@ class RuntimeControlProtocolService:
         connection_ttl_seconds: int = _DEFAULT_CONNECTION_TTL_SECONDS,
         operation_ttl_seconds: int = _DEFAULT_OPERATION_TTL_SECONDS,
         request_reclaim_idle_seconds: float = _DEFAULT_REQUEST_RECLAIM_IDLE_SECONDS,
+        runner_generation_observer: RuntimeRunnerGenerationObserver | None = None,
     ) -> None:
         """Initialize the control protocol service."""
         self._store = store
@@ -56,6 +83,7 @@ class RuntimeControlProtocolService:
         self._connection_ttl_seconds = connection_ttl_seconds
         self._operation_ttl_seconds = operation_ttl_seconds
         self._request_reclaim_idle_seconds = request_reclaim_idle_seconds
+        self._runner_generation_observer = runner_generation_observer
 
     async def register_provider(
         self,
@@ -97,6 +125,10 @@ class RuntimeControlProtocolService:
         registered_at: datetime,
     ) -> RuntimeRunnerRegistrationAccepted:
         """Register a Runner connection and issue a runner generation."""
+        previous = await self._store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id=registration.runtime_id,
+        )
         record = await self._store.register_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=registration.runtime_id,
@@ -115,6 +147,26 @@ class RuntimeControlProtocolService:
                 "metadata": registration.metadata,
             },
         )
+        if (
+            previous is not None
+            and previous.generation != record.generation
+            and self._runner_generation_observer is not None
+        ):
+            try:
+                await self._runner_generation_observer.on_runner_replaced(
+                    runtime_id=registration.runtime_id,
+                    previous_generation=previous.generation,
+                    generation=record.generation,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Runtime Runner replacement observer failed",
+                    extra={
+                        "runtime_id": registration.runtime_id,
+                        "previous_generation": previous.generation,
+                        "generation": record.generation,
+                    },
+                )
         return RuntimeRunnerRegistrationAccepted(
             runtime_id=registration.runtime_id,
             runner_id=registration.runner_id,
@@ -175,11 +227,23 @@ class RuntimeControlProtocolService:
         generation: int,
     ) -> bool:
         """Revoke a Runner connection only when its generation is current."""
-        return await self._store.revoke_connection(
+        revoked = await self._store.revoke_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=runtime_id,
             generation=generation,
         )
+        if revoked and self._runner_generation_observer is not None:
+            try:
+                await self._runner_generation_observer.on_runner_revoked(
+                    runtime_id=runtime_id,
+                    generation=generation,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Runtime Runner revoke observer failed",
+                    extra={"runtime_id": runtime_id, "generation": generation},
+                )
+        return revoked
 
     async def dispatch_provider_command(
         self,
@@ -584,6 +648,12 @@ class RuntimeControlProtocolService:
                 operation_id=operation_id,
                 runtime_id=runtime_id,
                 target=target,
+                generation=generation,
+                operation_type=operation_type,
+                transfer_id=None,
+                transfer_attempt_id=None,
+                transfer_dispatch_id=None,
+                transfer_direction=None,
                 request_stream_id=request_stream_id,
                 reply_stream_id=reply_stream_id,
                 status=RuntimeOperationStatus.ACTIVE,

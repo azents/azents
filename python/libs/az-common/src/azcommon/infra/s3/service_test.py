@@ -12,6 +12,8 @@ from azcommon.infra.s3.service import (
     S3CompletedPart,
     S3ObjectIdentity,
     S3Service,
+    S3TransferCancelled,
+    S3TransferCleanupRequired,
     S3TransferObjectMetadata,
 )
 
@@ -100,6 +102,7 @@ class _FakeS3Client:
         self.list_calls: list[str | None] = []
         self.list_snapshot: list[str] | None = None
         self.fail_complete = False
+        self.fail_abort = False
         self.complete_then_raise = False
         self.block_complete = False
         self.complete_started = asyncio.Event()
@@ -276,6 +279,8 @@ class _FakeS3Client:
         """Abort one fake multipart upload."""
         upload_id = _string_argument(arguments, "UploadId")
         self.abort_calls.append(upload_id)
+        if self.fail_abort:
+            raise RuntimeError("abort failed")
         self.uploads.pop(upload_id, None)
         return {}
 
@@ -860,7 +865,7 @@ async def test_cleanup_condition_preserves_replacement_after_owned_head() -> Non
     winner = _StoredObject(b"winner", {"owner": "other"}, None)
     client.replace_before_delete = winner
 
-    with pytest.raises(ClientError):
+    with pytest.raises(S3TransferCleanupRequired):
         await service.complete_multipart_upload(
             upload=upload,
             completed_parts=(part,),
@@ -901,6 +906,43 @@ async def test_cancelled_multipart_completion_aborts_without_destination() -> No
 
     assert client.abort_calls == [upload.upload_id]
     assert ("bucket", "transfer") not in client.objects
+
+
+@pytest.mark.asyncio
+async def test_cancelled_completion_retains_cleanup_flags_without_masking_cancel() -> (
+    None
+):
+    """Abort failure retains exact evidence while cancellation remains control flow."""
+    client = _FakeS3Client()
+    service = _service(client)
+    upload = await service.create_multipart_upload(
+        destination=S3ObjectIdentity(bucket="bucket", key="transfer"),
+        transfer_metadata=S3TransferObjectMetadata(
+            sha256=_sha256(b"part"),
+            content_type=None,
+        ),
+    )
+    part = await service.upload_part(upload=upload, part_number=1, body=b"part")
+    client.block_complete = True
+    client.fail_abort = True
+
+    task = asyncio.create_task(
+        service.complete_multipart_upload(
+            upload=upload,
+            completed_parts=(part,),
+            expected_size=4,
+            expected_sha256=_sha256(b"part"),
+        )
+    )
+    await client.complete_started.wait()
+    task.cancel()
+    with pytest.raises(S3TransferCancelled) as error:
+        await task
+
+    assert isinstance(error.value, asyncio.CancelledError)
+    assert error.value.multipart_cleanup_required is True
+    assert error.value.completed_object_cleanup_required is False
+    assert client.abort_calls == [upload.upload_id]
 
 
 @pytest.mark.asyncio

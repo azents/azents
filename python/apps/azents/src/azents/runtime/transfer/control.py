@@ -25,6 +25,7 @@ class RuntimeControlTransferSettings(Protocol):
     runtime_control_transfer_deployment_bytes: int
     runtime_control_transfer_admission_lease_seconds: float
     runtime_control_transfer_consumer_lease_seconds: float
+    runtime_control_transfer_stream_lease_seconds: float
     runtime_control_transfer_terminal_ttl_seconds: float
     runtime_control_transfer_list_page_size: int
 
@@ -43,6 +44,9 @@ def runtime_control_transfer_config(
         ),
         consumer_lease=timedelta(
             seconds=settings.runtime_control_transfer_consumer_lease_seconds
+        ),
+        stream_lease=timedelta(
+            seconds=settings.runtime_control_transfer_stream_lease_seconds
         ),
         terminal_ttl=timedelta(
             seconds=settings.runtime_control_transfer_terminal_ttl_seconds

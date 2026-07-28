@@ -1,5 +1,7 @@
 """Runtime coordination store contract tests."""
 
+import asyncio
+import dataclasses
 import json
 from collections.abc import AsyncGenerator, Callable
 from datetime import datetime, timedelta, timezone
@@ -15,6 +17,7 @@ from azents.runtime.coordination.data import (
     RuntimeCoordinationTarget,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
+    RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
@@ -288,6 +291,12 @@ async def test_operation_metadata_heartbeat_status_and_delete(
         operation_id="op-1",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        generation=1,
+        operation_type="test.operation",
+        transfer_id=None,
+        transfer_attempt_id=None,
+        transfer_dispatch_id=None,
+        transfer_direction=None,
         request_stream_id="runner:runtime-1",
         reply_stream_id="reply:req-1",
         status=RuntimeOperationStatus.ACTIVE,
@@ -322,6 +331,59 @@ async def test_operation_metadata_heartbeat_status_and_delete(
 
 
 @pytest.mark.asyncio
+async def test_ensure_operation_metadata_is_atomic_and_fences_conflicts(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Compatible concurrent creation is idempotent without replacing a final."""
+    created_at = _now()
+    metadata = RuntimeOperationMetadata(
+        operation_id="transfer-operation",
+        runtime_id="runtime-1",
+        target=RuntimeCoordinationTarget.RUNNER,
+        generation=3,
+        operation_type="file.transfer.v1",
+        transfer_id="transfer-1",
+        transfer_attempt_id="attempt-1",
+        transfer_dispatch_id="dispatch-1",
+        transfer_direction=RuntimeOperationTransferDirection.DOWNLOAD,
+        request_stream_id="runner:runtime-1:generation:3",
+        reply_stream_id="reply:transfer-operation",
+        status=RuntimeOperationStatus.ACTIVE,
+        created_at=created_at,
+        updated_at=created_at,
+        deadline_at=created_at + timedelta(seconds=30),
+        body_stream_id=None,
+        last_heartbeat_at=None,
+        last_event_at=None,
+        cancel_requested_at=None,
+        final_event_cursor=None,
+    )
+    ensured = await asyncio.gather(
+        *(store.ensure_operation_metadata(metadata, ttl_seconds=60) for _ in range(2))
+    )
+
+    assert ensured == [metadata, metadata]
+    conflicting = dataclasses.replace(metadata, generation=4)
+    assert await store.ensure_operation_metadata(conflicting, ttl_seconds=60) is None
+    conflicting_direction = dataclasses.replace(
+        metadata,
+        transfer_direction=RuntimeOperationTransferDirection.UPLOAD,
+    )
+    assert (
+        await store.ensure_operation_metadata(conflicting_direction, ttl_seconds=60)
+        is None
+    )
+    final = await store.update_operation_status(
+        metadata.operation_id,
+        status=RuntimeOperationStatus.FINAL,
+        updated_at=created_at + timedelta(seconds=1),
+        final_event_cursor="1",
+    )
+    assert final is not None
+    assert await store.ensure_operation_metadata(metadata, ttl_seconds=60) is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.asyncio
 async def test_try_start_operation_is_atomic(
     store: RuntimeCoordinationStore,
@@ -332,6 +394,12 @@ async def test_try_start_operation_is_atomic(
         operation_id="op-start-1",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        generation=1,
+        operation_type="test.operation",
+        transfer_id=None,
+        transfer_attempt_id=None,
+        transfer_dispatch_id=None,
+        transfer_direction=None,
         request_stream_id="runner:runtime-1",
         reply_stream_id="reply:req-start",
         status=RuntimeOperationStatus.ACTIVE,
@@ -385,6 +453,12 @@ async def test_cancel_requested_status_records_timestamp_and_blocks_start(
         operation_id="op-cancel-1",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        generation=1,
+        operation_type="test.operation",
+        transfer_id=None,
+        transfer_attempt_id=None,
+        transfer_dispatch_id=None,
+        transfer_direction=None,
         request_stream_id="runner:runtime-1",
         reply_stream_id="reply:req-cancel",
         status=RuntimeOperationStatus.ACTIVE,
@@ -426,6 +500,12 @@ async def test_append_reply_for_operation_rejects_late_final(
         operation_id="op-final-1",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        generation=1,
+        operation_type="test.operation",
+        transfer_id=None,
+        transfer_attempt_id=None,
+        transfer_dispatch_id=None,
+        transfer_direction=None,
         request_stream_id="runner:runtime-1",
         reply_stream_id="reply:req-final",
         status=RuntimeOperationStatus.ACTIVE,

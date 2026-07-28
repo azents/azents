@@ -183,6 +183,27 @@ class InMemoryRuntimeCoordinationStore:
         async with self._lock:
             self._operation_metadata[metadata.operation_id] = metadata
 
+    async def ensure_operation_metadata(
+        self,
+        metadata: RuntimeOperationMetadata,
+        *,
+        ttl_seconds: int | None,
+    ) -> RuntimeOperationMetadata | None:
+        """Create metadata once or return an exactly compatible existing record."""
+        del ttl_seconds
+        async with self._lock:
+            existing = self._operation_metadata.get(metadata.operation_id)
+            if existing is None:
+                self._operation_metadata[metadata.operation_id] = metadata
+                return metadata
+            if existing.status is RuntimeOperationStatus.FINAL:
+                return None
+            return (
+                existing
+                if _operation_identity(existing) == _operation_identity(metadata)
+                else None
+            )
+
     async def get_operation(
         self,
         operation_id: str,
@@ -397,3 +418,28 @@ def _read_after_cursor[RecordT](
         return records[:limit]
     offset = int(after_cursor)
     return records[offset : offset + limit]
+
+
+def _operation_identity(
+    metadata: RuntimeOperationMetadata,
+) -> tuple[
+    str,
+    int,
+    str,
+    datetime | None,
+    str | None,
+    str | None,
+    str | None,
+    object | None,
+]:
+    """Return the immutable identity used by atomic operation creation."""
+    return (
+        metadata.runtime_id,
+        metadata.generation,
+        metadata.operation_type,
+        metadata.deadline_at,
+        metadata.transfer_id,
+        metadata.transfer_attempt_id,
+        metadata.transfer_dispatch_id,
+        metadata.transfer_direction,
+    )

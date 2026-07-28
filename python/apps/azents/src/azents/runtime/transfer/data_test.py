@@ -9,6 +9,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
+    RuntimeTransferDispatchStatus,
     RuntimeTransferPhase,
     RuntimeTransferProgress,
     RuntimeTransferRecord,
@@ -22,7 +23,9 @@ _DIGEST = "a" * 64
 
 
 def _admission(
-    *, source_expires_at: datetime | None = None
+    *,
+    deadline_at: datetime = _NOW + timedelta(minutes=5),
+    source_expires_at: datetime | None = None,
 ) -> RuntimeTransferAdmission:
     return RuntimeTransferAdmission(
         transfer_id="transfer",
@@ -32,13 +35,14 @@ def _admission(
         desired_generation=1,
         operation_id="operation",
         session_id=None,
+        agent_id=None,
         runtime_path="/workspace/agent/file",
         overwrite=False,
         expected_size=1,
         expected_sha256=_DIGEST,
         product_maximum_size=2,
         provider_maximum_size=2,
-        deadline_at=_NOW + timedelta(minutes=5),
+        deadline_at=deadline_at,
         source_expires_at=source_expires_at,
         resource_class="default",
     )
@@ -57,6 +61,8 @@ def test_admission_rejects_expired_source_and_invalid_hash() -> None:
     """Admission metadata fails closed for source expiry and invalid SHA values."""
     with pytest.raises(ValueError, match="future"):
         validate_admission_time(_admission(source_expires_at=_NOW), _NOW)
+    with pytest.raises(ValueError, match="deadline_at"):
+        validate_admission_time(_admission(deadline_at=_NOW), _NOW)
     with pytest.raises(ValueError, match="SHA-256"):
         _admission.__func__ if False else RuntimeTransferAdmission(
             transfer_id="t",
@@ -66,6 +72,7 @@ def test_admission_rejects_expired_source_and_invalid_hash() -> None:
             desired_generation=1,
             operation_id="o",
             session_id=None,
+            agent_id=None,
             runtime_path="/x",
             overwrite=False,
             expected_size=1,
@@ -92,12 +99,22 @@ def test_record_enforces_authoritative_expiry_and_terminal_ceiling() -> None:
             updated_at=_NOW,
             logical_expires_at=_NOW + timedelta(minutes=1),
             accepted_runner_generation=None,
+            dispatch_id=None,
+            dispatch_status=RuntimeTransferDispatchStatus.NOT_BOUND,
+            dispatch_request_id=None,
             object=None,
             actual_size=None,
             actual_sha256=None,
             stream_claim_id=None,
+            stream_owner_replica_id=None,
+            stream_lease_expires_at=None,
+            multipart_cleanup_handle=None,
+            completed_object_cleanup_required=False,
             progress=None,
+            upload_response_committed_at=None,
+            runner_result_confirmed_at=None,
             cancellation_requested_at=None,
+            cancellation_reason=None,
             consumer_claim_id=None,
             consumer_lease_expires_at=None,
             consumer_acknowledged_at=None,
@@ -127,12 +144,22 @@ def test_progress_is_timezone_aware_and_bounded_by_expected_size() -> None:
             updated_at=_NOW,
             logical_expires_at=_NOW + timedelta(hours=1),
             accepted_runner_generation=1,
+            dispatch_id="dispatch",
+            dispatch_status=RuntimeTransferDispatchStatus.ENQUEUED,
+            dispatch_request_id="request",
             object=None,
             actual_size=None,
             actual_sha256=None,
             stream_claim_id="stream",
+            stream_owner_replica_id="replica",
+            stream_lease_expires_at=_NOW + timedelta(seconds=30),
+            multipart_cleanup_handle=None,
+            completed_object_cleanup_required=False,
             progress=RuntimeTransferProgress(bytes_transferred=2, observed_at=_NOW),
+            upload_response_committed_at=None,
+            runner_result_confirmed_at=None,
             cancellation_requested_at=None,
+            cancellation_reason=None,
             consumer_claim_id=None,
             consumer_lease_expires_at=None,
             consumer_acknowledged_at=None,
@@ -177,6 +204,7 @@ def test_config_requires_positive_bounded_values() -> None:
             deployment_bytes=1,
             admission_lease=timedelta(seconds=1),
             consumer_lease=timedelta(seconds=1),
+            stream_lease=timedelta(seconds=1),
             terminal_ttl=timedelta(seconds=1),
             list_page_size=1,
         )

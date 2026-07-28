@@ -42,6 +42,16 @@ def main() -> None:
         / "runtime_control"
         / "v1"
         / "runtime_runner_control.proto",
+        proto_root
+        / "azents"
+        / "runtime_control"
+        / "v1"
+        / "runtime_runner_transfer.proto",
+        proto_root
+        / "azents"
+        / "runtime_control"
+        / "v1"
+        / "runtime_transfer_coordinator.proto",
     ):
         result = protoc.main(
             [
@@ -80,7 +90,20 @@ def _fix_generated_imports(
     grpc_file.write_text(_GRPC_HEADER + content)
 
     pb2_file = out_dir / f"{module_name}.py"
-    pb2_file.write_text(_PB2_HEADER + pb2_file.read_text())
+    pb2_content = pb2_file.read_text()
+    pb2_content = re.sub(
+        r"^from azents\.runtime_control\.v1 import (.+)$",
+        r"from . import \1",
+        pb2_content,
+        flags=re.MULTILINE,
+    )
+    pb2_content = re.sub(
+        r"^import (\w+_pb2) as (.+)$",
+        r"from . import \1 as \2",
+        pb2_content,
+        flags=re.MULTILINE,
+    )
+    pb2_file.write_text(_PB2_HEADER + pb2_content)
     return pb2_file, grpc_file
 
 

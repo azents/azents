@@ -16,13 +16,16 @@ from azents_runtime_control.grpc_runner_client import (
     runner_event_from_message,
     runner_execution_policy_evidence_from_message,
     runner_state_report_from_message,
+    runner_transfer_result_from_message,
 )
 from azents_runtime_control.proto import (
     runtime_runner_control_pb2,
     runtime_runner_control_pb2_grpc,
+    runtime_runner_transfer_pb2,
 )
 from azents_runtime_control.runner import RunnerStateReport as SharedRunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
+from azents_runtime_control.runner_transfer import RunnerTransferDirection
 from google.protobuf import timestamp_pb2
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
@@ -42,15 +45,19 @@ from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeBodyChunkRecord,
     RuntimeCoordinationTarget,
+    RuntimeOperationMetadata,
     RuntimeOperationStatus,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
+from azents.runtime.transfer.data import RuntimeTransferFailure
+from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
 
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
+_MAX_TRANSFER_DISPATCH_TOMBSTONES = 4096
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -99,6 +106,7 @@ class RuntimeRunnerControlGrpcServicer(
         owner_replica_id: str,
         consumer_id: str,
         runner_authenticator: RuntimeRunnerCredentialAuthenticator,
+        transfer_result_sink: RuntimeRunnerTransferResultSink,
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
         """Initialize the Runner Control gRPC servicer."""
@@ -109,6 +117,7 @@ class RuntimeRunnerControlGrpcServicer(
         self._consumer_id = consumer_id
         self._runner_authenticator = runner_authenticator
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
+        self._transfer_result_sink = transfer_result_sink
         self._operation_block_ms = operation_block_ms
 
     async def ConnectRunner(
@@ -164,6 +173,10 @@ class RuntimeRunnerControlGrpcServicer(
             },
         )
         outbound: asyncio.Queue[_RunnerOutbound] = asyncio.Queue(maxsize=1)
+        active_transfer_dispatches: dict[
+            tuple[str, str, str, int],
+            tuple[str, str, str, bytes],
+        ] = {}
         inbound_task = asyncio.create_task(
             self._consume_runner_messages(
                 request_iterator,
@@ -171,6 +184,7 @@ class RuntimeRunnerControlGrpcServicer(
                 authentication=authentication,
                 runtime_id=accepted.runtime_id,
                 generation=accepted.generation,
+                active_transfer_dispatches=active_transfer_dispatches,
             )
         )
         operation_task = asyncio.create_task(
@@ -179,6 +193,7 @@ class RuntimeRunnerControlGrpcServicer(
                 authentication=authentication,
                 runtime_id=accepted.runtime_id,
                 generation=accepted.generation,
+                active_transfer_dispatches=active_transfer_dispatches,
             )
         )
         try:
@@ -276,6 +291,10 @@ class RuntimeRunnerControlGrpcServicer(
         authentication: RuntimeRunnerCredential,
         runtime_id: str,
         generation: int,
+        active_transfer_dispatches: dict[
+            tuple[str, str, str, int],
+            tuple[str, str, str, bytes],
+        ],
     ) -> None:
         async for message in request_iterator:
             if not await self._runner_authenticator.authorize_runner(authentication):
@@ -375,6 +394,26 @@ class RuntimeRunnerControlGrpcServicer(
                     return
                 await self._append_runner_event(message)
                 continue
+            if payload == "transfer_result":
+                if message.transfer_result.identity.runtime_id != runtime_id:
+                    await outbound.put(
+                        _error(message.request_id, "RUNNER_IDENTITY_MISMATCH")
+                    )
+                    return
+                if message.transfer_result.identity.runner_generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_RUNNER_GENERATION")
+                    )
+                    return
+                if not await self._runner_generation_current(
+                    runtime_id=runtime_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
+                await self._append_transfer_result(message)
+                continue
             if payload == "operation_start":
                 if message.operation_start.runtime_id != runtime_id:
                     await outbound.put(
@@ -433,6 +472,10 @@ class RuntimeRunnerControlGrpcServicer(
         authentication: RuntimeRunnerCredential,
         runtime_id: str,
         generation: int,
+        active_transfer_dispatches: dict[
+            tuple[str, str, str, int],
+            tuple[str, str, str, bytes],
+        ],
     ) -> None:
         while True:
             if not await self._runner_authenticator.authorize_runner(authentication):
@@ -462,6 +505,55 @@ class RuntimeRunnerControlGrpcServicer(
                                     operation_id=operation_id,
                                 )
                             ),
+                        ),
+                        ack_envelope=envelope,
+                    )
+                )
+                continue
+            if envelope.operation_type == "file.transfer.cancel.v1":
+                cancellation = _runner_transfer_cancel(envelope)
+                await outbound.put(
+                    _RunnerOutboundItem(
+                        message=runtime_runner_control_pb2.RunnerControlMessage(
+                            request_id=envelope.request_id,
+                            transfer_cancel=cancellation,
+                        ),
+                        ack_envelope=envelope,
+                    )
+                )
+                continue
+            if envelope.operation_type == "file.transfer.v1":
+                intent = _runner_transfer_intent(envelope)
+                dispatch_key = (
+                    intent.identity.transfer_id,
+                    intent.identity.attempt_id,
+                    intent.dispatch_id,
+                    intent.identity.runner_generation,
+                )
+                fingerprint = (
+                    envelope.request_id,
+                    envelope.operation_type,
+                    envelope.reply_stream_id,
+                    intent.SerializeToString(deterministic=True),
+                )
+                previous = active_transfer_dispatches.get(dispatch_key)
+                if previous is not None:
+                    if previous != fingerprint:
+                        raise RuntimeError(
+                            "Conflicting duplicate transfer intent detected"
+                        )
+                    await self._control_protocol.ack_claimed_request(envelope)
+                    continue
+                if len(active_transfer_dispatches) >= _MAX_TRANSFER_DISPATCH_TOMBSTONES:
+                    raise RuntimeError(
+                        "Runner transfer dispatch tombstone capacity exhausted"
+                    )
+                active_transfer_dispatches[dispatch_key] = fingerprint
+                await outbound.put(
+                    _RunnerOutboundItem(
+                        message=runtime_runner_control_pb2.RunnerControlMessage(
+                            request_id=envelope.request_id,
+                            transfer_intent=intent,
                         ),
                         ack_envelope=envelope,
                     )
@@ -581,6 +673,63 @@ class RuntimeRunnerControlGrpcServicer(
                 return records
             after_cursor = batch[-1].cursor
 
+    async def _append_transfer_result(
+        self,
+        message: runtime_runner_control_pb2.RunnerMessage,
+    ) -> None:
+        result = message.transfer_result
+        try:
+            _validate_transfer_result_lookup(result)
+        except ValueError:
+            return
+        operation = await self._coordination_store.get_operation(result.operation_id)
+        if (
+            operation is None
+            or operation.status is RuntimeOperationStatus.FINAL
+            or operation.transfer_id != result.identity.transfer_id
+            or operation.transfer_attempt_id != result.identity.attempt_id
+            or operation.transfer_dispatch_id != result.dispatch_id
+            or operation.transfer_direction is None
+            or operation.runtime_id != result.identity.runtime_id
+            or operation.generation != result.identity.runner_generation
+        ):
+            return
+        try:
+            mapped = runner_transfer_result_from_message(
+                result,
+                direction=RunnerTransferDirection(operation.transfer_direction.value),
+            )
+        except KeyError, ValueError:
+            await self._append_transfer_result_error(
+                operation,
+                message,
+                error_code="RUNNER_TRANSFER_PROTOCOL_VIOLATION",
+            )
+            return
+        await self._transfer_result_sink.handle(
+            mapped,
+            request_id=message.request_id,
+        )
+
+    async def _append_transfer_result_error(
+        self,
+        operation: RuntimeOperationMetadata,
+        message: runtime_runner_control_pb2.RunnerMessage,
+        *,
+        error_code: str,
+    ) -> None:
+        """Settle Transfer State before finalizing an unusable transfer result."""
+        await self._transfer_result_sink.handle_failure(
+            operation,
+            request_id=message.request_id,
+            error_code=error_code,
+            failure=(
+                RuntimeTransferFailure.FENCED
+                if error_code == "RUNNER_TRANSFER_PROTOCOL_VIOLATION"
+                else RuntimeTransferFailure.STREAM
+            ),
+        )
+
     async def _append_runner_event(
         self,
         message: runtime_runner_control_pb2.RunnerMessage,
@@ -619,6 +768,7 @@ def add_runtime_runner_control_servicer(
     owner_replica_id: str,
     consumer_id: str,
     runner_authenticator: RuntimeRunnerCredentialAuthenticator,
+    transfer_result_sink: RuntimeRunnerTransferResultSink,
     operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Runner Control servicer to a gRPC server."""
@@ -630,6 +780,7 @@ def add_runtime_runner_control_servicer(
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
             runner_authenticator=runner_authenticator,
+            transfer_result_sink=transfer_result_sink,
             operation_block_ms=operation_block_ms,
         ),
         server,
@@ -731,6 +882,85 @@ def _registration(
         ),
         connection_id=message.connection_id,
         owner_replica_id=owner_replica_id,
+    )
+
+
+def _runner_transfer_intent(
+    envelope: RuntimeRequestEnvelope,
+) -> runtime_runner_control_pb2.RunnerTransferIntent:
+    payload = envelope.payload
+    transfer_id = _str_payload(payload, "transfer_id")
+    attempt_id = _str_payload(payload, "attempt_id")
+    runtime_id = _str_payload(payload, "runtime_id")
+    _int_payload(payload, "desired_generation")
+    direction = _str_payload(payload, "direction")
+    operation_id = _str_payload(payload, "operation_id")
+    dispatch_id = _str_payload(payload, "dispatch_id")
+    deadline_at = envelope.deadline_at
+    if deadline_at is None or envelope.body_stream_id is not None:
+        raise ValueError("Transfer intent requires metadata-only deadline routing")
+    message = runtime_runner_control_pb2.RunnerTransferIntent(
+        identity=runtime_runner_transfer_pb2.TransferIdentity(
+            transfer_id=transfer_id,
+            attempt_id=attempt_id,
+            runtime_id=runtime_id,
+            runner_generation=envelope.generation,
+        ),
+        direction=(
+            runtime_runner_transfer_pb2.TRANSFER_DIRECTION_DOWNLOAD
+            if direction == "download"
+            else runtime_runner_transfer_pb2.TRANSFER_DIRECTION_UPLOAD
+        ),
+        operation_id=operation_id,
+        runtime_path=_str_payload(payload, "runtime_path"),
+        deadline_at=_timestamp(deadline_at),
+        protocol_version="2026-07-25",
+        capability="file.transfer.v1",
+        dispatch_id=dispatch_id,
+    )
+    owner_session_id = payload.get("owner_session_id")
+    if isinstance(owner_session_id, str):
+        message.owner_session_id = owner_session_id
+    overwrite = payload.get("overwrite")
+    if isinstance(overwrite, bool):
+        message.overwrite = overwrite
+    expected_size = payload.get("expected_size")
+    if isinstance(expected_size, int):
+        message.expected_size = expected_size
+    expected_sha256 = payload.get("expected_sha256")
+    if isinstance(expected_sha256, str):
+        message.expected_sha256 = expected_sha256
+    return message
+
+
+def _runner_transfer_cancel(
+    envelope: RuntimeRequestEnvelope,
+) -> runtime_runner_control_pb2.RunnerTransferCancel:
+    payload = envelope.payload
+    reason = _str_payload(payload, "reason")
+    reasons = {
+        "caller": (runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_CALLER),
+        "deadline": (runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_DEADLINE),
+        "superseded": (
+            runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_SUPERSEDED
+        ),
+        "shutdown": (runtime_runner_control_pb2.RUNNER_TRANSFER_CANCEL_REASON_SHUTDOWN),
+    }
+    if envelope.body_stream_id is not None or reason not in reasons:
+        raise ValueError("Transfer cancellation requires bounded metadata routing")
+    runner_generation = _int_payload(payload, "runner_generation")
+    if runner_generation != envelope.generation:
+        raise ValueError("Transfer cancellation generation does not match")
+    return runtime_runner_control_pb2.RunnerTransferCancel(
+        identity=runtime_runner_transfer_pb2.TransferIdentity(
+            transfer_id=_str_payload(payload, "transfer_id"),
+            attempt_id=_str_payload(payload, "attempt_id"),
+            runtime_id=_str_payload(payload, "runtime_id"),
+            runner_generation=runner_generation,
+        ),
+        operation_id=_str_payload(payload, "operation_id"),
+        dispatch_id=_str_payload(payload, "dispatch_id"),
+        reason=reasons[reason],
     )
 
 
@@ -975,6 +1205,30 @@ def _str_list_payload(payload: dict[str, JsonValue], key: str) -> list[str]:
 
 def _deadline_expired(envelope: RuntimeRequestEnvelope, now: datetime) -> bool:
     return envelope.deadline_at is not None and envelope.deadline_at <= now
+
+
+def _validate_transfer_result_lookup(
+    result: runtime_runner_control_pb2.RunnerTransferResult,
+) -> None:
+    """Bound untrusted transfer result fields before constructing store keys."""
+    for name, value in (
+        ("transfer_id", result.identity.transfer_id),
+        ("attempt_id", result.identity.attempt_id),
+        ("runtime_id", result.identity.runtime_id),
+        ("operation_id", result.operation_id),
+        ("dispatch_id", result.dispatch_id),
+    ):
+        size = len(value.encode())
+        if size < 1 or size > 128:
+            raise ValueError(f"{name} must be between 1 and 128 UTF-8 bytes")
+    if result.identity.runner_generation <= 0:
+        raise ValueError("runner_generation must be positive")
+    if result.HasField("sha256") and (
+        len(result.sha256) != 64
+        or result.sha256.lower() != result.sha256
+        or any(character not in "0123456789abcdef" for character in result.sha256)
+    ):
+        raise ValueError("sha256 must be lowercase hexadecimal")
 
 
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:

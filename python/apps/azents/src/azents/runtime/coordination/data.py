@@ -24,6 +24,13 @@ class RuntimeOperationStatus(enum.StrEnum):
     FINAL = "final"
 
 
+class RuntimeOperationTransferDirection(enum.StrEnum):
+    """Closed direction for a metadata-only transfer operation."""
+
+    DOWNLOAD = "download"
+    UPLOAD = "upload"
+
+
 class RuntimeReplyEventType(enum.StrEnum):
     """Reply stream event type."""
 
@@ -119,6 +126,12 @@ class RuntimeOperationMetadata:
     operation_id: str
     runtime_id: str
     target: RuntimeCoordinationTarget
+    generation: int
+    operation_type: str
+    transfer_id: str | None
+    transfer_attempt_id: str | None
+    transfer_dispatch_id: str | None
+    transfer_direction: RuntimeOperationTransferDirection | None
     request_stream_id: str
     reply_stream_id: str
     status: RuntimeOperationStatus
@@ -130,6 +143,29 @@ class RuntimeOperationMetadata:
     last_event_at: datetime | None
     cancel_requested_at: datetime | None
     final_event_cursor: str | None
+
+    def __post_init__(self) -> None:
+        """Require complete transfer identity and direction metadata together."""
+        transfer_values = (
+            self.transfer_id,
+            self.transfer_attempt_id,
+            self.transfer_dispatch_id,
+            self.transfer_direction,
+        )
+        if any(value is None for value in transfer_values) and any(
+            value is not None for value in transfer_values
+        ):
+            raise ValueError("Transfer operation metadata must be complete")
+        if (
+            self.operation_type == "file.transfer.v1"
+            and self.transfer_direction is None
+        ):
+            raise ValueError("Transfer operations require a direction")
+        if (
+            self.operation_type != "file.transfer.v1"
+            and self.transfer_direction is not None
+        ):
+            raise ValueError("Only transfer operations may have a transfer direction")
 
 
 @dataclasses.dataclass(frozen=True)

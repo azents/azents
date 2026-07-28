@@ -8,10 +8,13 @@ import pytest
 
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCancellationReason,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
+    RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
+    RuntimeTransferRecord,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 
@@ -36,6 +39,7 @@ def _config(*, attempts: int = 2, bytes_limit: int = 10) -> RuntimeTransferConfi
         bytes_limit,
         timedelta(minutes=1),
         timedelta(minutes=1),
+        timedelta(seconds=30),
         timedelta(minutes=5),
         2,
     )
@@ -52,6 +56,7 @@ def _admission(
         1,
         "operation",
         None,
+        None,
         "/workspace/file",
         False,
         size,
@@ -61,6 +66,57 @@ def _admission(
         _NOW + timedelta(minutes=5),
         source,
         "default",
+    )
+
+
+async def _claim_stream(
+    store: InMemoryRuntimeTransferStateStore,
+    transfer_id: str,
+    *,
+    attempt_id: str,
+    runtime_id: str,
+    desired_generation: int,
+    accepted_runner_generation: int,
+    expected_revision: int,
+    claim_id: str,
+) -> RuntimeTransferRecord | None:
+    """Bind one test dispatch before claiming its bounded stream."""
+    del expected_revision
+    ready = await store.get(transfer_id)
+    if ready is None:
+        return None
+    dispatch_id = f"dispatch:{transfer_id}"
+    request_id = f"request:{transfer_id}"
+    bound = await store.bind_dispatch(
+        transfer_id,
+        attempt_id=attempt_id,
+        runtime_id=runtime_id,
+        desired_generation=desired_generation,
+        accepted_runner_generation=accepted_runner_generation,
+        expected_revision=ready.revision,
+        dispatch_id=dispatch_id,
+        dispatch_request_id=request_id,
+    )
+    if bound is None:
+        return None
+    deliverable = await store.mark_dispatch_deliverable(
+        transfer_id,
+        attempt_id=attempt_id,
+        expected_revision=bound.revision,
+        dispatch_id=dispatch_id,
+        dispatch_request_id=request_id,
+    )
+    if deliverable is None:
+        return None
+    return await store.claim_stream(
+        transfer_id,
+        attempt_id=attempt_id,
+        runtime_id=runtime_id,
+        desired_generation=desired_generation,
+        accepted_runner_generation=accepted_runner_generation,
+        expected_revision=deliverable.revision,
+        claim_id=claim_id,
+        owner_replica_id="test-replica",
     )
 
 
@@ -126,7 +182,7 @@ async def test_concurrent_budget_retry_expiry_and_pagination() -> None:
         attempt_id="a",
         expected_revision=current.revision,
         outcome=RuntimeTransferOutcome.FAILED,
-        failure=None,
+        failure=RuntimeTransferFailure.STREAM,
     )
     assert settled is not None
     retry = await store.admit(
@@ -196,6 +252,7 @@ async def test_ready_stream_progress_and_download_commit() -> None:
         1,
         "operation",
         None,
+        None,
         "/workspace/file",
         False,
         3,
@@ -230,7 +287,8 @@ async def test_ready_stream_progress_and_download_commit() -> None:
     assert ready is not None and ready.revision == 2
     claims = await asyncio.gather(
         *(
-            store.claim_stream(
+            _claim_stream(
+                store,
                 "download",
                 attempt_id="a",
                 runtime_id="runtime",
@@ -330,7 +388,8 @@ async def test_upload_consumer_cancellation_terminal_and_historical_safety() -> 
         object=RuntimeTransferObject("object", 1, _DIGEST),
     )
     assert ready is not None
-    stream = await store.claim_stream(
+    stream = await _claim_stream(
+        store,
         "upload",
         attempt_id="a",
         runtime_id="runtime",
@@ -388,12 +447,18 @@ async def test_upload_consumer_cancellation_terminal_and_historical_safety() -> 
         is None
     )
     cancelled = await store.request_cancellation(
-        "upload", attempt_id="a", expected_revision=reclaimed.revision
+        "upload",
+        attempt_id="a",
+        expected_revision=reclaimed.revision,
+        reason=RuntimeTransferCancellationReason.CALLER,
     )
     assert cancelled is not None
     assert (
         await store.request_cancellation(
-            "upload", attempt_id="a", expected_revision=cancelled.revision
+            "upload",
+            attempt_id="a",
+            expected_revision=cancelled.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
         )
         == cancelled
     )
@@ -412,7 +477,7 @@ async def test_upload_consumer_cancellation_terminal_and_historical_safety() -> 
         attempt_id="a",
         expected_revision=cancelled.revision,
         outcome=RuntimeTransferOutcome.CANCELLED,
-        failure=None,
+        failure=RuntimeTransferFailure.CANCELLED,
     )
     assert terminal is not None
     assert (
