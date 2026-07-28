@@ -6,7 +6,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -699,6 +699,149 @@ def _service(
         ),
         session_lifecycle=cast(SessionLifecycleService, session_lifecycle),
     )
+
+
+class _AsyncSessionContext:
+    """Minimal async session-manager context for lifecycle unit tests."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def __aenter__(self) -> AsyncSession:
+        return self.session
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_discord_wake_orders_claim_commit_broker_then_active() -> None:
+    """The durable claim and Session wake fence activation ordering."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    repository.claim_binding_wake = AsyncMock(
+        return_value=(SimpleNamespace(id="binding-1"), True)
+    )
+    service = _service(
+        cast(SessionManager[AsyncSession], MagicMock()),
+        cast(ExternalChannelRepository, repository),
+    )
+    session = AsyncMock()
+    events: list[str] = []
+    session.commit.side_effect = lambda: events.append("commit")
+    service_any = cast(Any, service)
+    service_any.session_manager = lambda: _AsyncSessionContext(session)
+    service.agent_session_repository.mark_running_for_input_wakeup = AsyncMock(
+        side_effect=lambda *_args: events.append("running")
+    )
+    cast(Any, service.session_lifecycle).send_session_wake_up = AsyncMock(
+        side_effect=lambda *_args: events.append("wake")
+    )
+    service_any._activate_binding_after_wake = AsyncMock(
+        side_effect=lambda **_kwargs: events.append("active") or True
+    )
+
+    with patch(
+        "azents.services.external_channel.event_processor._now",
+        side_effect=[_at(10), _at(11)],
+    ) as now:
+        result = await service_any._wake_discord_binding(
+            binding_id="binding-1",
+            agent_session_id="session-1",
+            projected_through_position="position-9",
+        )
+
+    assert result is True
+    assert events == ["running", "commit", "wake", "active"]
+    assert repository.claim_binding_wake.await_args.kwargs["now"] == _at(10)
+    assert now.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_discord_initial_delivery_does_not_replay_terminal_rows() -> None:
+    """Failed/unknown initial rows block activation and are never replayed."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    repository.list_initial_delivery_attempts = AsyncMock(
+        return_value=[
+            SimpleNamespace(id="pending", status=ExternalChannelDeliveryStatus.PENDING),
+            SimpleNamespace(id="failed", status=ExternalChannelDeliveryStatus.FAILED),
+            SimpleNamespace(id="unknown", status=ExternalChannelDeliveryStatus.UNKNOWN),
+        ]
+    )
+    service = _service(
+        cast(SessionManager[AsyncSession], MagicMock()),
+        cast(ExternalChannelRepository, repository),
+    )
+    service.action_service.attempt_delivery = AsyncMock()
+
+    service_any = cast(Any, service)
+    await service_any._attempt_discord_initial_deliveries(binding_id="binding-1")
+    delivered = await service_any._discord_initial_deliveries_delivered(
+        binding_id="binding-1"
+    )
+
+    service.action_service.attempt_delivery.assert_awaited_once_with("pending")
+    assert delivered is False
+
+
+@pytest.mark.asyncio
+async def test_discord_fresh_wake_pending_does_not_emit_second_wake() -> None:
+    """A fresh durable wake claim is observed but not replayed concurrently."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    repository.claim_binding_wake = AsyncMock(
+        return_value=(SimpleNamespace(id="binding-1"), False)
+    )
+    service = _service(
+        cast(SessionManager[AsyncSession], MagicMock()),
+        cast(ExternalChannelRepository, repository),
+    )
+    session = AsyncMock()
+    service_any = cast(Any, service)
+    service_any.session_manager = lambda: _AsyncSessionContext(session)
+    service_any._activate_binding_after_wake = AsyncMock()
+
+    assert (
+        await service_any._wake_discord_binding(
+            binding_id="binding-1",
+            agent_session_id="session-1",
+            projected_through_position="position-9",
+        )
+        is False
+    )
+    cast(Any, service.session_lifecycle).send_session_wake_up.assert_not_awaited()
+    service_any._activate_binding_after_wake.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_incomplete_discord_hydration_is_not_refetched_or_activated() -> None:
+    """Terminal malformed hydration skips provider refetch and activation forever."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    repository.get_binding = AsyncMock(
+        return_value=ExternalChannelBinding.model_construct(
+            id="binding-1", route_id="route-1", resource_id="resource-1"
+        )
+    )
+    repository.get_agent_route = AsyncMock(
+        return_value=SimpleNamespace(connection_id="connection-1")
+    )
+    repository.get_resource = AsyncMock(
+        return_value=ExternalChannelResource.model_construct(
+            id="resource-1",
+            hydration_status=ExternalChannelHydrationStatus.INCOMPLETE,
+        )
+    )
+    service = _service(
+        cast(SessionManager[AsyncSession], MagicMock()),
+        cast(ExternalChannelRepository, repository),
+    )
+    service_any = cast(Any, service)
+    session = AsyncMock()
+    service_any.session_manager = lambda: _AsyncSessionContext(session)
+    cast(Any, service.discord_history_client).fetch_thread_page = AsyncMock()
+
+    await service_any._hydrate_waiting_discord_binding(binding_id="binding-1")
+    await service_any._hydrate_waiting_discord_binding(binding_id="binding-1")
+
+    cast(Any, service.discord_history_client).fetch_thread_page.assert_not_awaited()
 
 
 async def test_pending_context_retention_uses_provider_message_time() -> None:
@@ -2639,10 +2782,382 @@ async def test_initial_binding_release_creates_one_session_link_and_tracker(
     assert repeated.activity_delivery_attempt_id == activity.id
 
 
+async def _prepare_discord_reconcile_fixture(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> tuple[
+    _TestEventProcessorService,
+    ExternalChannelRepository,
+    str,
+    str,
+]:
+    """Create one real hydrated Discord binding with retained invocation context."""
+    async with rdb_session_manager() as session:
+        connection_id, route_id, agent_id, repository = await _setup_route(
+            session, provider=ExternalChannelProvider.DISCORD
+        )
+        resource = await repository.create_resource_idempotent(
+            session,
+            ExternalChannelResourceCreate(
+                connection_id=connection_id,
+                resource_type=ExternalChannelResourceType.THREAD,
+                provider_resource_key="discord:G1:reconcile",
+                labels={
+                    "provider": "discord",
+                    "guild_id": "G1",
+                    "source_channel_id": "200",
+                    "parent_channel_id": "200",
+                    "root_message_id": "100",
+                    "channel_id": "200",
+                    "thread_id": "100",
+                },
+                status=ExternalChannelResourceStatus.ACTIVE,
+                hydration_status=ExternalChannelHydrationStatus.COMPLETE,
+                hydration_cursor=None,
+                hydration_high_watermark_position=None,
+                reconciliation_boundary_received_at=_at(1),
+                reconciliation_boundary_event_id="boundary-1",
+                hydration_error_kind=None,
+                hydration_error_summary=None,
+                hydration_started_at=_at(0),
+                hydration_completed_at=_at(1),
+                latest_activity_at=_at(1),
+                unavailable_at=None,
+                deleted_at=None,
+            ),
+        )
+        event = await repository.admit_event(
+            session,
+            ExternalChannelEventCreate(
+                connection_id=connection_id,
+                provider_event_id="discord-gateway:reconcile:1",
+                transport_envelope_id="discord-gateway:reconcile:1",
+                event_type="discord_message_create",
+                provider_app_id="A1",
+                provider_tenant_id="G1",
+                provider_enterprise_id=None,
+                resource_correlation_key="G1:200",
+                eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+                envelope={"message": {}},
+                status=ExternalChannelEventStatus.ACCEPTED,
+                provider_occurred_at=_at(1),
+                received_at=_at(1),
+            ),
+        )
+        event_row = await session.get(RDBExternalChannelEvent, event.event.id)
+        assert event_row is not None
+        event_row.status = ExternalChannelEventStatus.PROCESSED
+        configuration = await repository.get_connection_configuration(
+            session, connection_id=connection_id
+        )
+        route = await repository.get_routable_route_by_id(session, route_id=route_id)
+        assert configuration is not None and route is not None
+        service = _service(rdb_session_manager, repository)
+        await service.persist_discord_message_event_for_test(
+            event=event.event,
+            configuration=configuration,
+            resource=resource,
+            message=DiscordNormalizedMessage(
+                tenant_id="G1",
+                channel_id="200",
+                thread_id=None,
+                parent_channel_id=None,
+                message_id="100",
+                provider_message_key="discord:G1:100",
+                provider_position="100",
+                revision_key="discord-revision-reconcile",
+                revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+                lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+                author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+                provider_user_id="U1",
+                normalized_body="Please investigate",
+                attachment_metadata=None,
+                normalized_size=18,
+                provider_created_at=_at(1),
+                provider_updated_at=None,
+                invocation=True,
+            ),
+        )
+        binding = await repository.get_active_binding_by_resource(
+            session, resource_id=resource.id
+        )
+        trigger = await repository.get_message_by_provider_key(
+            session,
+            resource_id=resource.id,
+            provider_message_key="discord:G1:100",
+        )
+        assert binding is not None and trigger is not None
+        assert trigger.principal_id is not None
+        approver = await UserRepository().create(
+            session, UserCreate(email=f"reconcile-approver-{binding.id}@example.com")
+        )
+        await repository.ensure_access_grant(
+            session,
+            ExternalChannelAccessGrantCreate(
+                agent_id=agent_id,
+                principal_id=trigger.principal_id,
+                scope=ExternalChannelAccessGrantScope.AGENT,
+                agent_session_id=None,
+                granted_by_user_id=approver.id,
+                source_access_request_id=None,
+                revoked_by_user_id=None,
+                revoked_at=None,
+            ),
+        )
+        await session.commit()
+    return service, repository, binding.id, resource.id
+
+
+@pytest.mark.asyncio
+async def test_reconcile_discord_delivered_attempts_wakes_then_activates(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Persisted initial attempts gate one wake and ACTIVE boundary advancement."""
+    (
+        service,
+        repository,
+        binding_id,
+        _resource_id,
+    ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
+
+    async def deliver(attempt_id: str) -> None:
+        async with rdb_session_manager() as session:
+            await repository.start_delivery_attempt(
+                session, delivery_attempt_id=attempt_id, attempted_at=_at(5)
+            )
+            await repository.finish_delivery_attempt(
+                session,
+                delivery_attempt_id=attempt_id,
+                status=ExternalChannelDeliveryStatus.DELIVERED,
+                provider_message_key=f"discord:test:{attempt_id}",
+                error_kind=None,
+                error_summary=None,
+                completed_at=_at(5),
+            )
+            await session.commit()
+
+    service.action_service.attempt_delivery = AsyncMock(side_effect=deliver)
+
+    assert await service.reconcile_binding(binding_id=binding_id) is True
+    cast(Any, service.session_lifecycle).send_session_wake_up.assert_awaited_once()
+    async with rdb_session_manager() as session:
+        binding = await session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    assert binding.activation_status is ExternalChannelBindingActivationStatus.ACTIVE
+    assert binding.projected_through_position == "100"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terminal_status",
+    [
+        ExternalChannelDeliveryStatus.FAILED,
+        ExternalChannelDeliveryStatus.UNKNOWN,
+    ],
+)
+async def test_reconcile_discord_terminal_initial_attempt_blocks_wake_and_replay(
+    rdb_session_manager: SessionManager[AsyncSession],
+    terminal_status: ExternalChannelDeliveryStatus,
+) -> None:
+    """Failed or unknown initial rows leave WAITING and are never replayed."""
+    (
+        service,
+        repository,
+        binding_id,
+        _resource_id,
+    ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
+    outcome = 0
+
+    async def deliver(attempt_id: str) -> None:
+        nonlocal outcome
+        status = (
+            terminal_status if outcome == 0 else ExternalChannelDeliveryStatus.DELIVERED
+        )
+        outcome += 1
+        async with rdb_session_manager() as session:
+            await repository.start_delivery_attempt(
+                session, delivery_attempt_id=attempt_id, attempted_at=_at(5)
+            )
+            await repository.finish_delivery_attempt(
+                session,
+                delivery_attempt_id=attempt_id,
+                status=status,
+                provider_message_key=None,
+                error_kind=(
+                    "provider_failure"
+                    if status is not ExternalChannelDeliveryStatus.DELIVERED
+                    else None
+                ),
+                error_summary=(
+                    "safe test failure"
+                    if status is not ExternalChannelDeliveryStatus.DELIVERED
+                    else None
+                ),
+                completed_at=_at(5),
+            )
+            await session.commit()
+
+    service.action_service.attempt_delivery = AsyncMock(side_effect=deliver)
+
+    assert await service.reconcile_binding(binding_id=binding_id) is False
+    first_attempt_count = service.action_service.attempt_delivery.await_count
+    assert await service.reconcile_binding(binding_id=binding_id) is False
+    assert service.action_service.attempt_delivery.await_count == first_attempt_count
+    cast(Any, service.session_lifecycle).send_session_wake_up.assert_not_awaited()
+    async with rdb_session_manager() as session:
+        binding = await session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    assert binding.activation_status is (
+        ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_discord_wake_pending_crash_recovers_without_provider_replay(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A crash after the durable claim re-emits wake and skips terminal providers."""
+    (
+        service,
+        repository,
+        binding_id,
+        _resource_id,
+    ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
+
+    async def deliver(attempt_id: str) -> None:
+        async with rdb_session_manager() as session:
+            await repository.start_delivery_attempt(
+                session, delivery_attempt_id=attempt_id, attempted_at=_at(5)
+            )
+            await repository.finish_delivery_attempt(
+                session,
+                delivery_attempt_id=attempt_id,
+                status=ExternalChannelDeliveryStatus.DELIVERED,
+                provider_message_key=f"discord:test:{attempt_id}",
+                error_kind=None,
+                error_summary=None,
+                completed_at=_at(5),
+            )
+            await session.commit()
+
+    service.action_service.attempt_delivery = AsyncMock(side_effect=deliver)
+    cast(Any, service.session_lifecycle).send_session_wake_up = AsyncMock(
+        side_effect=RuntimeError("injected wake crash")
+    )
+    with pytest.raises(RuntimeError, match="injected wake crash"):
+        await service.reconcile_binding(binding_id=binding_id)
+    assert service.action_service.attempt_delivery.await_count == 2
+    async with rdb_session_manager() as session:
+        crashed = await session.get(RDBExternalChannelBinding, binding_id)
+        assert crashed is not None
+        assert crashed.activation_status is (
+            ExternalChannelBindingActivationStatus.WAKE_PENDING
+        )
+        assert crashed.projected_through_position == "100"
+        crashed.activation_wake_claimed_at = _at(10) - datetime.timedelta(minutes=2)
+        await session.commit()
+
+    cast(Any, service.session_lifecycle).send_session_wake_up = AsyncMock()
+    assert await service.reconcile_binding(binding_id=binding_id) is True
+    assert service.action_service.attempt_delivery.await_count == 2
+    cast(Any, service.session_lifecycle).send_session_wake_up.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_loop_reconciles_open_access_waiting_binding_without_grant(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """The worker loop releases open-access Discord bindings without a grant row."""
+    (
+        service,
+        repository,
+        binding_id,
+        _resource_id,
+    ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
+    async with rdb_session_manager() as session:
+        binding = await repository.get_binding(session, binding_id=binding_id)
+        assert binding is not None
+        route = await repository.get_agent_route(session, route_id=binding.route_id)
+        assert route is not None
+        await session.execute(
+            sa.delete(RDBExternalChannelAccessGrant).where(
+                RDBExternalChannelAccessGrant.agent_id
+                == route.require_active_agent_id()
+            )
+        )
+        await session.commit()
+
+    async def deliver(attempt_id: str) -> None:
+        async with rdb_session_manager() as session:
+            await repository.start_delivery_attempt(
+                session, delivery_attempt_id=attempt_id, attempted_at=_at(5)
+            )
+            await repository.finish_delivery_attempt(
+                session,
+                delivery_attempt_id=attempt_id,
+                status=ExternalChannelDeliveryStatus.DELIVERED,
+                provider_message_key=f"discord:test:{attempt_id}",
+                error_kind=None,
+                error_summary=None,
+                completed_at=_at(5),
+            )
+            await session.commit()
+
+    service.action_service.attempt_delivery = AsyncMock(side_effect=deliver)
+    shutdown = asyncio.Event()
+
+    async def process_once() -> int:
+        shutdown.set()
+        return 0
+
+    service_any = cast(Any, service)
+    service_any.process_once = AsyncMock(side_effect=process_once)
+    await service_any.run(shutdown)
+
+    cast(Any, service.session_lifecycle).send_session_wake_up.assert_awaited_once()
+    async with rdb_session_manager() as session:
+        binding_row = await session.get(RDBExternalChannelBinding, binding_id)
+    assert binding_row is not None
+    assert binding_row.activation_status is (
+        ExternalChannelBindingActivationStatus.ACTIVE
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_restricted_waiting_binding_without_grant_stays_waiting(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A restricted route still requires a durable grant during reconciliation."""
+    (
+        service,
+        repository,
+        binding_id,
+        _resource_id,
+    ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
+    async with rdb_session_manager() as session:
+        binding = await repository.get_binding(session, binding_id=binding_id)
+        assert binding is not None
+        route_row = await session.get(
+            RDBExternalChannelAgentRoute,
+            binding.route_id,
+        )
+        assert route_row is not None
+        route_row.open_access_enabled = False
+        await session.execute(
+            sa.delete(RDBExternalChannelAccessGrant).where(
+                RDBExternalChannelAccessGrant.agent_id == route_row.agent_id
+            )
+        )
+        await session.commit()
+
+    service_any = cast(Any, service)
+    assert await service_any.reconcile_binding(binding_id=binding_id) is False
+    cast(Any, service.session_lifecycle).send_session_wake_up.assert_not_awaited()
+
+
 async def test_discord_first_binding_releases_context_and_creates_deliveries(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """A first Discord mention immediately wakes its bound Agent session."""
+    """A first Discord mention persists waiting delivery intents before wake."""
     async with rdb_session_manager() as session:
         connection_id, _, _, repository = await _setup_route(
             session,
@@ -2732,27 +3247,122 @@ async def test_discord_first_binding_releases_context_and_creates_deliveries(
         ),
     )
 
-    assert result.control_delivery_attempt_id is not None
-    assert result.activity_delivery_attempt_id is not None
-    assert result.wake_up is not None
+    assert result.control_delivery_attempt_id is None
+    assert result.activity_delivery_attempt_id is None
+    assert result.wake_up is None
     async with rdb_session_manager() as session:
-        attempts = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelDeliveryAttempt).where(
-                    RDBExternalChannelDeliveryAttempt.id.in_(
-                        (
-                            result.control_delivery_attempt_id,
-                            result.activity_delivery_attempt_id,
-                        )
-                    )
-                )
-            )
+        persisted_binding = await repository.get_active_binding_by_resource(
+            session,
+            resource_id=resource.id,
         )
+    assert persisted_binding is not None
+    assert persisted_binding.activation_status is (
+        ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    )
 
-    assert {attempt.operation for attempt in attempts} == {
-        ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-    }
+
+@pytest.mark.asyncio
+async def test_real_sessions_allow_one_fresh_wake_claim_and_stale_reclaim(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """PostgreSQL row locks preserve one fresh claim across sessions."""
+    async with rdb_session_manager() as session:
+        connection_id, route_id, agent_id, repository = await _setup_route(
+            session, provider=ExternalChannelProvider.DISCORD
+        )
+        resource = await repository.create_resource_idempotent(
+            session,
+            ExternalChannelResourceCreate(
+                connection_id=connection_id,
+                resource_type=ExternalChannelResourceType.THREAD,
+                provider_resource_key="discord:G1:claim-test",
+                labels={"provider": "discord", "guild_id": "G1", "thread_id": "T1"},
+                status=ExternalChannelResourceStatus.ACTIVE,
+                hydration_status=ExternalChannelHydrationStatus.COMPLETE,
+                hydration_cursor=None,
+                hydration_high_watermark_position=None,
+                reconciliation_boundary_received_at=_at(1),
+                reconciliation_boundary_event_id="boundary-1",
+                hydration_error_kind=None,
+                hydration_error_summary=None,
+                hydration_started_at=_at(0),
+                hydration_completed_at=_at(1),
+                latest_activity_at=_at(1),
+                unavailable_at=None,
+                deleted_at=None,
+            ),
+        )
+        agent = await session.get(RDBAgent, agent_id)
+        assert agent is not None
+        agent_session = await AgentSessionRepository().create(
+            session,
+            AgentSessionCreate(
+                workspace_id=agent.workspace_id, agent_id=agent_id, title=None
+            ),
+        )
+        trigger = await _create_trigger_message(
+            session, repository=repository, resource_id=resource.id, message_key="claim"
+        )
+        binding = await repository.create_binding_idempotent(
+            session,
+            ExternalChannelBindingCreate(
+                resource_id=resource.id,
+                route_id=route_id,
+                agent_session_id=agent_session.id,
+                status=ExternalChannelBindingStatus.ACTIVE,
+                activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
+                activation_trigger_message_id=trigger.id,
+                activated_at=None,
+                projected_through_position=None,
+                truncated_message_count=0,
+                truncated_size=0,
+                disconnected_at=None,
+                disconnect_reason=None,
+            ),
+            expected_admission_id=None,
+            expected_access_request_id=None,
+        )
+        await session.commit()
+
+    async with rdb_session_manager() as first, rdb_session_manager() as second:
+        first_claim, first_wake = await repository.claim_binding_wake(
+            first,
+            binding_id=binding.id,
+            now=_at(10),
+            projected_through_position="claim-position",
+        )
+        await first.commit()
+        second_claim, second_wake = await repository.claim_binding_wake(
+            second,
+            binding_id=binding.id,
+            now=_at(10) + datetime.timedelta(seconds=1),
+            projected_through_position="claim-position",
+        )
+        await second.commit()
+
+    assert first_claim is not None and first_wake is True
+    assert second_claim is not None and second_wake is False
+
+    async with rdb_session_manager() as session:
+        binding_row = await repository.lock_binding(session, binding_id=binding.id)
+        assert binding_row is not None
+        binding_row_rdb = await session.get(RDBExternalChannelBinding, binding.id)
+        assert binding_row_rdb is not None
+        binding_row_rdb.activation_wake_claimed_at = _at(10) - datetime.timedelta(
+            minutes=2
+        )
+        await session.commit()
+
+    async with rdb_session_manager() as session:
+        stale_claim, stale_wake = await repository.claim_binding_wake(
+            session,
+            binding_id=binding.id,
+            now=_at(10),
+            projected_through_position="claim-position",
+        )
+        await session.commit()
+
+    assert stale_claim is not None and stale_wake is True
 
 
 def test_discord_root_target_is_shared_by_session_link_and_progress() -> None:

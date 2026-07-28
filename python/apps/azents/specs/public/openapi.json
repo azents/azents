@@ -17064,6 +17064,7 @@
         "type": "string",
         "enum": [
           "waiting_hydration",
+          "wake_pending",
           "active"
         ],
         "title": "ExternalChannelBindingActivationStatus",

@@ -1705,6 +1705,11 @@ class RDBExternalChannelBinding(RDBModel):
         nullable=True,
         default=None,
     )
+    activation_wake_claimed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
     projected_through_position: Mapped[str | None] = mapped_column(
         sa.String(255),
         nullable=True,

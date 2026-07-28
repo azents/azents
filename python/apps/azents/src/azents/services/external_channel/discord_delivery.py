@@ -54,31 +54,13 @@ class DiscordDeliveryClient:
         root_message_id: str,
     ) -> DiscordDeliveryResult:
         """Return only after the root Discord message has a usable thread."""
-        try:
-            existing = await self.http_client.get(
-                (
-                    f"{discord_api_base_url()}/channels/{parent_channel_id}/messages/"
-                    f"{root_message_id}"
-                ),
-                headers={"Authorization": f"Bot {bot_token}"},
-            )
-        except httpx.RequestError:
-            return _unknown_result()
-        if existing.status_code == 200:
-            try:
-                payload: object = existing.json()
-            except ValueError:
-                return _unknown_result()
-            if not isinstance(payload, dict):
-                return _unknown_result()
-            if "thread" in payload:
-                return _thread_result(
-                    response=existing,
-                    parent_channel_id=parent_channel_id,
-                    root_message_id=root_message_id,
-                )
-        if existing.status_code != 404:
-            return _response_failure(existing) or _unknown_result()
+        existing = await self._read_root_thread(
+            bot_token=bot_token,
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+        )
+        if existing is not None:
+            return existing
         response = await self._request(
             "POST",
             f"/channels/{parent_channel_id}/messages/{root_message_id}/threads",
@@ -86,7 +68,66 @@ class DiscordDeliveryClient:
             json_body={"name": "Azents"},
         )
         if isinstance(response, DiscordDeliveryResult):
-            return response
+            result = response
+        else:
+            result = _thread_result(
+                response=response,
+                parent_channel_id=parent_channel_id,
+                root_message_id=root_message_id,
+            )
+        if result.status == "delivered":
+            return result
+        reconciled = await self._read_root_thread(
+            bot_token=bot_token,
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+        )
+        if reconciled is not None:
+            return reconciled
+        return result
+
+    async def _read_root_thread(
+        self,
+        *,
+        bot_token: str,
+        parent_channel_id: str,
+        root_message_id: str,
+    ) -> DiscordDeliveryResult | None:
+        """Read the root once to reconcile an existing or ambiguous thread create."""
+        try:
+            response = await self.http_client.get(
+                (
+                    f"{discord_api_base_url()}/channels/{parent_channel_id}/messages/"
+                    f"{root_message_id}"
+                ),
+                headers={"Authorization": f"Bot {bot_token}"},
+            )
+        except httpx.RequestError:
+            return _unknown_result(
+                error_kind="transport_unknown",
+                error_summary="Discord thread reconciliation transport failed.",
+            )
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            return _response_failure(response) or _unknown_result(
+                error_kind="response_shape_invalid",
+                error_summary="Discord thread reconciliation response was invalid.",
+            )
+        try:
+            payload: object = response.json()
+        except ValueError:
+            return _unknown_result(
+                error_kind="response_malformed",
+                error_summary="Discord thread reconciliation response was malformed.",
+            )
+        if not isinstance(payload, dict):
+            return _unknown_result(
+                error_kind="response_shape_invalid",
+                error_summary="Discord thread reconciliation response was invalid.",
+            )
+        if "thread" not in payload:
+            return None
         return _thread_result(
             response=response,
             parent_channel_id=parent_channel_id,
@@ -241,7 +282,10 @@ class DiscordDeliveryClient:
                 content=content,
             )
         except httpx.RequestError:
-            return _unknown_result()
+            return _unknown_result(
+                error_kind="transport_unknown",
+                error_summary="Discord delivery transport outcome is unknown.",
+            )
         return _response_failure(response) or response
 
 
@@ -277,7 +321,10 @@ def _response_failure(response: httpx.Response) -> DiscordDeliveryResult | None:
             error_summary="Discord rate limited the provider operation.",
         )
     if response.status_code >= 500:
-        return _unknown_result()
+        return _unknown_result(
+            error_kind="provider_5xx_unknown",
+            error_summary="Discord returned a server error with an unknown outcome.",
+        )
     if response.status_code >= 400:
         return _rejected_result()
     return None
@@ -299,15 +346,29 @@ def _created_message_result(
     try:
         payload: object = response.json()
     except ValueError:
-        return _unknown_result()
+        return _unknown_result(
+            error_kind="response_malformed",
+            error_summary="Discord message response was malformed.",
+        )
     message_id = payload.get("id") if isinstance(payload, dict) else None
     response_channel_id = (
         payload.get("channel_id") if isinstance(payload, dict) else None
     )
-    if message_id is None or response_channel_id != channel_id:
-        return _unknown_result()
+    if response_channel_id != channel_id:
+        return _unknown_result(
+            error_kind="response_channel_mismatch",
+            error_summary="Discord message response targeted another channel.",
+        )
+    if message_id is None:
+        return _unknown_result(
+            error_kind="response_shape_invalid",
+            error_summary="Discord message response omitted its identity.",
+        )
     if not isinstance(message_id, str) or not message_id.isdigit():
-        return _unknown_result()
+        return _unknown_result(
+            error_kind="response_shape_invalid",
+            error_summary="Discord message response contained an invalid identity.",
+        )
     return DiscordDeliveryResult(
         status="delivered",
         provider_message_key=f"discord:{guild_id}:{message_id}",
@@ -326,17 +387,32 @@ def _thread_result(
     try:
         payload: object = response.json()
     except ValueError:
-        return _unknown_result()
+        return _unknown_result(
+            error_kind="response_malformed",
+            error_summary="Discord thread response was malformed.",
+        )
     if not isinstance(payload, dict):
-        return _unknown_result()
+        return _unknown_result(
+            error_kind="response_shape_invalid",
+            error_summary="Discord thread response was invalid.",
+        )
     thread = payload.get("thread") if "thread" in payload else payload
     if not isinstance(thread, dict):
-        return _unknown_result()
+        return _unknown_result(
+            error_kind="thread_response_invalid",
+            error_summary="Discord thread response omitted its thread object.",
+        )
     thread_id = thread.get("id")
     if thread.get("parent_id") != parent_channel_id:
-        return _unknown_result()
+        return _unknown_result(
+            error_kind="thread_response_invalid",
+            error_summary="Discord thread response had the wrong parent channel.",
+        )
     if not isinstance(thread_id, str) or not thread_id.isdigit():
-        return _unknown_result()
+        return _unknown_result(
+            error_kind="thread_response_invalid",
+            error_summary="Discord thread response contained an invalid identity.",
+        )
     return DiscordDeliveryResult(
         status="delivered",
         provider_message_key=f"discord-thread:{thread_id}",
@@ -345,12 +421,16 @@ def _thread_result(
     )
 
 
-def _unknown_result() -> DiscordDeliveryResult:
+def _unknown_result(
+    *,
+    error_kind: str = "provider_ambiguous",
+    error_summary: str = "Discord delivery outcome is unknown.",
+) -> DiscordDeliveryResult:
     return DiscordDeliveryResult(
         status="unknown",
         provider_message_key=None,
-        error_kind="provider_ambiguous",
-        error_summary="Discord delivery outcome is unknown.",
+        error_kind=error_kind,
+        error_summary=error_summary,
     )
 
 

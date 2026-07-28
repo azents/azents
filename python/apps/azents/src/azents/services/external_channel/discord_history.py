@@ -1,5 +1,6 @@
 """Bounded Discord conversation-history hydration primitives."""
 
+import json
 from dataclasses import dataclass
 
 import httpx
@@ -41,6 +42,14 @@ class DiscordHistoryTemporaryError(DiscordHistoryProviderError):
     """Discord did not provide a complete history response."""
 
 
+class DiscordHistoryResponseMalformed(DiscordHistoryTemporaryError):
+    """Discord returned a response outside the requested channel boundary."""
+
+
+MAX_DISCORD_HISTORY_RESPONSE_BYTES = 256 * 1024
+MAX_DISCORD_HISTORY_MESSAGE_BYTES = 64 * 1024
+
+
 class DiscordHistoryRequestRejected(DiscordHistoryProviderError):
     """Discord rejected a syntactically valid history request."""
 
@@ -80,9 +89,14 @@ class DiscordConversationHistoryClient:
                 f"/channels/{source_channel_id}/messages/{root_message_id}",
                 bot_token=bot_token,
             )
+            self._validate_response_size(response)
             payload = self._object_payload(response)
-            if payload.get("id") != root_message_id:
-                raise DiscordHistoryTemporaryError(
+            self._validate_message_size(payload)
+            if (
+                payload.get("id") != root_message_id
+                or payload.get("channel_id") != source_channel_id
+            ):
+                raise DiscordHistoryResponseMalformed(
                     "Discord source message response did not match the request."
                 )
             message = self._normalize(
@@ -105,12 +119,32 @@ class DiscordConversationHistoryClient:
             bot_token=bot_token,
             params=params,
         )
+        self._validate_response_size(response)
         payload = self._array_payload(response)
+        if len(payload) > page_limit:
+            raise DiscordHistoryResponseMalformed(
+                "Discord history response exceeded the requested limit."
+            )
         messages: list[DiscordNormalizedMessage] = []
         oldest_message_id: str | None = None
         for item in payload:
+            if isinstance(item, dict):
+                self._validate_message_size(item)
             if not isinstance(item, dict):
                 continue
+            if item.get("channel_id") != thread_channel_id:
+                raise DiscordHistoryResponseMalformed(
+                    "Discord thread history item crossed the requested channel."
+                )
+            raw_thread = item.get("thread")
+            if isinstance(raw_thread, dict):
+                if raw_thread.get("id") != thread_channel_id or (
+                    raw_thread.get("parent_id") is not None
+                    and raw_thread.get("parent_id") != source_channel_id
+                ):
+                    raise DiscordHistoryResponseMalformed(
+                        "Discord thread history item had an invalid root relationship."
+                    )
             message = self._normalize(
                 guild_id=guild_id,
                 raw_message=item,
@@ -145,6 +179,30 @@ class DiscordConversationHistoryClient:
             raise DiscordHistoryTemporaryError(
                 "Discord history response contained an invalid message."
             ) from error
+
+    @staticmethod
+    def _validate_response_size(response: httpx.Response) -> None:
+        if len(response.content) > MAX_DISCORD_HISTORY_RESPONSE_BYTES:
+            raise DiscordHistoryResponseMalformed(
+                "Discord history response exceeded the size limit."
+            )
+
+    @staticmethod
+    def _validate_message_size(message: dict[str, object]) -> None:
+        try:
+            serialized = json.dumps(
+                message,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode()
+        except (TypeError, ValueError) as error:
+            raise DiscordHistoryResponseMalformed(
+                "Discord history message could not be bounded."
+            ) from error
+        if len(serialized) > MAX_DISCORD_HISTORY_MESSAGE_BYTES:
+            raise DiscordHistoryResponseMalformed(
+                "Discord history message exceeded the size limit."
+            )
 
     async def _request(
         self,

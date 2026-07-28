@@ -138,6 +138,206 @@ def test_discord_fake_redacts_rest_secrets_and_visible_provider_bodies(
     assert "private.example" not in rendered
 
 
+def test_discord_fake_serves_bounded_history_and_thread_ordering_evidence(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Expose history pages and one root-thread boundary without content evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "root_messages": [
+                {
+                    "id": "500000000000000001",
+                    "channel_id": "400000000000000001",
+                    "content": "Private root source",
+                    "author": {"id": "600000000000000001"},
+                    "timestamp": "2026-07-28T00:00:00.000000+00:00",
+                }
+            ],
+            "history_pages": [
+                [
+                    {"id": "300", "channel_id": "700", "content": "Private later"},
+                    {"id": "200", "channel_id": "700", "content": "Private earlier"},
+                ],
+                [{"id": "100", "channel_id": "700", "content": "Private oldest"}],
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    root = requests.get(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000001",
+        timeout=5,
+    )
+    root.raise_for_status()
+    assert root.json()["id"] == "500000000000000001"
+    first_page = requests.get(
+        f"{discord_fake_url}/api/v10/channels/700/messages",
+        params={"limit": 2},
+        timeout=5,
+    )
+    first_page.raise_for_status()
+    assert [item["id"] for item in first_page.json()] == ["300", "200"]
+    second_page = requests.get(
+        f"{discord_fake_url}/api/v10/channels/700/messages",
+        params={"limit": 2, "before": "200"},
+        timeout=5,
+    )
+    second_page.raise_for_status()
+    assert [item["id"] for item in second_page.json()] == ["100"]
+    thread = requests.post(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000001/threads",
+        json={"name": "Azents"},
+        timeout=5,
+    )
+    thread.raise_for_status()
+    assert thread.json()["parent_id"] == "400000000000000001"
+    reused_root = requests.get(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000001",
+        timeout=5,
+    )
+    reused_root.raise_for_status()
+    assert reused_root.json()["thread"]["id"] == thread.json()["id"]
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    events = evidence["operations"]
+    assert [event["event"] for event in events] == [
+        "thread_read",
+        "history_page",
+        "history_page",
+        "thread_create",
+        "thread_read",
+    ]
+    assert events[0]["outcome"] == "missing"
+    assert events[3]["thread_channel_id"] == thread.json()["id"]
+    assert events[4]["outcome"] == "reused"
+    rendered = str(evidence)
+    assert "Private root source" not in rendered
+    assert "Private later" not in rendered
+    assert "Private earlier" not in rendered
+    assert "Private oldest" not in rendered
+
+
+def test_discord_fake_preserves_state_for_one_shot_scenarios(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Scenario changes do not erase nonce identities or ordered evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "api_scenario_sequences": {"create_message": ["response_malformed", "ok"]}
+        },
+        timeout=5,
+    ).raise_for_status()
+    message_url = f"{discord_fake_url}/api/v10/channels/700/messages"
+    first = requests.post(message_url, json={"nonce": "nonce-once"}, timeout=5)
+    assert first.status_code == 200
+    assert first.content == b"{malformed"
+    second = requests.post(message_url, json={"nonce": "nonce-once"}, timeout=5)
+    second.raise_for_status()
+    assert second.json()["id"].isdigit()
+    requests.post(
+        f"{discord_fake_url}/__testenv/scenario",
+        json={"api_scenarios": {"create_message": "response_shape_invalid"}},
+        timeout=5,
+    ).raise_for_status()
+    third = requests.post(message_url, json={"nonce": "nonce-once"}, timeout=5)
+    assert third.status_code == 200
+    assert third.json() == {"channel_id": "700"}
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert len(evidence["operations"]) == 3
+    assert [item.get("safe_category") for item in evidence["operations"]] == [
+        "response_malformed",
+        None,
+        "response_shape_invalid",
+    ]
+    assert evidence["deliveries"][0]["outcome"] == "duplicate"
+    assert "nonce-once" not in str(evidence)
+
+
+def test_discord_fake_controls_thread_response_mismatch_and_transport_unknown(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Expose malformed thread success and transport ambiguity as safe evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "api_scenario_sequences": {
+                "create_thread": ["thread_response_invalid", "transport_unknown"]
+            }
+        },
+        timeout=5,
+    ).raise_for_status()
+    thread_url = (
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/"
+        "500000000000000001/threads"
+    )
+    invalid = requests.post(thread_url, json={"name": "Azents"}, timeout=5)
+    assert invalid.status_code == 201
+    assert invalid.json() == {"id": "bad", "parent_id": "0"}
+    with pytest.raises(requests.exceptions.ConnectionError):
+        requests.post(thread_url, json={"name": "Azents"}, timeout=5)
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert [item["safe_category"] for item in evidence["operations"]] == [
+        "thread_response_invalid",
+        "transport_unknown",
+    ]
+    assert "Azents" not in str(evidence)
+
+
+def test_discord_fake_reconciles_committed_unknown_thread_creation(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Reconcile a committed thread after the create response is lost."""
+    discord_fake_url, _ = discord_fake_urls
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "api_scenario_sequences": {
+                "create_thread": ["thread_create_committed_unknown"]
+            },
+            "allow_synthetic_roots": True,
+        },
+        timeout=5,
+    ).raise_for_status()
+    thread_url = (
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/"
+        "500000000000000001/threads"
+    )
+    with pytest.raises(requests.exceptions.ConnectionError):
+        requests.post(thread_url, json={"name": "Private thread name"}, timeout=5)
+
+    reconciled = requests.get(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/"
+        "500000000000000001",
+        timeout=5,
+    )
+    reconciled.raise_for_status()
+    thread_id = reconciled.json()["thread"]["id"]
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert [event["event"] for event in evidence["operations"]] == [
+        "thread_create",
+        "thread_reconcile",
+    ]
+    assert evidence["operations"][0] == {
+        "sequence": 1,
+        "event": "thread_create",
+        "operation": "create_thread",
+        "outcome": "unknown",
+        "safe_category": "transport_unknown",
+        "parent_channel_id": "400000000000000001",
+        "root_message_id": "500000000000000001",
+        "thread_channel_id": thread_id,
+    }
+    assert evidence["operations"][1]["outcome"] == "reused"
+    rendered = str(evidence)
+    assert "Private thread name" not in rendered
+
+
 def test_discord_fake_serves_gateway_identify_ready_dispatch_and_heartbeat(
     discord_fake_urls: tuple[str, str],
 ) -> None:
@@ -282,6 +482,207 @@ def test_discord_fake_controls_invalid_sessions_and_intents_close(
     assert "private" not in str(evidence)
 
 
+@pytest.mark.parametrize(
+    ("scenario", "expected_status"),
+    [
+        ("credentials_invalid", 401),
+        ("forbidden", 403),
+        ("not_found", 404),
+        ("rate_limited", 429),
+        ("rejected", 400),
+        ("provider_5xx_unknown", 503),
+    ],
+)
+def test_discord_fake_controls_confirmed_and_unknown_http_categories(
+    discord_fake_urls: tuple[str, str],
+    scenario: str,
+    expected_status: int,
+) -> None:
+    """Expose each bounded REST category without retaining provider response bodies."""
+    discord_fake_url, _ = discord_fake_urls
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"api_scenario_sequences": {"create_message": [scenario]}},
+        timeout=5,
+    ).raise_for_status()
+    response = requests.post(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
+        json={"nonce": f"nonce-{scenario}"},
+        timeout=5,
+    )
+    assert response.status_code == expected_status
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["operations"][0]["event"] == "message"
+    assert evidence["operations"][0]["safe_category"] in {
+        "credentials_invalid",
+        "permission_denied",
+        "message_not_found",
+        "rate_limited",
+        "provider_rejected",
+        "provider_5xx_unknown",
+    }
+    assert "nonce-" not in str(evidence)
+
+
+def test_discord_fake_confirmed_create_failure_does_not_consume_nonce_identity(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """A confirmed rejection leaves the nonce available for a real retry."""
+    discord_fake_url, _ = discord_fake_urls
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"api_scenario_sequences": {"create_message": ["rejected", "ok"]}},
+        timeout=5,
+    ).raise_for_status()
+    message_url = f"{discord_fake_url}/api/v10/channels/400000000000000001/messages"
+    first = requests.post(message_url, json={"nonce": "retry-nonce"}, timeout=5)
+    assert first.status_code == 400
+    second = requests.post(message_url, json={"nonce": "retry-nonce"}, timeout=5)
+    second.raise_for_status()
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert "message_id" not in evidence["deliveries"][0]
+    assert evidence["deliveries"][1]["outcome"] == "created"
+    assert evidence["deliveries"][1]["message_id"] == second.json()["id"]
+    assert "retry-nonce" not in str(evidence)
+
+
+def test_discord_fake_history_is_channel_scoped_and_cursor_bounded(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """History pages enforce target channel, requested limit, and cursor evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {"id": "300", "channel_id": "channel-a"},
+                    {"id": "200", "channel_id": "channel-a"},
+                ]
+            ]
+        },
+        timeout=5,
+    ).raise_for_status()
+    wrong_channel = requests.get(
+        f"{discord_fake_url}/api/v10/channels/channel-b/messages",
+        params={"limit": 100},
+        timeout=5,
+    )
+    wrong_channel.raise_for_status()
+    assert wrong_channel.json() == []
+    first = requests.get(
+        f"{discord_fake_url}/api/v10/channels/channel-a/messages",
+        params={"limit": 1},
+        timeout=5,
+    )
+    first.raise_for_status()
+    assert [item["id"] for item in first.json()] == ["300"]
+    second = requests.get(
+        f"{discord_fake_url}/api/v10/channels/channel-a/messages",
+        params={"limit": 1, "before": "300"},
+        timeout=5,
+    )
+    second.raise_for_status()
+    assert [item["id"] for item in second.json()] == ["200"]
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    history_events = [
+        item for item in evidence["operations"] if item["event"] == "history_page"
+    ]
+    assert history_events[0]["channel_id"] == "channel-b"
+    assert history_events[0]["limit"] == 100
+    assert history_events[1]["channel_id"] == "channel-a"
+    assert history_events[1]["limit"] == 1
+    assert history_events[2]["cursor"] == "300"
+
+
+def test_discord_fake_root_reads_require_configured_or_explicit_synthetic_mode(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Absent roots are 404 unless the bounded synthetic fixture mode is enabled."""
+    discord_fake_url, _ = discord_fake_urls
+    root_url = f"{discord_fake_url}/api/v10/channels/channel-a/messages/root-a"
+    missing = requests.get(root_url, timeout=5)
+    assert missing.status_code == 404
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"allow_synthetic_roots": True},
+        timeout=5,
+    ).raise_for_status()
+    synthetic = requests.get(root_url, timeout=5)
+    synthetic.raise_for_status()
+    assert synthetic.json()["id"] == "root-a"
+
+
+def test_discord_fake_rejects_unbounded_history_and_root_fixtures(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """History/root fixture page, count, and serialized-size bounds are enforced."""
+    discord_fake_url, _ = discord_fake_urls
+    oversized = requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "id": "1",
+                        "channel_id": "channel-a",
+                        "content": "x" * 20_000,
+                    }
+                ]
+            ]
+        },
+        timeout=5,
+    )
+    assert oversized.status_code == 400
+    too_many_pages = requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [{"id": str(index), "channel_id": "channel-a"}] for index in range(33)
+            ]
+        },
+        timeout=5,
+    )
+    assert too_many_pages.status_code == 400
+    oversized_root = requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "root_messages": [
+                {
+                    "id": "root-a",
+                    "channel_id": "channel-a",
+                    "content": "x" * 20_000,
+                }
+            ]
+        },
+        timeout=5,
+    )
+    assert oversized_root.status_code == 400
+
+
+def test_discord_fake_update_delete_track_missing_and_deleted_messages(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Update/delete paths expose real missing and deleted identity behavior."""
+    discord_fake_url, _ = discord_fake_urls
+    message_url = f"{discord_fake_url}/api/v10/channels/channel-a/messages"
+    created = requests.post(message_url, json={"nonce": "lifecycle"}, timeout=5)
+    created.raise_for_status()
+    message_id = created.json()["id"]
+    update_url = f"{message_url}/{message_id}"
+    updated = requests.patch(update_url, json={"content": "new"}, timeout=5)
+    updated.raise_for_status()
+    deleted = requests.delete(update_url, timeout=5)
+    assert deleted.status_code == 204
+    assert (
+        requests.patch(update_url, json={"content": "again"}, timeout=5).status_code
+        == 404
+    )
+    assert requests.delete(update_url, timeout=5).status_code == 404
+
+
 def test_discord_fake_controls_rest_rate_limit_rejection_and_ambiguous_write(
     discord_fake_urls: tuple[str, str],
 ) -> None:
@@ -314,7 +715,13 @@ def test_discord_fake_controls_rest_rate_limit_rejection_and_ambiguous_write(
 
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
     assert evidence["request_counts"] == {"create_message": 1}
-    assert evidence["deliveries"][0]["outcome"] == "created"
+    assert evidence["deliveries"][0] == {
+        "operation": "create_message",
+        "channel_id": "400000000000000001",
+        "outcome": "unknown",
+        "message_id": evidence["deliveries"][0]["message_id"],
+        "safe_category": "provider_5xx_unknown",
+    }
     assert "Private controlled outcome body" not in str(evidence)
 
 
@@ -364,6 +771,7 @@ def test_discord_fake_relays_a_real_signed_interaction_without_body_evidence(
             "interaction_id": "700000000000000001",
             "interaction_type": 1,
             "response_status": 200,
+            "response_type": 1,
         }
     ]
     assert "/callback" not in rendered
