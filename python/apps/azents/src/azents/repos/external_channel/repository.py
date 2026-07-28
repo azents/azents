@@ -317,6 +317,7 @@ class ExternalChannelRepository:
         provider_tenant_id: str,
         provider_bot_user_id: str | None,
         interaction_public_key: str,
+        message_command_id: str,
         callback_selector_hash: str,
         checked_at: datetime.datetime,
     ) -> ExternalChannelConnection | None:
@@ -381,6 +382,7 @@ class ExternalChannelRepository:
         connection.http_callback_selector_hash = callback_selector_hash
         connection.capabilities = {
             "interaction_public_key": interaction_public_key,
+            "message_command_id": message_command_id,
         }
         connection.configuration_generation += 1
         connection.status = ExternalChannelConnectionStatus.ACTIVE

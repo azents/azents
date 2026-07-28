@@ -76,6 +76,78 @@ from azents.services.external_channel.slack_events import (
 class ExternalChannelWorkRepository:
     """Own Channel Work transitions and delivery ledger state."""
 
+    async def ensure_initial_discord_progress(
+        self,
+        session: AsyncSession,
+        *,
+        work_id: str,
+        binding_id: str,
+        labels: dict[str, object] | None,
+    ) -> str | None:
+        """Plan initial Discord Tracker pages through the durable page ledger."""
+        work = await session.scalar(
+            sa.select(RDBExternalChannelWork)
+            .where(RDBExternalChannelWork.id == work_id)
+            .with_for_update()
+        )
+        if work is None:
+            raise RuntimeError("External Channel work disappeared.")
+        if work.desired_progress_payload is None:
+            return None
+        presentation = render_discord_persisted_progress(
+            work.desired_progress_payload,
+            work_id=work.id,
+            desired_progress_revision=work.desired_progress_revision,
+        )
+        parts = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelWorkProjectionPart)
+                .where(RDBExternalChannelWorkProjectionPart.work_id == work.id)
+                .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
+                .with_for_update()
+            )
+        )
+        if not parts:
+            for ordinal, text in enumerate(presentation.pages):
+                part = RDBExternalChannelWorkProjectionPart(
+                    work_id=work.id,
+                    part_ordinal=ordinal,
+                    desired_progress_revision=work.desired_progress_revision,
+                    status=ExternalChannelWorkProjectionStatus.PENDING,
+                    provider_message_key=None,
+                    latest_delivery_attempt_id=None,
+                    deleted_at=None,
+                )
+                session.add(part)
+                await session.flush()
+                await self._create_discord_progress_attempt(
+                    session,
+                    work=work,
+                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                    origin_id=work.id,
+                    channel_action_id=None,
+                    binding_id=binding_id,
+                    part=part,
+                    operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                    labels=labels,
+                    text=text,
+                )
+        return await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt.id)
+            .join(
+                RDBExternalChannelWorkProjectionPart,
+                RDBExternalChannelWorkProjectionPart.latest_delivery_attempt_id
+                == RDBExternalChannelDeliveryAttempt.id,
+            )
+            .where(
+                RDBExternalChannelWorkProjectionPart.work_id == work.id,
+                RDBExternalChannelDeliveryAttempt.status
+                == ExternalChannelDeliveryStatus.PENDING,
+            )
+            .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
+            .limit(1)
+        )
+
     async def ensure_active_work(
         self,
         session: AsyncSession,
@@ -727,6 +799,7 @@ class ExternalChannelWorkRepository:
                         RDBExternalChannelAgentRoute,
                         RDBExternalChannelConnection,
                         RDBAgent,
+                        RDBExternalChannelAccessRequest.resource_id,
                     )
                     .join(
                         RDBExternalChannelAccessRequest,
@@ -747,12 +820,13 @@ class ExternalChannelWorkRepository:
             ).one_or_none()
             if request_route is None:
                 return None
-            route, connection, agent = request_route
+            route, connection, agent, resource_id = request_route
             return ChannelDeliveryTarget(
                 delivery_attempt_id=attempt.id,
                 operation=attempt.operation,
                 status=attempt.status,
                 binding_id=None,
+                resource_id=resource_id,
                 connection_id=route.connection_id,
                 provider=connection.provider,
                 encrypted_credentials=connection.encrypted_credentials,
@@ -769,6 +843,7 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelAgentRoute,
                     RDBExternalChannelConnection,
                     RDBAgent,
+                    RDBExternalChannelBinding.resource_id,
                 )
                 .join(
                     RDBExternalChannelBinding,
@@ -794,12 +869,13 @@ class ExternalChannelWorkRepository:
         ).one_or_none()
         if row is None:
             return None
-        attempt, route, connection, agent = row
+        attempt, route, connection, agent, resource_id = row
         return ChannelDeliveryTarget(
             delivery_attempt_id=attempt.id,
             operation=attempt.operation,
             status=attempt.status,
             binding_id=attempt.binding_id,
+            resource_id=resource_id,
             connection_id=route.connection_id,
             provider=connection.provider,
             encrypted_credentials=connection.encrypted_credentials,
@@ -809,6 +885,34 @@ class ExternalChannelWorkRepository:
             agent_avatar=None if agent is None else agent.avatar,
             request_payload=dict(attempt.request_payload),
         )
+
+    async def record_discord_delivery_channel(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+        delivery_channel_id: str,
+    ) -> str | None:
+        """Retain one provisioned Discord thread for all later provider intents."""
+        resource = await session.get(
+            RDBExternalChannelResource,
+            resource_id,
+            with_for_update=True,
+        )
+        if resource is None:
+            return None
+        labels = dict(resource.labels or {})
+        if labels.get("provider") != ExternalChannelProvider.DISCORD.value:
+            return None
+        existing = labels.get("delivery_channel_id")
+        if isinstance(existing, str) and existing:
+            return existing
+        labels["thread_channel_id"] = delivery_channel_id
+        labels["delivery_channel_id"] = delivery_channel_id
+        labels["thread_id"] = delivery_channel_id
+        resource.labels = labels
+        await session.flush()
+        return delivery_channel_id
 
     async def start_delivery(
         self,
@@ -1960,7 +2064,12 @@ def _provider_payload(
             }
         case ExternalChannelProvider.DISCORD:
             guild_id = labels.get("guild_id")
-            thread_id = labels.get("thread_id")
+            delivery_channel_id = labels.get("delivery_channel_id")
+            thread_id = (
+                delivery_channel_id
+                if isinstance(delivery_channel_id, str) and delivery_channel_id
+                else labels.get("thread_id")
+            )
             if not isinstance(guild_id, str) or not guild_id:
                 raise ValueError("Discord resource has no provider Guild.")
             if not isinstance(thread_id, str) or not thread_id:
@@ -1971,7 +2080,7 @@ def _provider_payload(
             }
             parent_channel_id = labels.get("parent_channel_id")
             root_message_id = labels.get("root_message_id")
-            if (
+            if delivery_channel_id is None and (
                 isinstance(parent_channel_id, str)
                 and parent_channel_id
                 and isinstance(root_message_id, str)

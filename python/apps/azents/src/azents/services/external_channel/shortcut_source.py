@@ -1,4 +1,4 @@
-"""Synchronous route-neutral materialization for admitted Slack shortcuts."""
+"""Synchronous route-neutral materialization for admitted provider shortcuts."""
 
 import datetime
 from dataclasses import dataclass
@@ -13,6 +13,7 @@ from azents.core.enums import (
     ExternalChannelConversationAdmissionStatus,
     ExternalChannelHydrationStatus,
     ExternalChannelInteractionType,
+    ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
 )
@@ -28,6 +29,9 @@ from azents.repos.external_channel.data import (
     ExternalChannelResourceCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.services.external_channel.discord_events import (
+    normalize_projected_discord_event,
+)
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
     SlackEventExcluded,
@@ -94,25 +98,61 @@ class ExternalChannelShortcutSourceService:
                 or connection.app_mode is not ExternalChannelAppMode.MULTI
             ):
                 raise SlackEventExcluded("Slack shortcut selection is unavailable.")
-            normalized = normalize_projected_slack_event(
-                event_type=event.event_type,
-                tenant_id=event.provider_tenant_id,
-                envelope=event.envelope,
-            )
-            if isinstance(normalized, SlackConnectionRevocation):
-                raise ValueError("Slack shortcut source is unavailable.")
+            if connection.provider is ExternalChannelProvider.SLACK:
+                normalized = normalize_projected_slack_event(
+                    event_type=event.event_type,
+                    tenant_id=event.provider_tenant_id,
+                    envelope=event.envelope,
+                )
+                if isinstance(normalized, SlackConnectionRevocation):
+                    raise ValueError("Slack shortcut source is unavailable.")
+                provider_resource_key = normalized.provider_resource_key
+                labels = {
+                    "provider": "slack",
+                    "tenant_id": normalized.tenant_id,
+                    "channel_id": normalized.channel_id,
+                    "thread_ts": normalized.root_thread_ts,
+                }
+            elif connection.provider is ExternalChannelProvider.DISCORD:
+                normalized = normalize_projected_discord_event(
+                    event_type=event.event_type,
+                    tenant_id=event.provider_tenant_id,
+                    envelope=event.envelope,
+                    connected_bot_user_id=None,
+                )
+                thread_id = normalized.thread_id or normalized.message_id
+                parent_channel_id = (
+                    normalized.parent_channel_id or normalized.channel_id
+                )
+                provider_resource_key = f"discord:{normalized.tenant_id}:{thread_id}"
+                labels = {
+                    "provider": "discord",
+                    "guild_id": normalized.tenant_id,
+                    "source_channel_id": normalized.channel_id,
+                    "channel_id": parent_channel_id,
+                    "thread_id": thread_id,
+                    "parent_channel_id": parent_channel_id,
+                    "root_message_id": thread_id,
+                    **(
+                        {"thread_channel_id": normalized.thread_id}
+                        if normalized.thread_id is not None
+                        else {}
+                    ),
+                    **(
+                        {"delivery_channel_id": normalized.thread_id}
+                        if normalized.thread_id is not None
+                        else {}
+                    ),
+                }
+            else:
+                raise ValueError("External Channel shortcut provider is unavailable.")
             resource = await self.repository.create_resource_idempotent(
                 session,
                 ExternalChannelResourceCreate(
                     connection_id=connection.id,
                     resource_type=ExternalChannelResourceType.THREAD,
-                    provider_resource_key=normalized.provider_resource_key,
-                    labels={
-                        "provider": "slack",
-                        "tenant_id": normalized.tenant_id,
-                        "channel_id": normalized.channel_id,
-                        "thread_ts": normalized.root_thread_ts,
-                    },
+                    provider_resource_key=provider_resource_key,
+                    labels=labels,
                     status=ExternalChannelResourceStatus.ACTIVE,
                     hydration_status=ExternalChannelHydrationStatus.PENDING,
                     hydration_cursor=None,

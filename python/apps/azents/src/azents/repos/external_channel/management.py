@@ -179,10 +179,11 @@ class ExternalChannelManagementRepository:
         session: AsyncSession,
         *,
         workspace_id: str,
+        provider: ExternalChannelProvider,
         offset: int,
         limit: int,
     ) -> list[ManagedMultiConnection]:
-        """List Workspace-owned Multi Apps with redacted connection state."""
+        """List one provider's Workspace-owned Multi Apps with redacted state."""
         if offset < 0 or limit <= 0 or limit > 100:
             raise ValueError("External Channel page is invalid.")
         active_route_counts = (
@@ -235,6 +236,7 @@ class ExternalChannelManagementRepository:
                 )
                 .where(
                     RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.provider == provider,
                     RDBExternalChannelConnection.app_mode
                     == ExternalChannelAppMode.MULTI,
                 )
@@ -349,13 +351,15 @@ class ExternalChannelManagementRepository:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         lock: bool = False,
         include_disconnected: bool = False,
     ) -> RDBExternalChannelConnection | None:
-        """Fetch one Workspace-owned Multi App, optionally under a row lock."""
+        """Fetch one provider-scoped Multi App, optionally under a row lock."""
         predicates: list[sa.ColumnElement[bool]] = [
             RDBExternalChannelConnection.id == connection_id,
             RDBExternalChannelConnection.workspace_id == workspace_id,
+            RDBExternalChannelConnection.provider == provider,
             RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.MULTI,
         ]
         if not include_disconnected:
@@ -374,6 +378,7 @@ class ExternalChannelManagementRepository:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         include_disconnected: bool = False,
     ) -> ManagedMultiConnection | None:
         """Load a redacted Multi App projection."""
@@ -381,6 +386,7 @@ class ExternalChannelManagementRepository:
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
+            provider=provider,
             include_disconnected=include_disconnected,
         )
         if connection is None:
@@ -427,6 +433,7 @@ class ExternalChannelManagementRepository:
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
             lock=True,
         )
         if connection is None:
@@ -454,6 +461,7 @@ class ExternalChannelManagementRepository:
             session,
             workspace_id=workspace_id,
             connection_id=connection.id,
+            provider=ExternalChannelProvider.SLACK,
         )
 
     async def replace_multi_discord_configuration(
@@ -471,12 +479,10 @@ class ExternalChannelManagementRepository:
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
             lock=True,
         )
-        if (
-            connection is None
-            or connection.provider is not ExternalChannelProvider.DISCORD
-        ):
+        if connection is None:
             return None
         await _release_discord_app_claim(session, connection_id=connection.id)
         _reset_discord_configuration(
@@ -491,6 +497,7 @@ class ExternalChannelManagementRepository:
             session,
             workspace_id=workspace_id,
             connection_id=connection.id,
+            provider=ExternalChannelProvider.DISCORD,
         )
 
     async def list_multi_routes(
@@ -499,6 +506,7 @@ class ExternalChannelManagementRepository:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         offset: int,
         limit: int,
     ) -> list[ManagedMultiRoute] | None:
@@ -509,6 +517,7 @@ class ExternalChannelManagementRepository:
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
+            provider=provider,
             include_disconnected=True,
         )
         if connection is None:
@@ -541,6 +550,7 @@ class ExternalChannelManagementRepository:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         route_id: str,
     ) -> ManagedMultiRoute | None:
         """Load one Multi App route under its Workspace owner."""
@@ -559,6 +569,7 @@ class ExternalChannelManagementRepository:
                 .where(
                     RDBExternalChannelConnection.id == connection_id,
                     RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.provider == provider,
                     RDBExternalChannelConnection.app_mode
                     == ExternalChannelAppMode.MULTI,
                     RDBExternalChannelAgentRoute.id == route_id,
@@ -575,6 +586,7 @@ class ExternalChannelManagementRepository:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         agent_id: str,
     ) -> ManagedMultiRoute | None:
         """Load the stable Multi App association for one Agent identity."""
@@ -593,6 +605,7 @@ class ExternalChannelManagementRepository:
                 .where(
                     RDBExternalChannelConnection.id == connection_id,
                     RDBExternalChannelConnection.workspace_id == workspace_id,
+                    RDBExternalChannelConnection.provider == provider,
                     RDBExternalChannelConnection.app_mode
                     == ExternalChannelAppMode.MULTI,
                     RDBExternalChannelAgentRoute.connection_app_mode
@@ -609,6 +622,7 @@ class ExternalChannelManagementRepository:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         offset: int,
         limit: int,
     ) -> list[ManagedChannelDefault] | None:
@@ -619,6 +633,7 @@ class ExternalChannelManagementRepository:
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
+            provider=provider,
             include_disconnected=True,
         )
         if connection is None:
@@ -659,6 +674,7 @@ class ExternalChannelManagementRepository:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         provider_channel_id: str,
         route_id: str,
         configured_by_user_id: str,
@@ -669,6 +685,7 @@ class ExternalChannelManagementRepository:
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
+            provider=provider,
             lock=True,
         )
         if connection is None:
@@ -736,6 +753,7 @@ class ExternalChannelManagementRepository:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         provider_channel_id: str,
         now: datetime.datetime,
     ) -> bool | None:
@@ -744,6 +762,7 @@ class ExternalChannelManagementRepository:
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
+            provider=provider,
             lock=True,
         )
         if connection is None:

@@ -459,6 +459,7 @@ class TestExternalChannelRepository:
             provider_tenant_id="guild-1",
             provider_bot_user_id=None,
             interaction_public_key="a" * 64,
+            message_command_id="123456789012345678",
             callback_selector_hash="reclaimed-selector-hash",
             checked_at=_at(1),
         )
@@ -517,6 +518,7 @@ class TestExternalChannelRepository:
             provider_tenant_id="guild-1",
             provider_bot_user_id=None,
             interaction_public_key="a" * 64,
+            message_command_id="123456789012345678",
             callback_selector_hash="selector-hash",
             checked_at=_at(1),
         )
@@ -698,6 +700,7 @@ class TestExternalChannelRepository:
             provider_tenant_id="guild-terminal-1",
             provider_bot_user_id=None,
             interaction_public_key="a" * 64,
+            message_command_id="123456789012345678",
             callback_selector_hash="terminal-selector-hash",
             checked_at=_at(1),
         )

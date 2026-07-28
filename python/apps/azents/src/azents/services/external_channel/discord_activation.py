@@ -34,6 +34,7 @@ from azents.services.external_channel.discord_api import (
     DiscordAPICredentialsInvalid,
     DiscordAPIError,
     DiscordAPIUnavailable,
+    DiscordGuildMessageCommand,
     get_discord_api_client,
 )
 
@@ -213,11 +214,17 @@ class DiscordConnectionActivationService:
             if not prepared:
                 raise DiscordActivationConfigurationError("discord_authority_changed")
             await session.commit()
+        command: DiscordGuildMessageCommand
         try:
             await self.discord_client.configure_interactions_endpoint(
                 bot_token=credentials.bot_token,
                 application_id=metadata.application_id,
                 endpoint_url=endpoint_url,
+            )
+            command = await self.discord_client.register_guild_message_command(
+                bot_token=credentials.bot_token,
+                application_id=metadata.application_id,
+                guild_id=target_guild_id,
             )
         except DiscordAPIError as error:
             cleared = await self._clear_prepared_callback(
@@ -246,6 +253,7 @@ class DiscordConnectionActivationService:
                 provider_tenant_id=target_guild_id,
                 provider_bot_user_id=bot_user_id,
                 interaction_public_key=metadata.verify_key,
+                message_command_id=command.command_id,
                 callback_selector_hash=selector_hash,
                 checked_at=datetime.datetime.now(datetime.UTC),
             )

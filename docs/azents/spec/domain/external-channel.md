@@ -53,8 +53,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-07-27
-spec_version: 19
+last_verified_at: 2026-07-28
+spec_version: 20
 ---
 
 # External Channel
@@ -97,7 +97,7 @@ contain multiple independent bindings.
 | Channel default | Multi App channel-to-route preference. At most one active default exists per connection and provider channel. Removing its route invalidates rather than silently retargets it. |
 | Conversation admission | Durable, expiring unbound-conversation scope that records the initiating provider principal and may become selected exactly once. |
 | Interaction | Idempotent signed Slack or Discord shortcut, component/action, navigation, or submission claim. Provider triggers and Discord interaction tokens stay transient and are never persisted or replayed. |
-| Resource | One provider conversation: a Slack thread or Discord thread, with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. |
+| Resource | One provider conversation: a Slack thread or Discord root/thread, with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. Discord labels separately retain source channel, parent channel, root message, existing thread, and provisioned delivery thread identities. |
 | Event | Durable provider envelope admission keyed by connection and provider event identity. Processing is at-least-once and domain writes are idempotent. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
 | Message and revision | Canonical provider message plus immutable original/edit/delete revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Discord Gateway messages are normalized only after target-Guild, author, content, and message eligibility checks. Raw provider payloads cannot supply Azents' internal normalized-text projection; only the authenticated admission projection may be consumed through the trusted projection path. Revisions retain optional bounded provider identity mappings and up to 20 metadata-only file entries. Supported entries expose binding-scoped opaque locators; private URLs and file bodies are never persisted or rendered. |
@@ -132,7 +132,8 @@ contain multiple independent bindings.
   authorization remains authoritative at download time.
 - A Discord connection is scoped to its validated Application and target Guild. The
   callback selector is opaque and retained only as a hash; the Application public key,
-  Bot identity, and callback authority are configuration-derived state. Discord
+  Bot identity, and required Guild Message Command identifier are
+  configuration-derived state. Discord
   interaction tokens, callback URLs, raw interaction bodies, and signature values are
   never durable External Channel state.
 - The dedicated Discord Gateway Worker claims each connection through owner,
@@ -152,11 +153,13 @@ contain multiple independent bindings.
   and declared size only. A current provider message lookup obtains a non-durable
   download URL immediately before a bounded in-memory download; redirects, stale
   authority, malformed metadata, and oversized streams fail closed.
-- Initial binding activation creates one separate button-only Session navigation
-  message. Releasing a new invocation batch creates the current work cycle's
-  Activity Tracker before Session wake-up. Checking and task progress update one
-  retained provider message; a delivered final answer deletes it, and separate work
-  cycles never share that identity.
+- Initial binding activation creates one separate Session navigation message and one
+  checking work projection before Session wake-up. Slack lowers work through its
+  retained Tracker message; Discord lowers it through ordered durable page parts. A
+  Discord root source provisions or reuses one delivery thread after route resolution,
+  persists that target, and sends approval controls, Session navigation, replies,
+  files, progress, recovery, and cleanup to that thread. A delivered final answer
+  deletes active progress, and separate work cycles never share provider identities.
 - The Tracker uses one native read-only Slack task card before Channel Work is
   declared. Once tasks exist, one native Slack plan carries the Agent-authored
   current-work title and up to 49 ordered tasks. Canonical task states are
@@ -203,13 +206,14 @@ bots are disabled by default, and neither setting overrides a block or admits th
 connected Azents bot. Removing the Single association disconnects the App. Secret
 fields remain blank and required when an existing connection is edited.
 
-Workspace Owners and Managers manage Multi Apps from Workspace integrations.
-Ordinary Members have neither Multi read nor write authority. Multi creation starts
-with zero Agents and remains rollout-gated. The management surface supports paged App
-and Agent catalogs, idempotent Agent association, removed-route re-enable, channel
-defaults, validation and complete credential replacement, impact previews, and
-generation-fenced route removal/default mutation/App disconnect. Disconnected Multi
-Apps remain readable historical records but accept no further mutation.
+Workspace Owners and Managers manage provider-scoped Multi Apps from Workspace
+integrations. Ordinary Members have neither Multi read nor write authority. Slack and
+Discord Multi creation start with zero Agents. Their provider-correct public API,
+generated clients, tRPC, and Workspace UI support paged connection and route catalogs,
+idempotent Agent association, removed-route re-enable, channel defaults, validation
+and complete credential replacement, impact previews, and generation-fenced route
+removal/default mutation/App disconnect. Disconnected Multi Apps remain readable
+historical records but accept no further mutation.
 
 Agent settings show associated Multi Apps as Workspace-managed read-only context.
 Slack can open an opaque, expiring management handoff for the current Multi App
@@ -220,13 +224,15 @@ Discord Single and Multi setup use separate Agent and Workspace flows. A connect
 validates that its Bot Token belongs to the submitted Discord Application, retains the
 target Guild identity, durably prepares the opaque callback selector hash and
 Application public key behind the current credential and configuration-generation
-fences, then configures the signed-interaction callback. This preparation accepts only
+fences, then configures the signed-interaction callback and reconciles the required
+Guild-scoped `Ask an Azents Agent` Message Command. This preparation accepts only
 Discord PING verification; ordinary interactions remain unauthorized until the
 activation commit. A failed provider registration clears the provisional callback
 authority behind the same fences and requires reconnection. Replacing Discord
 credentials or App identity invalidates prior callback and Gateway authority before
-activation repeats. Discord is available without a deployment-scoped provider rollout
-flag; every enabled Server deployment includes the dedicated Gateway Worker.
+activation repeats. Dedicated Discord setup is available without a deployment-scoped
+provider rollout flag; Discord Multi App creation is subject to the shared Multi rollout
+gate. Every enabled Server deployment includes the dedicated Gateway Worker.
 
 Slack validation first uses `auth.test` to resolve Team and Bot identity, then uses
 `bots.info` to verify that the Bot Token's actual App ID equals the configured App
@@ -259,6 +265,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-28** (spec_version 20) — Added bounded Discord root/thread hydration,
+  reconciliation-fenced activation, durable provisioned delivery-thread retention,
+  and provider-correct Discord Multi management across public and Workspace surfaces.
 - **2026-07-27** (spec_version 19) — Added route-scoped open human access and
   external-bot admission controls, with rejected authors excluded from releasable
   pending context and connected-bot loop prevention preserved.

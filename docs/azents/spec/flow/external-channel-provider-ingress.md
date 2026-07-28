@@ -22,6 +22,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
   - python/apps/azents/src/azents/services/external_channel/discord_events.py
+  - python/apps/azents/src/azents/services/external_channel/discord_history.py
+  - python/apps/azents/src/azents/services/external_channel/discord_selector.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/services/external_channel/event_processor.py
@@ -36,8 +38,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-07-27
-spec_version: 12
+last_verified_at: 2026-07-28
+spec_version: 13
 ---
 
 # External Channel Provider Ingress
@@ -91,9 +93,11 @@ retained.
    connection.
 5. A verified endpoint PING returns its provider acknowledgement without durable
    admission.
-6. A supported command, component, autocomplete, or modal interaction creates or
-   reuses one token-free durable interaction admission before its provider
-   acknowledgement is returned.
+6. A supported Message Command, component, autocomplete, or modal interaction creates
+   or reuses one token-free durable interaction admission before its provider
+   acknowledgement is returned. Message Commands materialize their selected source
+   through the same canonical source-before-selection boundary; selector responses use
+   signed compact component scope and return before any post-response control delivery.
 
 Unknown selectors, malformed bodies, invalid signatures, mismatched Application/Guild
 identity, and unsupported interaction types fail before durable admission. Discord
@@ -181,10 +185,11 @@ The worker claims admitted events in bounded batches with a claim owner and expi
   block, grant, binding, invocation-batch, and mailbox boundaries as Slack. A Discord
   principal remains provider provenance and access-policy subject matter only; it is
   never inferred to be an Azents User.
-- A granted Discord mention creates or reuses an immediately active binding, releases
-  retained context exactly once, ensures active Channel Work, and wakes the bound
-  Session after commit. Discord has no remote-history hydration adapter, so it does
-  not enter Slack's `waiting_hydration` activation gate.
+- A granted Discord mention creates or reuses a `waiting_hydration` binding. It does
+  not release retained context, create initial Session/progress delivery, or wake the
+  Session until bounded Discord history reconciliation reaches its persisted event
+  boundary. Selector and approval-created Discord bindings start the same hydration
+  path during waiting-binding reconciliation.
 - An ungranted Discord mention creates the durable access request and its
   provider-visible approval control without waking a Session. Allow releases the
   retained source message through the same invocation batch and mailbox boundary;
@@ -197,18 +202,22 @@ The worker claims admitted events in bounded batches with a claim owner and expi
 - Slack message normalization prefers non-blank provider fallback text. When it is absent, HTTP and Socket ingestion derive the same bounded readable body from supported section, header, context, and rich-text elements. User and channel elements retain reference syntax, unsupported elements contribute no text, and edit revision identity uses the resulting normalized body.
 - Ingestion enriches revisions with bounded sender/current-channel/in-body Slack reference mappings when provider lookup succeeds. Lookup failure leaves canonical provider IDs and messages intact.
 - Provider permalink resolution is optional and occurs outside the persistence transaction. Controlled provider failures leave `original_url` null and do not hide the message.
-- First invocation starts bounded `conversations.replies` hydration. Pages reconcile provider history into the same canonical message identities and update the high-watermark and event boundary.
+- First invocation starts provider-dispatched bounded hydration. Slack reads
+  `conversations.replies`; Discord reads only the canonical root source when no thread
+  exists and pages an existing thread backward by message cursor. Both normalize pages
+  into the same canonical message/revision identities and update the high-watermark and
+  event boundary without persisting raw REST pages, tokens, or attachment URLs.
 - If routing becomes unavailable after hydration starts, hydration completes as
   `incomplete` with a routing-unavailable error rather than remaining `running`.
 - Rate limits and temporary read failures defer the event with bounded retry timing.
   Invalid credentials and missing Slack scopes require reconnect but preserve routing.
   Lost resource access marks hydration incomplete and terminalizes the resource.
 
-Slack activation waits until hydration is terminal and every correlated event through
-the persisted boundary is terminal. This prevents out-of-order or
-post-trigger/pre-activation message loss. Discord activation instead serializes on
-the resource lock and commits its retained context, active binding, batch, mailbox,
-and Channel Work before the post-commit wake-up.
+Slack and Discord activation wait until hydration is terminal and every correlated
+event through the persisted boundary is terminal. This prevents out-of-order or
+post-trigger/pre-activation message loss. After that fence, retained context, the
+active binding, invocation batch, mailbox item, Session navigation, and initial work
+projection commit before the post-commit wake-up.
 
 ## File Metadata Projection
 
@@ -240,6 +249,9 @@ excluded.
 
 ## Changelog
 
+- **2026-07-28** (spec_version 13) — Added bounded Discord root/thread history
+  hydration, reconciliation-fenced selector/approval activation, and signed
+  Message-Command selector source materialization.
 - **2026-07-27** (spec_version 12) — Terminalized fenced Discord Gateway credential
   and non-reconnectable outcomes so they cannot cause repeated scheduler claims.
 - **2026-07-26** (spec_version 11) — Completed Discord mention routing through

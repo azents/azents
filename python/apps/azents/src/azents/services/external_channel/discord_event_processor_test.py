@@ -32,6 +32,9 @@ from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
     DiscordNormalizedMessage,
 )
+from azents.services.external_channel.discord_history import (
+    DiscordConversationHistoryClient,
+)
 from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
     ExternalChannelPersistedMessage,
@@ -109,6 +112,10 @@ class _Processor(ExternalChannelEventProcessorService):
             action_service=cast(ExternalChannelActionService, MagicMock()),
             credentials_codec=cast(ExternalChannelCredentialsCodec, MagicMock()),
             slack_client=cast(SlackConversationClient, MagicMock()),
+            discord_history_client=cast(
+                DiscordConversationHistoryClient,
+                MagicMock(spec=DiscordConversationHistoryClient),
+            ),
             agent_repository=MagicMock(),
             agent_session_repository=MagicMock(),
             root_agent_session_creation_service=cast(

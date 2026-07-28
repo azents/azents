@@ -34,6 +34,7 @@ from azents.services.external_channel.discord_api import (
     DiscordAPIClient,
     DiscordAPIUnavailable,
     DiscordApplicationMetadata,
+    DiscordGuildMessageCommand,
 )
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
@@ -132,9 +133,16 @@ class _RepositoryDouble:
 class _DiscordClientDouble:
     """Capture provider calls in their required order."""
 
-    def __init__(self, events: list[str], *, fail_endpoint: bool = False) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        fail_endpoint: bool = False,
+        fail_command: bool = False,
+    ) -> None:
         self.events = events
         self.fail_endpoint = fail_endpoint
+        self.fail_command = fail_command
         self.endpoint_url: str | None = None
 
     async def get_current_application(
@@ -164,6 +172,21 @@ class _DiscordClientDouble:
         self.endpoint_url = endpoint_url
         if self.fail_endpoint:
             raise DiscordAPIUnavailable
+
+    async def register_guild_message_command(
+        self,
+        *,
+        bot_token: str,
+        application_id: str,
+        guild_id: str,
+    ) -> DiscordGuildMessageCommand:
+        assert bot_token == "discord-bot-token"
+        assert application_id == "app-1"
+        assert guild_id == "guild-1"
+        self.events.append("command")
+        if self.fail_command:
+            raise DiscordAPIUnavailable
+        return DiscordGuildMessageCommand(command_id="command-1")
 
 
 def _configuration(
@@ -310,6 +333,7 @@ async def test_activation_prepares_callback_before_provider_validation(
         "prepare",
         "commit",
         "endpoint",
+        "command",
         "activate",
         "commit",
     ]
@@ -322,6 +346,7 @@ async def test_activation_prepares_callback_before_provider_validation(
     )
     assert repository.activation_kwargs is not None
     assert repository.activation_kwargs["provider_bot_user_id"] == "bot-1"
+    assert repository.activation_kwargs["message_command_id"] == "command-1"
     selector_hash = repository.activation_kwargs["callback_selector_hash"]
     assert isinstance(selector_hash, str)
     assert len(selector_hash) == 64
@@ -380,6 +405,47 @@ async def test_provider_endpoint_failure_does_not_activate(
 
 
 @pytest.mark.asyncio
+async def test_provider_message_command_failure_does_not_activate(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """A required Message Command failure clears provisional callback authority."""
+    configuration = _configuration(codec)
+    events: list[str] = []
+    repository = _RepositoryDouble(
+        configuration=configuration,
+        events=events,
+        activate_result=_active_connection(configuration),
+    )
+    service = _service(
+        callback_url="https://callbacks.example",
+        repository=repository,
+        codec=codec,
+        client=_DiscordClientDouble(events, fail_command=True),
+        events=events,
+    )
+
+    snapshot = await service.activate(connection_id=configuration.id)
+
+    assert snapshot.status is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+    assert snapshot.code == "discord_api_unavailable"
+    assert events == [
+        "load",
+        "metadata",
+        "bot",
+        "prepare",
+        "commit",
+        "endpoint",
+        "command",
+        "clear",
+        "commit",
+        "failure",
+        "commit",
+    ]
+    assert repository.activation_kwargs is None
+    assert repository.clear_kwargs is not None
+
+
+@pytest.mark.asyncio
 async def test_lost_activation_fence_is_reported_without_commit(
     codec: ExternalChannelCredentialsCodec,
 ) -> None:
@@ -410,6 +476,7 @@ async def test_lost_activation_fence_is_reported_without_commit(
         "prepare",
         "commit",
         "endpoint",
+        "command",
         "activate",
         "clear",
         "commit",

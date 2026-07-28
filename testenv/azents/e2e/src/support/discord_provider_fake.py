@@ -64,6 +64,7 @@ class FakeState:
             self.gateway_terminal_events: list[str] = []
             self._message_sequence = 0
             self._nonce_messages: dict[str, str] = {}
+            self._root_threads: dict[tuple[str, str], str] = {}
 
     def configure(self, payload: dict[str, object]) -> None:
         """Apply bounded fake configuration without retaining evidence bodies."""
@@ -117,6 +118,7 @@ class FakeState:
             self.gateway_terminal_events = []
             self._message_sequence = 0
             self._nonce_messages = {}
+            self._root_threads = {}
 
     def record_request(
         self,
@@ -224,6 +226,26 @@ class FakeState:
             self.deliveries.append(delivery)
             return message_id
 
+    def get_root_thread(
+        self, *, parent_channel_id: str, root_message_id: str
+    ) -> str | None:
+        """Return the current thread channel for one root message without payloads."""
+        with self.lock:
+            return self._root_threads.get((parent_channel_id, root_message_id))
+
+    def ensure_root_thread(
+        self, *, parent_channel_id: str, root_message_id: str
+    ) -> str:
+        """Create or reuse one deterministic numeric thread channel identity."""
+        with self.lock:
+            key = (parent_channel_id, root_message_id)
+            thread_id = self._root_threads.get(key)
+            if thread_id is None:
+                self._message_sequence += 1
+                thread_id = str(700000000000000000 + self._message_sequence)
+                self._root_threads[key] = thread_id
+            return thread_id
+
     def gateway_start(self, opcode: int) -> tuple[list[dict[str, object]], str]:
         """Record one Identify or Resume and return its configured behavior."""
         with self.lock:
@@ -329,14 +351,21 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     )
                 ):
                     return
-                self._json_response(
-                    200,
-                    {
-                        "id": message_id,
-                        "channel_id": channel_id,
-                        "attachments": [],
-                    },
+                payload: dict[str, object] = {
+                    "id": message_id,
+                    "channel_id": channel_id,
+                    "attachments": [],
+                }
+                thread_id = self.state.get_root_thread(
+                    parent_channel_id=channel_id,
+                    root_message_id=message_id,
                 )
+                if thread_id is not None:
+                    payload["thread"] = {
+                        "id": thread_id,
+                        "parent_id": channel_id,
+                    }
+                self._json_response(200, payload)
                 return
         if parsed.path.startswith("/attachments/"):
             if self._controlled_response(self._operation("download_attachment")):
@@ -402,9 +431,13 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     )
                 ):
                     return
+                thread_id = self.state.ensure_root_thread(
+                    parent_channel_id=channel_id,
+                    root_message_id=message_id,
+                )
                 self._json_response(
                     201,
-                    {"id": f"thread-{message_id}", "parent_id": channel_id},
+                    {"id": thread_id, "parent_id": channel_id},
                 )
                 return
         if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(

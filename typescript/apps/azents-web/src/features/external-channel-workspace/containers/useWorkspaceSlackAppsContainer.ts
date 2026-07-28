@@ -69,7 +69,7 @@ export interface WorkspaceSlackAppsContainerOutput {
   routeImpactLoading: boolean;
   connectionImpactLoading: boolean;
   canManage: boolean;
-  onSelectConnection: (connectionId: string) => void;
+  onSelectConnection: (connection: ManagedMultiConnection) => void;
   onSetupDraftChange: (draft: MultiConnectionDraft) => void;
   onEditDraftChange: (draft: MultiConnectionDraft) => void;
   onDiscordSetupDraftChange: (draft: DiscordMultiConnectionDraft) => void;
@@ -133,6 +133,9 @@ export function useWorkspaceSlackAppsContainer({
   const [selectedConnectionId, setSelectedConnectionId] = useState<
     string | null
   >(initialConnectionId ?? null);
+  const [selectedProvider, setSelectedProvider] = useState<
+    "slack" | "discord" | null
+  >(null);
   const [connectionOffset, setConnectionOffset] = useState(0);
   const [routeOffset, setRouteOffset] = useState(0);
   const [defaultOffset, setDefaultOffset] = useState(0);
@@ -150,64 +153,102 @@ export function useWorkspaceSlackAppsContainer({
   const [previewDisconnect, setPreviewDisconnect] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const meQuery = trpc.workspaceMember.me.useQuery({ handle });
-  const listQuery = trpc.externalChannel.listMultiConnections.useQuery({
+  const slackListQuery = trpc.externalChannel.listMultiConnections.useQuery({
     handle,
+    provider: "slack",
     offset: connectionOffset,
     limit: PAGE_SIZE,
   });
+  const discordListQuery = trpc.externalChannel.listMultiConnections.useQuery({
+    handle,
+    provider: "discord",
+    offset: connectionOffset,
+    limit: PAGE_SIZE,
+  });
+  const connections = useMemo(
+    () => [
+      ...(slackListQuery.data?.items ?? []),
+      ...(discordListQuery.data?.items ?? []),
+    ],
+    [discordListQuery.data?.items, slackListQuery.data?.items],
+  );
   const canManage =
     meQuery.data?.role === "owner" || meQuery.data?.role === "manager";
 
   useEffect((): void => {
-    if (selectedConnectionId !== null || listQuery.data?.items.length === 0) {
+    if (selectedConnectionId !== null || connections.length === 0) {
       return;
     }
-    setSelectedConnectionId(
-      (connectionOffset === 0 ? initialConnectionId : null) ??
-        listQuery.data?.items[0]?.id ??
-        null,
-    );
+    const initialId = connectionOffset === 0 ? initialConnectionId : null;
+    const connection =
+      connections.find((item) => item.id === initialId) ?? connections[0];
+    if (!connection) {
+      return;
+    }
+    setSelectedConnectionId(connection.id);
+    setSelectedProvider(connection.provider);
   }, [
     connectionOffset,
+    connections,
     initialConnectionId,
-    listQuery.data?.items,
     selectedConnectionId,
   ]);
 
   const detailQuery = trpc.externalChannel.getMultiConnection.useQuery(
-    { handle, connectionId: selectedConnectionId ?? "missing" },
-    { enabled: selectedConnectionId !== null },
+    {
+      handle,
+      connectionId: selectedConnectionId ?? "missing",
+      provider: selectedProvider ?? "slack",
+    },
+    { enabled: selectedConnectionId !== null && selectedProvider !== null },
   );
   const routesQuery = trpc.externalChannel.listMultiRoutes.useQuery(
     {
       handle,
       connectionId: selectedConnectionId ?? "missing",
+      provider: selectedProvider ?? "slack",
       offset: routeOffset,
       limit: PAGE_SIZE,
     },
-    { enabled: selectedConnectionId !== null },
+    { enabled: selectedConnectionId !== null && selectedProvider !== null },
   );
   const defaultsQuery = trpc.externalChannel.listMultiChannelDefaults.useQuery(
     {
       handle,
       connectionId: selectedConnectionId ?? "missing",
+      provider: selectedProvider ?? "slack",
       offset: defaultOffset,
       limit: PAGE_SIZE,
     },
-    { enabled: selectedConnectionId !== null },
+    { enabled: selectedConnectionId !== null && selectedProvider !== null },
   );
   const routeImpactQuery = trpc.externalChannel.getMultiRouteImpact.useQuery(
     {
       handle,
       connectionId: selectedConnectionId ?? "missing",
+      provider: selectedProvider ?? "slack",
       routeId: previewRouteId ?? "missing",
     },
-    { enabled: selectedConnectionId !== null && previewRouteId !== null },
+    {
+      enabled:
+        selectedConnectionId !== null &&
+        selectedProvider !== null &&
+        previewRouteId !== null,
+    },
   );
   const connectionImpactQuery =
     trpc.externalChannel.getMultiConnectionImpact.useQuery(
-      { handle, connectionId: selectedConnectionId ?? "missing" },
-      { enabled: selectedConnectionId !== null && previewDisconnect },
+      {
+        handle,
+        connectionId: selectedConnectionId ?? "missing",
+        provider: selectedProvider ?? "slack",
+      },
+      {
+        enabled:
+          selectedConnectionId !== null &&
+          selectedProvider !== null &&
+          previewDisconnect,
+      },
     );
   const handoffQuery = trpc.externalChannel.loadMultiManagementHandoff.useQuery(
     { handle, interactionId: interactionId ?? "missing" },
@@ -244,6 +285,7 @@ export function useWorkspaceSlackAppsContainer({
       return;
     }
     setSelectedConnectionId(handoffQuery.data.connection_id);
+    setSelectedProvider(handoffQuery.data.provider);
     setProviderChannelId(handoffQuery.data.provider_channel_id);
   }, [handoffQuery.data]);
 
@@ -267,6 +309,7 @@ export function useWorkspaceSlackAppsContainer({
     onSuccess: async (result) => {
       setSetupDraft(EMPTY_DRAFT);
       setSelectedConnectionId(result.connection.id);
+      setSelectedProvider("slack");
       await refresh();
     },
     onError: (error) => void fail(error),
@@ -276,6 +319,7 @@ export function useWorkspaceSlackAppsContainer({
       onSuccess: async (result) => {
         setDiscordSetupDraft(EMPTY_DISCORD_DRAFT);
         setSelectedConnectionId(result.connection.id);
+        setSelectedProvider("discord");
         await refresh();
       },
       onError: (error) => void fail(error),
@@ -373,20 +417,22 @@ export function useWorkspaceSlackAppsContainer({
     clearDefaultMutation.isPending ||
     disconnectMutation.isPending;
   const state: WorkspaceMultiAppsState = useMemo(() => {
-    if (meQuery.isPending || listQuery.isPending) {
+    if (
+      meQuery.isPending ||
+      slackListQuery.isPending ||
+      discordListQuery.isPending
+    ) {
       return { type: "LOADING" };
     }
     if (meQuery.isError && errorCode(meQuery.error) === "FORBIDDEN") {
       return { type: "FORBIDDEN", message: meQuery.error.message };
     }
-    if (listQuery.isError && errorCode(listQuery.error) === "FORBIDDEN") {
-      return { type: "FORBIDDEN", message: listQuery.error.message };
+    const listError = slackListQuery.error ?? discordListQuery.error;
+    if (listError && errorCode(listError) === "FORBIDDEN") {
+      return { type: "FORBIDDEN", message: listError.message };
     }
-    if (
-      listQuery.isError &&
-      errorCode(listQuery.error) === "SERVICE_UNAVAILABLE"
-    ) {
-      return { type: "UNAVAILABLE", message: listQuery.error.message };
+    if (listError && errorCode(listError) === "SERVICE_UNAVAILABLE") {
+      return { type: "UNAVAILABLE", message: listError.message };
     }
     if (meQuery.isError) {
       return {
@@ -394,11 +440,18 @@ export function useWorkspaceSlackAppsContainer({
         message: meQuery.error.message,
       };
     }
-    if (listQuery.isError) {
-      return { type: "ERROR", message: listQuery.error.message };
+    if (listError) {
+      return { type: "ERROR", message: listError.message };
     }
-    return { type: "LOADED", connections: listQuery.data.items };
-  }, [listQuery, meQuery]);
+    return { type: "LOADED", connections };
+  }, [
+    connections,
+    discordListQuery.error,
+    discordListQuery.isPending,
+    meQuery,
+    slackListQuery.error,
+    slackListQuery.isPending,
+  ]);
 
   return {
     handle,
@@ -438,8 +491,9 @@ export function useWorkspaceSlackAppsContainer({
     connectionImpactLoading:
       previewDisconnect && connectionImpactQuery.isFetching,
     canManage,
-    onSelectConnection: (connectionId) => {
-      setSelectedConnectionId(connectionId);
+    onSelectConnection: (connection) => {
+      setSelectedConnectionId(connection.id);
+      setSelectedProvider(connection.provider);
       setRouteOffset(0);
       setDefaultOffset(0);
       setAgentId("");
@@ -515,7 +569,11 @@ export function useWorkspaceSlackAppsContainer({
     onValidate: () => {
       if (selectedConnectionId !== null) {
         setActionError(null);
-        validateMutation.mutate({ handle, connectionId: selectedConnectionId });
+        validateMutation.mutate({
+          handle,
+          connectionId: selectedConnectionId,
+          provider: selectedProvider ?? "slack",
+        });
       }
     },
     onPreviewRouteRemoval: (routeId) => {
@@ -532,6 +590,7 @@ export function useWorkspaceSlackAppsContainer({
         removeRouteMutation.mutate({
           handle,
           connectionId: selectedConnectionId,
+          provider: selectedProvider ?? "slack",
           routeId: previewRouteId,
           expectedGeneration: routeImpactQuery.data?.generation ?? generation,
         });
@@ -543,6 +602,7 @@ export function useWorkspaceSlackAppsContainer({
         reenableRouteMutation.mutate({
           handle,
           connectionId: selectedConnectionId,
+          provider: selectedProvider ?? "slack",
           routeId,
         });
       }
@@ -553,6 +613,7 @@ export function useWorkspaceSlackAppsContainer({
         addRouteMutation.mutate({
           handle,
           connectionId: selectedConnectionId,
+          provider: selectedProvider ?? "slack",
           agentId,
         });
       }
@@ -568,6 +629,7 @@ export function useWorkspaceSlackAppsContainer({
         replaceDefaultMutation.mutate({
           handle,
           connectionId: selectedConnectionId,
+          provider: selectedProvider ?? "slack",
           providerChannelId,
           routeId: defaultRouteId,
           expectedGeneration: generation,
@@ -580,6 +642,7 @@ export function useWorkspaceSlackAppsContainer({
         clearDefaultMutation.mutate({
           handle,
           connectionId: selectedConnectionId,
+          provider: selectedProvider ?? "slack",
           providerChannelId: channelId,
           expectedGeneration: generation,
         });
@@ -595,6 +658,7 @@ export function useWorkspaceSlackAppsContainer({
         disconnectMutation.mutate({
           handle,
           connectionId: selectedConnectionId,
+          provider: selectedProvider ?? "slack",
           expectedGeneration:
             connectionImpactQuery.data?.generation ?? generation,
         });
@@ -607,6 +671,7 @@ export function useWorkspaceSlackAppsContainer({
     onConnectionPage: (offset) => {
       setConnectionOffset(offset);
       setSelectedConnectionId(null);
+      setSelectedProvider(null);
       setRouteOffset(0);
       setDefaultOffset(0);
       setAgentId("");

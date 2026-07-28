@@ -72,11 +72,13 @@ class _RepositoryDouble:
         self.finished: list[
             tuple[ExternalChannelDeliveryStatus, str | None, str | None]
         ] = []
+        self.recorded_delivery_channels: list[tuple[str, str]] = []
         self.target = ChannelDeliveryTarget(
             delivery_attempt_id="delivery-1",
             operation=ExternalChannelDeliveryOperation.REPLY,
             status=ExternalChannelDeliveryStatus.PENDING,
             binding_id="binding-1",
+            resource_id=None,
             connection_id="connection-1",
             provider=ExternalChannelProvider.SLACK,
             encrypted_credentials="ciphertext",
@@ -138,6 +140,16 @@ class _RepositoryDouble:
         self.events.append("finish")
         self.finished.append((status, provider_message_key, error_kind))
         return self.recovery_delivery_ids.pop(0) if self.recovery_delivery_ids else None
+
+    async def record_discord_delivery_channel(
+        self,
+        _session: AsyncSession,
+        *,
+        resource_id: str,
+        delivery_channel_id: str,
+    ) -> str:
+        self.recorded_delivery_channels.append((resource_id, delivery_channel_id))
+        return delivery_channel_id
 
     async def recover_archive_cleanup(
         self,
@@ -287,7 +299,7 @@ class _DiscordClient:
         self.calls.append(("ensure_thread", kwargs))
         return DiscordDeliveryResult(
             status="delivered",
-            provider_message_key=None,
+            provider_message_key="discord-thread:444",
             error_kind=None,
             error_summary=None,
         )
@@ -544,6 +556,7 @@ async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> N
         update={
             "provider": ExternalChannelProvider.DISCORD,
             "provider_tenant_id": "111",
+            "resource_id": "resource-1",
             "agent_name": "Research * Agent",
             "request_payload": {
                 "guild_id": "111",
@@ -593,12 +606,13 @@ async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> N
             {
                 "bot_token": "xoxb-secret",
                 "guild_id": "111",
-                "channel_id": "333",
+                "channel_id": "444",
                 "content": "**Research \\* Agent**\nReply",
                 "delivery_attempt_id": "delivery-1",
             },
         ),
     ]
+    assert repository.recorded_delivery_channels == [("resource-1", "444")]
 
 
 @pytest.mark.asyncio
@@ -663,7 +677,7 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
             {
                 "bot_token": "xoxb-secret",
                 "guild_id": "111",
-                "channel_id": "333",
+                "channel_id": "444",
                 "content": (
                     "Approval is required. "
                     "[Review access](https://azents.example/request-1)"

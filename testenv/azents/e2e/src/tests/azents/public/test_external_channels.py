@@ -2432,19 +2432,19 @@ def test_discord_multi_management_and_lifecycle_journey(
     assert connection.credentials_configured is True
     assert _DISCORD_BOT_TOKEN not in setup.model_dump_json(by_alias=True)
 
-    first_route = external_api.external_channel_v1_add_multi_slack_route(
+    first_route = external_api.external_channel_v1_add_multi_discord_route(
         connection_id=connection.id,
         handle=handle,
         multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
         _headers=headers,
     )
-    duplicate_route = external_api.external_channel_v1_add_multi_slack_route(
+    duplicate_route = external_api.external_channel_v1_add_multi_discord_route(
         connection_id=connection.id,
         handle=handle,
         multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[0]),
         _headers=headers,
     )
-    second_route = external_api.external_channel_v1_add_multi_slack_route(
+    second_route = external_api.external_channel_v1_add_multi_discord_route(
         connection_id=connection.id,
         handle=handle,
         multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_ids[1]),
@@ -2453,12 +2453,12 @@ def test_discord_multi_management_and_lifecycle_journey(
     assert duplicate_route.id == first_route.id
     assert second_route.agent_id == agent_ids[1]
 
-    current = external_api.external_channel_v1_get_multi_slack_connection(
+    current = external_api.external_channel_v1_get_multi_discord_connection(
         connection_id=connection.id,
         handle=handle,
         _headers=headers,
     )
-    default = external_api.external_channel_v1_replace_multi_slack_channel_default(
+    default = external_api.external_channel_v1_replace_multi_discord_channel_default(
         connection_id=connection.id,
         provider_channel_id=_DISCORD_CHANNEL_ID,
         handle=handle,
@@ -2471,13 +2471,13 @@ def test_discord_multi_management_and_lifecycle_journey(
     assert default.route_id == first_route.id
     assert default.status is ExternalChannelChannelDefaultStatus.ACTIVE
 
-    impact = external_api.external_channel_v1_get_multi_slack_route_impact(
+    impact = external_api.external_channel_v1_get_multi_discord_route_impact(
         connection_id=connection.id,
         route_id=first_route.id,
         handle=handle,
         _headers=headers,
     )
-    removed = external_api.external_channel_v1_remove_multi_slack_route(
+    removed = external_api.external_channel_v1_remove_multi_discord_route(
         connection_id=connection.id,
         route_id=first_route.id,
         handle=handle,
@@ -2487,7 +2487,7 @@ def test_discord_multi_management_and_lifecycle_journey(
         _headers=headers,
     )
     assert removed.active_default_count == 1
-    defaults = external_api.external_channel_v1_list_multi_slack_channel_defaults(
+    defaults = external_api.external_channel_v1_list_multi_discord_channel_defaults(
         connection_id=connection.id,
         handle=handle,
         _headers=headers,
@@ -2495,13 +2495,13 @@ def test_discord_multi_management_and_lifecycle_journey(
     assert defaults.items[0].status is ExternalChannelChannelDefaultStatus.INVALIDATED
 
     connection_impact = (
-        external_api.external_channel_v1_get_multi_slack_connection_impact(
+        external_api.external_channel_v1_get_multi_discord_connection_impact(
             connection_id=connection.id,
             handle=handle,
             _headers=headers,
         )
     )
-    disconnected = external_api.external_channel_v1_disconnect_multi_slack_connection(
+    disconnected = external_api.external_channel_v1_disconnect_multi_discord_connection(
         connection_id=connection.id,
         handle=handle,
         generation_fence_request=GenerationFenceRequest(
@@ -2510,7 +2510,7 @@ def test_discord_multi_management_and_lifecycle_journey(
         _headers=headers,
     )
     assert disconnected.disconnected_route_count == 1
-    historical = external_api.external_channel_v1_get_multi_slack_connection(
+    historical = external_api.external_channel_v1_get_multi_discord_connection(
         connection_id=connection.id,
         handle=handle,
         _headers=headers,

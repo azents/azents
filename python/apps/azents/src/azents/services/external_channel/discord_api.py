@@ -9,6 +9,9 @@ from fastapi import Depends
 
 from azents.services.external_channel.discord_endpoint import discord_api_base_url
 
+DISCORD_AZENTS_MESSAGE_COMMAND_NAME = "Ask an Azents Agent"
+_DISCORD_MESSAGE_COMMAND_TYPE = 3
+
 
 class DiscordAPIError(RuntimeError):
     """Base class for controlled Discord REST adapter errors."""
@@ -32,6 +35,13 @@ class DiscordApplicationMetadata:
 
     application_id: str
     verify_key: str
+
+
+@dataclass(frozen=True)
+class DiscordGuildMessageCommand:
+    """Sanitized provider-authoritative Guild message-command metadata."""
+
+    command_id: str
 
 
 class DiscordAPIClient:
@@ -125,6 +135,41 @@ class DiscordAPIClient:
             raise DiscordAPIUnavailable
         if response.status_code >= 400:
             raise DiscordAPIConfigurationInvalid
+
+    async def register_guild_message_command(
+        self,
+        *,
+        bot_token: str,
+        application_id: str,
+        guild_id: str,
+    ) -> DiscordGuildMessageCommand:
+        """Create or reconcile Azents' target-Guild Message Command."""
+        try:
+            response = await self.http_client.post(
+                f"{discord_api_base_url()}/applications/{application_id}/guilds/"
+                f"{guild_id}/commands",
+                headers={"Authorization": f"Bot {bot_token}"},
+                json={
+                    "name": DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
+                    "type": _DISCORD_MESSAGE_COMMAND_TYPE,
+                },
+            )
+        except httpx.RequestError as error:
+            raise DiscordAPIUnavailable from error
+        if response.status_code in {401, 403}:
+            raise DiscordAPICredentialsInvalid
+        if response.status_code == 429 or response.status_code >= 500:
+            raise DiscordAPIUnavailable
+        if response.status_code >= 400:
+            raise DiscordAPIConfigurationInvalid
+        try:
+            payload: object = response.json()
+        except ValueError as error:
+            raise DiscordAPIUnavailable from error
+        command_id = payload.get("id") if isinstance(payload, dict) else None
+        if not isinstance(command_id, str) or not command_id.isdigit():
+            raise DiscordAPIUnavailable
+        return DiscordGuildMessageCommand(command_id=command_id)
 
 
 async def get_discord_api_http_client() -> AsyncIterator[httpx.AsyncClient]:
