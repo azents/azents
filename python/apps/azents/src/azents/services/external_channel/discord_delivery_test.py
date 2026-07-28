@@ -110,6 +110,53 @@ async def test_ensure_thread_reuses_a_thread_returned_by_the_root_message() -> N
 
 
 @pytest.mark.asyncio
+async def test_ensure_thread_treats_root_200_without_thread_as_absent() -> None:
+    """A valid root response without a thread performs exactly one create POST."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": "333", "channel_id": "222"})
+        return httpx.Response(201, json={"id": "444", "parent_id": "222"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await DiscordDeliveryClient(client).ensure_thread(
+            bot_token="discord-secret",
+            parent_channel_id="222",
+            root_message_id="333",
+        )
+
+    assert result.status == "delivered"
+    assert [request.method for request in calls] == ["GET", "POST"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_thread_reconciles_ambiguous_create_without_replay() -> None:
+    """An ambiguous create reconciles an existing thread without a second POST."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.method == "GET" and len(calls) == 1:
+            return httpx.Response(404)
+        if request.method == "POST":
+            return httpx.Response(500, json={"error": "provider unavailable"})
+        return httpx.Response(200, json={"thread": {"id": "444", "parent_id": "222"}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await DiscordDeliveryClient(client).ensure_thread(
+            bot_token="discord-secret",
+            parent_channel_id="222",
+            root_message_id="333",
+        )
+
+    assert result.status == "delivered"
+    assert result.provider_message_key == "discord-thread:444"
+    assert [request.method for request in calls] == ["GET", "POST", "GET"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("status_code", "expected_status", "expected_kind"),
     [
@@ -117,7 +164,7 @@ async def test_ensure_thread_reuses_a_thread_returned_by_the_root_message() -> N
         (403, "failed", "permission_denied"),
         (404, "failed", "message_not_found"),
         (429, "failed", "rate_limited"),
-        (500, "unknown", "provider_ambiguous"),
+        (500, "unknown", "provider_5xx_unknown"),
     ],
 )
 async def test_delivery_maps_provider_failures_without_retry(

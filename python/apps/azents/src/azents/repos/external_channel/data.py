@@ -540,6 +540,7 @@ class ExternalChannelBinding(_Record):
     activation_status: ExternalChannelBindingActivationStatus
     activation_trigger_message_id: str | None
     activated_at: datetime.datetime | None
+    activation_wake_claimed_at: datetime.datetime | None = None
     projected_through_position: str | None
     truncated_message_count: int
     truncated_size: int
@@ -560,6 +561,7 @@ class ExternalChannelBindingCreate(_Record):
     activation_status: ExternalChannelBindingActivationStatus
     activation_trigger_message_id: str | None
     activated_at: datetime.datetime | None
+    activation_wake_claimed_at: datetime.datetime | None = None
     projected_through_position: str | None
     truncated_message_count: int
     truncated_size: int

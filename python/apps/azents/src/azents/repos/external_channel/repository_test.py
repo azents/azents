@@ -1,6 +1,7 @@
 """ExternalChannelRepository tests."""
 
 import datetime
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,7 +15,11 @@ from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
     ExternalChannelAppMode,
+    ExternalChannelBindingActivationStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelDeliveryOperation,
+    ExternalChannelDeliveryOriginType,
+    ExternalChannelDeliveryStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelIngressProfile,
@@ -33,7 +38,9 @@ from azents.rdb.models.external_channel import (
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
+    ExternalChannelBinding,
     ExternalChannelConnectionCreate,
+    ExternalChannelDeliveryAttempt,
     ExternalChannelEventCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -111,6 +118,118 @@ def _event_create(connection_id: str) -> ExternalChannelEventCreate:
         provider_occurred_at=_at(1),
         received_at=_at(2),
     )
+
+
+@pytest.mark.asyncio
+async def test_list_initial_delivery_attempts_scopes_session_link_and_work_parts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Initial hydration reads only the binding link and active-work parts."""
+    repository = ExternalChannelRepository()
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(side_effect=["work-1", "link-1"])
+    session.scalars = AsyncMock(
+        side_effect=[
+            ["part-1", "part-2"],
+            [
+                SimpleNamespace(
+                    id="link-1",
+                    binding_id="binding-1",
+                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                    origin_id="binding-1",
+                    operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                    status=ExternalChannelDeliveryStatus.DELIVERED,
+                ),
+                SimpleNamespace(
+                    id="part-1",
+                    binding_id="binding-1",
+                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                    origin_id="work-1",
+                    operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                    status=ExternalChannelDeliveryStatus.DELIVERED,
+                ),
+                SimpleNamespace(
+                    id="part-2",
+                    binding_id="binding-1",
+                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                    origin_id="work-1",
+                    operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                    status=ExternalChannelDeliveryStatus.UNKNOWN,
+                ),
+            ],
+        ]
+    )
+    monkeypatch.setattr(
+        ExternalChannelDeliveryAttempt,
+        "model_validate",
+        classmethod(lambda cls, value: value),
+    )
+
+    attempts = await repository.list_initial_delivery_attempts(
+        session,
+        binding_id="binding-1",
+    )
+
+    assert [attempt.id for attempt in attempts] == ["link-1", "part-1", "part-2"]
+    assert attempts[-1].status is ExternalChannelDeliveryStatus.UNKNOWN
+    assert session.scalar.await_count == 2
+    assert session.scalars.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_claim_binding_wake_has_one_winner_and_reclaims_stale_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fresh claims fence concurrent reconcilers while stale claims recover."""
+    repository = ExternalChannelRepository()
+    binding = SimpleNamespace(
+        id="binding-1",
+        activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
+        activation_wake_claimed_at=None,
+        projected_through_position=None,
+    )
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(return_value=binding)
+    session.flush = AsyncMock()
+    monkeypatch.setattr(
+        ExternalChannelBinding,
+        "model_validate",
+        classmethod(lambda cls, value: value),
+    )
+    now = _at(10)
+
+    claimed, should_wake = await repository.claim_binding_wake(
+        session,
+        binding_id="binding-1",
+        now=now,
+        projected_through_position="position-9",
+    )
+    assert claimed is binding
+    assert should_wake is True
+    assert binding.activation_status is (
+        ExternalChannelBindingActivationStatus.WAKE_PENDING
+    )
+    assert binding.projected_through_position == "position-9"
+
+    claimed, should_wake = await repository.claim_binding_wake(
+        session,
+        binding_id="binding-1",
+        now=now + datetime.timedelta(seconds=1),
+        projected_through_position="position-9",
+    )
+    assert claimed is binding
+    assert should_wake is False
+
+    binding.activation_wake_claimed_at = now - datetime.timedelta(minutes=2)
+    claimed, should_wake = await repository.claim_binding_wake(
+        session,
+        binding_id="binding-1",
+        now=now,
+        projected_through_position="position-9",
+    )
+    assert claimed is binding
+    assert should_wake is True
+    assert binding.activation_wake_claimed_at == now
 
 
 async def test_invocation_projection_query_preserves_inner_revision_from() -> None:

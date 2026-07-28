@@ -922,6 +922,7 @@ class ExternalChannelBindingActivationStatus(enum.StrEnum):
     """Initial invocation activation state for one active binding."""
 
     WAITING_HYDRATION = "waiting_hydration"
+    WAKE_PENDING = "wake_pending"
     ACTIVE = "active"
 
 

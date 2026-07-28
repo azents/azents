@@ -16,7 +16,6 @@ from azents.core.enums import (
     ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConversationAdmissionStatus,
-    ExternalChannelProvider,
     ExternalChannelResourceStatus,
     MailboxItemKind,
     MailboxSchedulingMode,
@@ -309,17 +308,9 @@ class ExternalChannelAccessService:
                     route_id=request.route_id,
                     agent_session_id=agent_session_id,
                     status=ExternalChannelBindingStatus.ACTIVE,
-                    activation_status=(
-                        ExternalChannelBindingActivationStatus.ACTIVE
-                        if connection.provider is ExternalChannelProvider.DISCORD
-                        else ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-                    ),
+                    activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
                     activation_trigger_message_id=request.source_message_id,
-                    activated_at=(
-                        now
-                        if connection.provider is ExternalChannelProvider.DISCORD
-                        else None
-                    ),
+                    activated_at=None,
                     projected_through_position=None,
                     truncated_message_count=(
                         snapshot_count if isinstance(snapshot_count, int) else 0

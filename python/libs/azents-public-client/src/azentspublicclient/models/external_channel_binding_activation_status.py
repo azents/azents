@@ -27,6 +27,7 @@ class ExternalChannelBindingActivationStatus(str, Enum):
     allowed enum values
     """
     WAITING_HYDRATION = 'waiting_hydration'
+    WAKE_PENDING = 'wake_pending'
     ACTIVE = 'active'
 
     @classmethod

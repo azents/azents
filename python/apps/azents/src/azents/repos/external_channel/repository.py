@@ -69,6 +69,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
+    RDBExternalChannelWorkProjectionPart,
 )
 
 from .data import (
@@ -3135,8 +3136,12 @@ class ExternalChannelRepository:
             sa.select(RDBExternalChannelBinding.id)
             .where(
                 RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
-                RDBExternalChannelBinding.activation_status
-                == ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
+                RDBExternalChannelBinding.activation_status.in_(
+                    (
+                        ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
+                        ExternalChannelBindingActivationStatus.WAKE_PENDING,
+                    )
+                ),
             )
             .order_by(RDBExternalChannelBinding.connected_at)
             .limit(limit)
@@ -3169,6 +3174,56 @@ class ExternalChannelRepository:
             await session.get(RDBExternalChannelBinding, binding_id),
         )
 
+    async def claim_binding_wake(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+        now: datetime.datetime,
+        projected_through_position: str,
+        lease: datetime.timedelta = datetime.timedelta(minutes=1),
+    ) -> tuple[ExternalChannelBinding | None, bool]:
+        """Claim one durable wake send for a hydrated binding.
+
+        A fresh claim fences concurrent reconcilers. A stale claim is reclaimable
+        so a process crash before broker delivery can be recovered without
+        replaying provider delivery attempts.
+        """
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelBinding)
+            .where(
+                RDBExternalChannelBinding.id == binding_id,
+                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            return None, False
+        if rdb.activation_status is ExternalChannelBindingActivationStatus.ACTIVE:
+            return ExternalChannelBinding.model_validate(rdb), False
+        if (
+            rdb.activation_status
+            is ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+        ):
+            rdb.activation_status = ExternalChannelBindingActivationStatus.WAKE_PENDING
+            rdb.activation_wake_claimed_at = now
+            rdb.projected_through_position = projected_through_position
+            await session.flush()
+            await session.refresh(rdb, attribute_names=["updated_at"])
+            return ExternalChannelBinding.model_validate(rdb), True
+        if (
+            rdb.activation_status
+            is not ExternalChannelBindingActivationStatus.WAKE_PENDING
+        ):
+            return None, False
+        claimed_at = rdb.activation_wake_claimed_at
+        if claimed_at is not None and claimed_at > now - lease:
+            return ExternalChannelBinding.model_validate(rdb), False
+        rdb.activation_wake_claimed_at = now
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelBinding.model_validate(rdb), True
+
     async def mark_binding_activated(
         self,
         session: AsyncSession,
@@ -3190,12 +3245,13 @@ class ExternalChannelRepository:
             return None
         if rdb.activation_status is ExternalChannelBindingActivationStatus.ACTIVE:
             return ExternalChannelBinding.model_validate(rdb)
-        if (
-            rdb.activation_status
-            is not ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+        if rdb.activation_status not in (
+            ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
+            ExternalChannelBindingActivationStatus.WAKE_PENDING,
         ):
             return None
         rdb.activation_status = ExternalChannelBindingActivationStatus.ACTIVE
+        rdb.activation_wake_claimed_at = None
         rdb.activated_at = now
         rdb.projected_through_position = projected_through_position
         rdb.truncated_message_count = 0
@@ -3255,6 +3311,100 @@ class ExternalChannelRepository:
             None,
         )
         return session_link_id, activity_id
+
+    async def list_initial_delivery_attempts(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+    ) -> tuple[ExternalChannelDeliveryAttempt, ...]:
+        """List all immutable initial Discord delivery attempts for one binding."""
+        work_id = await session.scalar(
+            sa.select(RDBExternalChannelWork.id)
+            .where(
+                RDBExternalChannelWork.binding_id == binding_id,
+                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+            )
+            .order_by(
+                RDBExternalChannelWork.created_at,
+                RDBExternalChannelWork.id,
+            )
+            .limit(1)
+        )
+        if work_id is None:
+            return ()
+        part_attempt_ids = list(
+            await session.scalars(
+                sa.select(
+                    RDBExternalChannelWorkProjectionPart.latest_delivery_attempt_id
+                )
+                .where(
+                    RDBExternalChannelWorkProjectionPart.work_id == work_id,
+                    RDBExternalChannelWorkProjectionPart.deleted_at.is_(None),
+                )
+                .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
+            )
+        )
+        if not part_attempt_ids or any(
+            attempt_id is None for attempt_id in part_attempt_ids
+        ):
+            return ()
+        session_link_id = await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt.id)
+            .where(
+                RDBExternalChannelDeliveryAttempt.binding_id == binding_id,
+                RDBExternalChannelDeliveryAttempt.origin_type
+                == ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                RDBExternalChannelDeliveryAttempt.origin_id == binding_id,
+                RDBExternalChannelDeliveryAttempt.operation
+                == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            )
+            .order_by(
+                RDBExternalChannelDeliveryAttempt.created_at,
+                RDBExternalChannelDeliveryAttempt.id,
+            )
+            .limit(1)
+        )
+        if session_link_id is None:
+            return ()
+        attempt_ids = [session_link_id, *part_attempt_ids]
+        rows = await session.scalars(
+            sa.select(RDBExternalChannelDeliveryAttempt)
+            .where(RDBExternalChannelDeliveryAttempt.id.in_(attempt_ids))
+            .order_by(
+                RDBExternalChannelDeliveryAttempt.created_at,
+                RDBExternalChannelDeliveryAttempt.id,
+            )
+        )
+        attempts = tuple(
+            ExternalChannelDeliveryAttempt.model_validate(row) for row in rows
+        )
+        if len(attempts) != len(attempt_ids):
+            return ()
+        if any(
+            attempt.binding_id != binding_id
+            or attempt.origin_type
+            is not ExternalChannelDeliveryOriginType.MANAGER_OPERATION
+            or (
+                attempt.id == session_link_id
+                and (
+                    attempt.origin_id != binding_id
+                    or attempt.operation
+                    is not ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                )
+            )
+            or (
+                attempt.id in part_attempt_ids
+                and (
+                    attempt.origin_id != work_id
+                    or attempt.operation
+                    is not ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                )
+            )
+            for attempt in attempts
+        ):
+            return ()
+        return attempts
 
     async def advance_binding_projection(
         self,
@@ -3843,6 +3993,10 @@ class ExternalChannelRepository:
                 "channel_id": channel_id,
                 "provider_message_key": control.provider_message_key,
             }
+            for key in ("thread_parent_channel_id", "thread_root_message_id"):
+                value = control.request_payload.get(key)
+                if isinstance(value, str) and value:
+                    payload[key] = value
         elif provider is ExternalChannelProvider.SLACK:
             channel_id = control.request_payload.get("channel_id")
             thread_ts = control.request_payload.get("thread_ts")
