@@ -395,6 +395,9 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert initializer.image == _RUNNER_IMAGE
     assert initializer.command is not None
     assert "transfer-staging" in initializer.command[-1]
+    assert initializer.security_context.capabilities_add == ("CHOWN", "FOWNER")
+    assert initializer.security_context.capabilities_drop == ("ALL",)
+    assert container.security_context.capabilities_add == ("SETGID", "SETUID")
     assert pvc.spec.storage_class_name == "gp3"
     assert pvc.spec.storage_request == "20Gi"
     assert "azents/workspace-path" not in pod.metadata.labels
