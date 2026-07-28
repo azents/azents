@@ -50,43 +50,43 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
             - name: AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS
-              value: {{ .Values.server.runtimeControl.reconcileIntervalSeconds | quote }}
+              value: {{ printf "%d" (int64 .Values.server.runtimeControl.reconcileIntervalSeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_LIFECYCLE_RETRY_DELAY_SECONDS
-              value: {{ .Values.server.runtimeControl.lifecycleRetryDelaySeconds | quote }}
+              value: {{ printf "%d" (int64 .Values.server.runtimeControl.lifecycleRetryDelaySeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_START_TIMEOUT_SECONDS
-              value: {{ .Values.server.runtimeControl.startTimeoutSeconds | quote }}
+              value: {{ printf "%d" (int64 .Values.server.runtimeControl.startTimeoutSeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_BACKEND
               value: {{ $transfer.stateBackend | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_REDIS_NAMESPACE
               value: {{ $transfer.redisNamespace | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_PER_RUNTIME_ATTEMPTS
-              value: {{ $transfer.perRuntimeAttempts | quote }}
+              value: {{ printf "%d" (int64 $transfer.perRuntimeAttempts) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_PER_RUNTIME_BYTES
-              value: {{ $transfer.perRuntimeBytes | quote }}
+              value: {{ printf "%d" (int64 $transfer.perRuntimeBytes) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_DEPLOYMENT_ATTEMPTS
-              value: {{ $transfer.deploymentAttempts | quote }}
+              value: {{ printf "%d" (int64 $transfer.deploymentAttempts) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_DEPLOYMENT_BYTES
-              value: {{ $transfer.deploymentBytes | quote }}
+              value: {{ printf "%d" (int64 $transfer.deploymentBytes) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_ADMISSION_LEASE_SECONDS
-              value: {{ $transfer.admissionLeaseSeconds | quote }}
+              value: {{ printf "%d" (int64 $transfer.admissionLeaseSeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_CONSUMER_LEASE_SECONDS
-              value: {{ $transfer.consumerLeaseSeconds | quote }}
+              value: {{ printf "%d" (int64 $transfer.consumerLeaseSeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_STREAM_LEASE_SECONDS
-              value: {{ $transfer.streamLeaseSeconds | quote }}
+              value: {{ printf "%d" (int64 $transfer.streamLeaseSeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_TERMINAL_TTL_SECONDS
-              value: {{ $transfer.terminalTtlSeconds | quote }}
+              value: {{ printf "%d" (int64 $transfer.terminalTtlSeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_LIST_PAGE_SIZE
-              value: {{ $transfer.listPageSize | quote }}
+              value: {{ printf "%d" (int64 $transfer.listPageSize) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_MAX_CONCURRENT_DOWNLOADS
-              value: {{ $transfer.maxConcurrentDownloads | quote }}
+              value: {{ printf "%d" (int64 $transfer.maxConcurrentDownloads) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_MAX_CONCURRENT_UPLOADS
-              value: {{ $transfer.maxConcurrentUploads | quote }}
+              value: {{ printf "%d" (int64 $transfer.maxConcurrentUploads) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_CHUNK_BYTES
-              value: {{ $transfer.chunkBytes | quote }}
+              value: {{ printf "%d" (int64 $transfer.chunkBytes) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_MULTIPART_PART_BYTES
-              value: {{ $transfer.multipartPartBytes | quote }}
+              value: {{ printf "%d" (int64 $transfer.multipartPartBytes) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_REPAIR_INTERVAL_SECONDS
-              value: {{ $transfer.repairIntervalSeconds | quote }}
+              value: {{ printf "%d" (int64 $transfer.repairIntervalSeconds) | quote }}
             - name: AZ_RUNTIME_CONTROL_TRANSFER_OBJECT_PREFIX
               value: {{ $transfer.objectPrefix | quote }}
             - name: AZ_RUNTIME_CONTROL_WORKSPACE_S3_PREFIX

@@ -14,7 +14,7 @@ _WEB_DIGEST = f"sha256:{'e' * 64}"
 _ADMIN_WEB_DIGEST = f"sha256:{'f' * 64}"
 
 
-def _helm_template(*values: str) -> str:
+def _helm_template(*values: str, json_values: tuple[str, ...] = ()) -> str:
     """Run helm template or skip when helm is unavailable."""
     helm = shutil.which("helm")
     if helm is None:
@@ -35,6 +35,8 @@ def _helm_template(*values: str) -> str:
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])
+    for value in json_values:
+        command.extend(["--set-json", value])
     completed = subprocess.run(
         command,
         cwd=CHART_DIR,
@@ -104,6 +106,34 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert 'namespace: "default"' in tokenreview_binding
     assert "azents-runtime-provider-kubernetes" not in tokenreview_binding
     assert rendered.count("mountPath: /var/run/secrets/azents/runtime-control-tls") == 3
+
+
+def test_runtime_control_renders_values_object_numbers_as_decimal_integers() -> None:
+    """ArgoCD valuesObject numbers remain valid integer environment values."""
+    rendered = _helm_template(
+        "server.runtimeControl.enabled=true",
+        "server.runtimeControl.runnerImage.repository=repo/runner",
+        "server.runtimeControl.runnerImage.tag=sha",
+        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        json_values=(
+            "server.runtimeControl.transfer.perRuntimeBytes=8388608",
+            "server.runtimeControl.transfer.deploymentBytes=33554432",
+            "server.runtimeControl.transfer.multipartPartBytes=5242880",
+        ),
+    )
+
+    assert (
+        "name: AZ_RUNTIME_CONTROL_TRANSFER_PER_RUNTIME_BYTES\n"
+        '              value: "8388608"'
+    ) in rendered
+    assert (
+        "name: AZ_RUNTIME_CONTROL_TRANSFER_DEPLOYMENT_BYTES\n"
+        '              value: "33554432"'
+    ) in rendered
+    assert (
+        "name: AZ_RUNTIME_CONTROL_TRANSFER_MULTIPART_PART_BYTES\n"
+        '              value: "5242880"'
+    ) in rendered
 
 
 def test_runtime_control_renders_dedicated_workspace_s3_credential_aliases() -> None:
