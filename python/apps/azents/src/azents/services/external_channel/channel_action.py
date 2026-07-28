@@ -337,7 +337,12 @@ class ExternalChannelActionService:
         provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
     ) -> ExternalChannelDeliveryStatus | None:
         """Attempt one current target or settle its prior provider completion."""
-        completed_recoveries = _completed_runtime_recoveries(target.request_payload)
+        runtime_provider_transfer = _uses_runtime_provider_transfer(target)
+        completed_recoveries = (
+            _completed_runtime_recoveries(target.request_payload)
+            if target.provider is ExternalChannelProvider.SLACK
+            else None
+        )
         if completed_recoveries is not None:
             return await self._recover_completed_runtime_delivery(
                 target,
@@ -346,7 +351,7 @@ class ExternalChannelActionService:
             )
         if target.status is not ExternalChannelDeliveryStatus.PENDING:
             return None
-        if _has_runtime_outbound_source(target.request_payload):
+        if runtime_provider_transfer:
             if provider_delivery_capability is None:
                 async with self.session_manager() as session:
                     await self.repository.skip_delivery(
@@ -367,7 +372,8 @@ class ExternalChannelActionService:
                 now=datetime.datetime.now(datetime.UTC),
                 runtime_target=(
                     provider_delivery_capability.target
-                    if provider_delivery_capability is not None
+                    if runtime_provider_transfer
+                    and provider_delivery_capability is not None
                     else None
                 ),
             )
@@ -388,10 +394,8 @@ class ExternalChannelActionService:
             )
             raise
         recovery_delivery_id = None
-        if not (
-            result.status == "delivered"
-            and _has_runtime_outbound_source(started.request_payload)
-        ):
+        started_runtime_provider_transfer = _uses_runtime_provider_transfer(started)
+        if not (result.status == "delivered" and started_runtime_provider_transfer):
             async with self.session_manager() as session:
                 recovery_delivery_id = await self.repository.finish_delivery(
                     session,
@@ -405,7 +409,7 @@ class ExternalChannelActionService:
                 await session.commit()
         if recovery_delivery_id is not None:
             await self.attempt_delivery(recovery_delivery_id)
-        if _has_runtime_outbound_source(started.request_payload):
+        if started_runtime_provider_transfer:
             await self.recover_runtime_provider_settlement(
                 target.delivery_attempt_id,
                 provider_delivery_capability=provider_delivery_capability,
@@ -446,7 +450,7 @@ class ExternalChannelActionService:
     ) -> ExternalChannelDeliveryStatus | None:
         """Recover exact Runtime settlement without replaying a provider request."""
         target = await self.prepare_delivery(delivery_attempt_id)
-        if target is None:
+        if target is None or target.provider is not ExternalChannelProvider.SLACK:
             return None
         recoveries = _completed_runtime_recoveries(target.request_payload)
         if recoveries is None or provider_delivery_capability is None:
@@ -1242,6 +1246,14 @@ def _has_runtime_outbound_source(payload: dict[str, object]) -> bool:
     )
 
 
+def _uses_runtime_provider_transfer(target: ChannelDeliveryTarget) -> bool:
+    """Return whether Slack delivery requires the trusted Runtime transfer path."""
+    return (
+        target.provider is ExternalChannelProvider.SLACK
+        and _has_runtime_outbound_source(target.request_payload)
+    )
+
+
 def _runtime_provider_recovery_payload(
     recovery: RuntimeToProviderRecovery,
 ) -> dict[str, object]:
@@ -1398,16 +1410,6 @@ def _discord_invalid_payload() -> DiscordDeliveryResult:
     )
 
 
-def _runtime_settlement_pending_result() -> SlackControlMessageResult:
-    """Return a non-success outcome after provider success lacks settlement."""
-    return SlackControlMessageResult(
-        status="unknown",
-        provider_message_key=None,
-        error_kind="runtime_transfer_settlement_pending",
-        error_summary=(
-            "Slack accepted the file reply, but Runtime transfer settlement is pending."
-        ),
-    )
 def _outbound_files(
     value: object,
 ) -> tuple[ExternalChannelOutboundFileManifest, ...] | None:
