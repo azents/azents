@@ -3,6 +3,13 @@
 from azcommon.testing.images import get_docker_hub_image
 
 
+def test_get_docker_hub_image_uses_public_ecr_for_python() -> None:
+    """Python uses the public mirror to avoid Docker Hub availability failures."""
+    image = get_docker_hub_image("python:3.14-alpine")
+
+    assert image == "public.ecr.aws/docker/library/python:3.14-alpine"
+
+
 def test_get_docker_hub_image_keeps_postgres_on_docker_hub() -> None:
     """Postgres stays on Docker Hub because ECR Public tag coverage is incomplete."""
     image = get_docker_hub_image("postgres:18")

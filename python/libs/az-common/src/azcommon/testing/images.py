@@ -1,7 +1,7 @@
 """Docker image utilities for testing."""
 
 _PUBLIC_ECR_DOCKER_HUB_LIBRARY = "public.ecr.aws/docker/library"
-_PUBLIC_ECR_LIBRARY_IMAGES = frozenset({"redis"})
+_PUBLIC_ECR_LIBRARY_IMAGES = frozenset({"python", "redis"})
 
 
 def _split_image_name(image: str) -> tuple[str, str | None]:
