@@ -14,11 +14,14 @@ _DISCORD_AGENT_PREFIX_RESERVE = 200
 DISCORD_DELIVERY_TEXT_LIMIT = (
     _DISCORD_MESSAGE_CONTENT_LIMIT - _DISCORD_AGENT_PREFIX_RESERVE
 )
+_PROGRESS_TITLE_MAX_LENGTH = 160
+_TASK_TITLE_MAX_LENGTH = 120
+_TASK_CONTEXT_MAX_LENGTH = 240
 
 
 @dataclass(frozen=True)
 class DiscordProgressPage:
-    """One bounded accessible fallback and native Embed presentation."""
+    """One bounded Discord progress-message presentation."""
 
     text: str
     embeds: list[dict[str, object]]
@@ -68,65 +71,27 @@ def render_discord_progress(
     work_id: str,
     desired_progress_revision: int,
 ) -> DiscordProgressPresentation:
-    """Lower one canonical progress snapshot to stable bounded Discord pages."""
+    """Lower one canonical progress snapshot to one compact Discord Tracker."""
     del work_id, desired_progress_revision
     if progress.state == "checking":
         return DiscordProgressPresentation(
             pages=(
                 DiscordProgressPage(
-                    text="",
-                    embeds=[
-                        {
-                            "title": "Agent is checking your message",
-                            "description": (
-                                "The Agent is preparing the first response for this "
-                                "conversation."
-                            ),
-                            "color": 0x5865F2,
-                        }
-                    ],
+                    text="◉ Agent is checking your message",
+                    embeds=[],
                 ),
             )
         )
     if progress.title is None:
         raise AssertionError("Validated working progress must contain a title.")
-    summary = _progress_summary(progress.tasks)
-    pages = [
-        DiscordProgressPage(
-            text="",
-            embeds=[
-                {
-                    "title": _bounded_embed_title(progress.title),
-                    "description": summary,
-                    "color": 0x5865F2,
-                }
-            ],
-        )
-    ]
-    for task in progress.tasks:
-        task_text = _task_page(task)
-        parts = split_discord_markdown(task_text)
-        pages.extend(
+    return DiscordProgressPresentation(
+        pages=(
             DiscordProgressPage(
-                text="",
-                embeds=[
-                    {
-                        "title": _bounded_embed_title(
-                            f"{_task_status_label(task.status)} — {task.title}"
-                            + (
-                                f" ({ordinal + 1}/{len(parts)})"
-                                if len(parts) > 1
-                                else ""
-                            )
-                        ),
-                        "description": part,
-                        "color": _task_status_color(task.status),
-                    }
-                ],
-            )
-            for ordinal, part in enumerate(parts)
+                text=_compact_progress_text(progress),
+                embeds=[],
+            ),
         )
-    return DiscordProgressPresentation(pages=tuple(pages))
+    )
 
 
 def render_discord_persisted_progress(
@@ -171,67 +136,173 @@ def _active_fence_after(value: str, active_fence: str | None) -> str | None:
 
 
 def _progress_summary(tasks: list[ExternalChannelWorkTask]) -> str:
-    """Render a short, literal summary for the durable overview page."""
-    counts = {
-        ExternalChannelWorkTaskStatus.PENDING: 0,
-        ExternalChannelWorkTaskStatus.IN_PROGRESS: 0,
-        ExternalChannelWorkTaskStatus.COMPLETED: 0,
-        ExternalChannelWorkTaskStatus.FAILED: 0,
-    }
-    for task in tasks:
-        counts[task.status] += 1
-    return (
-        f"{len(tasks)} task(s) · "
-        f"{counts[ExternalChannelWorkTaskStatus.IN_PROGRESS]} in progress · "
-        f"{counts[ExternalChannelWorkTaskStatus.PENDING]} pending · "
-        f"{counts[ExternalChannelWorkTaskStatus.COMPLETED]} completed · "
-        f"{counts[ExternalChannelWorkTaskStatus.FAILED]} failed"
+    """Render compact completion counts for one Tracker header."""
+    completed = sum(
+        task.status is ExternalChannelWorkTaskStatus.COMPLETED for task in tasks
     )
+    failed = sum(task.status is ExternalChannelWorkTaskStatus.FAILED for task in tasks)
+    summary = f"{completed}/{len(tasks)} complete"
+    return f"{summary} · {failed} failed" if failed else summary
 
 
-def _task_page(task: ExternalChannelWorkTask) -> str:
-    """Lower one canonical task without inventing provider-only state."""
-    lines = [f"### {_task_status_label(task.status)} — {task.title}"]
-    if task.details is not None:
-        lines.extend(("**Details**", task.details))
-    if task.output is not None:
-        lines.extend(("**Output**", task.output))
-    if task.sources:
-        lines.append("**Sources**")
-        lines.extend(f"- [{source.label}]({source.url})" for source in task.sources)
-    return "\n".join(lines)
+def _compact_progress_text(progress: ExternalChannelDesiredProgress) -> str:
+    """Render every task in one bounded checklist with prioritized context."""
+    if progress.title is None:
+        raise AssertionError("Validated working progress must contain a title.")
+    title = _truncate(_single_line(progress.title), _PROGRESS_TITLE_MAX_LENGTH)
+    header = f"**{title}** · {_progress_summary(progress.tasks)}"
+    task_lines = _bounded_task_title_lines(
+        progress.tasks,
+        maximum=DISCORD_DELIVERY_TEXT_LIMIT - len(header) - 1,
+    )
+    extras: list[list[str]] = [[] for _ in progress.tasks]
+    base = "\n".join((header, *task_lines))
+    remaining = DISCORD_DELIVERY_TEXT_LIMIT - len(base)
+
+    task_ordinals = sorted(
+        range(len(progress.tasks)),
+        key=lambda ordinal: (
+            _task_context_priority(progress.tasks[ordinal].status),
+            ordinal,
+        ),
+    )
+    for ordinal in task_ordinals:
+        context = _task_context(progress.tasks[ordinal])
+        if context is None:
+            continue
+        prefix = "  ↳ "
+        maximum = min(
+            _TASK_CONTEXT_MAX_LENGTH,
+            remaining - len(prefix) - 1,
+        )
+        if maximum < 8:
+            break
+        line = f"{prefix}{_truncate(_single_line(context), maximum)}"
+        extras[ordinal].append(line)
+        remaining -= len(line) + 1
+
+    for ordinal in task_ordinals:
+        if remaining <= 0:
+            break
+        source_line = _bounded_source_line(
+            progress.tasks[ordinal],
+            maximum=remaining - 1,
+        )
+        if source_line is None:
+            continue
+        extras[ordinal].append(source_line)
+        remaining -= len(source_line) + 1
+
+    lines = [header]
+    for ordinal, task_line in enumerate(task_lines):
+        lines.append(task_line)
+        lines.extend(extras[ordinal])
+    rendered = "\n".join(lines)
+    if len(rendered) > DISCORD_DELIVERY_TEXT_LIMIT:
+        raise AssertionError("Discord Tracker rendering exceeded its bounded limit.")
+    return rendered
 
 
-def _task_status_label(status: ExternalChannelWorkTaskStatus) -> str:
+def _bounded_task_title_lines(
+    tasks: list[ExternalChannelWorkTask],
+    *,
+    maximum: int,
+) -> list[str]:
+    """Keep every ordered task visible while fitting the Tracker message."""
+    markers = [_task_status_marker(task.status) for task in tasks]
+    titles = [
+        _truncate(_single_line(task.title), _TASK_TITLE_MAX_LENGTH) for task in tasks
+    ]
+    lines = [f"{marker} {title}" for marker, title in zip(markers, titles, strict=True)]
+    if len("\n".join(lines)) <= maximum:
+        return lines
+
+    fixed_length = sum(len(marker) + 1 for marker in markers) + len(tasks) - 1
+    title_budget = maximum - fixed_length
+    if title_budget < len(tasks):
+        raise AssertionError("Discord Tracker cannot retain every task title.")
+    remaining_budget = title_budget
+    bounded_titles: list[str] = []
+    for ordinal, title in enumerate(titles):
+        remaining_tasks = len(titles) - ordinal
+        item_budget = max(1, remaining_budget // remaining_tasks)
+        bounded = _truncate(title, item_budget)
+        bounded_titles.append(bounded)
+        remaining_budget -= len(bounded)
+    return [
+        f"{marker} {title}"
+        for marker, title in zip(markers, bounded_titles, strict=True)
+    ]
+
+
+def _task_status_marker(status: ExternalChannelWorkTaskStatus) -> str:
     match status:
         case ExternalChannelWorkTaskStatus.PENDING:
-            return "Pending"
+            return "○"
         case ExternalChannelWorkTaskStatus.IN_PROGRESS:
-            return "In progress"
+            return "◉"
         case ExternalChannelWorkTaskStatus.COMPLETED:
-            return "Completed"
+            return "✓"
         case ExternalChannelWorkTaskStatus.FAILED:
-            return "Failed"
+            return "✕"
         case _ as unreachable:
             assert_never(unreachable)
 
 
-def _task_status_color(status: ExternalChannelWorkTaskStatus) -> int:
-    """Use a stable visual status without retaining provider-specific work state."""
+def _task_context_priority(status: ExternalChannelWorkTaskStatus) -> int:
+    """Prioritize the most operationally relevant compact task context."""
     match status:
-        case ExternalChannelWorkTaskStatus.PENDING:
-            return 0x99AAB5
         case ExternalChannelWorkTaskStatus.IN_PROGRESS:
-            return 0x5865F2
-        case ExternalChannelWorkTaskStatus.COMPLETED:
-            return 0x57F287
+            return 0
         case ExternalChannelWorkTaskStatus.FAILED:
-            return 0xED4245
+            return 1
+        case ExternalChannelWorkTaskStatus.COMPLETED:
+            return 2
+        case ExternalChannelWorkTaskStatus.PENDING:
+            return 3
         case _ as unreachable:
             assert_never(unreachable)
 
 
-def _bounded_embed_title(value: str) -> str:
-    """Keep each generated title inside Discord's bounded Embed title field."""
-    maximum = 256
-    return value if len(value) <= maximum else f"{value[: maximum - 1]}…"
+def _task_context(task: ExternalChannelWorkTask) -> str | None:
+    """Select the status-relevant task prose for the compact Tracker."""
+    if task.status in {
+        ExternalChannelWorkTaskStatus.COMPLETED,
+        ExternalChannelWorkTaskStatus.FAILED,
+    }:
+        return task.output or task.details
+    return task.details
+
+
+def _bounded_source_line(
+    task: ExternalChannelWorkTask,
+    *,
+    maximum: int,
+) -> str | None:
+    """Render as many labeled sources as fit without dropping another task."""
+    prefix = "  Sources: "
+    if not task.sources or maximum <= len(prefix):
+        return None
+    links: list[str] = []
+    for source in task.sources:
+        label = _truncate(_single_line(source.label), 80)
+        link = f"[{label}]({source.url})"
+        candidate = f"{prefix}{' · '.join((*links, link))}"
+        if len(candidate) > maximum:
+            break
+        links.append(link)
+    return f"{prefix}{' · '.join(links)}" if links else None
+
+
+def _single_line(value: str) -> str:
+    """Collapse multiline task prose into a compact Tracker line."""
+    return " ".join(value.split())
+
+
+def _truncate(value: str, maximum: int) -> str:
+    """Bound visible prose while preserving deterministic ellipsis."""
+    if len(value) <= maximum:
+        return value
+    if maximum <= 1:
+        return "…"
+    return f"{value[: maximum - 1].rstrip()}…"

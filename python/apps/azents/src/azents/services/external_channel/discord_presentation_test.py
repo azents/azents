@@ -1,7 +1,10 @@
 """Deterministic Discord message-part presentation tests."""
 
 from azents.core.enums import ExternalChannelWorkTaskStatus
-from azents.core.external_channel_progress import ExternalChannelDesiredProgress
+from azents.core.external_channel_progress import (
+    ExternalChannelDesiredProgress,
+    ExternalChannelWorkSource,
+)
 from azents.repos.external_channel.work_data import ChannelWorkTask
 from azents.services.external_channel.discord_presentation import (
     DISCORD_DELIVERY_TEXT_LIMIT,
@@ -35,8 +38,26 @@ def test_reopens_and_closes_fenced_code_when_a_part_crosses_its_body() -> None:
     assert any(part.startswith("```python\n") for part in parts[1:])
 
 
-def test_progress_uses_a_summary_page_then_ordered_bounded_task_pages() -> None:
-    """Discord Tracker pages retain canonical task order and bounded presentation."""
+def test_checking_progress_uses_one_text_tracker() -> None:
+    """Initial Discord activity is one plain-text Tracker without an Embed card."""
+    presentation = render_discord_progress(
+        ExternalChannelDesiredProgress(
+            schema_version=2,
+            state="checking",
+            title=None,
+            tasks=[],
+        ),
+        work_id="work-1",
+        desired_progress_revision=1,
+    )
+
+    assert len(presentation.pages) == 1
+    assert presentation.pages[0].text == "◉ Agent is checking your message"
+    assert presentation.pages[0].embeds == []
+
+
+def test_progress_uses_one_compact_checklist_message() -> None:
+    """Discord Tracker retains rich tasks in one compact text message."""
     presentation = render_discord_progress(
         ExternalChannelDesiredProgress(
             schema_version=2,
@@ -54,10 +75,15 @@ def test_progress_uses_a_summary_page_then_ordered_bounded_task_pages() -> None:
                 ChannelWorkTask(
                     id="report",
                     title="Report the outcome",
-                    status=ExternalChannelWorkTaskStatus.PENDING,
+                    status=ExternalChannelWorkTaskStatus.COMPLETED,
                     details=None,
-                    output=None,
-                    sources=[],
+                    output="Shared the final findings.",
+                    sources=[
+                        ExternalChannelWorkSource(
+                            label="Incident report",
+                            url="https://example.com/report",
+                        )
+                    ],
                 ),
             ],
         ),
@@ -65,28 +91,49 @@ def test_progress_uses_a_summary_page_then_ordered_bounded_task_pages() -> None:
         desired_progress_revision=7,
     )
 
-    assert presentation.pages[0].text == ""
-    assert presentation.pages[0].embeds == [
-        {
-            "title": "Investigating the issue…",
-            "description": (
-                "2 task(s) · 1 in progress · 1 pending · 0 completed · 0 failed"
-            ),
-            "color": 0x5865F2,
-        }
-    ]
-    descriptions: list[str] = []
-    for page in presentation.pages[1:]:
-        if page.embeds:
-            description = page.embeds[0]["description"]
-            if isinstance(description, str):
-                descriptions.append(description)
-    assert "Inspect the current incident" in "".join(descriptions)
-    assert "Report the outcome" in "".join(descriptions)
-    assert all(page.text == "" for page in presentation.pages)
-    assert all(
-        page.embeds
-        and isinstance(page.embeds[0]["description"], str)
-        and len(page.embeds[0]["description"]) <= DISCORD_DELIVERY_TEXT_LIMIT
-        for page in presentation.pages[1:]
+    assert len(presentation.pages) == 1
+    assert presentation.pages[0].embeds == []
+    assert presentation.pages[0].text == (
+        "**Investigating the issue…** · 1/2 complete\n"
+        "◉ Inspect the current incident\n"
+        "  ↳ Read the provider logs.\n"
+        "✓ Report the outcome\n"
+        "  ↳ Shared the final findings.\n"
+        "  Sources: [Incident report](https://example.com/report)"
     )
+
+
+def test_progress_keeps_every_task_in_one_bounded_message() -> None:
+    """Oversized rich task snapshots retain every ordered checklist item."""
+    tasks = [
+        ChannelWorkTask(
+            id=f"task-{ordinal}",
+            title=f"Task {ordinal:02d} " + ("title " * 70),
+            status=(
+                ExternalChannelWorkTaskStatus.IN_PROGRESS
+                if ordinal == 24
+                else ExternalChannelWorkTaskStatus.PENDING
+            ),
+            details="detail " * 50,
+            output=None,
+            sources=[],
+        )
+        for ordinal in range(49)
+    ]
+
+    presentation = render_discord_progress(
+        ExternalChannelDesiredProgress(
+            schema_version=2,
+            state="working",
+            title="Large plan",
+            tasks=tasks,
+        ),
+        work_id="work-2",
+        desired_progress_revision=8,
+    )
+
+    assert len(presentation.pages) == 1
+    assert presentation.pages[0].embeds == []
+    assert len(presentation.pages[0].text) <= DISCORD_DELIVERY_TEXT_LIMIT
+    for ordinal in range(49):
+        assert f"Task {ordinal:02d}" in presentation.pages[0].text

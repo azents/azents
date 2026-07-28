@@ -1578,7 +1578,7 @@ def _discord_embeds(value: object) -> list[dict[str, object]] | None:
     """Validate the generated bounded Embed subset persisted for delivery."""
     if value is None:
         return None
-    if not isinstance(value, list) or not value or len(value) > 10:
+    if not isinstance(value, list) or len(value) > 10:
         return None
     embeds: list[dict[str, object]] = []
     for embed in value:

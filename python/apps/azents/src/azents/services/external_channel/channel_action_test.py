@@ -850,6 +850,65 @@ async def test_discord_reply_agent_prefix_follows_app_mode(
 
 
 @pytest.mark.asyncio
+async def test_discord_progress_update_clears_tracker_embeds() -> None:
+    """A compact Tracker update removes any retained legacy Embed cards."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "operation": ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+            "request_payload": {
+                "guild_id": "111",
+                "channel_id": "333",
+                "provider_message_key": "discord:111:555",
+                "text": "**Plan** · 0/1 complete\n◉ Inspect the issue",
+                "embeds": [],
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.DELIVERED,
+            "discord:111:555",
+            None,
+        )
+    ]
+    assert discord_client.calls == [
+        (
+            "update",
+            {
+                "bot_token": "xoxb-secret",
+                "guild_id": "111",
+                "channel_id": "333",
+                "message_id": "555",
+                "content": "**Plan** · 0/1 complete\n◉ Inspect the issue",
+                "embeds": [],
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_discord_approval_control_delivery_uses_text_create() -> None:
     """Discord approval controls use the same fenced create-message delivery path."""
     events: list[str] = []
