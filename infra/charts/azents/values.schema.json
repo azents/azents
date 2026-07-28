@@ -864,8 +864,7 @@
                 "chunkBytes",
                 "multipartPartBytes",
                 "repairIntervalSeconds",
-                "objectPrefix",
-                "lifecycleAcknowledgement"
+                "objectPrefix"
               ],
               "properties": {
                 "stateBackend": {
@@ -917,7 +916,8 @@
                 },
                 "listPageSize": {
                   "type": "integer",
-                  "minimum": 1
+                  "minimum": 1,
+                  "maximum": 1000
                 },
                 "maxConcurrentDownloads": {
                   "type": "integer",
@@ -942,40 +942,6 @@
                 "objectPrefix": {
                   "type": "string",
                   "minLength": 1
-                },
-                "lifecycleAcknowledgement": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "owner",
-                    "evidenceTimestamp",
-                    "rollbackOwner"
-                  ],
-                  "properties": {
-                    "prefixExpirationHours": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "exclusiveMinimum": 0
-                    },
-                    "incompleteMultipartAbortHours": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "exclusiveMinimum": 0
-                    },
-                    "owner": {
-                      "type": "string"
-                    },
-                    "evidenceTimestamp": {
-                      "type": "string"
-                    },
-                    "rollbackOwner": {
-                      "type": "string"
-                    }
-                  }
                 }
               }
             },

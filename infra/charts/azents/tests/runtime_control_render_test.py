@@ -32,11 +32,6 @@ def _helm_template(*values: str) -> str:
         f"runtimeProviderKubernetes.engineImage.digest={_ENGINE_DIGEST}",
         "secrets.existingSecrets.redis=azents-redis",
         "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
-        "server.runtimeControl.transfer.lifecycleAcknowledgement.prefixExpirationHours=24",
-        "server.runtimeControl.transfer.lifecycleAcknowledgement.incompleteMultipartAbortHours=24",
-        "server.runtimeControl.transfer.lifecycleAcknowledgement.owner=platform",
-        "server.runtimeControl.transfer.lifecycleAcknowledgement.evidenceTimestamp=2026-07-26T00:00:00Z",
-        "server.runtimeControl.transfer.lifecycleAcknowledgement.rollbackOwner=platform",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])
@@ -200,106 +195,52 @@ def test_runtime_control_rejects_memory_transfer_state_with_hpa() -> None:
     assert "memory Runtime Transfer state requires exactly one" in raised.value.stderr
 
 
-def test_runtime_control_requires_external_storage_lifecycle_evidence() -> None:
-    """External object storage cutover fails without operator lifecycle evidence."""
-    helm = shutil.which("helm")
-    if helm is None:
-        pytest.skip("helm binary is not available")
-    command = [
-        helm,
-        "template",
-        "azents",
-        str(CHART_DIR),
-        "--set",
-        "server.image.repository=repo/server",
-        "--set",
-        "server.image.tag=sha",
-        "--set",
-        "web.image.repository=repo/web",
-        "--set",
-        "web.image.tag=sha",
-        "--set",
-        "adminWeb.image.repository=repo/admin-web",
-        "--set",
-        "adminWeb.image.tag=sha",
-        "--set",
-        "secrets.existingSecrets.redis=azents-redis",
-        "--set",
-        "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
-        "--set",
+def test_runtime_control_allows_memory_transfer_state_for_single_replica() -> None:
+    """Runtime Transfer remains usable without Redis-backed transfer state."""
+    rendered = _helm_template(
         "server.runtimeControl.enabled=true",
-        "--set",
+        "server.runtimeControl.replicas=1",
+        "server.runtimeControl.autoscaling.enabled=false",
+        "server.runtimeControl.transfer.stateBackend=memory",
         "server.runtimeControl.runnerImage.repository=repo/runner",
-        "--set",
         "server.runtimeControl.runnerImage.tag=sha",
-        "--set",
         f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
-    ]
-    completed = subprocess.run(
-        command,
-        cwd=CHART_DIR,
-        check=False,
-        capture_output=True,
-        text=True,
     )
 
-    assert completed.returncode != 0
-    assert "lifecycle acknowledgement evidence" in completed.stderr
+    assert "name: AZ_RUNTIME_CONTROL_TRANSFER_BACKEND" in rendered
+    assert 'value: "memory"' in rendered
 
 
-def test_runtime_control_requires_external_multipart_abort_evidence() -> None:
-    """External storage cannot rely on default lifecycle intervals."""
-    helm = shutil.which("helm")
-    if helm is None:
-        pytest.skip("helm binary is not available")
-    command = [
-        helm,
-        "template",
-        "azents",
-        str(CHART_DIR),
-        "--set",
-        "server.image.repository=repo/server",
-        "--set",
-        "server.image.tag=sha",
-        "--set",
-        "web.image.repository=repo/web",
-        "--set",
-        "web.image.tag=sha",
-        "--set",
-        "adminWeb.image.repository=repo/admin-web",
-        "--set",
-        "adminWeb.image.tag=sha",
-        "--set",
-        "secrets.existingSecrets.redis=azents-redis",
-        "--set",
-        "server.runtimeControl.tls.existingSecret=azents-runtime-control-tls",
-        "--set",
-        "server.runtimeControl.enabled=true",
-        "--set",
-        "server.runtimeControl.runnerImage.repository=repo/runner",
-        "--set",
-        "server.runtimeControl.runnerImage.tag=sha",
-        "--set",
-        f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
-        "--set",
-        "server.runtimeControl.transfer.lifecycleAcknowledgement.prefixExpirationHours=24",
-        "--set",
-        "server.runtimeControl.transfer.lifecycleAcknowledgement.owner=platform",
-        "--set",
-        "server.runtimeControl.transfer.lifecycleAcknowledgement.evidenceTimestamp=2026-07-26T00:00:00Z",
-        "--set",
-        "server.runtimeControl.transfer.lifecycleAcknowledgement.rollbackOwner=platform",
-    ]
-    completed = subprocess.run(
-        command,
-        cwd=CHART_DIR,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+def test_runtime_control_rejects_removed_lifecycle_acknowledgement_values() -> None:
+    """Removed deployment acknowledgement cannot silently regain lifespan authority."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.transfer.lifecycleAcknowledgement.owner=platform",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        )
 
-    assert completed.returncode != 0
-    assert "incomplete multipart abort" in completed.stderr
+    error = raised.value.stderr.lower()
+    assert "schema" in error
+    assert "lifecycleacknowledgement" in error
+
+
+def test_runtime_control_rejects_transfer_list_page_above_s3_limit() -> None:
+    """Runtime Transfer page bounds remain compatible with S3 list APIs."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.transfer.listPageSize=1001",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        )
+
+    error = raised.value.stderr.lower()
+    assert "schema" in error
+    assert "listpagesize" in error
 
 
 def test_runtime_control_rejects_removed_shared_auth_values() -> None:

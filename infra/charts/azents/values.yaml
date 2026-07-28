@@ -94,12 +94,6 @@ server:
       multipartPartBytes: 5242880
       repairIntervalSeconds: 5
       objectPrefix: runtime-transfer
-      lifecycleAcknowledgement:
-        prefixExpirationHours: null
-        incompleteMultipartAbortHours: null
-        owner: ""
-        evidenceTimestamp: ""
-        rollbackOwner: ""
     tls:
       existingSecret: ""
       certificateKey: tls.crt

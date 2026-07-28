@@ -53,7 +53,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-28
-spec_version: 32
+spec_version: 33
 ---
 
 # File Exchange Storage
@@ -214,6 +214,13 @@ that copy succeeds; a failed, cancelled, changed, oversized, or unverified Runti
 source never becomes an ExchangeFile. The published attachment appears in the chat UI
 attachment list and can be retrieved through the download endpoint.
 
+Runtime Transfer state is optional volatile coordination. If its in-memory or Redis
+implementation restarts empty, an earlier upload handle cannot be revived from an S3
+object, while a new `present_file` operation can start normally. Runtime Control
+independently scans its transfer prefix in bounded pages and cleans objects and
+incomplete multipart uploads whose storage age is at least the fixed one-hour transfer
+lifetime. Object existence alone never creates Exchange publication authority.
+
 ## Storage Boundaries
 
 - Event store does not store file body. Event has only attachment/artifact metadata and URI reference, or FilePart `model_file_id`.
@@ -257,6 +264,8 @@ attachment list and can be retrieved through the download endpoint.
 
 ## Changelog
 
+- **2026-07-28** — v33. Clarified `present_file` recovery after empty volatile transfer
+  state and state-independent one-hour orphan cleanup without reviving S3 objects.
 - **2026-07-28** — v32. Promoted the common Runtime File Transfer behavior for
   `import_file`, External Channel ingress, and `present_file`: bounded
   Control-mediated streaming, incremental VFS/provider staging, S3-native

@@ -171,6 +171,15 @@ async def test_rustfs_multipart_upload_copy_abort_zero_byte_and_cleanup(
             async for chunk in chunks:
                 uploaded_hasher.update(chunk)
         assert uploaded_hasher.hexdigest() == digest
+        object_page = await service.list_object_summaries_page(
+            bucket=s3_bucket_name,
+            prefix=upload_destination.key,
+            maximum_keys=1,
+            continuation_token=None,
+        )
+        assert len(object_page.objects) == 1
+        assert object_page.objects[0].identity == upload_destination
+        assert object_page.objects[0].last_modified_at.utcoffset() is not None
 
         copied = await service.copy_immutable(
             source=upload_destination,
@@ -194,6 +203,16 @@ async def test_rustfs_multipart_upload_copy_abort_zero_byte_and_cleanup(
             transfer_metadata=metadata,
         )
         await service.upload_part(upload=aborted, part_number=1, body=first_part)
+        multipart_page = await service.list_multipart_uploads_page(
+            bucket=s3_bucket_name,
+            prefix=abort_destination.key,
+            maximum_uploads=1,
+            key_marker=None,
+            upload_id_marker=None,
+        )
+        assert len(multipart_page.uploads) == 1
+        assert multipart_page.uploads[0].upload == aborted
+        assert multipart_page.uploads[0].initiated_at.utcoffset() is not None
         await service.abort_multipart_upload(upload=aborted)
         assert await service.head(abort_destination) is None
 

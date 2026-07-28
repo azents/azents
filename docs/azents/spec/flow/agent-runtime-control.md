@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-07-28
-spec_version: 40
+spec_version: 41
 ---
 
 # Agent Runtime Control
@@ -118,6 +118,18 @@ product/provider publication succeeds, and abandons or settles a failed claim. C
 removes terminal objects and incomplete multipart preparations according to their
 bounded retention policy. A provider mutation is attempted at most once: no transfer or
 provider call is replayed after mutation starts or its outcome is unknown.
+
+Every attempt has a non-extendable logical expiration no later than one hour after
+admission. Runtime Control rejects every access after that deadline even when the
+physical object remains. Settlement immediately attempts exact object deletion or
+multipart abort. The bounded repair loop also scans one page of completed objects and
+one page of incomplete multipart uploads under the Control-owned transfer prefix,
+independently of the selected transfer-state backend. Storage-reported objects and
+uploads at least one hour old are deleted or aborted without recreating transfer state.
+This lets an empty restarted in-memory or Redis store fail previous attempts closed,
+resume new transfers, and converge orphan cleanup without Redis retention or leadership.
+Backend lifecycle policy remains a later infrastructure-owned defense and is not a
+Runtime Transfer authorization or startup input.
 
 ## Durable State
 
@@ -371,6 +383,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-28** (spec_version 41) — Added state-independent bounded transfer-prefix
+  object and multipart orphan cleanup, kept one-hour access authority in Runtime
+  Control, and clarified empty memory/Redis recovery.
 - **2026-07-28** (spec_version 40) — Promoted the independent Runtime File Transfer
   control/data contracts: bounded Control-owned object streaming, opaque
   coordination/consumer handles, generation- and revision-fenced terminal state,
