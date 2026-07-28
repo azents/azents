@@ -1,5 +1,6 @@
 """Artifact service."""
 
+import asyncio
 import dataclasses
 import datetime
 import hashlib
@@ -7,7 +8,11 @@ import logging
 import re
 from typing import Annotated
 
-from azcommon.infra.s3.service import S3Service
+from azcommon.infra.s3.service import (
+    S3ObjectIdentity,
+    S3ProductPublicationMetadata,
+    S3Service,
+)
 from azcommon.result import Failure, Result, Success
 from azcommon.types import JSONValue
 from azcommon.uuid import uuid7
@@ -287,6 +292,191 @@ class ArtifactService:
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_object(object_key)
+
+    async def create_from_verified_object_for_authority(
+        self,
+        *,
+        authority: SessionResourceAuthority,
+        source: S3ObjectIdentity,
+        size_bytes: int,
+        sha256: str,
+        publication_id: str,
+        filename: str | None,
+        media_type: str,
+        source_tool_name: str | None = None,
+        source_call_id: str | None = None,
+        source_part_index: int | None = None,
+        description: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> Result[Artifact, ArtifactAccessDenied]:
+        """Publish a verified transfer object as an authority-owned Artifact."""
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(ArtifactAccessDenied())
+        artifact_id = publication_id
+        async with self.session_manager() as session:
+            existing = await self.artifact_repository.get_by_id(session, artifact_id)
+        if existing is not None:
+            return Success(
+                self._validated_existing_verified_publication(
+                    existing=existing,
+                    authority=authority,
+                    size_bytes=size_bytes,
+                    sha256=sha256,
+                    media_type=media_type,
+                    publication_id=publication_id,
+                )
+            )
+        object_key = artifact_storage_key(
+            workspace_id=authority.workspace_id,
+            session_id=authority.session_id,
+            created_run_index=authority.run_index,
+            artifact_id=artifact_id,
+        )
+        publication_metadata = S3ProductPublicationMetadata(
+            sha256=sha256,
+            content_type=media_type,
+            publication_id=artifact_id,
+        )
+        created_by_invocation = False
+        committed = False
+        try:
+            publication = (
+                await self.s3_service.copy_verified_transfer_object_to_product(
+                    source=source,
+                    destination=S3ObjectIdentity(
+                        bucket=self.config.workspace_s3.bucket,
+                        key=object_key,
+                    ),
+                    expected_size=size_bytes,
+                    publication_metadata=publication_metadata,
+                )
+            )
+            created_by_invocation = publication.created
+            async with self.session_manager() as session:
+                if not await self._has_valid_resource_authority(
+                    session,
+                    authority,
+                    lock=True,
+                ):
+                    return Failure(ArtifactAccessDenied())
+                existing = await self.artifact_repository.get_by_id(
+                    session,
+                    artifact_id,
+                )
+                if existing is not None:
+                    committed = True
+                    return Success(
+                        self._validated_existing_verified_publication(
+                            existing=existing,
+                            authority=authority,
+                            size_bytes=size_bytes,
+                            sha256=sha256,
+                            media_type=media_type,
+                            publication_id=publication_id,
+                        )
+                    )
+                now = datetime.datetime.now(datetime.UTC)
+                created = await self.artifact_repository.create(
+                    session,
+                    ArtifactCreate(
+                        id=artifact_id,
+                        workspace_id=authority.workspace_id,
+                        session_id=authority.session_id,
+                        agent_id=authority.agent_id,
+                        created_run_id=authority.run_id,
+                        created_run_index=authority.run_index,
+                        expires_at=artifact_expires_at(now=now, config=self.config),
+                        name=_sanitize_display_filename(filename),
+                        media_type=media_type,
+                        size_bytes=size_bytes,
+                        sha256=sha256,
+                        source_tool_name=source_tool_name,
+                        source_call_id=source_call_id,
+                        source_part_index=source_part_index,
+                        description=description,
+                        metadata=_json_metadata(metadata),
+                    ),
+                )
+            committed = True
+            return Success(created)
+        finally:
+            if created_by_invocation and not committed:
+                logger.warning(
+                    "Retaining uncommitted Artifact object for stable "
+                    "publication recovery",
+                    extra={"publication_id": publication_id},
+                )
+
+    def _validated_existing_verified_publication(
+        self,
+        *,
+        existing: Artifact,
+        authority: SessionResourceAuthority,
+        size_bytes: int,
+        sha256: str,
+        media_type: str,
+        publication_id: str,
+    ) -> Artifact:
+        """Return a committed stable publication only when its identity matches."""
+        if (
+            existing.id == publication_id
+            and existing.workspace_id == authority.workspace_id
+            and existing.session_id == authority.session_id
+            and existing.agent_id == authority.agent_id
+            and existing.created_run_id == authority.run_id
+            and existing.created_run_index == authority.run_index
+            and existing.storage_key
+            == artifact_storage_key(
+                workspace_id=authority.workspace_id,
+                session_id=authority.session_id,
+                created_run_index=authority.run_index,
+                artifact_id=publication_id,
+            )
+            and existing.status is ArtifactStatus.AVAILABLE
+            and existing.size_bytes == size_bytes
+            and existing.sha256 == sha256
+            and existing.media_type == media_type
+        ):
+            return existing
+        raise RuntimeError(
+            "publication ID is already committed with different metadata"
+        )
+
+    async def _has_committed_verified_publication(
+        self,
+        *,
+        authority: SessionResourceAuthority,
+        size_bytes: int,
+        sha256: str,
+        media_type: str,
+        publication_id: str,
+    ) -> bool:
+        """Preserve the final object when commit outcome cannot be disproven."""
+        try:
+            async with self.session_manager() as session:
+                existing = await self.artifact_repository.get_by_id(
+                    session,
+                    publication_id,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return True
+        if existing is None:
+            return False
+        try:
+            self._validated_existing_verified_publication(
+                existing=existing,
+                authority=authority,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                media_type=media_type,
+                publication_id=publication_id,
+            )
+        except RuntimeError:
+            return True
+        return True
 
     async def resolve_for_authority(
         self,

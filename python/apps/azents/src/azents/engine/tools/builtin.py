@@ -74,8 +74,10 @@ from azents.engine.tools.present_file import make_present_file_tool
 from azents.engine.tools.read_image import make_read_image_tool
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_instruction_context import (
+    PresentFilePublicationExecutor,
     RuntimeInstructionContext,
     RuntimeInstructionContextStore,
+    RuntimeToServerPublicationCapability,
     RuntimeTransferCapability,
     ServerToRuntimeTransferExecutor,
 )
@@ -568,6 +570,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
+        runtime_to_server_publication_service: PresentFilePublicationExecutor | None,
         import_file_staging_configuration: ImportFileStagingConfiguration | None,
     ) -> None:
         self._config = config
@@ -588,6 +591,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
+        self.runtime_to_server_publication_service = (
+            runtime_to_server_publication_service
+        )
         self.import_file_staging_configuration = import_file_staging_configuration
         self._agents_context: RuntimeInstructionContext | None = None
         self._agents_appendix_lock = asyncio.Lock()
@@ -680,6 +686,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             owner_session_id=self._runtime_session_id,
         )
         transfer_capability = await self._transfer_capability(runtime_agent_id)
+        publication_capability = await self._publication_capability(runtime_agent_id)
 
         async def resolve_patch_target() -> RuntimePatchTarget:
             runtime = await _ready_runtime_for_agent(
@@ -758,7 +765,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                     ),
                     make_present_file_tool(
                         session_storage=file_ss,
-                        exchange_file_service=self.exchange_file_service,
+                        publication_capability=publication_capability,
                         authority=authority,
                     ),
                     make_read_image_tool(
@@ -815,6 +822,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         instruction_context = await self._make_instruction_context(
             file_ss,
             transfer_capability=transfer_capability,
+            publication_capability=publication_capability,
         )
         self.register_agents_context(instruction_context)
         if self.instruction_context_store is not None:
@@ -837,6 +845,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         file_storage: FileStorage,
         *,
         transfer_capability: RuntimeTransferCapability | None,
+        publication_capability: RuntimeToServerPublicationCapability | None,
     ) -> RuntimeInstructionContext:
         """Build shared Runtime context for instruction appendix providers."""
         projects = sorted(
@@ -847,6 +856,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             file_storage=file_storage,
             projects=tuple(projects),
             transfer_capability=transfer_capability,
+            publication_capability=publication_capability,
         )
 
     async def _transfer_capability(
@@ -870,6 +880,34 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         except RuntimeStorageError:
             return None
         return RuntimeTransferCapability(
+            service=service,
+            target=ServerToRuntimeTarget(
+                runtime_id=runtime.id,
+                desired_generation=runtime.runner_generation,
+            ),
+        )
+
+    async def _publication_capability(
+        self,
+        runtime_agent_id: str,
+    ) -> RuntimeToServerPublicationCapability | None:
+        """Build managed publication only when the Runtime is ready."""
+        service = self.runtime_to_server_publication_service
+        if service is None:
+            return None
+        try:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=self.agent_runtime_repo,
+                session_manager=self.session_manager,
+                execution_policy_application_service=(
+                    self.execution_policy_application_service
+                ),
+                agent_id=runtime_agent_id,
+                wait_timeout_seconds=0,
+            )
+        except RuntimeStorageError:
+            return None
+        return RuntimeToServerPublicationCapability(
             service=service,
             target=ServerToRuntimeTarget(
                 runtime_id=runtime.id,
@@ -974,6 +1012,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         runner_operations: RuntimeRunnerOperationClient,
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
+        runtime_to_server_publication_service: PresentFilePublicationExecutor | None,
         import_file_staging_configuration: ImportFileStagingConfiguration | None,
     ) -> None:
         self.exchange_file_service = exchange_file_service
@@ -988,6 +1027,9 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
+        self.runtime_to_server_publication_service = (
+            runtime_to_server_publication_service
+        )
         self.import_file_staging_configuration = import_file_staging_configuration
 
     async def resolve(
@@ -1021,6 +1063,9 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             project_repo=self.project_repo,
             agents_store=self.agents_store,
             server_to_runtime_transfer_service=self.server_to_runtime_transfer_service,
+            runtime_to_server_publication_service=(
+                self.runtime_to_server_publication_service
+            ),
             import_file_staging_configuration=self.import_file_staging_configuration,
         )
 

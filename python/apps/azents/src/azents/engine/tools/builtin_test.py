@@ -52,6 +52,7 @@ from azents.engine.tools.builtin import (
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_instruction_context import (
+    PresentFilePublicationExecutor,
     ServerToRuntimeTransferExecutor,
 )
 from azents.engine.tools.runtime_io import (
@@ -621,6 +622,7 @@ def _make_toolkit(
     projects: list[SessionWorkspaceProject] | None = None,
     agents_store: _FakeAgentsAppendixDedupeStateStore | None = None,
     server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None = None,
+    runtime_to_server_publication_service: PresentFilePublicationExecutor | None = None,
 ) -> RuntimeToolkit:
     """Create RuntimeToolkit for tests."""
     runner_operations = _FakeRunnerOperations(storage_files)
@@ -654,6 +656,7 @@ def _make_toolkit(
         project_repo=project_repo,
         agents_store=cast(Any, agents_store),
         server_to_runtime_transfer_service=server_to_runtime_transfer_service,
+        runtime_to_server_publication_service=runtime_to_server_publication_service,
         import_file_staging_configuration=None,
     )
     toolkit.set_session_id(session_id)
@@ -744,6 +747,7 @@ class TestBuiltinToolkitProviderResolve:
             ),
             project_repo=project_repo,
             server_to_runtime_transfer_service=None,
+            runtime_to_server_publication_service=None,
             import_file_staging_configuration=None,
         )
         toolkit = await provider.resolve(
@@ -853,6 +857,7 @@ class TestRuntimeToolkitUpdateContext:
         ]
         assert hasattr(instruction_context.file_storage, "get")
         assert instruction_context.transfer_capability is None
+        assert instruction_context.publication_capability is None
 
     @pytest.mark.asyncio
     async def test_update_context_exposes_transfer_capability_for_current_runtime(
@@ -875,6 +880,54 @@ class TestRuntimeToolkitUpdateContext:
         assert capability.service is transfer_service
         assert capability.target.runtime_id == "runtime-1"
         assert capability.target.desired_generation == 1
+
+    @pytest.mark.asyncio
+    async def test_update_context_exposes_publication_capability_without_storage(
+        self,
+    ) -> None:
+        """Expose only the publication operation and current Runtime target."""
+        publication_service = AsyncMock()
+        toolkit = _make_toolkit(
+            runtime_to_server_publication_service=cast(
+                PresentFilePublicationExecutor,
+                publication_service,
+            ),
+        )
+
+        await toolkit.update_context(_make_context())
+
+        instruction_context = cast(Any, toolkit)._agents_context
+        capability = instruction_context.publication_capability
+        assert capability is not None
+        assert capability.target.runtime_id == "runtime-1"
+        assert capability.target.desired_generation == 1
+        assert callable(capability.publish)
+        assert set(vars(capability)) == {"_service", "target"}
+        assert not hasattr(capability, "resolver")
+        assert not hasattr(capability, "bucket")
+        assert not hasattr(capability, "key")
+
+    @pytest.mark.asyncio
+    async def test_update_context_withholds_publication_until_runtime_is_ready(
+        self,
+    ) -> None:
+        """An unavailable Runtime withholds managed publication capability."""
+        publication_service = AsyncMock()
+        toolkit = _make_toolkit(
+            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+            runner_state=RuntimeRunnerState.STARTING,
+            runtime_to_server_publication_service=cast(
+                PresentFilePublicationExecutor,
+                publication_service,
+            ),
+        )
+
+        await toolkit.update_context(_make_context())
+
+        instruction_context = cast(Any, toolkit)._agents_context
+        assert instruction_context.publication_capability is None
+        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo.get_by_agent_id.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_update_context_withholds_transfer_until_runtime_is_ready(

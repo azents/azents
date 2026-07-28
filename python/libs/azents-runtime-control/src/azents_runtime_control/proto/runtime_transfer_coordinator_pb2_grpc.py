@@ -76,6 +76,12 @@ class RuntimeTransferCoordinatorStub(object):
             response_deserializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
             _registered_method=True,
         )
+        self.RenewConsumerLease = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeTransferCoordinator/RenewConsumerLease",
+            request_serializer=runtime__transfer__coordinator__pb2.RenewConsumerLeaseRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
+            _registered_method=True,
+        )
         self.AcknowledgeConsumer = channel.unary_unary(
             "/azents.runtime_control.v1.RuntimeTransferCoordinator/AcknowledgeConsumer",
             request_serializer=runtime__transfer__coordinator__pb2.AcknowledgeConsumerRequest.SerializeToString,
@@ -165,6 +171,12 @@ class RuntimeTransferCoordinatorServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def RenewConsumerLease(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
     def AcknowledgeConsumer(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -244,6 +256,11 @@ def add_RuntimeTransferCoordinatorServicer_to_server(servicer, server):
         "ClaimConsumer": grpc.unary_unary_rpc_method_handler(
             servicer.ClaimConsumer,
             request_deserializer=runtime__transfer__coordinator__pb2.ClaimConsumerRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.SerializeToString,
+        ),
+        "RenewConsumerLease": grpc.unary_unary_rpc_method_handler(
+            servicer.RenewConsumerLease,
+            request_deserializer=runtime__transfer__coordinator__pb2.RenewConsumerLeaseRequest.FromString,
             response_serializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.SerializeToString,
         ),
         "AcknowledgeConsumer": grpc.unary_unary_rpc_method_handler(
@@ -468,6 +485,36 @@ class RuntimeTransferCoordinator(object):
             target,
             "/azents.runtime_control.v1.RuntimeTransferCoordinator/ClaimConsumer",
             runtime__transfer__coordinator__pb2.ClaimConsumerRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def RenewConsumerLease(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeTransferCoordinator/RenewConsumerLease",
+            runtime__transfer__coordinator__pb2.RenewConsumerLeaseRequest.SerializeToString,
             runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
             options,
             channel_credentials,

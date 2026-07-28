@@ -117,6 +117,18 @@ class RuntimeTransferStateStore(Protocol):
         cleanup_handle: str,
     ) -> RuntimeTransferRecord | None: ...
 
+    async def record_pre_ready_object(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        accepted_runner_generation: int,
+        expected_revision: int,
+        claim_id: str,
+        owner_replica_id: str,
+        object_handle: str,
+    ) -> RuntimeTransferRecord | None: ...
+
     async def register_preparation_cleanup(
         self,
         transfer_id: str,
@@ -264,6 +276,15 @@ class RuntimeTransferStateStore(Protocol):
     ) -> RuntimeTransferRecord | None: ...
 
     async def claim_consumer(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        expected_revision: int,
+        claim_id: str,
+    ) -> RuntimeTransferRecord | None: ...
+
+    async def renew_consumer_lease(
         self,
         transfer_id: str,
         *,

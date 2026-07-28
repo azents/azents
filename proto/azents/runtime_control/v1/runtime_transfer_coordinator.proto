@@ -14,6 +14,8 @@ service RuntimeTransferCoordinator {
   rpc GetVerifiedObject(GetVerifiedObjectRequest)
       returns (GetVerifiedObjectResponse);
   rpc ClaimConsumer(ClaimConsumerRequest) returns (TransferStatusResponse);
+  rpc RenewConsumerLease(RenewConsumerLeaseRequest)
+      returns (TransferStatusResponse);
   rpc AcknowledgeConsumer(AcknowledgeConsumerRequest)
       returns (TransferStatusResponse);
   rpc AbandonConsumer(AbandonConsumerRequest)
@@ -118,7 +120,7 @@ message ExpectedManifest {
 
 message ObjectManifest {
   optional uint64 size = 1;
-  string sha256 = 2;
+  optional string sha256 = 2;
 }
 
 message OpaqueObjectHandle {
@@ -193,6 +195,12 @@ message GetVerifiedObjectResponse {
 }
 
 message ClaimConsumerRequest {
+  CoordinatorTransferIdentity identity = 1;
+  uint64 expected_revision = 2;
+  string consumer_claim_id = 3;
+}
+
+message RenewConsumerLeaseRequest {
   CoordinatorTransferIdentity identity = 1;
   uint64 expected_revision = 2;
   string consumer_claim_id = 3;

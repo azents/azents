@@ -214,6 +214,7 @@ def _make_toolkit(storage: FakeSharedStorage) -> ClaudeRulesToolkit:
             file_storage=storage,
             projects=(_make_project(),),
             transfer_capability=None,
+            publication_capability=None,
         )
     )
     toolkit.set_instruction_context_store(context_store)

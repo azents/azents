@@ -14,6 +14,8 @@ from botocore.exceptions import ClientError as BotoClientError
 from types_aiobotocore_s3.client import S3Client
 
 _TRANSFER_SHA256_METADATA_KEY = "azents-transfer-sha256"
+_PRODUCT_PUBLICATION_SHA256_METADATA_KEY = "azents-product-publication-sha256"
+_PRODUCT_PUBLICATION_ID_METADATA_KEY = "azents-product-publication-id"
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,28 @@ class S3TransferObjectMetadata:
 
     def __post_init__(self) -> None:
         _validate_sha256(self.sha256)
+
+
+@dataclass(frozen=True)
+class S3ProductPublicationMetadata:
+    """Exact ownership evidence for one uncommitted product-object publication."""
+
+    sha256: str
+    content_type: str | None
+    publication_id: str
+
+    def __post_init__(self) -> None:
+        _validate_sha256(self.sha256)
+        if not self.publication_id:
+            raise ValueError("publication_id must not be empty")
+
+
+@dataclass(frozen=True)
+class S3ProductPublicationResult:
+    """Verified product publication with exact creation evidence."""
+
+    metadata: S3ObjectMetadata
+    created: bool
 
 
 @dataclass(frozen=True)
@@ -294,6 +318,146 @@ class S3Service:
             ),
             source_etag=source_metadata.etag,
         )
+
+    async def copy_verified_transfer_object_to_product(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        destination: S3ObjectIdentity,
+        expected_size: int,
+        publication_metadata: S3ProductPublicationMetadata,
+    ) -> S3ProductPublicationResult:
+        """Native-copy a verified transfer object to one product-object key.
+
+        :param source: Verified transfer-object source.
+        :param destination: Preallocated immutable product-object destination.
+        :param expected_size: Exact verified transfer byte count.
+        :param publication_metadata: Product content and cleanup ownership evidence.
+        :raises ValueError: If an existing final object does not match exactly.
+        :returns: Verified final object and whether this invocation created it.
+        """
+        source_verified = await self.verify_transfer_object(
+            identity=source,
+            expected_size=expected_size,
+            expected_sha256=publication_metadata.sha256,
+        )
+        source_etag = source_verified.metadata.etag
+        if source_etag is None:
+            raise ValueError("source copy requires stable ETag evidence")
+        try:
+            await self.s3_client.copy_object(
+                Bucket=destination.bucket,
+                Key=destination.key,
+                CopySource={"Bucket": source.bucket, "Key": source.key},
+                CopySourceIfMatch=source_etag,
+                IfNoneMatch="*",
+                MetadataDirective="REPLACE",
+                Metadata=_product_publication_user_metadata(publication_metadata),
+                **_content_type_args(publication_metadata.content_type),
+            )
+            return S3ProductPublicationResult(
+                metadata=await self.verify_product_publication_object(
+                    identity=destination,
+                    expected_size=expected_size,
+                    publication_metadata=publication_metadata,
+                ),
+                created=True,
+            )
+        except asyncio.CancelledError:
+            raise
+        except BotoClientError as exc:
+            if _is_precondition_failed_error(exc):
+                try:
+                    return S3ProductPublicationResult(
+                        metadata=await self.verify_product_publication_object(
+                            identity=destination,
+                            expected_size=expected_size,
+                            publication_metadata=publication_metadata,
+                        ),
+                        created=False,
+                    )
+                except FileNotFoundError:
+                    pass
+            raise
+
+    async def verify_product_publication_object(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        publication_metadata: S3ProductPublicationMetadata,
+    ) -> S3ObjectMetadata:
+        """Verify one final product object without downloading its bytes.
+
+        :param identity: Final product-object destination.
+        :param expected_size: Exact verified transfer byte count.
+        :param publication_metadata: Exact expected product metadata.
+        :raises FileNotFoundError: If the object does not exist.
+        :returns: Verified final product-object metadata.
+        """
+        metadata = await self.head(identity)
+        if metadata is None:
+            raise FileNotFoundError(identity.key)
+        if metadata.content_length != expected_size:
+            raise ValueError("product object size does not match expected_size")
+        if metadata.content_type != publication_metadata.content_type:
+            raise ValueError(
+                "product object content type does not match expected value"
+            )
+        if (
+            metadata.user_metadata.get(_PRODUCT_PUBLICATION_SHA256_METADATA_KEY)
+            != publication_metadata.sha256
+        ):
+            raise ValueError("product object SHA-256 metadata does not match")
+        if (
+            metadata.user_metadata.get(_PRODUCT_PUBLICATION_ID_METADATA_KEY)
+            != publication_metadata.publication_id
+        ):
+            raise ValueError("product object publication ID metadata does not match")
+        return metadata
+
+    async def delete_uncommitted_product_object(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        publication_metadata: S3ProductPublicationMetadata,
+    ) -> None:
+        """Conditionally delete only the exact uncommitted product object.
+
+        :param identity: Preallocated product-object destination.
+        :param expected_size: Exact verified transfer byte count.
+        :param publication_metadata: Exact ownership evidence for this publication.
+        """
+        metadata = await self.head(identity)
+        if metadata is None:
+            return
+        owned = (
+            metadata.content_length == expected_size
+            and metadata.content_type == publication_metadata.content_type
+            and metadata.user_metadata.get(_PRODUCT_PUBLICATION_SHA256_METADATA_KEY)
+            == publication_metadata.sha256
+            and metadata.user_metadata.get(_PRODUCT_PUBLICATION_ID_METADATA_KEY)
+            == publication_metadata.publication_id
+        )
+        if not owned:
+            return
+        if metadata.etag is None:
+            raise RuntimeError("product object cleanup requires stable ETag evidence")
+        try:
+            await self.s3_client.delete_object(
+                Bucket=identity.bucket,
+                Key=identity.key,
+                IfMatch=metadata.etag,
+            )
+        except BotoClientError as exc:
+            if _is_not_found_error(exc):
+                return
+            if _is_precondition_failed_error(exc):
+                raise RuntimeError(
+                    "product object changed before conditional cleanup"
+                ) from exc
+            raise
 
     async def create_multipart_upload(
         self,
@@ -1036,6 +1200,16 @@ def _content_type_args(content_type: str | None) -> dict[str, str]:
     if content_type is None:
         return {}
     return {"ContentType": content_type}
+
+
+def _product_publication_user_metadata(
+    publication_metadata: S3ProductPublicationMetadata,
+) -> dict[str, str]:
+    """Return the private metadata required for conditional product cleanup."""
+    return {
+        _PRODUCT_PUBLICATION_SHA256_METADATA_KEY: publication_metadata.sha256,
+        _PRODUCT_PUBLICATION_ID_METADATA_KEY: publication_metadata.publication_id,
+    }
 
 
 def _validate_completed_parts(completed_parts: tuple[S3CompletedPart, ...]) -> None:

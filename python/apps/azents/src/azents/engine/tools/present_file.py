@@ -5,23 +5,29 @@ Export runtime file as Exchange artifact and share with user.
 
 import logging
 import posixpath
+import uuid
 
-from azcommon.result import Failure, Success
 from pydantic import BaseModel, Field
 
-from azents.core.enums import ExchangeFileProvenanceKind
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
     FunctionToolResult,
 )
+from azents.engine.tooling.execution_context import (
+    get_client_tool_execution_context,
+)
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
-from azents.services.exchange_file import (
-    ExchangeFileService,
-    FileAccessDenied,
+from azents.engine.tools.runtime_instruction_context import (
+    RuntimeToServerPublicationCapability,
 )
+from azents.runtime.transfer.present_file_publication import (
+    PresentFilePublicationAccessDenied,
+    PresentFilePublicationError,
+)
+from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferError
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
@@ -30,6 +36,10 @@ from azents.services.session_storage import guess_media_type
 logger = logging.getLogger(__name__)
 
 _PRESENTABLE_ROOT = "/workspace/agent"
+_PUBLICATION_ID_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_URL,
+    "https://azents.ai/runtime-transfer/present-file-publication",
+)
 
 
 def _is_presentable_path(path: str) -> bool:
@@ -38,6 +48,14 @@ def _is_presentable_path(path: str) -> bool:
     return normalized == _PRESENTABLE_ROOT or normalized.startswith(
         f"{_PRESENTABLE_ROOT}/"
     )
+
+
+def _publication_id(*, run_id: str, call_id: str, runtime_path: str) -> str:
+    """Derive a stable verified-object publication ID for one Runtime path."""
+    return uuid.uuid5(
+        _PUBLICATION_ID_NAMESPACE,
+        f"{run_id}:{call_id}:{runtime_path}",
+    ).hex
 
 
 class PresentFileInput(BaseModel):
@@ -51,13 +69,13 @@ class PresentFileInput(BaseModel):
 def make_present_file_tool(
     *,
     session_storage: FileStorage,
-    exchange_file_service: ExchangeFileService,
+    publication_capability: RuntimeToServerPublicationCapability | None,
     authority: SessionResourceAuthority,
 ) -> FunctionTool:
     """Create present_file tool.
 
     :param session_storage: runtime runner file storage
-    :param exchange_file_service: Exchange file service
+    :param publication_capability: Runtime-to-server managed publication capability
     :param authority: Validated Session/Run resource authority
     :return: present_file Tool instance
     """
@@ -66,6 +84,9 @@ def make_present_file_tool(
         """Export runtime file as Exchange artifact."""
         if not input.paths:
             raise FunctionToolError("No paths provided.")
+        if publication_capability is None:
+            raise FunctionToolError("Runtime file transfer is unavailable.")
+        execution = get_client_tool_execution_context()
 
         attachments: list[RuntimeAttachment] = []
         errors: list[str] = []
@@ -80,7 +101,7 @@ def make_present_file_tool(
 
             # Metadata lookup (does not read entire file)
             try:
-                await session_storage.stat(
+                metadata = await session_storage.stat(
                     abs_path,
                     agent_id=authority.agent_id,
                 )
@@ -100,18 +121,47 @@ def make_present_file_tool(
                 )
                 continue
 
+            expected_size = metadata.get("size")
+            if (
+                metadata.get("is_file") is not True
+                or not isinstance(expected_size, int)
+                or isinstance(expected_size, bool)
+                or expected_size < 0
+            ):
+                errors.append(
+                    f"File not found or inaccessible: {abs_path}. "
+                    f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
+                )
+                continue
+
             media_type = guess_media_type(abs_path)
             file_name = abs_path.rsplit("/", 1)[-1]
             try:
-                body = await session_storage.get(
-                    abs_path,
-                    agent_id=authority.agent_id,
+                created = await publication_capability.publish(
+                    runtime_path=abs_path,
+                    filename=file_name,
+                    media_type=media_type,
+                    expected_size=expected_size,
+                    authority=authority,
+                    publication_id=_publication_id(
+                        run_id=authority.run_id,
+                        call_id=execution.call_id,
+                        runtime_path=abs_path,
+                    ),
                 )
+            except PresentFilePublicationAccessDenied:
+                errors.append("Session resource access denied while presenting file.")
+                continue
+            except PresentFilePublicationError, RuntimeToServerTransferError:
+                errors.append(f"Failed to present file: {abs_path}")
+                continue
             except RuntimeStorageError as exc:
-                raise FunctionToolError(f"Failed to read file: {exc.detail}") from None
+                raise FunctionToolError(
+                    f"Failed to present file: {exc.detail}"
+                ) from None
             except FileNotFoundError, ValueError, OSError:
                 logger.warning(
-                    "Failed to read file for present_file export",
+                    "Failed to publish file for present_file",
                     extra={"path": abs_path},
                     exc_info=True,
                 )
@@ -121,36 +171,14 @@ def make_present_file_tool(
                 )
                 continue
 
-            created = await exchange_file_service.create_for_authority(
-                authority=authority,
-                provenance_kind=ExchangeFileProvenanceKind.TOOL,
-                source_tool_name="present_file",
-                source_provider=None,
-                filename=file_name,
-                media_type=media_type,
-                body=body,
-            )
-            if isinstance(created, Failure):
-                error = created.error
-                if isinstance(error, FileAccessDenied):
-                    errors.append(
-                        "Session resource access denied while presenting file."
-                    )
-                    continue
-                errors.append(f"Failed to present file: {abs_path}")
-                continue
-
-            if not isinstance(created, Success):
-                raise FunctionToolError("Unexpected present_file result.")
-
             attachments.append(
                 RuntimeAttachment(
-                    attachment_id=created.value.id,
-                    uri=created.value.uri,
-                    media_type=created.value.media_type,
-                    size=created.value.size_bytes,
-                    name=created.value.filename,
-                    text_preview=created.value.preview_summary,
+                    attachment_id=created.id,
+                    uri=created.uri,
+                    media_type=created.media_type,
+                    size=created.size_bytes,
+                    name=created.filename,
+                    text_preview=created.preview_summary,
                 )
             )
 
