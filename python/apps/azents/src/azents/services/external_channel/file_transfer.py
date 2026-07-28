@@ -58,6 +58,7 @@ from azents.services.external_channel.connection import (
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import ExternalChannelCapabilitySnapshot
 from azents.services.external_channel.discord_files import (
+    DiscordAttachmentDownloadInfo,
     DiscordChannelClient,
     DiscordFileCredentialsInvalid,
     DiscordFileNotFound,
@@ -301,7 +302,7 @@ class ExternalChannelFileTransferService:
                     staging_configuration=staging_configuration,
                 )
             case ExternalChannelProvider.DISCORD:
-                source = await self._discord_file_source(
+                source_identity = await self._discord_file_source(
                     resource_id=target.resource_id,
                     provider_tenant_id=target.provider_tenant_id,
                     resource_labels=target.resource_labels,
@@ -309,12 +310,19 @@ class ExternalChannelFileTransferService:
                 )
                 return await self._download_discord(
                     bot_token=credentials.bot_token,
-                    source=source,
+                    source_identity=source_identity,
                     provider_file_id=locator.provider_file_id,
                     path=path,
+                    overwrite=overwrite,
                     limit=limit,
                     agent_id=agent_id,
-                    file_storage=file_storage,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                    locator=locator,
+                    target=target,
+                    transfer_service=transfer_service,
+                    transfer_target=transfer_target,
+                    staging_configuration=staging_configuration,
                 )
             case _ as unreachable:
                 assert_never(unreachable)
@@ -531,15 +539,22 @@ class ExternalChannelFileTransferService:
         self,
         *,
         bot_token: str,
-        source: tuple[str, str],
+        source_identity: tuple[str, str],
         provider_file_id: str,
         path: str,
+        overwrite: bool,
         limit: int,
         agent_id: str,
-        file_storage: FileStorage,
+        session_id: str,
+        operation_id: str,
+        locator: ExternalChannelFileLocator,
+        target: ExternalChannelFileAccessTarget,
+        transfer_service: ServerToRuntimeTransferExecutor,
+        transfer_target: ServerToRuntimeTarget,
+        staging_configuration: ExternalChannelInboundStagingConfiguration,
     ) -> ExternalChannelFileDownloadResult:
-        """Materialize a current Discord attachment without retaining its URL."""
-        channel_id, message_id = source
+        """Stage one current Discord attachment without retaining its URL."""
+        channel_id, message_id = source_identity
         try:
             info = await self.discord_client.fetch_attachment_download_info(
                 bot_token=bot_token,
@@ -547,97 +562,182 @@ class ExternalChannelFileTransferService:
                 message_id=message_id,
                 attachment_id=provider_file_id,
             )
-            metadata = info.metadata
-            if not metadata.supported:
-                reason = metadata.unsupported_reason
-                raise ExternalChannelFileTransferError(
-                    "Discord attachment metadata is unsupported"
-                    + (f": {reason.value}." if reason is not None else ".")
+            filename, declared_size, download_url = (
+                _validate_discord_attachment_metadata(
+                    info=info,
+                    provider_file_id=provider_file_id,
+                    limit=limit,
                 )
-            if metadata.declared_size is None:
-                raise ExternalChannelFileTransferError(
-                    "Discord attachment metadata does not include a valid size."
-                )
-            if metadata.declared_size > limit:
-                raise ExternalChannelFileTransferError(
-                    "Discord attachment exceeds the configured inbound limit of "
-                    f"{limit} bytes."
-                )
-            if info.download_url is None:
-                raise ExternalChannelFileTransferError(
-                    "Discord attachment does not include a current download target."
-                )
-            body = await self.discord_client.download_attachment(
-                download_url=info.download_url,
-                max_bytes=limit,
             )
-            if len(body) != metadata.declared_size:
-                raise ExternalChannelFileTransferError(
-                    "Discord attachment size does not match current provider metadata."
+            metadata = info.metadata
+            source = DeferredProviderServerToRuntimeSource(
+                metadata=ServerToRuntimeSourceMetadata(
+                    canonical_uri=(
+                        f"external-channel://discord/{locator.binding_id}/"
+                        f"{provider_file_id}"
+                    ),
+                    source_kind="external_channel_discord",
+                    display_name=filename,
+                    media_type=metadata.media_type or "application/octet-stream",
+                    size=declared_size,
+                    sha256=None,
+                    expires_at=None,
+                ),
+                open_stream=lambda *, maximum_chunk_size: (
+                    self.discord_client.open_attachment_stream(
+                        download_url=download_url,
+                        max_bytes=limit,
+                        maximum_chunk_size=maximum_chunk_size,
+                    )
+                ),
+                revalidate_authority=lambda: self._revalidate_discord_source(
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    locator=locator,
+                    target=target,
+                    bot_token=bot_token,
+                    source_identity=source_identity,
+                    expected_metadata=metadata,
+                    limit=limit,
+                ),
+                s3_service=staging_configuration.s3_service,
+                bucket=staging_configuration.workspace_bucket,
+                transfer_object_prefix=staging_configuration.transfer_object_prefix,
+                preparation_id_source=lambda: uuid7().hex,
+                maximum_size=limit,
+                stream_chunk_size=staging_configuration.stream_chunk_size,
+                multipart_part_size=staging_configuration.multipart_part_size,
+                multipart_copy_threshold=(
+                    staging_configuration.multipart_copy_threshold
+                ),
+                multipart_copy_part_size=(
+                    staging_configuration.multipart_copy_part_size
+                ),
+            )
+            await transfer_service.transfer(
+                ServerToRuntimeTransferRequest(
+                    source=source,
+                    target=transfer_target,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                    destination=path,
+                    overwrite=overwrite,
+                    product_maximum_size=limit,
+                    provider_maximum_size=limit,
+                    deadline_at=(
+                        datetime.datetime.now(datetime.UTC)
+                        + staging_configuration.deadline_after
+                    ),
                 )
+            )
+        except asyncio.CancelledError:
+            raise
         except ExternalChannelFileTransferError:
             raise
-        except DiscordFileTooLarge:
+        except DiscordFileProviderError as error:
+            raise _map_discord_download_error(error, limit=limit) from None
+        except ServerToRuntimeTransferError as error:
             raise ExternalChannelFileTransferError(
-                "Discord attachment exceeds the configured inbound limit of "
-                f"{limit} bytes."
+                _discord_transfer_error_message(error, path=path)
             ) from None
-        except DiscordFileNotFound:
+        except S3TransferCleanupRequired:
             raise ExternalChannelFileTransferError(
-                "Discord no longer exposes the requested attachment."
-            ) from None
-        except DiscordFilePermissionDenied:
-            raise ExternalChannelFileTransferError(
-                "Discord denied access to the requested attachment."
-            ) from None
-        except DiscordFileCredentialsInvalid:
-            raise ExternalChannelFileTransferError(
-                "Discord rejected the active External Channel credential."
-            ) from None
-        except DiscordFileTemporaryError:
-            raise ExternalChannelFileTransferError(
-                "Discord attachment download is temporarily unavailable."
-            ) from None
-        except DiscordFileProviderError:
-            raise ExternalChannelFileTransferError(
-                "Discord rejected the requested attachment."
-            ) from None
-        filename = metadata.name
-        if filename is None:
-            raise ExternalChannelFileTransferError(
-                "Discord attachment metadata does not include a filename."
-            )
-        try:
-            attachment = await file_storage.put(
-                path,
-                body,
-                metadata.media_type or "",
-                agent_id=agent_id,
-            )
-        except PermissionError:
-            raise ExternalChannelFileTransferError(
-                f"Runtime destination is not writable: {path}."
+                "Failed to stage the Discord attachment for Runtime transfer."
             ) from None
         except RuntimeStorageError as error:
             raise ExternalChannelFileTransferError(
                 f"Failed to write the Runtime file: {error.detail}"
             ) from None
         except ValueError as error:
-            raise ExternalChannelFileTransferError(str(error)) from None
+            message = str(error)
+            if "exceeds" in message:
+                raise ExternalChannelFileTransferError(
+                    "Discord attachment exceeds the configured inbound limit of "
+                    f"{limit} bytes."
+                ) from None
+            if "size" in message or "hash" in message:
+                raise ExternalChannelFileTransferError(
+                    "Discord attachment size does not match current provider metadata."
+                ) from None
+            raise ExternalChannelFileTransferError(
+                "Failed to write the Runtime file."
+            ) from None
         except OSError:
             raise ExternalChannelFileTransferError(
                 f"Failed to write the Runtime file: {path}."
             ) from None
-        if attachment.size != len(body):
-            raise ExternalChannelFileTransferError(
-                "Runtime reported an incomplete file write."
-            )
         return ExternalChannelFileDownloadResult(
             path=path,
             filename=filename,
             media_type=metadata.media_type,
-            bytes_written=len(body),
+            bytes_written=declared_size,
         )
+
+    async def _revalidate_discord_source(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        locator: ExternalChannelFileLocator,
+        target: ExternalChannelFileAccessTarget,
+        bot_token: str,
+        source_identity: tuple[str, str],
+        expected_metadata: ExternalChannelFileMetadata,
+        limit: int,
+    ) -> bool:
+        """Revalidate active Discord source authority before READY."""
+        async with self.session_manager() as session:
+            current = await self.repository.get_active_file_access_target(
+                session,
+                session_id=session_id,
+                agent_id=agent_id,
+                binding_id=locator.binding_id,
+            )
+        if current is None:
+            raise ExternalChannelFileTransferError(
+                "External Channel binding is not active for this AgentSession."
+            )
+        if current.provider is not locator.provider:
+            raise ExternalChannelFileTransferError(
+                "External Channel file locator does not match its active provider."
+            )
+        capabilities = self._capabilities(current.capabilities)
+        if not capabilities.download_files or current.encrypted_credentials is None:
+            raise ExternalChannelFileTransferError(
+                "External Channel file authorization changed before transfer completed."
+            )
+        if current != target:
+            raise ExternalChannelFileTransferError(
+                "External Channel binding changed before file transfer completed."
+            )
+        current_source_identity = await self._discord_file_source(
+            resource_id=current.resource_id,
+            provider_tenant_id=current.provider_tenant_id,
+            resource_labels=current.resource_labels,
+            provider_file_id=locator.provider_file_id,
+        )
+        if current_source_identity != source_identity:
+            raise ExternalChannelFileTransferError(
+                "Discord attachment source changed before transfer completed."
+            )
+        channel_id, message_id = current_source_identity
+        info = await self.discord_client.fetch_attachment_download_info(
+            bot_token=bot_token,
+            channel_id=channel_id,
+            message_id=message_id,
+            attachment_id=locator.provider_file_id,
+        )
+        _validate_discord_attachment_metadata(
+            info=info,
+            provider_file_id=locator.provider_file_id,
+            limit=limit,
+        )
+        if info.metadata != expected_metadata:
+            raise ExternalChannelFileTransferError(
+                "Discord attachment changed before transfer completed."
+            )
+        return True
 
     async def _revalidate_slack_source(
         self,
@@ -912,6 +1012,109 @@ def _discord_resource_source_allowed(
         if isinstance((value := resource_labels.get(key)), str)
     }
     return channel_id in allowed_channels
+
+
+def _validate_discord_attachment_metadata(
+    *,
+    info: DiscordAttachmentDownloadInfo,
+    provider_file_id: str,
+    limit: int,
+) -> tuple[str, int, str]:
+    """Validate one current Discord attachment before source admission."""
+    metadata = info.metadata
+    if metadata.provider_file_id != provider_file_id:
+        raise ExternalChannelFileTransferError(
+            "Discord attachment metadata does not match the selected locator."
+        )
+    if not metadata.supported:
+        reason = metadata.unsupported_reason
+        raise ExternalChannelFileTransferError(
+            "Discord attachment metadata is unsupported"
+            + (f": {reason.value}." if reason is not None else ".")
+        )
+    declared_size = metadata.declared_size
+    if declared_size is None:
+        raise ExternalChannelFileTransferError(
+            "Discord attachment metadata does not include a valid size."
+        )
+    if declared_size > limit:
+        raise ExternalChannelFileTransferError(
+            f"Discord attachment exceeds the configured inbound limit of {limit} bytes."
+        )
+    filename = metadata.name
+    if filename is None:
+        raise ExternalChannelFileTransferError(
+            "Discord attachment metadata does not include a filename."
+        )
+    download_url = info.download_url
+    if download_url is None:
+        raise ExternalChannelFileTransferError(
+            "Discord attachment does not include a current download target."
+        )
+    return filename, declared_size, download_url
+
+
+def _map_discord_download_error(
+    error: DiscordFileProviderError,
+    *,
+    limit: int,
+) -> ExternalChannelFileTransferError:
+    """Map Discord failures to the existing External Channel file contract."""
+    match error:
+        case DiscordFileTooLarge():
+            return ExternalChannelFileTransferError(
+                "Discord attachment exceeds the configured inbound limit of "
+                f"{limit} bytes."
+            )
+        case DiscordFileNotFound():
+            return ExternalChannelFileTransferError(
+                "Discord no longer exposes the requested attachment."
+            )
+        case DiscordFilePermissionDenied():
+            return ExternalChannelFileTransferError(
+                "Discord denied access to the requested attachment."
+            )
+        case DiscordFileCredentialsInvalid():
+            return ExternalChannelFileTransferError(
+                "Discord rejected the active External Channel credential."
+            )
+        case DiscordFileTemporaryError():
+            return ExternalChannelFileTransferError(
+                "Discord attachment download is temporarily unavailable."
+            )
+        case _:
+            return ExternalChannelFileTransferError(
+                "Discord rejected the requested attachment."
+            )
+
+
+def _discord_transfer_error_message(
+    error: ServerToRuntimeTransferError,
+    *,
+    path: str,
+) -> str:
+    """Map bounded Runtime transfer outcomes to Discord's established contract."""
+    match error.failure:
+        case CoordinatorTransferFailure.CANCELLED:
+            return "Runtime file transfer was cancelled before destination commit."
+        case CoordinatorTransferFailure.EXPIRED:
+            return "Runtime file transfer did not complete before its deadline."
+        case CoordinatorTransferFailure.INTEGRITY:
+            return (
+                "Discord attachment integrity verification failed before "
+                "destination commit."
+            )
+        case CoordinatorTransferFailure.CONSUMER:
+            return f"Runtime destination is not writable: {path}."
+        case (
+            CoordinatorTransferFailure.ADMISSION
+            | CoordinatorTransferFailure.FENCED
+            | CoordinatorTransferFailure.STREAM
+            | None
+        ):
+            return f"Failed to write the Runtime file: {path}."
+        case _:
+            return f"Failed to write the Runtime file: {path}."
 
 
 def _validate_slack_file_metadata(

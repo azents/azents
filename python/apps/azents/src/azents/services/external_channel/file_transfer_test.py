@@ -228,17 +228,21 @@ class _DiscordClient:
         self,
         *,
         info: DiscordAttachmentDownloadInfo | None = None,
-        body: bytes = b"content",
+        chunks: tuple[bytes, ...] = (b"content",),
         info_error: Exception | None = None,
         download_error: Exception | None = None,
+        stream_error: Exception | None = None,
     ) -> None:
         self.info = info or _discord_file_info()
-        self.body = body
+        self.chunks = chunks
         self.info_error = info_error
         self.download_error = download_error
+        self.stream_error = stream_error
         self.fetch_calls: list[tuple[str, str, str]] = []
         self.download_urls: list[str] = []
-        self.download_limits: list[int] = []
+        self.stream_limits: list[tuple[int, int]] = []
+        self.stream_opened = 0
+        self.stream_closed = 0
 
     async def fetch_attachment_download_info(
         self,
@@ -254,17 +258,31 @@ class _DiscordClient:
             raise self.info_error
         return self.info
 
-    async def download_attachment(
+    @asynccontextmanager
+    async def open_attachment_stream(
         self,
         *,
         download_url: str,
         max_bytes: int,
-    ) -> bytes:
+        maximum_chunk_size: int,
+    ) -> AsyncGenerator[AsyncIterator[bytes], None]:
         self.download_urls.append(download_url)
-        self.download_limits.append(max_bytes)
+        self.stream_limits.append((max_bytes, maximum_chunk_size))
         if self.download_error is not None:
             raise self.download_error
-        return self.body
+        self.stream_opened += 1
+
+        async def iterator() -> AsyncIterator[bytes]:
+            for chunk in self.chunks:
+                assert len(chunk) <= maximum_chunk_size
+                yield chunk
+            if self.stream_error is not None:
+                raise self.stream_error
+
+        try:
+            yield iterator()
+        finally:
+            self.stream_closed += 1
 
 
 class _SystemSettings:
@@ -1056,7 +1074,7 @@ async def test_discord_download_materializes_only_current_binding_attachment() -
         _target(provider=ExternalChannelProvider.DISCORD),
         source=_discord_source(),
     )
-    discord_client = _DiscordClient(body=b"content")
+    discord_client = _DiscordClient()
     storage = _FileStorage()
     service = _service(
         repository=repository,
@@ -1064,7 +1082,10 @@ async def test_discord_download_materializes_only_current_binding_attachment() -
         discord_client=discord_client,
     )
 
-    result = await service.download(
+    transfer = _TransferService()
+    result = await _download(
+        service,
+        transfer=transfer,
         session_id="session-1",
         agent_id="agent-1",
         file=_discord_locator(),
@@ -1079,18 +1100,14 @@ async def test_discord_download_materializes_only_current_binding_attachment() -
     assert result.bytes_written == 7
     assert repository.source_calls == [("resource-1", "555")]
     assert discord_client.fetch_calls == [("333", "444", "555")]
-    assert discord_client.download_urls == [
-        "https://cdn.discordapp.com/attachments/333/555/report.csv"
-    ]
-    assert discord_client.download_limits == [100]
-    assert storage.put_calls == [
-        (
-            "/workspace/agent/report.csv",
-            b"content",
-            "text/csv",
-            "agent-1",
-        )
-    ]
+    assert discord_client.stream_opened == 0
+    assert storage.put_calls == []
+    request = transfer.requests[0]
+    assert request.destination == "/workspace/agent/report.csv"
+    assert request.source.metadata.canonical_uri == (
+        "external-channel://discord/binding-1/555"
+    )
+    assert request.source.metadata.size == 7
 
 
 @pytest.mark.asyncio
@@ -1135,7 +1152,8 @@ async def test_discord_source_authority_failures_precede_provider_access(
     )
 
     with pytest.raises(ExternalChannelFileTransferError, match=message):
-        await service.download(
+        await _download(
+            service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1167,7 +1185,8 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
         discord_client=capability_client,
     )
     with pytest.raises(ExternalChannelFileTransferError, match="cannot download"):
-        await capability_service.download(
+        await _download(
+            capability_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1186,7 +1205,8 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
         discord_client=_DiscordClient(info=_discord_file_info(download_url=None)),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="download target"):
-        await url_service.download(
+        await _download(
+            url_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1205,7 +1225,8 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
         discord_client=_DiscordClient(info_error=DiscordFileNotFound("deleted")),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="no longer exposes"):
-        await deleted_service.download(
+        await _download(
+            deleted_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1233,7 +1254,8 @@ async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
         discord_client=_DiscordClient(info=_discord_file_info(declared_size=101)),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
-        await declared_service.download(
+        await _download(
+            declared_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1249,12 +1271,12 @@ async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
             source=_discord_source(),
         ),
         slack_client=_SlackClient(),
-        discord_client=_DiscordClient(
-            download_error=DiscordFileTooLarge("oversize"),
-        ),
+        discord_client=_DiscordClient(),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
-        await actual_service.download(
+        await _download(
+            actual_service,
+            transfer=_TransferService(DiscordFileTooLarge("oversize")),
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1273,7 +1295,11 @@ async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
         discord_client=_DiscordClient(info=_discord_file_info(declared_size=8)),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="does not match"):
-        await mismatch_service.download(
+        await _download(
+            mismatch_service,
+            transfer=_TransferService(
+                ValueError("Provider stream size does not match the manifest")
+            ),
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1312,7 +1338,8 @@ async def test_discord_provider_failures_are_controlled_without_runtime_write(
     )
 
     with pytest.raises(ExternalChannelFileTransferError, match=message):
-        await service.download(
+        await _download(
+            service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),

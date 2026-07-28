@@ -1,5 +1,7 @@
 """Current-source Discord attachment lookup and bounded download primitives."""
 
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TypeGuard
 from urllib.parse import urlparse
@@ -97,15 +99,33 @@ class DiscordChannelClient:
             return DiscordAttachmentDownloadInfo(metadata=metadata, download_url=url)
         raise DiscordFileNotFound("Discord no longer exposes the requested attachment.")
 
-    async def download_attachment(
+    def open_attachment_stream(
         self,
         *,
         download_url: str,
         max_bytes: int,
-    ) -> bytes:
-        """Download one current attachment URL with a strict in-memory byte limit."""
+        maximum_chunk_size: int,
+    ) -> AbstractAsyncContextManager[AsyncIterator[bytes]]:
+        """Return one owned bounded attachment stream."""
+        return self._open_attachment_stream(
+            download_url=download_url,
+            max_bytes=max_bytes,
+            maximum_chunk_size=maximum_chunk_size,
+        )
+
+    @asynccontextmanager
+    async def _open_attachment_stream(
+        self,
+        *,
+        download_url: str,
+        max_bytes: int,
+        maximum_chunk_size: int,
+    ) -> AsyncIterator[AsyncIterator[bytes]]:
+        """Open one current attachment URL and close it after stream consumption."""
         if max_bytes < 0:
             raise ValueError("Discord attachment limit must not be negative.")
+        if maximum_chunk_size <= 0:
+            raise ValueError("Discord stream chunk size must be positive.")
         if not _download_url_allowed(download_url):
             raise DiscordFileRequestRejected(
                 "Discord returned an invalid attachment download URL."
@@ -146,14 +166,21 @@ class DiscordChannelClient:
                         raise DiscordFileTooLarge(
                             "Discord attachment exceeds the configured limit."
                         )
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    if len(body) + len(chunk) > max_bytes:
-                        raise DiscordFileTooLarge(
-                            "Discord attachment exceeds the configured limit."
-                        )
-                    body.extend(chunk)
-                return bytes(body)
+
+                async def chunks() -> AsyncIterator[bytes]:
+                    """Yield bounded response chunks without retaining all bytes."""
+                    actual_size = 0
+                    async for chunk in response.aiter_bytes(
+                        chunk_size=maximum_chunk_size
+                    ):
+                        actual_size += len(chunk)
+                        if actual_size > max_bytes:
+                            raise DiscordFileTooLarge(
+                                "Discord attachment exceeds the configured limit."
+                            )
+                        yield chunk
+
+                yield chunks()
         except httpx.RequestError as error:
             raise DiscordFileTemporaryError(
                 "Discord attachment download did not produce a complete response."
