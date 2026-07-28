@@ -1158,6 +1158,7 @@
         },
         "activationStatus": {
           "waiting_hydration": "履歴の取得待ち",
+          "wake_pending": "呼び出し開始中",
           "active": "呼び出し有効"
         },
         "workStatus": {

@@ -1158,6 +1158,7 @@
         },
         "activationStatus": {
           "waiting_hydration": "기록 수집 대기",
+          "wake_pending": "호출 시작 중",
           "active": "호출 활성"
         },
         "workStatus": {
