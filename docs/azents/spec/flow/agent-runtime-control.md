@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-07-28
-spec_version: 39
+spec_version: 40
 ---
 
 # Agent Runtime Control
@@ -65,6 +65,59 @@ flowchart LR
     Backend --> Runner
     Store --> Queue
 ```
+
+## Runtime File Transfer
+
+Complete-file movement uses a separate Runtime File Transfer capability. The ordinary
+Runner Control stream carries only an authenticated transfer intent, progress,
+cancellation, and terminal result. It never carries file-body chunks, and Runtime
+Control keeps the existing gRPC message limits.
+
+`RuntimeTransferCoordinator` is an internal trusted-service RPC. It admits one
+directional attempt, owns its bounded state record, issues opaque object handles, and
+serializes revision-fenced state transitions. The record contains identity, Runtime and
+Runner generations, bounded manifests, destination policy, deadline, lease state,
+phase, terminal outcome, cleanup state, and consumer claims. Redis stores that bounded
+coordination data for multi-replica deployments; the in-memory implementation is
+single-process development and test support only. Neither implementation stores byte
+chunks, provider URLs, S3 credentials, object keys, or product file metadata.
+
+`RuntimeRunnerTransfer` is a distinct authenticated Runner gRPC service terminated by
+Runtime Control. `DownloadTransfer` streams ordered bounded raw frames from the
+Control-owned immutable attempt object to the Runner and ends with the verified byte
+count and SHA-256. `UploadTransfer` accepts an open frame, ordered bounded raw frames,
+and one completion frame. Control streams the frames into its attempt object, verifies
+the actual byte count and SHA-256, and only then makes the object available to a trusted
+consumer.
+
+The Runner receives only transfer/attempt identity, direction, Runtime path, expected
+manifest, deadline, operation correlation, and generation-scoped dispatch authority.
+It never receives object-store credentials, bucket or object identity, presigned URLs,
+provider upload URLs, opaque trusted-service handles, or storage topology. Runtime
+Control is the only component that streams between the Runner data RPC and the object
+store; it uses bounded incremental I/O and does not buffer a complete file.
+
+Each attempt is admitted before any bytes move and is fenced by Runtime desired
+generation, accepted Runner generation, dispatch ID, deadline, and state revision.
+Ordered offsets, maximum sizes, expected and actual manifests, cancellation, and
+terminal state are checked at the Control boundary. A malformed, stale, duplicate, or
+cross-attempt frame fails that attempt without exposing another object. Ordinary Runner
+control operations remain independently available while a transfer stream is active.
+
+For downloads, the Runner writes through protected same-filesystem staging and commits
+the requested destination only after complete verification. An existing destination is
+left unchanged unless an admitted overwrite can use that protected staging path; an
+unsafe overwrite configuration fails closed. For uploads, the Runner snapshots one
+authorized source before opening the transfer and reports its independently calculated
+manifest. A terminal transfer result is accepted only for the current dispatch and
+cannot be replaced by a late result.
+
+Verified objects are claimed by trusted consumers through short leases. A consumer
+receives an opaque handle and bounded async stream, acknowledges only after its
+product/provider publication succeeds, and abandons or settles a failed claim. Cleanup
+removes terminal objects and incomplete multipart preparations according to their
+bounded retention policy. A provider mutation is attempted at most once: no transfer or
+provider call is replayed after mutation starts or its outcome is unknown.
 
 ## Durable State
 
@@ -318,6 +371,10 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-28** (spec_version 40) — Promoted the independent Runtime File Transfer
+  control/data contracts: bounded Control-owned object streaming, opaque
+  coordination/consumer handles, generation- and revision-fenced terminal state,
+  protected Runner destination commit, and no Runner object-store authority.
 - **2026-07-28** (spec_version 39) — Shared the Agent Workspace and Pod-local temporary directory with the DIND sidecar at identical paths so ordinary Docker and Compose bind mounts resolve correctly.
 - **2026-07-28** (spec_version 38) — Removed the Container Policy Gateway, exposed each Runtime's private DIND socket directly, collapsed Docker into one atomic v1 capability, and removed unenforceable nested PID/count and Profile network controls.
 - **2026-07-27** (spec_version 37) — Replaced the Docker client header allowlist with effect-based validation and stripping so SDK metadata cannot break otherwise authorized Engine operations.

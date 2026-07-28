@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-28
-spec_version: 16
+spec_version: 17
 ---
 
 # External Channel Delivery and Channel Work
@@ -113,12 +113,11 @@ recovered-without-source file fails before provider mutation. The committed acti
 existing `REPLY` delivery store only ordered manifests containing source kind, source
 reference, filename, media type, and expected size.
 
-After commit, Runtime-source delivery is capability-gated. When the current Runtime has
-the trusted provider-delivery capability, every Runtime manifest creates one metadata-only
-Runtime upload attempt. The capability claims the verified transfer object, resolves its
-opaque object handle only inside trusted backend code, and exposes only a bounded async byte
-stream to Slack. The ordered batch retains every Runtime consumer claim until the one
-`files.completeUploadExternal` result. Runtime source bytes never use ordinary
+After commit, every Runtime manifest creates one metadata-only Runtime upload attempt.
+The trusted provider-delivery capability claims the verified transfer object, resolves
+its opaque object handle only inside trusted backend code, and exposes only a bounded
+async byte stream to Slack. The ordered batch retains every Runtime consumer claim
+until the one `files.completeUploadExternal` result. Runtime source bytes never use ordinary
 `FileStorage.read_range` relay and never create ExchangeFile, Artifact, ModelFile, or
 FilePart resources.
 
@@ -142,11 +141,12 @@ settlement cannot be confirmed, the delivery is `unknown` and its Runtime claims
 expiry or reconciliation. Cancellation before provider work attempts the same exact cleanup;
 cancellation after provider work is ambiguous.
 
-If the trusted Runtime provider-delivery capability is absent, Runtime sources fail closed
-before a Slack mutation. The default Worker composition intentionally leaves that capability
-unset until the coordinated Runtime transfer deployment cutover. Exchange-only replies retain
-their existing authority-resolved bounded stream path. No phase is automatically replayed, and
-ordinary Agent output is never uploaded without the explicit Channel action.
+If a Runtime transfer cannot be admitted, verified, claimed, or streamed, the delivery
+fails before a provider mutation. After a Slack external-upload mutation starts, the
+delivery ledger records one terminal result or an explicit ambiguous outcome; it does
+not automatically replay the transfer or provider mutation. Exchange-only replies
+retain their authority-resolved bounded stream path, and ordinary Agent output is never
+uploaded without the explicit Channel action.
 
 Discord lowers a reply or Channel Work snapshot into stable ordered message pages. Each
 page is bounded to the provider message limit, preserves balanced fenced Markdown where
@@ -262,6 +262,10 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-28** (spec_version 17) — Promoted the completed Runtime File Transfer
+  cutover for file-bearing replies: every Runtime source uses a verified-object
+  consumer claim and bounded provider stream, failures before mutation fail closed,
+  and provider mutation is never replayed after start or ambiguity.
 - **2026-07-28** (spec_version 16) — Added reconciliation-fenced Discord initial
   Session/work delivery and persisted root-thread targeting for all later output.
 - **2026-07-26** (spec_version 15) — Added nonce-fenced Discord approval-control
@@ -275,6 +279,8 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 - **2026-07-26** (spec_version 14) — Replaced Runtime `FileStorage` range-read relay with
   capability-gated verified-object provider streaming, one Runtime upload per source, batch-held
   claims, post-provider acknowledgement/settlement, and fail-closed pre-cutover wiring.
+- **2026-07-26** (spec_version 13) — Added the required bold Agent-name prefix for
+  Agent-associated Slack output and capability-aware icon override with safe fallback.
 - **2026-07-25** (spec_version 12) — Added authority-resolved `exchange://` outbound
   sources, explicit source-kind manifests, post-commit Exchange revalidation, supported
   source guidance, and form-encoded Slack external-upload completion.

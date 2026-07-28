@@ -9,7 +9,7 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/374a722fb9ee_add_exchange_file_provenance.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/8fae7b9ab00a_add_model_file_run_lineage.py
   - python/apps/azents/src/azents/core/vfs.py
-  - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
+  - python/apps/azents/src/azents/runtime/transfer/**
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
@@ -52,8 +52,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-26
-spec_version: 31
+last_verified_at: 2026-07-28
+spec_version: 32
 ---
 
 # File Exchange Storage
@@ -112,18 +112,29 @@ not.
 
 `import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical `azents://` paths present in the current AgentRun projection. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
 
-`exchange://{object_key}` materializes user-visible attachment into Runtime file. `artifact://{storage_key}` materializes agent/tool internal output Artifact into Runtime file. In both cases, original file body is not directly attached to LLM prompt.
+`exchange://{object_key}` materializes a user-visible attachment into a Runtime file.
+`artifact://{storage_key}` materializes an agent/tool internal output Artifact into a
+Runtime file. Both resolve an authority-checked source manifest and use the common
+Server-to-Runtime transfer capability; an existing managed S3 object is copied into the
+Control-owned immutable transfer object without an application-memory body relay.
+Original file bytes are not attached directly to the LLM prompt.
 
-`azents://` materializes one immutable managed file from the current run projection. The resolver verifies run, Agent, Session, and Workspace ownership, exact projection membership, Base64 decoding, decoded size, and content hash before writing through the same Runtime FileStorage path. Ordinary Runtime file tools do not resolve the URI directly. The source entry remains in the retained AgentRun projection; only the copied Runtime path follows Runtime persistence rules, and a default `/tmp/agent/imports/` copy is temporary.
+`azents://` materializes one immutable managed file from the current run projection.
+The resolver verifies run, Agent, Session, and Workspace ownership, exact projection
+membership, Base64 decoding, decoded size, and content hash before incrementally staging
+the source into the same Server-to-Runtime transfer capability. Ordinary Runtime file
+tools do not resolve the URI directly. The source entry remains in the retained AgentRun
+projection; only the copied Runtime path follows Runtime persistence rules, and a
+default `/tmp/agent/imports/` copy is temporary.
 
 ### Agent transfers an External Channel file
 
 `download_external_file` accepts one opaque `external-file:v1` locator from the current
 active External Channel binding. The service resolves Slack metadata and authenticated
 private bytes only after the explicit Tool call, enforces configured declared and actual
-byte limits, and writes one bounded payload to the authorized Runtime destination through
-`FileStorage.put`. The Tool result retains only Runtime path, filename, media type, and
-actual size.
+byte limits, incrementally stages the authorized source into the common
+Server-to-Runtime transfer capability, and waits for the Runtime destination commit. The
+Tool result retains only Runtime path, filename, media type, and actual size.
 
 A file-bearing `channel_action` accepts absolute Runtime paths and `exchange://` URIs.
 Runtime paths are statted before commit and, when the trusted Runtime provider-delivery
@@ -135,9 +146,9 @@ An Exchange URI resolves only under the current canonical `SessionResourceAuthor
 at preflight and again immediately before provider upload; both the stored metadata and
 returned byte length must match the committed bounded manifest. Relative paths, `artifact://`,
 and `azents://` are not outbound source forms. The relay creates no ExchangeFile, Artifact,
-ModelFile, FilePart, or other durable product file-body resource. If the provider-delivery
-capability is absent before the coordinated Runtime transfer cutover, Runtime sources fail
-closed before provider mutation.
+ModelFile, FilePart, or other durable product file-body resource. A failed admission,
+verification, claim, or stream fails before provider mutation. Once a provider mutation
+starts or its outcome is unknown, the transfer is not replayed automatically.
 
 ### Agent/tool output artifact
 
@@ -195,7 +206,13 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ### Agent presents sandbox file
 
-`present_file` tool publishes only files under Provider-reported Agent Workspace as public Exchange attachment to user. Files outside allowed path are rejected. Published attachment appears in chat UI attachment list and can be retrieved through download endpoint.
+`present_file` publishes only files under the Provider-reported Agent Workspace as a
+public Exchange attachment. Files outside the allowed path are rejected. It uses one
+Runtime-to-server upload transfer, then publishes the verified immutable transfer
+object through a native object-store copy. Product metadata is committed only after
+that copy succeeds; a failed, cancelled, changed, oversized, or unverified Runtime
+source never becomes an ExchangeFile. The published attachment appears in the chat UI
+attachment list and can be retrieved through the download endpoint.
 
 ## Storage Boundaries
 
@@ -240,6 +257,11 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ## Changelog
 
+- **2026-07-28** — v32. Promoted the common Runtime File Transfer behavior for
+  `import_file`, External Channel ingress, and `present_file`: bounded
+  Control-mediated streaming, incremental VFS/provider staging, S3-native
+  managed-object copy, verified-object publication, and no application-memory
+  complete-file relay.
 - **2026-07-26** — v31. Moved Runtime External Channel outbound sources to verified Runtime
   upload and provider-native streaming with post-provider settlement, while preserving the
   no-product-file-side-effect boundary.

@@ -2,6 +2,7 @@
 title: "Runtime File Transfer Design"
 created: 2026-07-25
 updated: 2026-07-25
+implemented: 2026-07-28
 tags: [runtime, files, transfer, grpc, s3, security, backend, infra, testenv]
 document_role: primary
 document_type: design
