@@ -150,6 +150,7 @@ _RECORD_FIELDS = frozenset(
         "progress",
         "upload_response_committed_at",
         "runner_result_confirmed_at",
+        "runner_commit_expires_at",
         "cancellation_requested_at",
         "cancellation_reason",
         "consumer_claim_id",
@@ -382,6 +383,9 @@ def _record_to_value(record: RuntimeTransferRecord) -> dict[str, object]:
         "runner_result_confirmed_at": _optional_datetime_to_value(
             record.runner_result_confirmed_at
         ),
+        "runner_commit_expires_at": _optional_datetime_to_value(
+            record.runner_commit_expires_at
+        ),
         "cancellation_requested_at": _optional_datetime_to_value(
             record.cancellation_requested_at
         ),
@@ -466,6 +470,10 @@ def _record_from_value(value: object) -> RuntimeTransferRecord:
         runner_result_confirmed_at=_optional_datetime_from_value(
             record["runner_result_confirmed_at"],
             "runner_result_confirmed_at",
+        ),
+        runner_commit_expires_at=_optional_datetime_from_value(
+            record["runner_commit_expires_at"],
+            "runner_commit_expires_at",
         ),
         cancellation_requested_at=_optional_datetime_from_value(
             record["cancellation_requested_at"],
@@ -778,6 +786,7 @@ class RedisRuntimeTransferStateStore:
                 progress=None,
                 upload_response_committed_at=None,
                 runner_result_confirmed_at=None,
+                runner_commit_expires_at=None,
                 cancellation_requested_at=None,
                 cancellation_reason=None,
                 consumer_claim_id=None,
@@ -1574,6 +1583,81 @@ class RedisRuntimeTransferStateStore:
             await self._commit(token, entries, now)
             return record
 
+    async def confirm_download_commit(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Atomically record a published Runner download as terminal success."""
+        now = self._now()
+        async with self._locked() as token:
+            entries = await self._load_reclaimed_entries(now)
+            key, envelope = await self._load_exact_entry(
+                entries, transfer_id, attempt_id, now
+            )
+            if key is None or envelope is None:
+                await self._commit(token, entries, now)
+                return None
+            record = envelope.record
+            if (
+                await self._current_key(transfer_id) != key
+                or envelope.admission_released
+                or record.revision != expected_revision
+                or record.phase is not RuntimeTransferPhase.VERIFYING
+                or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+                or record.admission.runtime_id != runtime_id
+                or record.admission.desired_generation != desired_generation
+                or record.accepted_runner_generation != accepted_runner_generation
+                or record.stream_claim_id != claim_id
+                or record.runner_commit_expires_at is None
+                or now >= record.runner_commit_expires_at
+                or record.object is None
+                or record.object.size != actual_size
+                or record.object.sha256 != actual_sha256
+                or record.admission.expected_size != actual_size
+                or (
+                    record.admission.expected_sha256 is not None
+                    and record.admission.expected_sha256 != actual_sha256
+                )
+                or record.cancellation_reason
+                is RuntimeTransferCancellationReason.SUPERSEDED
+            ):
+                await self._commit(token, entries, now)
+                return None
+            verification_at = record.runner_commit_expires_at - self.config.stream_lease
+            if (
+                record.cancellation_requested_at is not None
+                and record.cancellation_requested_at <= verification_at
+            ):
+                await self._commit(token, entries, now)
+                return None
+            terminal = dataclasses.replace(
+                record,
+                phase=RuntimeTransferPhase.TERMINAL,
+                revision=record.revision + 1,
+                updated_at=now,
+                actual_size=actual_size,
+                actual_sha256=actual_sha256,
+                terminal_outcome=RuntimeTransferOutcome.SUCCEEDED,
+                terminal_expires_at=terminal_expiry(now, self.config.terminal_ttl),
+                failure=None,
+            )
+            entries[key] = dataclasses.replace(
+                envelope,
+                record=terminal,
+                admission_released=True,
+            )
+            await self._commit(token, entries, now)
+            return terminal
+
     async def mark_committed(
         self,
         transfer_id: str,
@@ -2186,6 +2270,13 @@ class RedisRuntimeTransferStateStore:
                 accepted_runner_generation=accepted_runner_generation
                 if accepted_runner_generation is not None
                 else envelope.record.accepted_runner_generation,
+                runner_commit_expires_at=(
+                    now + self.config.stream_lease
+                    if target is RuntimeTransferPhase.VERIFYING
+                    and envelope.record.admission.direction
+                    is RuntimeTransferDirection.DOWNLOAD
+                    else envelope.record.runner_commit_expires_at
+                ),
             )
             entries[key] = dataclasses.replace(envelope, record=record)
             await self._commit(token, entries, now)
@@ -2466,6 +2557,11 @@ class RedisRuntimeTransferStateStore:
         if (
             record.phase is not RuntimeTransferPhase.TERMINAL
             and record.logical_expires_at <= now
+            and not (
+                record.phase is RuntimeTransferPhase.VERIFYING
+                and record.runner_commit_expires_at is not None
+                and now < record.runner_commit_expires_at
+            )
         ):
             settlement = (
                 cancellation_settlement(record.cancellation_reason)

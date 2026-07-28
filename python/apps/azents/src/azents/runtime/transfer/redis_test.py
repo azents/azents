@@ -78,6 +78,7 @@ def _record() -> RuntimeTransferRecord:
         progress=RuntimeTransferProgress(2, _NOW + timedelta(seconds=30)),
         upload_response_committed_at=None,
         runner_result_confirmed_at=None,
+        runner_commit_expires_at=None,
         cancellation_requested_at=_NOW + timedelta(seconds=10),
         cancellation_reason=RuntimeTransferCancellationReason.CALLER,
         consumer_claim_id="consumer",

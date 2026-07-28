@@ -34,6 +34,8 @@ from azents_runtime_control.runner import (
     RunnerRegistration,
     RunnerRegistrationAccepted,
     RunnerStateReport,
+    RunnerTransferCancelHandler,
+    RunnerTransferIntentHandler,
     RuntimeRunnerEventType,
     RuntimeRunnerState,
 )
@@ -67,6 +69,9 @@ class RuntimeRunnerControlStreamClosed(RuntimeError):
     """Runner Control gRPC stream closed before the requested operation finished."""
 
 
+_MAX_OUTBOUND_MESSAGES = 256
+
+
 class GrpcRunnerControlClient(RunnerControlClient):
     """RunnerControlClient implementation backed by a bidirectional gRPC stream."""
 
@@ -84,10 +89,12 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
         self._metadata = _auth_metadata(runner_auth_token)
         self._outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerMessage] = (
-            asyncio.Queue()
+            asyncio.Queue(maxsize=_MAX_OUTBOUND_MESSAGES)
         )
         self._operation_handler: RunnerOperationHandler | None = None
         self._operation_cancel_handler: RunnerOperationCancelHandler | None = None
+        self._transfer_intent_handler: RunnerTransferIntentHandler | None = None
+        self._transfer_cancel_handler: RunnerTransferCancelHandler | None = None
         self._pending_heartbeat_acks: dict[str, asyncio.Future[bool]] = {}
         self._pending_operation_start_acks: dict[str, asyncio.Future[bool]] = {}
         self._accepted: asyncio.Future[RunnerRegistrationAccepted] | None = None
@@ -110,6 +117,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
             endpoint,
             tls=tls,
             allow_insecure=allow_insecure,
+            options=(("grpc.use_local_subchannel_pool", 1),),
         )
         stub = runtime_runner_control_pb2_grpc.RuntimeRunnerControlStub(channel)
         return cls(
@@ -129,6 +137,20 @@ class GrpcRunnerControlClient(RunnerControlClient):
     ) -> None:
         """Set the direct operation cancellation handler."""
         self._operation_cancel_handler = handler
+
+    def set_transfer_intent_handler(
+        self,
+        handler: RunnerTransferIntentHandler,
+    ) -> None:
+        """Set the direct metadata-only transfer admission handler."""
+        self._transfer_intent_handler = handler
+
+    def set_transfer_cancel_handler(
+        self,
+        handler: RunnerTransferCancelHandler,
+    ) -> None:
+        """Set the direct metadata-only transfer cancellation handler."""
+        self._transfer_cancel_handler = handler
 
     async def register_runner(
         self,
@@ -243,6 +265,20 @@ class GrpcRunnerControlClient(RunnerControlClient):
             )
         )
 
+    async def append_runner_transfer_result(
+        self,
+        result: RunnerTransferResult,
+    ) -> None:
+        """Append one bounded metadata-only transfer result."""
+        await self._send(
+            runtime_runner_control_pb2.RunnerMessage(
+                connection_id=self._require_connection_id(),
+                request_id=f"transfer:{result.dispatch_id}",
+                generation=result.identity.runner_generation,
+                transfer_result=_transfer_result_message(result),
+            )
+        )
+
     async def close(self) -> None:
         """Close receiver task resources."""
         if self._receiver_task is not None:
@@ -322,6 +358,24 @@ class GrpcRunnerControlClient(RunnerControlClient):
                     runtime_id=message.operation_cancel.runtime_id,
                     operation_id=message.operation_cancel.operation_id,
                 )
+            )
+            return
+        if payload == "transfer_intent":
+            if self._transfer_intent_handler is None:
+                raise RuntimeRunnerControlStreamClosed(
+                    "Runner transfer intent handler is not registered"
+                )
+            await self._transfer_intent_handler(
+                runner_transfer_intent_from_message(message.transfer_intent)
+            )
+            return
+        if payload == "transfer_cancel":
+            if self._transfer_cancel_handler is None:
+                raise RuntimeRunnerControlStreamClosed(
+                    "Runner transfer cancellation handler is not registered"
+                )
+            await self._transfer_cancel_handler(
+                runner_transfer_cancel_from_message(message.transfer_cancel)
             )
             return
         if payload == "error":
@@ -1511,6 +1565,70 @@ def runner_transfer_result_from_message(
             _transfer_failure(message.failure) if message.HasField("failure") else None
         ),
     )
+
+
+def _transfer_result_message(
+    result: RunnerTransferResult,
+) -> runtime_runner_control_pb2.RunnerTransferResult:
+    """Map one bounded Runner transfer result to protobuf."""
+    message = runtime_runner_control_pb2.RunnerTransferResult(
+        identity=runtime_runner_transfer_pb2.TransferIdentity(
+            transfer_id=result.identity.transfer_id,
+            attempt_id=result.identity.attempt_id,
+            runtime_id=result.identity.runtime_id,
+            runner_generation=result.identity.runner_generation,
+        ),
+        operation_id=result.operation_id,
+        dispatch_id=result.dispatch_id,
+        outcome={
+            RunnerTransferOutcome.SUCCEEDED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_SUCCEEDED
+            ),
+            RunnerTransferOutcome.FAILED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_FAILED
+            ),
+            RunnerTransferOutcome.CANCELLED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_OUTCOME_CANCELLED
+            ),
+        }[result.outcome],
+    )
+    if result.actual_size is not None:
+        message.actual_size = result.actual_size
+    if result.sha256 is not None:
+        message.sha256 = result.sha256
+    if result.destination_committed is not None:
+        message.destination_committed = result.destination_committed
+    if result.failure is not None:
+        message.failure = {
+            RunnerTransferFailure.UNAVAILABLE: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_UNAVAILABLE
+            ),
+            RunnerTransferFailure.ALREADY_CLAIMED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_ALREADY_CLAIMED
+            ),
+            RunnerTransferFailure.RESOURCE_EXHAUSTED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_RESOURCE_EXHAUSTED
+            ),
+            RunnerTransferFailure.DEADLINE_EXCEEDED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_DEADLINE_EXCEEDED
+            ),
+            RunnerTransferFailure.CANCELLED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_CANCELLED
+            ),
+            RunnerTransferFailure.INTEGRITY_FAILED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_INTEGRITY_FAILED
+            ),
+            RunnerTransferFailure.PROTOCOL_VIOLATION: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_PROTOCOL_VIOLATION
+            ),
+            RunnerTransferFailure.STREAM_FAILED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_STREAM_FAILED
+            ),
+            RunnerTransferFailure.DESTINATION_FAILED: (
+                runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_DESTINATION_FAILED
+            ),
+        }[result.failure]
+    return message
 
 
 def _transfer_identity(

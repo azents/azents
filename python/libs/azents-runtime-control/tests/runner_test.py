@@ -24,6 +24,11 @@ from azents_runtime_control.runner import (
     RuntimeRunnerOperations,
     RuntimeRunnerState,
 )
+from azents_runtime_control.runner_transfer import (
+    RunnerTransferCancel,
+    RunnerTransferIntent,
+    RunnerTransferResult,
+)
 
 
 class FakeRunnerControlClient(RunnerControlClient):
@@ -42,6 +47,13 @@ class FakeRunnerControlClient(RunnerControlClient):
         self.operation_cancel_handler: (
             Callable[[RunnerOperationCancel], Awaitable[None]] | None
         ) = None
+        self.transfer_intent_handler: (
+            Callable[[RunnerTransferIntent], Awaitable[None]] | None
+        ) = None
+        self.transfer_cancel_handler: (
+            Callable[[RunnerTransferCancel], Awaitable[None]] | None
+        ) = None
+        self.transfer_results: list[RunnerTransferResult] = []
 
     def set_operation_handler(
         self,
@@ -56,6 +68,20 @@ class FakeRunnerControlClient(RunnerControlClient):
     ) -> None:
         """Record the direct operation cancellation handler."""
         self.operation_cancel_handler = handler
+
+    def set_transfer_intent_handler(
+        self,
+        handler: Callable[[RunnerTransferIntent], Awaitable[None]],
+    ) -> None:
+        """Record the direct transfer intent handler."""
+        self.transfer_intent_handler = handler
+
+    def set_transfer_cancel_handler(
+        self,
+        handler: Callable[[RunnerTransferCancel], Awaitable[None]],
+    ) -> None:
+        """Record the direct transfer cancellation handler."""
+        self.transfer_cancel_handler = handler
 
     async def register_runner(
         self,
@@ -116,6 +142,13 @@ class FakeRunnerControlClient(RunnerControlClient):
     async def append_runner_event(self, event: RunnerOperationEvent) -> None:
         """Record one Runner event."""
         self.events.append(event)
+
+    async def append_runner_transfer_result(
+        self,
+        result: RunnerTransferResult,
+    ) -> None:
+        """Record one bounded transfer result."""
+        self.transfer_results.append(result)
 
 
 @dataclasses.dataclass

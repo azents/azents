@@ -97,6 +97,7 @@ class InMemoryRuntimeTransferStateStore:
                 progress=None,
                 upload_response_committed_at=None,
                 runner_result_confirmed_at=None,
+                runner_commit_expires_at=None,
                 cancellation_requested_at=None,
                 cancellation_reason=None,
                 consumer_claim_id=None,
@@ -587,17 +588,39 @@ class InMemoryRuntimeTransferStateStore:
         claim_id: str,
         expected_revision: int,
     ) -> RuntimeTransferRecord | None:
-        return await self._move(
-            transfer_id,
-            attempt_id,
-            expected_revision,
-            RuntimeTransferPhase.STREAMING,
-            RuntimeTransferPhase.VERIFYING,
-            runtime_id=runtime_id,
-            generation=desired_generation,
-            required_runner_generation=accepted_runner_generation,
-            required_claim_id=claim_id,
-        )
+        now = self._now()
+        async with self.lock:
+            record = self._active(
+                transfer_id,
+                attempt_id,
+                expected_revision,
+                RuntimeTransferPhase.STREAMING,
+                now,
+                runtime_id=runtime_id,
+                desired_generation=desired_generation,
+                accepted_runner_generation=accepted_runner_generation,
+                claim_id=claim_id,
+            )
+            if record is None or not phase_transition_allowed(
+                record.admission.direction,
+                record.phase,
+                RuntimeTransferPhase.VERIFYING,
+            ):
+                return None
+            return self._put(
+                dataclasses.replace(
+                    record,
+                    phase=RuntimeTransferPhase.VERIFYING,
+                    revision=record.revision + 1,
+                    updated_at=now,
+                    runner_commit_expires_at=(
+                        now + self.config.stream_lease
+                        if record.admission.direction
+                        is RuntimeTransferDirection.DOWNLOAD
+                        else None
+                    ),
+                )
+            )
 
     async def publish_available(
         self,
@@ -718,6 +741,69 @@ class InMemoryRuntimeTransferStateStore:
                     completed_object_cleanup_required=False,
                 )
             )
+
+    async def confirm_download_commit(
+        self,
+        transfer_id: str,
+        *,
+        attempt_id: str,
+        runtime_id: str,
+        desired_generation: int,
+        accepted_runner_generation: int,
+        claim_id: str,
+        expected_revision: int,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> RuntimeTransferRecord | None:
+        """Atomically record a published Runner download as terminal success."""
+        now = self._now()
+        async with self.lock:
+            self._expire(now)
+            record = self._exact(transfer_id, attempt_id)
+            if (
+                record is None
+                or self.current_attempts.get(transfer_id) != attempt_id
+                or record.revision != expected_revision
+                or record.phase is not RuntimeTransferPhase.VERIFYING
+                or record.admission.direction is not RuntimeTransferDirection.DOWNLOAD
+                or (transfer_id, attempt_id) in self.released
+                or record.admission.runtime_id != runtime_id
+                or record.admission.desired_generation != desired_generation
+                or record.accepted_runner_generation != accepted_runner_generation
+                or record.stream_claim_id != claim_id
+                or record.runner_commit_expires_at is None
+                or now >= record.runner_commit_expires_at
+                or record.object is None
+                or record.object.size != actual_size
+                or record.object.sha256 != actual_sha256
+                or record.admission.expected_size != actual_size
+                or (
+                    record.admission.expected_sha256 is not None
+                    and record.admission.expected_sha256 != actual_sha256
+                )
+                or record.cancellation_reason
+                is RuntimeTransferCancellationReason.SUPERSEDED
+            ):
+                return None
+            verification_at = record.runner_commit_expires_at - self.config.stream_lease
+            if (
+                record.cancellation_requested_at is not None
+                and record.cancellation_requested_at <= verification_at
+            ):
+                return None
+            terminal = dataclasses.replace(
+                record,
+                phase=RuntimeTransferPhase.TERMINAL,
+                revision=record.revision + 1,
+                updated_at=now,
+                actual_size=actual_size,
+                actual_sha256=actual_sha256,
+                terminal_outcome=RuntimeTransferOutcome.SUCCEEDED,
+                terminal_expires_at=terminal_expiry(now, self.config.terminal_ttl),
+                failure=None,
+            )
+            self.released.add((transfer_id, attempt_id))
+            return self._put(terminal)
 
     async def mark_committed(
         self,
@@ -1293,6 +1379,11 @@ class InMemoryRuntimeTransferStateStore:
             if (
                 record.phase is not RuntimeTransferPhase.TERMINAL
                 and record.logical_expires_at <= now
+                and not (
+                    record.phase is RuntimeTransferPhase.VERIFYING
+                    and record.runner_commit_expires_at is not None
+                    and now < record.runner_commit_expires_at
+                )
             ):
                 settlement = (
                     cancellation_settlement(record.cancellation_reason)

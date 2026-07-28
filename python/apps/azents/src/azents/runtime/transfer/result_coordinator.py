@@ -121,7 +121,10 @@ class RuntimeRunnerTransferResultCoordinator:
         operation: RuntimeOperationMetadata,
         result: RunnerTransferResult,
     ) -> None:
-        if operation.status is not RuntimeOperationStatus.ACTIVE:
+        if operation.status is not RuntimeOperationStatus.ACTIVE and not (
+            result.direction is RunnerTransferDirection.DOWNLOAD
+            and operation.status is RuntimeOperationStatus.CANCEL_REQUESTED
+        ):
             return
         if result.direction is RunnerTransferDirection.DOWNLOAD:
             if (
@@ -134,7 +137,7 @@ class RuntimeRunnerTransferResultCoordinator:
                 or record.object.sha256 != result.sha256
             ):
                 return
-            committed = await self._state_store.mark_committed(
+            committed = await self._state_store.confirm_download_commit(
                 record.admission.transfer_id,
                 attempt_id=record.admission.attempt_id,
                 runtime_id=record.admission.runtime_id,

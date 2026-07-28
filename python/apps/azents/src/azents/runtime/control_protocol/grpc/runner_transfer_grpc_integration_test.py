@@ -20,12 +20,18 @@ from azcommon.infra.s3.service import (
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
+from azents_runtime_control.grpc_runner_transfer_client import (
+    GrpcRunnerTransferClient,
+    RunnerDownloadChunk,
+    RunnerUploadComplete,
+)
 from azents_runtime_control.proto import runtime_runner_control_pb2 as control_pb
 from azents_runtime_control.proto import runtime_runner_control_pb2_grpc as control_grpc
 from azents_runtime_control.proto import runtime_runner_transfer_pb2 as transfer_pb
 from azents_runtime_control.proto import (
     runtime_runner_transfer_pb2_grpc as transfer_grpc,
 )
+from azents_runtime_control.runner_transfer import RunnerTransferIdentity
 from azents_runtime_control.transfer import (
     MAX_TRANSFER_CHUNK_BYTES,
     MULTIPART_PART_BYTES,
@@ -330,23 +336,40 @@ async def test_default_limit_channels_keep_control_healthy_during_large_transfer
         heartbeat = await stream.read()
         assert heartbeat.heartbeat_ack.monotonic_sequence == 1
 
+        transfer_client = GrpcRunnerTransferClient(
+            transfer_grpc.RuntimeRunnerTransferStub(transfer_channel),
+            runner_auth_token="token",
+            channel=transfer_channel,
+        )
         await _ready(state, RuntimeTransferDirection.DOWNLOAD, "download-1", download)
         download_frames = [
             frame
-            async for frame in transfer_grpc.RuntimeRunnerTransferStub(
-                transfer_channel
-            ).DownloadTransfer(_download_request("download-1"), metadata=_metadata())
+            async for frame in transfer_client.download(
+                _runner_identity("download-1"),
+                timeout=5,
+            )
         ]
-        assert b"".join(frame.chunk.data for frame in download_frames[:-1]) == download
-        assert download_frames[-1].complete.actual_size == len(download)
+        assert (
+            b"".join(
+                frame.data
+                for frame in download_frames
+                if isinstance(frame, RunnerDownloadChunk)
+            )
+            == download
+        )
+        assert download_frames[-1].actual_size == len(download)
         assert all(
-            frame.ByteSize() <= MAX_TRANSFER_CHUNK_BYTES for frame in download_frames
+            len(frame.data) <= MAX_TRANSFER_CHUNK_BYTES
+            for frame in download_frames
+            if isinstance(frame, RunnerDownloadChunk)
         )
 
         await _ready(state, RuntimeTransferDirection.UPLOAD, "upload-1", upload)
-        uploaded = await transfer_grpc.RuntimeRunnerTransferStub(
-            transfer_channel
-        ).UploadTransfer(_upload_frames("upload-1", upload), metadata=_metadata())
+        uploaded = await transfer_client.upload(
+            _runner_identity("upload-1"),
+            _runner_upload_frames(upload),
+            timeout=5,
+        )
         assert uploaded.actual_size == len(upload)
         assert uploaded.sha256 == hashlib.sha256(upload).hexdigest()
         assert object_store.uploads["transfer-object:upload-1"] == upload
@@ -440,11 +463,18 @@ async def test_backpressured_transfer_keeps_runner_operation_control_healthy() -
         await _ready(
             state, RuntimeTransferDirection.DOWNLOAD, "paused-download", download
         )
-        download_stream = transfer_grpc.RuntimeRunnerTransferStub(
-            transfer_channel
-        ).DownloadTransfer(_download_request("paused-download"), metadata=_metadata())
-        first = await download_stream.read()
-        assert first.chunk.data == download[:_FRAME_BYTES]
+        transfer_client = GrpcRunnerTransferClient(
+            transfer_grpc.RuntimeRunnerTransferStub(transfer_channel),
+            runner_auth_token="token",
+            channel=transfer_channel,
+        )
+        download_stream = transfer_client.download(
+            _runner_identity("paused-download"),
+            timeout=5,
+        )
+        first = await anext(download_stream)
+        assert isinstance(first, RunnerDownloadChunk)
+        assert first.data == download[:_FRAME_BYTES]
         await asyncio.wait_for(object_store.download_blocked.wait(), timeout=1)
 
         dispatched = await control.dispatch_runner_operation(
@@ -491,14 +521,21 @@ async def test_backpressured_transfer_keeps_runner_operation_control_healthy() -
         assert replies[-1].event.payload == {"exit_code": 0}
 
         object_store.resume_download.set()
-        remainder = await _read_remaining_download_frames(download_stream)
+        remainder = [frame async for frame in download_stream]
         assert (
             b"".join(
-                [first.chunk.data, *(frame.chunk.data for frame in remainder[:-1])]
+                [
+                    first.data,
+                    *(
+                        frame.data
+                        for frame in remainder
+                        if isinstance(frame, RunnerDownloadChunk)
+                    ),
+                ]
             )
             == download
         )
-        assert remainder[-1].complete.actual_size == len(download)
+        assert remainder[-1].actual_size == len(download)
         assert runner.peers[0] != transfer.peers[0]
     finally:
         object_store.resume_download.set()
@@ -608,10 +645,17 @@ async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy(
             == "cancelled-upload-dispatch"
         )
 
-        upload_call = transfer_grpc.RuntimeRunnerTransferStub(
-            transfer_channel
-        ).UploadTransfer(
-            _upload_frames("cancelled-upload", upload), metadata=_metadata()
+        transfer_client = GrpcRunnerTransferClient(
+            transfer_grpc.RuntimeRunnerTransferStub(transfer_channel),
+            runner_auth_token="token",
+            channel=transfer_channel,
+        )
+        upload_task = asyncio.create_task(
+            transfer_client.upload(
+                _runner_identity("cancelled-upload"),
+                _runner_upload_frames(upload),
+                timeout=5,
+            )
         )
         await asyncio.wait_for(object_store.upload_part_blocked.wait(), timeout=2)
         current = await state.get("cancelled-upload")
@@ -631,9 +675,9 @@ async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy(
         )
 
         # The synthetic Runner applies the typed cancel to its active data RPC.
-        upload_call.cancel()
+        upload_task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await upload_call
+            await upload_task
         await _wait_for(lambda: bool(object_store.aborted_upload_ids))
 
         record = await state.get("cancelled-upload")
@@ -824,39 +868,27 @@ def _transfer_admission(
     )
 
 
-def _download_request(transfer_id: str) -> transfer_pb.DownloadTransferRequest:
-    return transfer_pb.DownloadTransferRequest(
-        identity=transfer_pb.TransferIdentity(
-            transfer_id=transfer_id,
-            attempt_id=f"{transfer_id}-attempt",
-            runtime_id="runtime-1",
-            runner_generation=1,
-        )
+def _runner_identity(transfer_id: str) -> RunnerTransferIdentity:
+    return RunnerTransferIdentity(
+        transfer_id=transfer_id,
+        attempt_id=f"{transfer_id}-attempt",
+        runtime_id="runtime-1",
+        runner_generation=1,
     )
 
 
-def _upload_frames(
-    transfer_id: str,
+def _runner_upload_frames(
     data: bytes,
-) -> AsyncIterator[transfer_pb.UploadTransferFrame]:
-    async def frames() -> AsyncIterator[transfer_pb.UploadTransferFrame]:
-        yield transfer_pb.UploadTransferFrame(
-            open=transfer_pb.UploadTransferOpen(
-                identity=_download_request(transfer_id).identity
-            )
-        )
+) -> AsyncIterator[RunnerDownloadChunk | RunnerUploadComplete]:
+    async def frames() -> AsyncIterator[RunnerDownloadChunk | RunnerUploadComplete]:
         for offset in range(0, len(data), _FRAME_BYTES):
-            yield transfer_pb.UploadTransferFrame(
-                chunk=transfer_pb.TransferChunk(
-                    offset=offset,
-                    data=data[offset : offset + _FRAME_BYTES],
-                )
+            yield RunnerDownloadChunk(
+                offset=offset,
+                data=data[offset : offset + _FRAME_BYTES],
             )
-        yield transfer_pb.UploadTransferFrame(
-            complete=transfer_pb.UploadTransferComplete(
-                actual_size=len(data),
-                sha256=hashlib.sha256(data).hexdigest(),
-            )
+        yield RunnerUploadComplete(
+            actual_size=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
         )
 
     return frames()
@@ -936,18 +968,6 @@ async def _wait_for_reply_request(
     await _wait_for(read)
     assert matching is not None
     return matching
-
-
-async def _read_remaining_download_frames(
-    stream: grpc.aio.UnaryStreamCall[
-        transfer_pb.DownloadTransferRequest,
-        transfer_pb.DownloadTransferFrame,
-    ],
-) -> list[transfer_pb.DownloadTransferFrame]:
-    frames: list[transfer_pb.DownloadTransferFrame] = []
-    while (frame := await stream.read()) is not grpc.aio.EOF:
-        frames.append(frame)
-    return frames
 
 
 async def _wait_for(predicate: Callable[[], bool | Awaitable[bool]]) -> None:

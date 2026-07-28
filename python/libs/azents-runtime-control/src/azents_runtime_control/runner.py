@@ -12,6 +12,11 @@ from datetime import UTC, datetime
 from typing import Protocol, TypeAlias
 
 from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
+from azents_runtime_control.runner_transfer import (
+    RunnerTransferCancel,
+    RunnerTransferIntent,
+    RunnerTransferResult,
+)
 
 JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -143,6 +148,12 @@ RunnerOperationHandler: TypeAlias = Callable[[RunnerOperationEnvelope], Awaitabl
 RunnerOperationCancelHandler: TypeAlias = Callable[
     [RunnerOperationCancel], Awaitable[None]
 ]
+RunnerTransferIntentHandler: TypeAlias = Callable[
+    [RunnerTransferIntent], Awaitable[None]
+]
+RunnerTransferCancelHandler: TypeAlias = Callable[
+    [RunnerTransferCancel], Awaitable[None]
+]
 
 
 class RunnerControlClient(Protocol):
@@ -157,6 +168,20 @@ class RunnerControlClient(Protocol):
         handler: RunnerOperationCancelHandler,
     ) -> None:
         """Set the direct operation cancellation handler."""
+        ...
+
+    def set_transfer_intent_handler(
+        self,
+        handler: RunnerTransferIntentHandler,
+    ) -> None:
+        """Set the direct metadata-only transfer admission handler."""
+        ...
+
+    def set_transfer_cancel_handler(
+        self,
+        handler: RunnerTransferCancelHandler,
+    ) -> None:
+        """Set the direct metadata-only transfer cancellation handler."""
         ...
 
     async def register_runner(
@@ -203,6 +228,13 @@ class RunnerControlClient(Protocol):
 
     async def append_runner_event(self, event: RunnerOperationEvent) -> None:
         """Append one Runner operation event."""
+        ...
+
+    async def append_runner_transfer_result(
+        self,
+        result: RunnerTransferResult,
+    ) -> None:
+        """Append one bounded metadata-only transfer result."""
         ...
 
 

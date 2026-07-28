@@ -363,7 +363,10 @@ PR title: `Runtime File Transfer [5/12]: Runner transfer client and filesystem s
 Purpose:
 
 - Implement the untrusted Runner side of both transfer directions.
-- Preserve independent data/control channels and atomic local-file semantics.
+- Preserve independent data/control channels and exact-fd local-file semantics.
+- Establish the fail-closed Phase 5 boundary for existing-destination
+  replacement until Phase 9 provides workload-inaccessible same-filesystem
+  staging.
 
 Included behavior:
 
@@ -372,11 +375,13 @@ Included behavior:
   channel even when endpoint strings match.
 - Runner advertisement and implementation of the exact protocol version and
   `file.transfer.v1` capability defined in phase 4.
-- Server-to-Runtime attempt-owned same-directory staging file, sequential write,
-  incremental SHA-256/length verification, flush/fsync, destination recheck, and
-  atomic publication.
-- Atomic no-overwrite semantics for destination races and verified replacement
-  that preserves the previous valid destination until commit.
+- Server-to-Runtime attempt-owned unnamed same-filesystem staging descriptor,
+  sequential write, incremental SHA-256/length verification, flush/fsync,
+  destination recheck, and atomic exact-fd no-replace publication.
+- Atomic no-overwrite semantics for destination races. An absent destination
+  may publish for either overwrite policy. An existing destination with
+  `overwrite=true` fails closed in Phase 5 rather than using a same-UID mutable
+  pathname fallback.
 - Runtime-to-server regular-file validation, bounded local snapshot, pre/post
   identity and size checks, checksum calculation, streaming from the snapshot,
   and cleanup.
@@ -387,13 +392,16 @@ Excluded behavior:
 
 - Provider command/environment forwarding.
 - Production feature consumer migration.
+- Existing-destination atomic replacement before Phase 9 provides a genuinely
+  workload-inaccessible same-filesystem Runner staging boundary.
 - Legacy transfer fallback.
 
 Primary validation:
 
 - Runner Ruff, formatting, Pyright, and Pytest.
-- Filesystem race, symlink, source mutation, cancellation, cleanup, checksum,
-  missing completion, and bounded-memory tests.
+- Filesystem race, symlink, source mutation, cancellation, descriptor cleanup,
+  checksum, missing completion, fail-closed existing-destination replacement,
+  and bounded-memory tests.
 - Integration with the phase 4 service using distinct underlying channels.
 
 ## Phase 6: Server-to-Runtime consumers
@@ -526,6 +534,8 @@ Purpose:
 - Deliver Runner transfer endpoint and trust configuration through both Runtime
   Providers.
 - Configure Runtime Control S3/state/limits and Helm deployment validation.
+- Provide the protected same-filesystem Runner staging boundary required for
+  atomic existing-destination replacement.
 - Enforce the exact coordinated Runner protocol and capability cutover.
 
 Included behavior:
@@ -534,6 +544,13 @@ Included behavior:
   existing TLS/auth material.
 - Docker and Kubernetes Runner environment allowlists, serialization, desired
   state comparison, and reconciliation updates.
+- Runner/workload UID or mount-namespace isolation that makes a same-filesystem
+  staging directory inaccessible to workload code while remaining available to
+  Runner. Enable `overwrite=true` replacement only when this boundary is
+  configured; never fall back to a same-UID writable staging pathname.
+- Runner staging configuration and atomic replacement from the protected
+  same-filesystem directory, preserving the previous destination until commit,
+  plus bounded cleanup of protected named staging entries.
 - Runtime Control workspace S3 composition, state backend, TTL, chunk, part,
   buffer, concurrency, reconciliation, and transfer prefix settings.
 - API Server and Worker internal coordinator endpoint, TLS trust, and
@@ -575,6 +592,10 @@ Primary validation:
   Runtime Coordination remains Redis-backed.
 - Static and rendered-manifest assertions that Runner has no object-storage
   authority.
+- Docker and Kubernetes tests proving workload code cannot read, replace, link,
+  rename, or delete protected staging entries; existing-destination
+  `overwrite=true` preserves the old file until atomic commit and remains
+  fail-closed when the boundary is absent or crosses filesystems.
 - Cutover tests proving that strict registration enforcement is activated only
   in the cumulative coordinated deployment, not by independently promoting an
   earlier implementation phase.
@@ -689,11 +710,11 @@ Verification:
 | --- | --- | --- | --- |
 | 3 | Ephemeral transfer records, leases, object metadata, cleanup state; no RDB migration | Internal S3 and transfer-state contracts | Bounded object/state foundation; existing Redis Coordination unchanged |
 | 4 | Transfer object streaming and terminal evidence | New Runner transfer and internal coordinator protobuf/services and generated clients | Runtime Control solely owns state, terminates data RPC, and correlates trusted feature/control outcomes |
-| 5 | Runner temp/snapshot files only | Runner transfer client and capability/version | Atomic local download commit and bounded upload snapshot |
+| 5 | Unnamed Runner temp/snapshot inodes only | Runner transfer client and capability/version | Atomic exact-fd no-replace download commit, fail-closed existing-destination replacement, and bounded upload snapshot |
 | 6 | Transfer snapshots from managed/provider/VFS sources | Internal `AuthorizedTransferSource` and download service interfaces | Complete-file import and inbound External Channel use the common transfer path |
 | 7 | Verified transfer object to managed destination | Internal verified-object product publication interfaces | `present_file`, Exchange, and Artifact use S3-native publication |
 | 8 | Verified transfer object to provider | Internal provider-stream consumer interface | External Channel outbound uses one Runtime upload and bounded provider delivery |
-| 9 | Deployment configuration and lifecycle evidence | Provider lifecycle payload and Runner environment contract | Exact protocol cutover and production composition |
+| 9 | Deployment configuration, protected staging, and lifecycle evidence | Provider lifecycle payload and Runner environment contract | Protected same-filesystem atomic replacement, exact protocol cutover, and production composition |
 | 10 | Synthetic fixtures and tracked validation evidence | No planned new contract | Integrated success, failure, isolation, cleanup, and prerequisite proof |
 | 11 | Living-spec metadata | Documentation contract | Current behavior becomes authoritative |
 | 12 | No retained plan state | No API change | Temporary plans are removed |
