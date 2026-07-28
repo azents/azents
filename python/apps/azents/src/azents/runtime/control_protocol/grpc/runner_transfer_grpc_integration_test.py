@@ -84,6 +84,10 @@ class _StateSink:
     async def record_runner_state(self, report: object) -> None:
         del report
 
+    async def validate_runner_registration(self, registration: object) -> bool:
+        del registration
+        return True
+
 
 class _TransferResultSink:
     async def handle(self, result: object, *, request_id: str) -> None:
@@ -735,6 +739,17 @@ def _register() -> control_pb.RunnerMessage:
             health="ok",
             workspace_path="/workspace",
             auth_credential_id="credential-1",
+            execution_policy=control_pb.RunnerExecutionPolicyEvidence(
+                snapshot_id="snapshot-1",
+                digest="d" * 64,
+                desired_generation=1,
+                module_versions={"docker": 1, "runtime.resources": 1},
+                source_versions={
+                    "profile": 1,
+                    "workspace": 1,
+                    "agent": 1,
+                },
+            ),
         ),
     )
 
