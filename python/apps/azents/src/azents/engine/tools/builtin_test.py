@@ -908,6 +908,28 @@ class TestRuntimeToolkitUpdateContext:
         assert not hasattr(capability, "key")
 
     @pytest.mark.asyncio
+    async def test_update_context_withholds_publication_until_runtime_is_ready(
+        self,
+    ) -> None:
+        """An unavailable Runtime withholds managed publication capability."""
+        publication_service = AsyncMock()
+        toolkit = _make_toolkit(
+            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+            runner_state=RuntimeRunnerState.STARTING,
+            runtime_to_server_publication_service=cast(
+                PresentFilePublicationExecutor,
+                publication_service,
+            ),
+        )
+
+        await toolkit.update_context(_make_context())
+
+        instruction_context = cast(Any, toolkit)._agents_context
+        assert instruction_context.publication_capability is None
+        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo.get_by_agent_id.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_update_context_withholds_transfer_until_runtime_is_ready(
         self,
     ) -> None:
