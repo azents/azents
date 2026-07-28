@@ -4,11 +4,10 @@ FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea5
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.1@sha256:fc93e9ecd7218e9ec8fba117af89348eef8fd2463c50c13347478769aaedd0ce /uv /uvx /bin/
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 
 ENV DOCKER_API_VERSION=1.51
-ENV DOCKER_BUILDKIT=0
-ENV COMPOSE_DOCKER_CLI_BUILD=0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -111,6 +110,7 @@ RUN pip install --no-cache-dir --break-system-packages \
 RUN playwright install-deps chromium
 
 RUN docker --version | grep -F "Docker version 28.5.2" \
+    && docker buildx version | grep -F "github.com/docker/buildx v0.29.1" \
     && docker compose version | grep -F "Docker Compose version v2.40.3" \
     && test ! -e /var/run/azents-engine/docker.sock
 

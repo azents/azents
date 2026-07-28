@@ -517,7 +517,10 @@ jobs:
             azents-runtime-runner)
               docker run --rm --entrypoint sh "${{ matrix.image }}" -ec \
                 'docker --version | grep -F "Docker version 28.5.2" &&
+                 docker buildx version | grep -F "github.com/docker/buildx v0.29.1" &&
                  docker compose version | grep -F "Docker Compose version v2.40.3" &&
+                 test -z "${DOCKER_BUILDKIT:-}" &&
+                 test -z "${COMPOSE_DOCKER_CLI_BUILD:-}" &&
                  test ! -e /var/run/azents-engine/docker.sock'
               ;;
             azents-runtime-engine)
