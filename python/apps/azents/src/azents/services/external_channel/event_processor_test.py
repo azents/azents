@@ -34,6 +34,7 @@ from azents.core.enums import (
     ExternalChannelEventStatus,
     ExternalChannelHydrationStatus,
     ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -120,6 +121,7 @@ from azents.services.external_channel.channel_action import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
+from azents.services.external_channel.discord_events import DiscordNormalizedMessage
 from azents.services.external_channel.discord_history import (
     DiscordConversationHistoryClient,
 )
@@ -181,6 +183,7 @@ async def _setup_route(
     session: AsyncSession,
     *,
     policy_paths: tuple[str, ...] | None = None,
+    provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
 ) -> tuple[str, str, str, ExternalChannelRepository]:
     workspace_result = await WorkspaceRepository().create(
         session,
@@ -235,12 +238,14 @@ async def _setup_route(
         session,
         ExternalChannelConnectionCreate(
             workspace_id=workspace_id,
-            provider=ExternalChannelProvider.SLACK,
+            provider=provider,
             transport=ExternalChannelTransport.HTTP,
             app_mode=ExternalChannelAppMode.SINGLE,
             status=ExternalChannelConnectionStatus.ACTIVE,
             provider_app_id="A1",
-            provider_tenant_id="T1",
+            provider_tenant_id=(
+                "G1" if provider is ExternalChannelProvider.DISCORD else "T1"
+            ),
             provider_bot_user_id="B1",
             http_callback_selector_hash="processor-selector",
             encrypted_credentials="ciphertext",
@@ -411,6 +416,31 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             channel_display_name=None,
             reference_mappings={},
         )
+
+    async def persist_discord_message_event_for_test(
+        self,
+        *,
+        event: ExternalChannelEvent,
+        configuration: ExternalChannelConnectionConfiguration,
+        resource: ExternalChannelResource,
+        message: DiscordNormalizedMessage,
+    ) -> ExternalChannelPersistedMessage:
+        """Expose Discord persistence through its first-binding activation path."""
+        async with self.session_manager() as session:
+            connection = await self.repository.lock_connection_for_routing(
+                session,
+                connection_id=event.connection_id,
+            )
+            assert connection is not None
+            return await self._persist_discord_message_event(
+                session=session,
+                event=event,
+                configuration=configuration,
+                connection=connection,
+                resource=resource,
+                message=message,
+                now=_at(2),
+            )
 
     async def persist_normalized_message_for_test(
         self,
@@ -2607,6 +2637,122 @@ async def test_initial_binding_release_creates_one_session_link_and_tracker(
     assert repeated is not None
     assert repeated.session_link_delivery_attempt_id == session_link.id
     assert repeated.activity_delivery_attempt_id == activity.id
+
+
+async def test_discord_first_binding_releases_context_and_creates_deliveries(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A first Discord mention immediately wakes its bound Agent session."""
+    async with rdb_session_manager() as session:
+        connection_id, _, _, repository = await _setup_route(
+            session,
+            provider=ExternalChannelProvider.DISCORD,
+        )
+        resource = await repository.create_resource_idempotent(
+            session,
+            ExternalChannelResourceCreate(
+                connection_id=connection_id,
+                resource_type=ExternalChannelResourceType.THREAD,
+                provider_resource_key="discord:G1:100",
+                labels={
+                    "provider": "discord",
+                    "guild_id": "G1",
+                    "source_channel_id": "200",
+                    "parent_channel_id": "200",
+                    "root_message_id": "100",
+                    "channel_id": "200",
+                    "thread_id": "100",
+                },
+                status=ExternalChannelResourceStatus.ACTIVE,
+                hydration_status=ExternalChannelHydrationStatus.COMPLETE,
+                hydration_cursor=None,
+                hydration_high_watermark_position=None,
+                reconciliation_boundary_received_at=_at(1),
+                reconciliation_boundary_event_id="boundary-1",
+                hydration_error_kind=None,
+                hydration_error_summary=None,
+                hydration_started_at=_at(0),
+                hydration_completed_at=_at(1),
+                latest_activity_at=_at(1),
+                unavailable_at=None,
+                deleted_at=None,
+            ),
+        )
+        admitted = await repository.admit_event(
+            session,
+            ExternalChannelEventCreate(
+                connection_id=connection_id,
+                provider_event_id="discord-gateway:session-1:1",
+                transport_envelope_id="discord-gateway:session-1:1",
+                event_type="discord_message_create",
+                provider_app_id="A1",
+                provider_tenant_id="G1",
+                provider_enterprise_id=None,
+                resource_correlation_key="G1:200",
+                eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+                envelope={"message": {}},
+                status=ExternalChannelEventStatus.ACCEPTED,
+                provider_occurred_at=_at(1),
+                received_at=_at(1),
+            ),
+        )
+        configuration = await repository.get_connection_configuration(
+            session,
+            connection_id=connection_id,
+        )
+        await session.commit()
+
+    assert configuration is not None
+    result = await _service(
+        rdb_session_manager,
+        repository,
+    ).persist_discord_message_event_for_test(
+        event=admitted.event,
+        configuration=configuration,
+        resource=resource,
+        message=DiscordNormalizedMessage(
+            tenant_id="G1",
+            channel_id="200",
+            thread_id=None,
+            parent_channel_id=None,
+            message_id="100",
+            provider_message_key="discord:G1:100",
+            provider_position="100",
+            revision_key="discord-revision-100",
+            revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+            lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            provider_user_id="U1",
+            normalized_body="Please investigate",
+            attachment_metadata=None,
+            normalized_size=len("Please investigate"),
+            provider_created_at=_at(1),
+            provider_updated_at=None,
+            invocation=True,
+        ),
+    )
+
+    assert result.control_delivery_attempt_id is not None
+    assert result.activity_delivery_attempt_id is not None
+    assert result.wake_up is not None
+    async with rdb_session_manager() as session:
+        attempts = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelDeliveryAttempt).where(
+                    RDBExternalChannelDeliveryAttempt.id.in_(
+                        (
+                            result.control_delivery_attempt_id,
+                            result.activity_delivery_attempt_id,
+                        )
+                    )
+                )
+            )
+        )
+
+    assert {attempt.operation for attempt in attempts} == {
+        ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+    }
 
 
 def test_discord_root_target_is_shared_by_session_link_and_progress() -> None:

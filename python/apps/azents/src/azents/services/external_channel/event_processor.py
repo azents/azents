@@ -1419,6 +1419,24 @@ class ExternalChannelEventProcessorService:
                             status=ExternalChannelConversationAdmissionStatus.BOUND,
                             selected_route_id=route.id,
                         )
+                    released = await self._release_pending_context(
+                        session,
+                        binding=binding,
+                        trigger_message_id=canonical_message.id,
+                        now=now,
+                        initial_activation=True,
+                        workspace_id=configuration.workspace_id,
+                        agent_id=active_agent_id,
+                        provider=ExternalChannelProvider.DISCORD,
+                    )
+                    if released is not None:
+                        control_delivery_attempt_id = (
+                            released.session_link_delivery_attempt_id
+                        )
+                        activity_delivery_attempt_id = (
+                            released.activity_delivery_attempt_id
+                        )
+                        wake_session_id = binding.agent_session_id
                 elif grant is None:
                     participant_provider_user_id = message.provider_user_id
                     if participant_provider_user_id is None:
