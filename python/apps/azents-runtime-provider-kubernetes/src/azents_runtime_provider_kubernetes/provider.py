@@ -1132,24 +1132,6 @@ class KubernetesRuntimeProvider:
         return policy
 
 
-def _unprivileged_security_context(
-    *,
-    uid: int,
-    gid: int,
-    read_only_root_filesystem: bool = False,
-) -> ContainerSecurityContext:
-    return ContainerSecurityContext(
-        privileged=False,
-        allow_privilege_escalation=False,
-        read_only_root_filesystem=read_only_root_filesystem,
-        run_as_non_root=True,
-        run_as_user=uid,
-        run_as_group=gid,
-        capabilities_add=(),
-        capabilities_drop=("ALL",),
-    )
-
-
 def _engine_security_context() -> ContainerSecurityContext:
     return ContainerSecurityContext(
         privileged=True,

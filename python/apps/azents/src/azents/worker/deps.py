@@ -87,9 +87,11 @@ from azents.services.external_channel.connection import (
 from azents.services.external_channel.credentials import (
     ExternalChannelCredentialsCodec,
 )
+from azents.services.external_channel.discord_files import DiscordChannelClient
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferService,
     ExternalChannelInboundStagingConfiguration,
+    get_discord_file_client,
     get_slack_file_client,
 )
 from azents.services.external_channel.slack_events import SlackConversationClient
@@ -258,6 +260,10 @@ def get_worker_external_channel_file_transfer_service(
         SlackConversationClient,
         Depends(get_slack_file_client),
     ],
+    discord_client: Annotated[
+        DiscordChannelClient,
+        Depends(get_discord_file_client),
+    ],
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)],
     system_settings: Annotated[SystemSettingsService, Depends(SystemSettingsService)],
     config: Annotated[Config, Depends(get_config)],
@@ -273,6 +279,7 @@ def get_worker_external_channel_file_transfer_service(
         repository=repository,
         credentials_codec=credentials_codec,
         slack_client=slack_client,
+        discord_client=discord_client,
         exchange_file_service=exchange_file_service,
         system_settings=system_settings,
         inbound_staging_configuration=(
