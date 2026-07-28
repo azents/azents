@@ -864,8 +864,7 @@
                 "chunkBytes",
                 "multipartPartBytes",
                 "repairIntervalSeconds",
-                "objectPrefix",
-                "lifecycleAcknowledgement"
+                "objectPrefix"
               ],
               "properties": {
                 "stateBackend": {
@@ -942,40 +941,6 @@
                 "objectPrefix": {
                   "type": "string",
                   "minLength": 1
-                },
-                "lifecycleAcknowledgement": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "owner",
-                    "evidenceTimestamp",
-                    "rollbackOwner"
-                  ],
-                  "properties": {
-                    "prefixExpirationHours": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "exclusiveMinimum": 0
-                    },
-                    "incompleteMultipartAbortHours": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "exclusiveMinimum": 0
-                    },
-                    "owner": {
-                      "type": "string"
-                    },
-                    "evidenceTimestamp": {
-                      "type": "string"
-                    },
-                    "rollbackOwner": {
-                      "type": "string"
-                    }
-                  }
                 }
               }
             },
