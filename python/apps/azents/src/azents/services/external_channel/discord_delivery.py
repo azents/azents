@@ -56,17 +56,27 @@ class DiscordDeliveryClient:
         """Return only after the root Discord message has a usable thread."""
         try:
             existing = await self.http_client.get(
-                f"{discord_api_base_url()}/channels/{root_message_id}",
+                (
+                    f"{discord_api_base_url()}/channels/{parent_channel_id}/messages/"
+                    f"{root_message_id}"
+                ),
                 headers={"Authorization": f"Bot {bot_token}"},
             )
         except httpx.RequestError:
             return _unknown_result()
         if existing.status_code == 200:
-            return _thread_result(
-                response=existing,
-                parent_channel_id=parent_channel_id,
-                root_message_id=root_message_id,
-            )
+            try:
+                payload: object = existing.json()
+            except ValueError:
+                return _unknown_result()
+            if not isinstance(payload, dict):
+                return _unknown_result()
+            if "thread" in payload:
+                return _thread_result(
+                    response=existing,
+                    parent_channel_id=parent_channel_id,
+                    root_message_id=root_message_id,
+                )
         if existing.status_code != 404:
             return _response_failure(existing) or _unknown_result()
         response = await self._request(
@@ -319,14 +329,17 @@ def _thread_result(
         return _unknown_result()
     if not isinstance(payload, dict):
         return _unknown_result()
-    if (
-        payload.get("id") != root_message_id
-        or payload.get("parent_id") != parent_channel_id
-    ):
+    thread = payload.get("thread") if "thread" in payload else payload
+    if not isinstance(thread, dict):
+        return _unknown_result()
+    thread_id = thread.get("id")
+    if thread.get("parent_id") != parent_channel_id:
+        return _unknown_result()
+    if not isinstance(thread_id, str) or not thread_id.isdigit():
         return _unknown_result()
     return DiscordDeliveryResult(
         status="delivered",
-        provider_message_key=None,
+        provider_message_key=f"discord-thread:{thread_id}",
         error_kind=None,
         error_summary=None,
     )

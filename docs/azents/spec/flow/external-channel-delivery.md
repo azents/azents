@@ -28,8 +28,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-26
-spec_version: 15
+last_verified_at: 2026-07-28
+spec_version: 16
 ---
 
 # External Channel Delivery and Channel Work
@@ -138,6 +138,13 @@ nonce, validates each emitted byte count against preflight size, and is bounded 
 provider request limit. The durable records retain source manifests and delivery
 evidence, never file bytes.
 
+For a Discord root-message resource, the first route-resolved outbound intent ensures
+one provider thread and records its returned channel ID on the resource under a lock.
+All later newly planned approval, Session navigation, reply, file, progress, recovery,
+and cleanup intents use that retained delivery channel. Existing threads already use
+their retained delivery channel. A failed or ambiguous thread creation is a terminal
+delivery outcome and never causes an unsafe replay.
+
 ## Activity Tracker Lifecycle
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
@@ -161,6 +168,9 @@ evidence, never file bytes.
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
+- Discord creates one Session-link control and initial checking page set through the
+  same durable activation release. Its ordered projection parts update, delete, and
+  recover independently while preserving final-reply cleanup gating.
 
 The work cycle stores its title, complete provider-neutral version-2 desired
 snapshot, desired revision, and retained provider identity. A matching Slack
@@ -233,6 +243,8 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-28** (spec_version 16) — Added reconciliation-fenced Discord initial
+  Session/work delivery and persisted root-thread targeting for all later output.
 - **2026-07-26** (spec_version 15) — Added nonce-fenced Discord approval-control
   creation and provider-aware post-decision control deletion through the normal
   delivery ledger.

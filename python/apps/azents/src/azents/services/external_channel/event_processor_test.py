@@ -120,11 +120,16 @@ from azents.services.external_channel.channel_action import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
+from azents.services.external_channel.discord_history import (
+    DiscordConversationHistoryClient,
+)
 from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
     ExternalChannelPersistedMessage,
     ExternalChannelPersistedRevision,
     ExternalChannelReleasedInvocation,
+    _provider_thread_target,  # pyright: ignore[reportPrivateUsage]
+    _session_link_payload,  # pyright: ignore[reportPrivateUsage]
     connection_authored,
 )
 from azents.services.external_channel.slack_events import (
@@ -641,6 +646,10 @@ def _service(
             SlackConversationClient,
             MagicMock(spec=SlackConversationClient),
         ),
+        discord_history_client=cast(
+            DiscordConversationHistoryClient,
+            MagicMock(spec=DiscordConversationHistoryClient),
+        ),
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
         root_agent_session_creation_service=_root_session_creation_service(),
@@ -1139,6 +1148,7 @@ async def test_bound_shortcut_uses_recorded_agent_after_route_detaches() -> None
             operation=attempt.operation,
             status=attempt.status,
             binding_id="binding-1",
+            resource_id=None,
             connection_id="connection-1",
             provider=ExternalChannelProvider.SLACK,
             encrypted_credentials="ciphertext",
@@ -2597,6 +2607,47 @@ async def test_initial_binding_release_creates_one_session_link_and_tracker(
     assert repeated is not None
     assert repeated.session_link_delivery_attempt_id == session_link.id
     assert repeated.activity_delivery_attempt_id == activity.id
+
+
+def test_discord_root_target_is_shared_by_session_link_and_progress() -> None:
+    """Discord root conversations preserve one thread-provisioning delivery target."""
+    resource = ExternalChannelResource.model_construct(
+        id="resource-1",
+        labels={
+            "provider": "discord",
+            "guild_id": "123",
+            "thread_id": "456",
+            "parent_channel_id": "789",
+            "root_message_id": "456",
+        },
+    )
+
+    target = _provider_thread_target(resource)
+    session_link = _session_link_payload(
+        provider=ExternalChannelProvider.DISCORD,
+        resource=resource,
+        session_url="https://azents.example/w/test/agents/agent/sessions/session",
+    )
+
+    assert target == {
+        "guild_id": "123",
+        "channel_id": "456",
+        "thread_parent_channel_id": "789",
+        "thread_root_message_id": "456",
+    }
+    assert {
+        key: session_link[key]
+        for key in (
+            "guild_id",
+            "channel_id",
+            "thread_parent_channel_id",
+            "thread_root_message_id",
+        )
+    } == target
+    assert session_link["text"] == (
+        "Open this Azents session: "
+        "[Open session](https://azents.example/w/test/agents/agent/sessions/session)"
+    )
 
 
 async def test_pending_context_is_trimmed_by_count_and_size(

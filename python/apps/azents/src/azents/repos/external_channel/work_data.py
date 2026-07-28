@@ -70,6 +70,7 @@ class ChannelDeliveryTarget(_Record):
     operation: ExternalChannelDeliveryOperation
     status: ExternalChannelDeliveryStatus
     binding_id: str | None
+    resource_id: str | None
     connection_id: str
     provider: ExternalChannelProvider
     encrypted_credentials: str | None

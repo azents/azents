@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 async def receive_discord_interaction(
     selector: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     service: Annotated[
         DiscordHTTPAdmissionService,
         Depends(DiscordHTTPAdmissionService),
@@ -80,6 +81,17 @@ async def receive_discord_interaction(
         ) from error
     if result.ping:
         return JSONResponse(content={"type": 1})
+    if result.response is not None:
+        if (
+            result.control_delivery_attempt_id is not None
+            and result.control_delivery_connection_id is not None
+        ):
+            background_tasks.add_task(
+                service.attempt_control_delivery,
+                connection_id=result.control_delivery_connection_id,
+                delivery_attempt_id=result.control_delivery_attempt_id,
+            )
+        return JSONResponse(content=result.response)
     return JSONResponse(
         content={
             "type": discord_interaction_response_type(result.envelope.interaction_type)

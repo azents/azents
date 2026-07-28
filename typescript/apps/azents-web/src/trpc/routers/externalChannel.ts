@@ -1,25 +1,37 @@
 import {
+  externalChannelV1AddMultiDiscordRoute,
   externalChannelV1AddMultiSlackRoute,
+  externalChannelV1ClearMultiDiscordChannelDefault,
   externalChannelV1ClearMultiSlackChannelDefault,
   externalChannelV1DecideApprovalRequest,
   externalChannelV1DisconnectConnection,
+  externalChannelV1DisconnectMultiDiscordConnection,
   externalChannelV1DisconnectMultiSlackConnection,
   externalChannelV1DisconnectSessionChannel,
   externalChannelV1GetApprovalRequest,
   externalChannelV1GetManifestGuidance,
+  externalChannelV1GetMultiDiscordConnection,
+  externalChannelV1GetMultiDiscordConnectionImpact,
+  externalChannelV1GetMultiDiscordRouteImpact,
   externalChannelV1GetMultiSlackConnection,
   externalChannelV1GetMultiSlackConnectionImpact,
   externalChannelV1GetMultiSlackRouteImpact,
   externalChannelV1ListAgentAccess,
   externalChannelV1ListConnections,
+  externalChannelV1ListMultiDiscordChannelDefaults,
+  externalChannelV1ListMultiDiscordConnections,
+  externalChannelV1ListMultiDiscordRoutes,
   externalChannelV1ListMultiSlackChannelDefaults,
   externalChannelV1ListMultiSlackConnections,
   externalChannelV1ListMultiSlackRoutes,
   externalChannelV1ListSessionChannels,
   externalChannelV1LoadMultiSlackManagementHandoff,
+  externalChannelV1ReenableMultiDiscordRoute,
   externalChannelV1ReenableMultiSlackRoute,
   externalChannelV1RemoveAccessBlock,
+  externalChannelV1RemoveMultiDiscordRoute,
   externalChannelV1RemoveMultiSlackRoute,
+  externalChannelV1ReplaceMultiDiscordChannelDefault,
   externalChannelV1ReplaceMultiSlackChannelDefault,
   externalChannelV1RevokeAccessGrant,
   externalChannelV1SetupDiscordConnection,
@@ -32,6 +44,7 @@ import {
   externalChannelV1UpdateMultiSlackConnection,
   externalChannelV1UpdateSlackConnection,
   externalChannelV1ValidateConnection,
+  externalChannelV1ValidateMultiDiscordConnection,
   externalChannelV1ValidateMultiSlackConnection,
 } from "@azents/public-client";
 import { z } from "zod/v4";
@@ -45,6 +58,7 @@ const approvalDecisionSchema = z.enum([
   "block",
 ]);
 const transportSchema = z.enum(["http", "socket"]);
+const providerSchema = z.enum(["slack", "discord"]);
 const slackCredentialsSchema = z.object({
   botToken: z.string().min(1),
   signingSecret: z.string().min(1),
@@ -112,13 +126,18 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         offset: z.number().int().min(0).default(0),
         limit: z.number().int().min(1).max(100).default(50),
       }),
     )
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1ListMultiSlackConnections({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1ListMultiDiscordConnections
+            : externalChannelV1ListMultiSlackConnections
+        )({
           client: ctx.apiClient,
           path: { handle: input.handle },
           query: { offset: input.offset, limit: input.limit },
@@ -134,12 +153,17 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
       }),
     )
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1GetMultiSlackConnection({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1GetMultiDiscordConnection
+            : externalChannelV1GetMultiSlackConnection
+        )({
           client: ctx.apiClient,
           path: { handle: input.handle, connection_id: input.connectionId },
           throwOnError: true,
@@ -270,12 +294,17 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1ValidateMultiSlackConnection({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1ValidateMultiDiscordConnection
+            : externalChannelV1ValidateMultiSlackConnection
+        )({
           client: ctx.apiClient,
           path: { handle: input.handle, connection_id: input.connectionId },
           throwOnError: true,
@@ -290,12 +319,17 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
       }),
     )
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1GetMultiSlackConnectionImpact({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1GetMultiDiscordConnectionImpact
+            : externalChannelV1GetMultiSlackConnectionImpact
+        )({
           client: ctx.apiClient,
           path: { handle: input.handle, connection_id: input.connectionId },
           throwOnError: true,
@@ -310,13 +344,18 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
         expectedGeneration: z.string().min(1),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1DisconnectMultiSlackConnection({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1DisconnectMultiDiscordConnection
+            : externalChannelV1DisconnectMultiSlackConnection
+        )({
           client: ctx.apiClient,
           path: { handle: input.handle, connection_id: input.connectionId },
           body: { expected_generation: input.expectedGeneration },
@@ -332,6 +371,7 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
         offset: z.number().int().min(0).default(0),
         limit: z.number().int().min(1).max(100).default(50),
@@ -339,7 +379,11 @@ export const externalChannelRouter = router({
     )
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1ListMultiSlackRoutes({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1ListMultiDiscordRoutes
+            : externalChannelV1ListMultiSlackRoutes
+        )({
           client: ctx.apiClient,
           path: { handle: input.handle, connection_id: input.connectionId },
           query: { offset: input.offset, limit: input.limit },
@@ -355,13 +399,18 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
         agentId: z.string().min(1),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1AddMultiSlackRoute({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1AddMultiDiscordRoute
+            : externalChannelV1AddMultiSlackRoute
+        )({
           client: ctx.apiClient,
           path: { handle: input.handle, connection_id: input.connectionId },
           body: { agent_id: input.agentId },
@@ -377,13 +426,18 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
         routeId: z.string().min(1),
       }),
     )
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1GetMultiSlackRouteImpact({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1GetMultiDiscordRouteImpact
+            : externalChannelV1GetMultiSlackRouteImpact
+        )({
           client: ctx.apiClient,
           path: {
             handle: input.handle,
@@ -402,6 +456,7 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
         routeId: z.string().min(1),
         expectedGeneration: z.string().min(1),
@@ -409,7 +464,11 @@ export const externalChannelRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1RemoveMultiSlackRoute({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1RemoveMultiDiscordRoute
+            : externalChannelV1RemoveMultiSlackRoute
+        )({
           client: ctx.apiClient,
           path: {
             handle: input.handle,
@@ -429,13 +488,18 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
         routeId: z.string().min(1),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1ReenableMultiSlackRoute({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1ReenableMultiDiscordRoute
+            : externalChannelV1ReenableMultiSlackRoute
+        )({
           client: ctx.apiClient,
           path: {
             handle: input.handle,
@@ -454,6 +518,7 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
         offset: z.number().int().min(0).default(0),
         limit: z.number().int().min(1).max(100).default(50),
@@ -461,7 +526,11 @@ export const externalChannelRouter = router({
     )
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1ListMultiSlackChannelDefaults({
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1ListMultiDiscordChannelDefaults
+            : externalChannelV1ListMultiSlackChannelDefaults
+        )({
           client: ctx.apiClient,
           path: { handle: input.handle, connection_id: input.connectionId },
           query: { offset: input.offset, limit: input.limit },
@@ -477,6 +546,7 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
         providerChannelId: z.string().min(1),
         routeId: z.string().min(1),
@@ -485,21 +555,23 @@ export const externalChannelRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1ReplaceMultiSlackChannelDefault(
-          {
-            client: ctx.apiClient,
-            path: {
-              handle: input.handle,
-              connection_id: input.connectionId,
-              provider_channel_id: input.providerChannelId,
-            },
-            body: {
-              route_id: input.routeId,
-              expected_generation: input.expectedGeneration,
-            },
-            throwOnError: true,
+        const { data } = await (
+          input.provider === "discord"
+            ? externalChannelV1ReplaceMultiDiscordChannelDefault
+            : externalChannelV1ReplaceMultiSlackChannelDefault
+        )({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            connection_id: input.connectionId,
+            provider_channel_id: input.providerChannelId,
           },
-        );
+          body: {
+            route_id: input.routeId,
+            expected_generation: input.expectedGeneration,
+          },
+          throwOnError: true,
+        });
         return data;
       } catch (error) {
         throw mapManagementError(error);
@@ -510,6 +582,7 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
+        provider: providerSchema,
         connectionId: z.string().min(1),
         providerChannelId: z.string().min(1),
         expectedGeneration: z.string().min(1),
@@ -517,7 +590,11 @@ export const externalChannelRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        await externalChannelV1ClearMultiSlackChannelDefault({
+        await (
+          input.provider === "discord"
+            ? externalChannelV1ClearMultiDiscordChannelDefault
+            : externalChannelV1ClearMultiSlackChannelDefault
+        )({
           client: ctx.apiClient,
           path: {
             handle: input.handle,

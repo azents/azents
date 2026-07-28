@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from azents.services.external_channel.discord_api import (
+    DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
     DiscordAPIClient,
     DiscordAPICredentialsInvalid,
     DiscordAPIUnavailable,
@@ -113,5 +114,38 @@ async def test_configures_interaction_endpoint_without_persisting_selector() -> 
             b"https://callbacks.example/discord/interactions/opaque-selector"
             b'"}'
         )
+    )
+    await client.http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_registers_target_guild_message_command() -> None:
+    """The provider adapter reconciles the selected-message command by name and type."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            201,
+            json={"id": "123456789012345678"},
+            request=request,
+        )
+
+    client = _client(httpx.MockTransport(handler))
+
+    command = await client.register_guild_message_command(
+        bot_token="redacted-token",
+        application_id="app-1",
+        guild_id="guild-1",
+    )
+
+    assert command.command_id == "123456789012345678"
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == "POST"
+    assert request.url.path == "/api/v10/applications/app-1/guilds/guild-1/commands"
+    assert request.headers["authorization"] == "Bot redacted-token"
+    assert request.content == (
+        b'{"name":"' + DISCORD_AZENTS_MESSAGE_COMMAND_NAME.encode() + b'","type":3}'
     )
     await client.http_client.aclose()

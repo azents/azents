@@ -23,8 +23,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-27
-spec_version: 17
+last_verified_at: 2026-07-28
+spec_version: 18
 ---
 
 # External Channel Lifecycle
@@ -64,7 +64,8 @@ gap, identity, capability, and health projections before callback activation rep
 Callback activation first persists the new selector hash and Discord Application public
 key under the unchanged credential and configuration-generation fences, commits that
 provisional PING-only authority, then asks Discord to register the endpoint. A failed
-registration clears that provisional authority and moves the connection to
+registration of the endpoint or required Guild-scoped `Ask an Azents Agent` Message
+Command clears that provisional authority and moves the connection to
 `reconnect_required`; normal interactions are rejected until the final activation
 commit. The Gateway Worker can claim only the newly activated configuration; a stale
 worker cannot continue mutation after replacement or disconnect.
@@ -92,13 +93,14 @@ check. It does not delete canonical provider content, invocation history, projec
 Session events, or unrelated grants.
 
 An Allow decision locks the connection, route, resource, binding, admission, and
-request before creating or reusing its grant and binding. Slack keeps the existing
-`waiting_hydration` activation transition. Discord has no remote-history hydration
-adapter, so Allow creates an immediately active binding, ensures active Channel Work,
-releases the retained request source through one invocation batch and mailbox item,
-then wakes the Session after commit. Repeated Allow decisions reuse the same durable
-binding, batch, and mailbox identity. Final Allow, Deny, and Block decisions create a
-provider-aware idempotent delete intent when their approval control was delivered.
+request before creating or reusing its grant and binding. Slack and Discord both keep
+the `waiting_hydration` activation transition. Discord starts bounded root/thread
+history reconciliation during waiting-binding processing and activates only after its
+event boundary clears; activation then creates or reuses the binding, work projection,
+batch, mailbox identity, Session navigation delivery, and post-commit wake-up.
+Repeated Allow decisions reuse the same durable binding, batch, and mailbox identity.
+Final Allow, Deny, and Block decisions create a provider-aware idempotent delete intent
+when their approval control was delivered.
 
 Every new file download and file-bearing publication revalidates the current Agent,
 Session, route, binding, connection, and directional capability. Binding disconnect,
@@ -179,6 +181,8 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-28** (spec_version 18) — Replaced immediate Discord Allow activation
+  with shared bounded hydration and reconciliation fences before initial work and wake.
 - **2026-07-27** (spec_version 17) — Restored `configuring` provisional PING
   authority when retrying a Discord callback activation from `reconnect_required`.
 - **2026-07-27** (spec_version 16) — Persisted controlled Discord activation

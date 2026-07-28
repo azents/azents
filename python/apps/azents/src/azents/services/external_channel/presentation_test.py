@@ -34,6 +34,7 @@ def _target(
         operation=ExternalChannelDeliveryOperation.REPLY,
         status=ExternalChannelDeliveryStatus.PENDING,
         binding_id="binding-1",
+        resource_id=None,
         connection_id="connection-1",
         provider=ExternalChannelProvider.SLACK,
         encrypted_credentials="ciphertext",

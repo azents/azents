@@ -617,9 +617,7 @@ export function WorkspaceSlackApps(
                             aria-pressed={
                               props.selectedConnectionId === connection.id
                             }
-                            onClick={() =>
-                              props.onSelectConnection(connection.id)
-                            }
+                            onClick={() => props.onSelectConnection(connection)}
                           >
                             <Text fw={600}>
                               {connection.provider_app_id ?? connection.id}

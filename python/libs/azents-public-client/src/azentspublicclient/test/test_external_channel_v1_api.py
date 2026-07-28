@@ -26,10 +26,24 @@ class TestExternalChannelV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_external_channel_v1_add_multi_discord_route(self) -> None:
+        """Test case for external_channel_v1_add_multi_discord_route
+
+        Add Multi Discord Route
+        """
+        pass
+
     def test_external_channel_v1_add_multi_slack_route(self) -> None:
         """Test case for external_channel_v1_add_multi_slack_route
 
         Add Multi Slack Route
+        """
+        pass
+
+    def test_external_channel_v1_clear_multi_discord_channel_default(self) -> None:
+        """Test case for external_channel_v1_clear_multi_discord_channel_default
+
+        Clear Multi Discord Channel Default
         """
         pass
 
@@ -51,6 +65,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_disconnect_connection
 
         Disconnect Connection
+        """
+        pass
+
+    def test_external_channel_v1_disconnect_multi_discord_connection(self) -> None:
+        """Test case for external_channel_v1_disconnect_multi_discord_connection
+
+        Disconnect Multi Discord Connection
         """
         pass
 
@@ -79,6 +100,27 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_get_manifest_guidance
 
         Get Manifest Guidance
+        """
+        pass
+
+    def test_external_channel_v1_get_multi_discord_connection(self) -> None:
+        """Test case for external_channel_v1_get_multi_discord_connection
+
+        Get Multi Discord Connection
+        """
+        pass
+
+    def test_external_channel_v1_get_multi_discord_connection_impact(self) -> None:
+        """Test case for external_channel_v1_get_multi_discord_connection_impact
+
+        Get Multi Discord Connection Impact
+        """
+        pass
+
+    def test_external_channel_v1_get_multi_discord_route_impact(self) -> None:
+        """Test case for external_channel_v1_get_multi_discord_route_impact
+
+        Get Multi Discord Route Impact
         """
         pass
 
@@ -117,6 +159,27 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_list_multi_discord_channel_defaults(self) -> None:
+        """Test case for external_channel_v1_list_multi_discord_channel_defaults
+
+        List Multi Discord Channel Defaults
+        """
+        pass
+
+    def test_external_channel_v1_list_multi_discord_connections(self) -> None:
+        """Test case for external_channel_v1_list_multi_discord_connections
+
+        List Multi Discord Connections
+        """
+        pass
+
+    def test_external_channel_v1_list_multi_discord_routes(self) -> None:
+        """Test case for external_channel_v1_list_multi_discord_routes
+
+        List Multi Discord Routes
+        """
+        pass
+
     def test_external_channel_v1_list_multi_slack_channel_defaults(self) -> None:
         """Test case for external_channel_v1_list_multi_slack_channel_defaults
 
@@ -152,6 +215,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_reenable_multi_discord_route(self) -> None:
+        """Test case for external_channel_v1_reenable_multi_discord_route
+
+        Reenable Multi Discord Route
+        """
+        pass
+
     def test_external_channel_v1_reenable_multi_slack_route(self) -> None:
         """Test case for external_channel_v1_reenable_multi_slack_route
 
@@ -166,10 +236,24 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_remove_multi_discord_route(self) -> None:
+        """Test case for external_channel_v1_remove_multi_discord_route
+
+        Remove Multi Discord Route
+        """
+        pass
+
     def test_external_channel_v1_remove_multi_slack_route(self) -> None:
         """Test case for external_channel_v1_remove_multi_slack_route
 
         Remove Multi Slack Route
+        """
+        pass
+
+    def test_external_channel_v1_replace_multi_discord_channel_default(self) -> None:
+        """Test case for external_channel_v1_replace_multi_discord_channel_default
+
+        Replace Multi Discord Channel Default
         """
         pass
 
@@ -254,6 +338,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_validate_connection
 
         Validate Connection
+        """
+        pass
+
+    def test_external_channel_v1_validate_multi_discord_connection(self) -> None:
+        """Test case for external_channel_v1_validate_multi_discord_connection
+
+        Validate Multi Discord Connection
         """
         pass
 

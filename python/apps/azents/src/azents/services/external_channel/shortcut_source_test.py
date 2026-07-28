@@ -41,12 +41,17 @@ class _Repository:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.admission: object | None = None
+        self.provider = ExternalChannelProvider.SLACK
+        self.event: object | None = None
+        self.resource_creates: list[object] = []
 
     async def get_event_by_provider_identity(
         self, *args: object, **kwargs: object
     ) -> object:
         del args, kwargs
         self.calls.append("event")
+        if self.event is not None:
+            return self.event
         return SimpleNamespace(
             id="event-1",
             connection_id="connection-1",
@@ -82,14 +87,15 @@ class _Repository:
         return SimpleNamespace(
             id="connection-1",
             app_mode=ExternalChannelAppMode.MULTI,
-            provider=ExternalChannelProvider.SLACK,
+            provider=self.provider,
         )
 
     async def create_resource_idempotent(
         self, *args: object, **kwargs: object
     ) -> object:
-        del args, kwargs
+        del kwargs
         self.calls.append("resource_create")
+        self.resource_creates.append(args[1])
         return SimpleNamespace(id="resource-1")
 
     async def lock_resource(self, *args: object, **kwargs: object) -> object:
@@ -172,6 +178,24 @@ def _source_event() -> ExternalChannelEventCreate:
     )
 
 
+def _discord_source_event() -> ExternalChannelEventCreate:
+    return ExternalChannelEventCreate(
+        connection_id="connection-1",
+        provider_event_id="discord-interaction-source:interaction-1:100",
+        transport_envelope_id=None,
+        event_type="discord_message_create",
+        provider_app_id="app-1",
+        provider_tenant_id="guild-1",
+        provider_enterprise_id=None,
+        resource_correlation_key="guild-1:channel-1",
+        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+        envelope={},
+        status=ExternalChannelEventStatus.ACCEPTED,
+        provider_occurred_at=_NOW,
+        received_at=_NOW,
+    )
+
+
 def _service(
     session: _Session, repository: _Repository
 ) -> ExternalChannelShortcutSourceService:
@@ -244,3 +268,46 @@ async def test_shortcut_source_retry_reuses_admission_without_execution_effects(
             "wake",
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_discord_message_command_source_preserves_thread_identity() -> None:
+    """Discord source materialization uses the canonical root-thread resource shape."""
+    session = _Session()
+    repository = _Repository()
+    repository.provider = ExternalChannelProvider.DISCORD
+    repository.event = SimpleNamespace(
+        id="event-1",
+        connection_id="connection-1",
+        event_type="discord_message_create",
+        provider_tenant_id="guild-1",
+        envelope={
+            "message": {
+                "id": "100",
+                "channel_id": "channel-1",
+                "guild_id": "guild-1",
+                "content": "source text",
+                "author": {"id": "user-source"},
+            }
+        },
+    )
+
+    result = await _service(session, repository).ensure(
+        shortcut_source_event=_discord_source_event(),
+        interaction_id="interaction-1",
+        now=_NOW,
+    )
+
+    assert result.admission is not None
+    assert len(repository.resource_creates) == 1
+    create = cast(Any, repository.resource_creates[0])
+    assert create.provider_resource_key == "discord:guild-1:100"
+    assert create.labels == {
+        "provider": "discord",
+        "guild_id": "guild-1",
+        "source_channel_id": "channel-1",
+        "channel_id": "channel-1",
+        "thread_id": "100",
+        "parent_channel_id": "channel-1",
+        "root_message_id": "100",
+    }

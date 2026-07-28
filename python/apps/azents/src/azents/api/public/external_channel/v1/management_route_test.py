@@ -318,7 +318,7 @@ def test_multi_app_creation_is_blocked_before_mode_aware_enablement() -> None:
 
     assert response.status_code == 503
     assert response.json() == {
-        "detail": "Slack Multi App creation is not enabled for this deployment."
+        "detail": "Multi App creation is not enabled for this deployment."
     }
     service.setup_multi_slack.assert_not_awaited()
 
@@ -327,14 +327,9 @@ def test_multi_app_creation_is_blocked_before_mode_aware_enablement() -> None:
     ("path", "service_method"),
     [
         (
-            "/external-channel/v1/workspaces/ws/agents/agent-1/"
-            "external-channels/discord",
+            "/external-channel/v1/workspaces/ws/agents/agent-1/external-channels/discord",
             "setup_discord",
-        ),
-        (
-            "/external-channel/v1/workspaces/ws/external-channels/discord/multi",
-            "setup_multi_discord",
-        ),
+        )
     ],
 )
 def test_discord_creation_is_available_without_a_rollout_flag(
@@ -367,6 +362,62 @@ def test_discord_creation_is_available_without_a_rollout_flag(
 
     assert response.status_code == 201
     getattr(service, service_method).assert_awaited_once()
+
+
+def test_discord_multi_app_creation_is_blocked_before_mode_aware_enablement() -> None:
+    """Discord Multi creation obeys the same deployment rollout gate as Slack."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+
+    response = _client(
+        service,
+        role=WorkspaceUserRole.MANAGER,
+        multi_app_enabled=False,
+    ).post(
+        "/external-channel/v1/workspaces/ws/external-channels/discord/multi",
+        json={
+            "app_id": "discord-app-1",
+            "configuration": {
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+            },
+            "credentials": {
+                "provider": "discord",
+                "bot_token": "discord-bot-token",
+            },
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Multi App creation is not enabled for this deployment."
+    }
+    service.setup_multi_discord.assert_not_awaited()
+
+
+def test_discord_multi_app_creation_succeeds_after_mode_aware_enablement() -> None:
+    """Discord Multi creation reaches the provider-correct service after rollout."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.setup_multi_discord.return_value = ManagedMultiConnectionSetup(
+        connection=_multi_connection()
+    )
+
+    response = _client(service, role=WorkspaceUserRole.MANAGER).post(
+        "/external-channel/v1/workspaces/ws/external-channels/discord/multi",
+        json={
+            "app_id": "discord-app-1",
+            "configuration": {
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+            },
+            "credentials": {
+                "provider": "discord",
+                "bot_token": "discord-bot-token",
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    service.setup_multi_discord.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -669,6 +720,154 @@ def test_member_cannot_read_workspace_multi_apps() -> None:
     service.list_multi_connections.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    ("path", "method", "payload", "service_method"),
+    [
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1",
+            "GET",
+            None,
+            "get_multi_connection",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/impact",
+            "GET",
+            None,
+            "get_multi_connection_impact",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/validate",
+            "POST",
+            None,
+            "validate_multi_connection",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1",
+            "DELETE",
+            {"expected_generation": "2026-07-25T00:00:00Z"},
+            "disconnect_multi_connection",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/agents",
+            "GET",
+            None,
+            "list_multi_routes",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/agents",
+            "POST",
+            {"agent_id": "agent-1"},
+            "add_multi_route",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/agents/route-1/impact",
+            "GET",
+            None,
+            "get_multi_route_impact",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/agents/route-1",
+            "DELETE",
+            {"expected_generation": "2026-07-25T00:00:00Z"},
+            "remove_multi_route",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/agents/route-1/reenable",
+            "POST",
+            None,
+            "reenable_multi_route",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/channel-defaults",
+            "GET",
+            None,
+            "list_multi_channel_defaults",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/channel-defaults/channel-1",
+            "PUT",
+            {
+                "route_id": "route-1",
+                "expected_generation": "2026-07-25T00:00:00Z",
+            },
+            "replace_multi_channel_default",
+        ),
+        (
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+            "connection-1/channel-defaults/channel-1",
+            "DELETE",
+            {"expected_generation": "2026-07-25T00:00:00Z"},
+            "clear_multi_channel_default",
+        ),
+    ],
+)
+def test_discord_multi_operations_keep_provider_ids_opaque(
+    path: str,
+    method: str,
+    payload: dict[str, str] | None,
+    service_method: str,
+) -> None:
+    """Every Discord management operation passes the provider fence to the service."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    getattr(service, service_method).side_effect = ExternalChannelManagementNotFound(
+        "connection-1"
+    )
+
+    response = _client(service, role=WorkspaceUserRole.MANAGER).request(
+        method,
+        path,
+        json=payload,
+    )
+
+    assert response.status_code == 404
+    assert getattr(service, service_method).await_args.kwargs["provider"] is (
+        ExternalChannelProvider.DISCORD
+    )
+
+
+@pytest.mark.parametrize(
+    ("provider", "path"),
+    [
+        (
+            ExternalChannelProvider.SLACK,
+            "/external-channel/v1/workspaces/ws/external-channels/slack/multi",
+        ),
+        (
+            ExternalChannelProvider.DISCORD,
+            "/external-channel/v1/workspaces/ws/external-channels/discord/multi",
+        ),
+    ],
+)
+def test_multi_lists_are_provider_scoped(
+    provider: ExternalChannelProvider,
+    path: str,
+) -> None:
+    """Slack and Discord lists cannot enumerate each other's Multi Apps."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.list_multi_connections.return_value = []
+
+    response = _client(service, role=WorkspaceUserRole.MANAGER).get(path)
+
+    assert response.status_code == 200
+    service.list_multi_connections.assert_awaited_once_with(
+        workspace_id="workspace-1",
+        provider=provider,
+        offset=0,
+        limit=50,
+    )
+
+
 def test_multi_route_removal_rejects_stale_generation() -> None:
     """Stale destructive Multi mutations surface one conflict response."""
     service = AsyncMock(spec=ExternalChannelManagementService)
@@ -706,6 +905,7 @@ def test_multi_catalog_pagination_and_cross_workspace_not_found() -> None:
     service.list_multi_routes.assert_awaited_once_with(
         workspace_id="workspace-1",
         connection_id="foreign-connection",
+        provider=ExternalChannelProvider.SLACK,
         offset=10,
         limit=25,
     )
@@ -742,6 +942,7 @@ def test_multi_connection_impact_returns_generation_fenced_preview() -> None:
     service.get_multi_connection_impact.assert_awaited_once_with(
         workspace_id="workspace-1",
         connection_id="multi-connection-1",
+        provider=ExternalChannelProvider.SLACK,
     )
 
 
@@ -780,12 +981,22 @@ def test_openapi_includes_management_but_excludes_provider_callback() -> None:
     assert "post" in paths[discord_single_path]
     assert discord_multi_path in paths
     assert "post" in paths[discord_multi_path]
+    assert "get" in paths[discord_multi_path]
     discord_single_update_path = f"{connection_path}/discord"
     assert discord_single_update_path in paths
     assert "put" in paths[discord_single_update_path]
     discord_multi_update_path = f"{discord_multi_path}/{{connection_id}}"
     assert discord_multi_update_path in paths
     assert "put" in paths[discord_multi_update_path]
+    assert "get" in paths[discord_multi_update_path]
+    assert f"{discord_multi_update_path}/validate" in paths
+    assert f"{discord_multi_update_path}/impact" in paths
+    assert f"{discord_multi_update_path}/agents" in paths
+    assert f"{discord_multi_update_path}/agents/{{route_id}}/impact" in paths
+    assert f"{discord_multi_update_path}/channel-defaults" in paths
+    assert (
+        f"{discord_multi_update_path}/channel-defaults/{{provider_channel_id}}" in paths
+    )
     assert not any(
         "multi" in path and "/agents/{agent_id}/external-channels" in path
         for path in paths

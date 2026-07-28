@@ -29,8 +29,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-07-27
-spec_version: 9
+last_verified_at: 2026-07-28
+spec_version: 10
 ---
 
 # External Channel Authorization
@@ -136,6 +136,8 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-28** (spec_version 10) — Verified that Discord selector and approval
+  bindings use the shared hydration-fenced activation and source-provenance boundary.
 - **2026-07-27** (spec_version 9) — Added route-scoped open human access by
   default, an opt-in external-bot admission setting, connected-bot loop exclusion,
   and the rule that rejected author classes never enter releasable pending context.

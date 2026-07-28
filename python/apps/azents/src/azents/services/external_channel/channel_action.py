@@ -451,6 +451,33 @@ class ExternalChannelActionService:
         files = _outbound_files(payload.get("files"))
         if files is None:
             return _discord_invalid_payload()
+        delivery_channel_id = channel_id
+        parent_channel_id = payload.get("thread_parent_channel_id")
+        root_message_id = payload.get("thread_root_message_id")
+        if parent_channel_id is not None or root_message_id is not None:
+            if (
+                not isinstance(parent_channel_id, str)
+                or not parent_channel_id.isdigit()
+                or not isinstance(root_message_id, str)
+                or root_message_id != channel_id
+            ):
+                return _discord_invalid_payload()
+            thread = await self.discord_client.ensure_thread(
+                bot_token=bot_token,
+                parent_channel_id=parent_channel_id,
+                root_message_id=root_message_id,
+            )
+            if thread.status != "delivered":
+                return thread
+            resolved_thread_id = _discord_thread_channel_id(thread.provider_message_key)
+            if resolved_thread_id is None:
+                return _discord_invalid_payload()
+            delivery_channel_id = resolved_thread_id
+            if target.resource_id is not None:
+                await self._record_discord_delivery_channel(
+                    resource_id=target.resource_id,
+                    delivery_channel_id=resolved_thread_id,
+                )
         match target.operation:
             case (
                 ExternalChannelDeliveryOperation.REPLY
@@ -460,23 +487,6 @@ class ExternalChannelActionService:
                 text = payload.get("text")
                 if not isinstance(text, str):
                     return _discord_invalid_payload()
-                parent_channel_id = payload.get("thread_parent_channel_id")
-                root_message_id = payload.get("thread_root_message_id")
-                if parent_channel_id is not None or root_message_id is not None:
-                    if (
-                        not isinstance(parent_channel_id, str)
-                        or not parent_channel_id.isdigit()
-                        or not isinstance(root_message_id, str)
-                        or root_message_id != channel_id
-                    ):
-                        return _discord_invalid_payload()
-                    thread = await self.discord_client.ensure_thread(
-                        bot_token=bot_token,
-                        parent_channel_id=parent_channel_id,
-                        root_message_id=root_message_id,
-                    )
-                    if thread.status != "delivered":
-                        return thread
                 if files:
                     runtime_files = [
                         file
@@ -518,7 +528,7 @@ class ExternalChannelActionService:
                     return await self.discord_client.create_file_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
-                        channel_id=channel_id,
+                        channel_id=delivery_channel_id,
                         content=_discord_agent_content(target, text),
                         files=tuple(
                             DiscordOutboundFile(
@@ -540,7 +550,7 @@ class ExternalChannelActionService:
                 return await self.discord_client.create_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
-                    channel_id=channel_id,
+                    channel_id=delivery_channel_id,
                     content=_discord_agent_content(target, text),
                     delivery_attempt_id=target.delivery_attempt_id,
                 )
@@ -555,7 +565,7 @@ class ExternalChannelActionService:
                 return await self.discord_client.update_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
-                    channel_id=channel_id,
+                    channel_id=delivery_channel_id,
                     message_id=message_id,
                     content=_discord_agent_content(target, text),
                 )
@@ -568,11 +578,26 @@ class ExternalChannelActionService:
                     return _discord_invalid_payload()
                 return await self.discord_client.delete_message(
                     bot_token=bot_token,
-                    channel_id=channel_id,
+                    channel_id=delivery_channel_id,
                     message_id=message_id,
                 )
             case _ as unreachable:
                 assert_never(unreachable)
+
+    async def _record_discord_delivery_channel(
+        self,
+        *,
+        resource_id: str,
+        delivery_channel_id: str,
+    ) -> None:
+        """Persist a provisioned Discord thread outside the provider mutation."""
+        async with self.session_manager() as session:
+            await self.repository.record_discord_delivery_channel(
+                session,
+                resource_id=resource_id,
+                delivery_channel_id=delivery_channel_id,
+            )
+            await session.commit()
 
     async def _deliver_slack(
         self,
@@ -728,6 +753,17 @@ def _provider_message_ts(value: object) -> str | None:
         return None
     message_ts = value.rsplit(":", 1)[-1]
     return message_ts or None
+
+
+def _discord_thread_channel_id(value: object) -> str | None:
+    """Extract one validated Discord thread channel from a transient result."""
+    if not isinstance(value, str):
+        return None
+    prefix = "discord-thread:"
+    thread_id = value.removeprefix(prefix)
+    if thread_id == value or not thread_id.isdigit():
+        return None
+    return thread_id
 
 
 def _discord_provider_message_id(

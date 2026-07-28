@@ -95,6 +95,14 @@ from azents.services.external_channel.discord_events import (
     DiscordNormalizedMessage,
     normalize_projected_discord_event,
 )
+from azents.services.external_channel.discord_history import (
+    DiscordConversationHistoryClient,
+    DiscordHistoryCredentialsInvalid,
+    DiscordHistoryPermissionDenied,
+    DiscordHistoryProviderError,
+    DiscordHistoryRateLimited,
+    DiscordHistoryResourceUnavailable,
+)
 from azents.services.external_channel.presentation import (
     normalize_slack_agent_name,
     prepend_agent_blocks,
@@ -160,6 +168,22 @@ def get_slack_conversation_client(
 ) -> SlackConversationClient:
     """Provide the Slack conversation adapter."""
     return SlackConversationClient(http_client)
+
+
+async def get_discord_history_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Provide bounded Discord history-hydration HTTP transport."""
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        yield client
+
+
+def get_discord_conversation_history_client(
+    http_client: Annotated[
+        httpx.AsyncClient,
+        Depends(get_discord_history_http_client),
+    ],
+) -> DiscordConversationHistoryClient:
+    """Provide the Discord bounded-history adapter."""
+    return DiscordConversationHistoryClient(http_client)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -254,6 +278,10 @@ class ExternalChannelEventProcessorService:
     slack_client: Annotated[
         SlackConversationClient,
         Depends(get_slack_conversation_client),
+    ]
+    discord_history_client: Annotated[
+        DiscordConversationHistoryClient,
+        Depends(get_discord_conversation_history_client),
     ]
     agent_repository: Annotated[
         AgentRepository,
@@ -547,9 +575,70 @@ class ExternalChannelEventProcessorService:
             )
         reconciled = 0
         for binding_id in binding_ids:
+            await self._hydrate_waiting_discord_binding(binding_id=binding_id)
             if await self.reconcile_binding(binding_id=binding_id):
                 reconciled += 1
         return reconciled
+
+    async def _hydrate_waiting_discord_binding(self, *, binding_id: str) -> None:
+        """Start deferred Discord history only after a durable binding exists."""
+        async with self.session_manager() as session:
+            binding = await self.repository.get_binding(session, binding_id=binding_id)
+            if binding is None:
+                return
+            route = await self.repository.get_agent_route(
+                session,
+                route_id=binding.route_id,
+            )
+            resource = await self.repository.get_resource(
+                session,
+                resource_id=binding.resource_id,
+            )
+            if (
+                route is None
+                or resource is None
+                or _hydration_terminal(resource.hydration_status)
+            ):
+                return
+            configuration = await self.repository.get_connection_configuration(
+                session,
+                connection_id=route.connection_id,
+            )
+        if (
+            configuration is None
+            or configuration.provider is not ExternalChannelProvider.DISCORD
+            or configuration.encrypted_credentials is None
+        ):
+            return
+        credentials = self.credentials_codec.decrypt(
+            configuration.encrypted_credentials
+        )
+        try:
+            await self._hydrate_discord_resource(
+                configuration=configuration,
+                resource_id=resource.id,
+                bot_token=credentials.bot_token,
+            )
+        except DiscordHistoryRateLimited:
+            logger.info(
+                "Deferred Discord waiting-binding hydration due to rate limiting",
+                extra={"external_channel_binding_id": binding_id},
+            )
+        except DiscordHistoryPermissionDenied:
+            await self._mark_connection_reconnect_required(
+                connection_id=configuration.id,
+                reason="permission_denied",
+            )
+        except DiscordHistoryCredentialsInvalid:
+            await self._mark_connection_reconnect_required(
+                connection_id=configuration.id,
+                reason="credentials_invalid",
+            )
+        except DiscordHistoryProviderError:
+            logger.info(
+                "Deferred Discord waiting-binding hydration is temporarily unavailable",
+                extra={"external_channel_binding_id": binding_id},
+            )
 
     async def reconcile_binding(self, *, binding_id: str) -> bool:
         """Create the initial invocation batch when every activation fence passes."""
@@ -653,6 +742,7 @@ class ExternalChannelEventProcessorService:
                 initial_activation=True,
                 workspace_id=configuration.workspace_id,
                 agent_id=active_agent_id,
+                provider=configuration.provider,
             )
             if released is None:
                 return False
@@ -962,6 +1052,12 @@ class ExternalChannelEventProcessorService:
                         provider_resource_key=resource_key,
                     )
                 if resource is None:
+                    source_channel_id = normalized.channel_id
+                    thread_channel_id = normalized.thread_id
+                    parent_channel_id = (
+                        normalized.parent_channel_id or source_channel_id
+                    )
+                    root_message_id = normalized.thread_id or normalized.message_id
                     resource = await self.repository.create_resource_idempotent(
                         session,
                         ExternalChannelResourceCreate(
@@ -971,21 +1067,23 @@ class ExternalChannelEventProcessorService:
                             labels={
                                 "provider": "discord",
                                 "guild_id": tenant_id,
-                                "channel_id": (
-                                    normalized.parent_channel_id
-                                    or normalized.channel_id
+                                "source_channel_id": source_channel_id,
+                                "parent_channel_id": parent_channel_id,
+                                "root_message_id": root_message_id,
+                                **(
+                                    {"thread_channel_id": thread_channel_id}
+                                    if thread_channel_id is not None
+                                    else {}
                                 ),
-                                "thread_ts": (
-                                    normalized.thread_id or normalized.message_id
+                                **(
+                                    {"delivery_channel_id": thread_channel_id}
+                                    if thread_channel_id is not None
+                                    else {}
                                 ),
-                                "thread_id": (
-                                    normalized.thread_id or normalized.message_id
-                                ),
-                                "parent_channel_id": (
-                                    normalized.parent_channel_id
-                                    or normalized.channel_id
-                                ),
-                                "root_message_id": normalized.message_id,
+                                # Existing delivery payload construction uses this
+                                # canonical root identity until thread provisioning.
+                                "channel_id": parent_channel_id,
+                                "thread_id": root_message_id,
                             },
                             status=ExternalChannelResourceStatus.ACTIVE,
                             hydration_status=ExternalChannelHydrationStatus.PENDING,
@@ -1026,6 +1124,49 @@ class ExternalChannelEventProcessorService:
                 persisted.wake_up.session_id
             )
             await self.session_lifecycle.send_session_wake_up(persisted.wake_up)
+        if persisted.hydration_required:
+            if configuration.encrypted_credentials is None:
+                raise DiscordEventExcluded(
+                    "Discord history credentials are unavailable."
+                )
+            credentials = self.credentials_codec.decrypt(
+                configuration.encrypted_credentials
+            )
+            try:
+                await self._hydrate_discord_resource(
+                    configuration=configuration,
+                    resource_id=persisted.resource_id,
+                    bot_token=credentials.bot_token,
+                )
+            except DiscordHistoryRateLimited as error:
+                now = _now()
+                raise _DeferredEvent(
+                    retry_at=now
+                    + datetime.timedelta(seconds=error.retry_after_seconds),
+                    error_kind="discord_rate_limited",
+                    error_summary="Discord delayed inbound conversation hydration.",
+                ) from error
+            except DiscordHistoryPermissionDenied as error:
+                await self._mark_connection_reconnect_required(
+                    connection_id=event.connection_id,
+                    reason="permission_denied",
+                )
+                raise _ConnectionUnavailable("permission_denied") from error
+            except DiscordHistoryCredentialsInvalid as error:
+                await self._mark_connection_reconnect_required(
+                    connection_id=event.connection_id,
+                    reason="credentials_invalid",
+                )
+                raise _ConnectionUnavailable("credentials_invalid") from error
+            except DiscordHistoryProviderError as error:
+                now = _now()
+                raise _DeferredEvent(
+                    retry_at=now + _retry_delay(event.attempt_count),
+                    error_kind="discord_temporarily_unavailable",
+                    error_summary=(
+                        "Discord conversation hydration is temporarily unavailable."
+                    ),
+                ) from error
         await self._complete_event(
             event,
             eligibility_state=ExternalChannelEventEligibilityState.PROCESSED,
@@ -1168,7 +1309,10 @@ class ExternalChannelEventProcessorService:
             await session.commit()
             return ExternalChannelPersistedMessage(
                 resource_id=resource.id,
-                hydration_required=False,
+                hydration_required=(
+                    message.invocation
+                    and not _hydration_terminal(resource.hydration_status)
+                ),
                 control_delivery_attempt_id=None,
                 activity_delivery_attempt_id=None,
                 wake_up=None,
@@ -1191,6 +1335,7 @@ class ExternalChannelEventProcessorService:
             trim=trim,
         )
         control_delivery_attempt_id = None
+        activity_delivery_attempt_id = None
         wake_session_id: str | None = None
         principal_id = canonical_message.principal_id
         if principal_id is not None and _route_accepts_author(
@@ -1241,6 +1386,7 @@ class ExternalChannelEventProcessorService:
                     provider=ExternalChannelProvider.DISCORD,
                 )
                 if released is not None:
+                    activity_delivery_attempt_id = released.activity_delivery_attempt_id
                     wake_session_id = binding.agent_session_id
             elif message.invocation and not blocked:
                 if binding is None and authorized:
@@ -1273,23 +1419,6 @@ class ExternalChannelEventProcessorService:
                             status=ExternalChannelConversationAdmissionStatus.BOUND,
                             selected_route_id=route.id,
                         )
-                    if (
-                        persisted_revision.applied
-                        and message.revision_kind
-                        is ExternalChannelMessageRevisionKind.ORIGINAL
-                    ):
-                        released = await self._release_pending_context(
-                            session,
-                            binding=binding,
-                            trigger_message_id=canonical_message.id,
-                            now=now,
-                            initial_activation=False,
-                            workspace_id=configuration.workspace_id,
-                            agent_id=active_agent_id,
-                            provider=ExternalChannelProvider.DISCORD,
-                        )
-                        if released is not None:
-                            wake_session_id = binding.agent_session_id
                 elif grant is None:
                     participant_provider_user_id = message.provider_user_id
                     if participant_provider_user_id is None:
@@ -1326,9 +1455,12 @@ class ExternalChannelEventProcessorService:
         await session.commit()
         return ExternalChannelPersistedMessage(
             resource_id=resource.id,
-            hydration_required=False,
+            hydration_required=(
+                message.invocation
+                and not _hydration_terminal(resource.hydration_status)
+            ),
             control_delivery_attempt_id=control_delivery_attempt_id,
-            activity_delivery_attempt_id=None,
+            activity_delivery_attempt_id=activity_delivery_attempt_id,
             wake_up=(
                 SessionWakeUp(session_id=wake_session_id)
                 if wake_session_id is not None
@@ -3282,6 +3414,211 @@ class ExternalChannelEventProcessorService:
             error_summary=None,
         )
 
+    async def _hydrate_discord_resource(
+        self,
+        *,
+        configuration: ExternalChannelConnectionConfiguration,
+        resource_id: str,
+        bot_token: str,
+    ) -> None:
+        """Reconcile bounded Discord root/thread history through canonical revisions."""
+        now = _now()
+        async with self.session_manager() as session:
+            connection = await self.repository.lock_connection_for_routing(
+                session,
+                connection_id=configuration.id,
+            )
+            if connection is None:
+                raise _HydrationRoutingUnavailable
+            resource = await self.repository.mark_resource_hydration_running(
+                session,
+                resource_id=resource_id,
+                started_at=now,
+            )
+            if resource is None:
+                raise RuntimeError("External Channel resource disappeared.")
+            await self.repository.lock_active_binding_by_resource(
+                session,
+                resource_id=resource_id,
+            )
+            await session.commit()
+        if _hydration_terminal(resource.hydration_status):
+            return
+        labels = resource.labels or {}
+        guild_id = labels.get("guild_id")
+        source_channel_id = labels.get("source_channel_id")
+        root_message_id = labels.get("root_message_id")
+        thread_channel_id = labels.get("thread_channel_id")
+        if (
+            not isinstance(guild_id, str)
+            or not guild_id
+            or not isinstance(source_channel_id, str)
+            or not source_channel_id
+            or not isinstance(root_message_id, str)
+            or not root_message_id
+            or thread_channel_id is not None
+            and (not isinstance(thread_channel_id, str) or not thread_channel_id)
+        ):
+            raise RuntimeError("External Channel Discord resource labels are invalid.")
+        cursor = resource.hydration_cursor
+        bounded = False
+        high_watermark = resource.hydration_high_watermark_position
+        try:
+            for _ in range(_HYDRATION_MAX_PAGES):
+                page = await self.discord_history_client.fetch_thread_page(
+                    bot_token=bot_token,
+                    guild_id=guild_id,
+                    source_channel_id=source_channel_id,
+                    root_message_id=root_message_id,
+                    thread_channel_id=thread_channel_id,
+                    cursor=cursor,
+                    limit=_HYDRATION_PAGE_SIZE,
+                    connected_bot_user_id=configuration.provider_bot_user_id,
+                )
+                latest_activity = None
+                async with self.session_manager() as session:
+                    connection = await self.repository.lock_connection_for_routing(
+                        session,
+                        connection_id=configuration.id,
+                    )
+                    if connection is None:
+                        raise _HydrationRoutingUnavailable
+                    binding_snapshot = (
+                        await self.repository.get_active_binding_by_resource(
+                            session,
+                            resource_id=resource_id,
+                        )
+                    )
+                    route = None
+                    if binding_snapshot is not None:
+                        route = await self.repository.get_routable_route_by_id(
+                            session,
+                            route_id=binding_snapshot.route_id,
+                        )
+                        if route is None or route.connection_id != connection.id:
+                            raise _HydrationRoutingUnavailable
+                    current_resource = await self.repository.lock_resource(
+                        session,
+                        resource_id=resource_id,
+                    )
+                    if current_resource is None:
+                        raise RuntimeError("External Channel resource disappeared.")
+                    binding = await self.repository.lock_active_binding_by_resource(
+                        session,
+                        resource_id=resource_id,
+                    )
+                    if (binding_snapshot is None) != (binding is None) or (
+                        binding_snapshot is not None
+                        and binding is not None
+                        and (
+                            binding_snapshot.id != binding.id
+                            or binding_snapshot.route_id != binding.route_id
+                        )
+                    ):
+                        raise _HydrationRoutingUnavailable
+                    for history_message in page.messages:
+                        if connection_authored(configuration, history_message):
+                            continue
+                        persisted_revision = await self._persist_normalized_message(
+                            session,
+                            resource=current_resource,
+                            message=history_message,
+                            source_event_id=None,
+                            now=_now(),
+                            original_url=None,
+                            reference_mappings={},
+                            provider=ExternalChannelProvider.DISCORD,
+                        )
+                        trim = (
+                            ExternalChannelPendingContextTrim(
+                                deleted_message_count=0,
+                                deleted_size=0,
+                                retained_message_count=0,
+                                retained_size=0,
+                            )
+                            if route is None
+                            else await self._project_current_revision(
+                                session,
+                                route=route,
+                                resource=current_resource,
+                                message=persisted_revision.message,
+                                provider_position=history_message.provider_position,
+                                now=_now(),
+                                applied=persisted_revision.applied,
+                            )
+                        )
+                        if route is not None:
+                            binding = await self._record_trim(
+                                session,
+                                route=route,
+                                resource=current_resource,
+                                binding=binding,
+                                trim=trim,
+                            )
+                        if trim.deleted_message_count or trim.deleted_size:
+                            bounded = True
+                        if (
+                            latest_activity is None
+                            or history_message.provider_created_at is not None
+                            and history_message.provider_created_at > latest_activity
+                        ):
+                            latest_activity = history_message.provider_created_at
+                        if (
+                            high_watermark is None
+                            or history_message.provider_position > high_watermark
+                        ):
+                            high_watermark = history_message.provider_position
+                    cursor = page.next_cursor
+                    await self.repository.update_resource_hydration_cursor(
+                        session,
+                        resource_id=resource_id,
+                        cursor=cursor,
+                        high_watermark_position=high_watermark,
+                        latest_activity_at=latest_activity,
+                    )
+                    await session.commit()
+                if cursor is None:
+                    break
+            else:
+                bounded = True
+        except _HydrationRoutingUnavailable:
+            await self._complete_hydration(
+                configuration=configuration,
+                resource_id=resource_id,
+                status=ExternalChannelHydrationStatus.INCOMPLETE,
+                error_kind="routing_unavailable",
+                error_summary="External Channel routing became unavailable.",
+            )
+            return
+        except DiscordHistoryResourceUnavailable:
+            await self._complete_hydration(
+                configuration=configuration,
+                resource_id=resource_id,
+                status=ExternalChannelHydrationStatus.INCOMPLETE,
+                error_kind="resource_unavailable",
+                error_summary="Discord conversation history is unavailable to the App.",
+            )
+            async with self.session_manager() as session:
+                await self.repository.terminate_resource_for_provider_loss(
+                    session,
+                    resource_id=resource_id,
+                    reason="resource_unavailable",
+                    now=_now(),
+                )
+                await session.commit()
+            return
+        await self._complete_hydration(
+            configuration=configuration,
+            resource_id=resource_id,
+            status=(
+                ExternalChannelHydrationStatus.BOUNDED
+                if bounded or cursor is not None
+                else ExternalChannelHydrationStatus.COMPLETE
+            ),
+            error_kind=None,
+            error_summary=None,
+        )
+
     async def _complete_hydration(
         self,
         *,
@@ -3405,27 +3742,6 @@ class ExternalChannelEventProcessorService:
             binding_id=binding.id,
             desired_progress_payload=checking_progress().model_dump(mode="json"),
         )
-        if provider is ExternalChannelProvider.DISCORD:
-            await self.repository.delete_pending_context_ids(
-                session,
-                pending_context_ids=[item.id for item in pending],
-            )
-            if not initial_activation:
-                await self.repository.advance_binding_projection(
-                    session,
-                    binding_id=binding.id,
-                    projected_through_position=pending[-1].provider_position,
-                )
-            return ExternalChannelReleasedInvocation(
-                batch=batch,
-                session_link_delivery_attempt_id=None,
-                activity_delivery_attempt_id=None,
-            )
-        presentation = render_slack_progress(
-            checking_progress(),
-            work_id=work.id,
-            desired_progress_revision=work.desired_progress_revision,
-        )
         resource = await self.repository.get_resource(
             session,
             resource_id=binding.resource_id,
@@ -3448,7 +3764,11 @@ class ExternalChannelEventProcessorService:
             )
             if session_url is None:
                 raise RuntimeError("External Channel Session URL is unavailable.")
-            session_link = render_slack_session_link(session_url)
+            session_link_payload = _session_link_payload(
+                provider=provider,
+                resource=resource,
+                session_url=session_url,
+            )
             session_link_attempt = (
                 await self.repository.create_delivery_attempt_idempotent(
                     session,
@@ -3460,11 +3780,7 @@ class ExternalChannelEventProcessorService:
                         channel_action_id=None,
                         binding_id=binding.id,
                         operation=(ExternalChannelDeliveryOperation.CONTROL_MESSAGE),
-                        request_payload={
-                            **_provider_thread_target(resource),
-                            "text": session_link.text,
-                            "blocks": session_link.blocks,
-                        },
+                        request_payload=session_link_payload,
                         status=ExternalChannelDeliveryStatus.PENDING,
                         provider_message_key=None,
                         error_kind=None,
@@ -3476,28 +3792,48 @@ class ExternalChannelEventProcessorService:
             )
             if session_link_attempt.status is ExternalChannelDeliveryStatus.PENDING:
                 session_link_attempt_id = session_link_attempt.id
-        activity_attempt = await self.repository.create_delivery_attempt_idempotent(
-            session,
-            ExternalChannelDeliveryAttemptCreate(
-                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                origin_id=work.id,
-                channel_action_id=None,
-                binding_id=binding.id,
-                operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                request_payload={
-                    **_activity_provider_target(resource, work),
-                    "text": presentation.text,
-                    "blocks": presentation.blocks,
-                    "desired_progress_revision": work.desired_progress_revision,
-                },
-                status=ExternalChannelDeliveryStatus.PENDING,
-                provider_message_key=None,
-                error_kind=None,
-                error_summary=None,
-                attempted_at=None,
-                completed_at=None,
-            ),
-        )
+        if provider is ExternalChannelProvider.DISCORD:
+            activity_delivery_attempt_id = (
+                await self.work_repository.ensure_initial_discord_progress(
+                    session,
+                    work_id=work.id,
+                    binding_id=binding.id,
+                    labels=resource.labels,
+                )
+            )
+        else:
+            presentation = render_slack_progress(
+                checking_progress(),
+                work_id=work.id,
+                desired_progress_revision=work.desired_progress_revision,
+            )
+            activity_attempt = await self.repository.create_delivery_attempt_idempotent(
+                session,
+                ExternalChannelDeliveryAttemptCreate(
+                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                    origin_id=work.id,
+                    channel_action_id=None,
+                    binding_id=binding.id,
+                    operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                    request_payload={
+                        **_activity_provider_target(resource, work),
+                        "text": presentation.text,
+                        "blocks": presentation.blocks,
+                        "desired_progress_revision": work.desired_progress_revision,
+                    },
+                    status=ExternalChannelDeliveryStatus.PENDING,
+                    provider_message_key=None,
+                    error_kind=None,
+                    error_summary=None,
+                    attempted_at=None,
+                    completed_at=None,
+                ),
+            )
+            activity_delivery_attempt_id = (
+                activity_attempt.id
+                if activity_attempt.status is ExternalChannelDeliveryStatus.PENDING
+                else None
+            )
         await self.repository.delete_pending_context_ids(
             session,
             pending_context_ids=[item.id for item in pending],
@@ -3511,11 +3847,7 @@ class ExternalChannelEventProcessorService:
         return ExternalChannelReleasedInvocation(
             batch=batch,
             session_link_delivery_attempt_id=session_link_attempt_id,
-            activity_delivery_attempt_id=(
-                activity_attempt.id
-                if activity_attempt.status is ExternalChannelDeliveryStatus.PENDING
-                else None
-            ),
+            activity_delivery_attempt_id=activity_delivery_attempt_id,
         )
 
     async def _activate_binding_after_wake(
@@ -3781,8 +4113,33 @@ def _activity_provider_target(
 def _provider_thread_target(
     resource: ExternalChannelResource,
 ) -> dict[str, object]:
-    """Build one persisted Slack thread target without credentials."""
+    """Build one persisted provider conversation target without credentials."""
     labels = resource.labels or {}
+    if labels.get("provider") == ExternalChannelProvider.DISCORD.value:
+        guild_id = labels.get("guild_id")
+        thread_id = labels.get("thread_id")
+        if (
+            not isinstance(guild_id, str)
+            or not guild_id
+            or not isinstance(thread_id, str)
+            or not thread_id
+        ):
+            raise RuntimeError("External Channel Discord resource labels are invalid.")
+        target: dict[str, object] = {
+            "guild_id": guild_id,
+            "channel_id": thread_id,
+        }
+        parent_channel_id = labels.get("parent_channel_id")
+        root_message_id = labels.get("root_message_id")
+        if (
+            isinstance(parent_channel_id, str)
+            and parent_channel_id
+            and isinstance(root_message_id, str)
+            and root_message_id == thread_id
+        ):
+            target["thread_parent_channel_id"] = parent_channel_id
+            target["thread_root_message_id"] = root_message_id
+        return target
     tenant_id = labels.get("tenant_id")
     channel_id = labels.get("channel_id")
     thread_ts = labels.get("thread_ts")
@@ -3799,6 +4156,26 @@ def _provider_thread_target(
         "tenant_id": tenant_id,
         "channel_id": channel_id,
         "thread_ts": thread_ts,
+    }
+
+
+def _session_link_payload(
+    *,
+    provider: ExternalChannelProvider,
+    resource: ExternalChannelResource,
+    session_url: str,
+) -> dict[str, object]:
+    """Build one provider-native Session-link control from canonical state."""
+    if provider is ExternalChannelProvider.DISCORD:
+        return {
+            **_provider_thread_target(resource),
+            "text": f"Open this Azents session: [Open session]({session_url})",
+        }
+    session_link = render_slack_session_link(session_url)
+    return {
+        **_provider_thread_target(resource),
+        "text": session_link.text,
+        "blocks": session_link.blocks,
     }
 
 
@@ -3823,6 +4200,17 @@ def _provider_message_ts(value: object) -> str | None:
 
 def _resource_correlation_key(resource: ExternalChannelResource) -> str:
     labels = resource.labels or {}
+    if labels.get("provider") == ExternalChannelProvider.DISCORD.value:
+        guild_id = labels.get("guild_id")
+        source_channel_id = labels.get("source_channel_id")
+        if (
+            isinstance(guild_id, str)
+            and guild_id
+            and isinstance(source_channel_id, str)
+            and source_channel_id
+        ):
+            return f"{guild_id}:{source_channel_id}"
+        raise RuntimeError("External Channel Discord resource labels are invalid.")
     channel_id = labels.get("channel_id")
     thread_ts = labels.get("thread_ts")
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):

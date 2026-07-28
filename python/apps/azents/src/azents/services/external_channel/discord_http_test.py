@@ -22,6 +22,7 @@ from azents.core.enums import (
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
+    ExternalChannelEventCreate,
     ExternalChannelInteractionAdmission,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
@@ -32,6 +33,12 @@ from azents.services.external_channel.discord_http import DiscordHTTPAdmissionSe
 from azents.services.external_channel.discord_interaction import (
     DiscordInteractionInvalidPayload,
     DiscordInteractionUnauthorized,
+)
+from azents.services.external_channel.discord_selector import (
+    DiscordSelectorResponseService,
+)
+from azents.services.external_channel.shortcut_source import (
+    ExternalChannelShortcutSourceService,
 )
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
@@ -60,27 +67,125 @@ class _AdmissionDouble:
 
     def __init__(self) -> None:
         self.inputs: list[
-            tuple[ExternalChannelInteractionCreate, ExternalChannelPrincipalCreate]
+            tuple[
+                ExternalChannelInteractionCreate,
+                ExternalChannelPrincipalCreate,
+                object | None,
+            ]
         ] = []
+        self.claimed_interaction_ids: list[str] = []
+        self.finished_interaction_ids: list[str] = []
 
     async def admit_interaction(
         self,
         *,
         create: ExternalChannelInteractionCreate,
         principal: ExternalChannelPrincipalCreate,
+        shortcut_source_event: object | None = None,
     ) -> ExternalChannelInteractionAdmission:
-        self.inputs.append((create, principal))
+        self.inputs.append((create, principal, shortcut_source_event))
         return cast(
             ExternalChannelInteractionAdmission,
             SimpleNamespace(
-                interaction=SimpleNamespace(id="interaction-row-1"),
+                interaction=SimpleNamespace(
+                    id="interaction-row-1",
+                    principal_id="principal-1",
+                ),
                 created=True,
             ),
+        )
+
+    async def begin_interaction_provider_mutation(
+        self,
+        *,
+        interaction_id: str,
+        now: datetime.datetime,
+    ) -> object:
+        del now
+        self.claimed_interaction_ids.append(interaction_id)
+        return SimpleNamespace(claimed=True)
+
+    async def finish_interaction_provider_mutation(
+        self,
+        *,
+        interaction_id: str,
+        status: object,
+        error_kind: str | None,
+        error_summary: str | None,
+    ) -> None:
+        del status, error_kind, error_summary
+        self.finished_interaction_ids.append(interaction_id)
+
+
+class _ShortcutSourceDouble:
+    """Record materialization without retaining request-local interaction data."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, str, datetime.datetime]] = []
+
+    async def ensure(
+        self,
+        *,
+        shortcut_source_event: object,
+        interaction_id: str,
+        now: datetime.datetime,
+    ) -> object:
+        self.calls.append((shortcut_source_event, interaction_id, now))
+        return SimpleNamespace(admission=SimpleNamespace(id="admission-1"))
+
+
+class _SelectorResponseDouble:
+    """Render a safe static response while recording the trusted scope only."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, datetime.datetime]] = []
+
+    async def initial_response(
+        self,
+        *,
+        admission_id: str,
+        principal_id: str,
+        now: datetime.datetime,
+    ) -> dict[str, object]:
+        self.calls.append((admission_id, principal_id, now))
+        return {
+            "type": 4,
+            "data": {
+                "flags": 64,
+                "content": "Select an Agent for this conversation.",
+            },
+        }
+
+    async def component_response(
+        self,
+        *,
+        custom_id: str,
+        selected_route_id: str | None,
+        principal_id: str,
+        now: datetime.datetime,
+    ) -> object:
+        self.calls.append((custom_id, principal_id, now))
+        return SimpleNamespace(
+            response={
+                "type": 7,
+                "data": {
+                    "content": (
+                        "Agent selected."
+                        if selected_route_id is not None
+                        else "Select an Agent."
+                    ),
+                    "components": [],
+                },
+            },
+            control_delivery_attempt_id="delivery-1",
+            connection_id="connection-1",
         )
 
 
 def _configuration(
     public_key: str,
+    *,
+    app_mode: ExternalChannelAppMode = ExternalChannelAppMode.SINGLE,
 ) -> ExternalChannelConnectionConfiguration:
     return ExternalChannelConnectionConfiguration(
         id="connection-1",
@@ -90,7 +195,7 @@ def _configuration(
         ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
         configuration_generation=2,
         status=ExternalChannelConnectionStatus.ACTIVE,
-        app_mode=ExternalChannelAppMode.SINGLE,
+        app_mode=app_mode,
         provider_app_id="app-1",
         provider_tenant_id="guild-1",
         provider_bot_user_id=None,
@@ -115,19 +220,30 @@ def _service(
     *,
     configuration: ExternalChannelConnectionConfiguration,
     admission: _AdmissionDouble,
-) -> tuple[DiscordHTTPAdmissionService, _RepositoryDouble]:
+) -> tuple[DiscordHTTPAdmissionService, _RepositoryDouble, _ShortcutSourceDouble]:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
         yield cast(AsyncSession, object())
 
     repository = _RepositoryDouble(configuration)
+    shortcut_source = _ShortcutSourceDouble()
+    selector_response = _SelectorResponseDouble()
     return (
         DiscordHTTPAdmissionService(
             session_manager=cast(SessionManager[AsyncSession], session_manager),
             repository=cast(ExternalChannelRepository, repository),
             admission_service=cast(ExternalChannelAdmissionService, admission),
+            shortcut_source_service=cast(
+                ExternalChannelShortcutSourceService,
+                shortcut_source,
+            ),
+            selector_response_service=cast(
+                DiscordSelectorResponseService,
+                selector_response,
+            ),
         ),
         repository,
+        shortcut_source,
     )
 
 
@@ -161,12 +277,76 @@ def _signature(private_key: Ed25519PrivateKey, body: bytes) -> tuple[str, str]:
     return timestamp, private_key.sign(timestamp.encode() + body).hex()
 
 
+def _message_command_body() -> bytes:
+    """Build one selected-message command with deliberately sensitive raw fields."""
+    return json.dumps(
+        {
+            "id": "discord-interaction-1",
+            "type": 2,
+            "application_id": "app-1",
+            "guild_id": "guild-1",
+            "channel_id": "channel-1",
+            "member": {"user": {"id": "user-1"}},
+            "token": "interaction-token-must-not-persist",
+            "data": {
+                "type": 3,
+                "name": "Ask an Azents Agent",
+                "target_id": "100",
+                "resolved": {
+                    "messages": {
+                        "100": {
+                            "id": "100",
+                            "channel_id": "channel-1",
+                            "content": "Selected source content.",
+                            "timestamp": "2026-07-26T00:00:00+00:00",
+                            "author": {
+                                "id": "user-2",
+                                "avatar": "https://cdn.discordapp.com/private",
+                            },
+                            "attachments": [
+                                {
+                                    "id": "attachment-1",
+                                    "filename": "report.pdf",
+                                    "size": 3,
+                                    "url": "https://cdn.discordapp.com/private",
+                                    "proxy_url": "https://media.discordapp.net/private",
+                                }
+                            ],
+                        }
+                    }
+                },
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
+def _selector_component_body() -> bytes:
+    """Build a transient component callback with an opaque selector scope."""
+    return json.dumps(
+        {
+            "id": "discord-component-1",
+            "type": 3,
+            "application_id": "app-1",
+            "guild_id": "guild-1",
+            "channel_id": "channel-1",
+            "member": {"user": {"id": "user-1"}},
+            "token": "interaction-token-must-not-persist",
+            "data": {
+                "custom_id": "azents-selector:select:admission-1:0:signature",
+                "values": ["route-1"],
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
 @pytest.mark.asyncio
 async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
     """A verified Guild interaction commits provenance before acknowledgement."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, repository = _service(
+    service, repository, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
     )
@@ -187,7 +367,7 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
         hashlib.sha256(b"opaque-selector").hexdigest()
     ]
     assert len(admission.inputs) == 1
-    create, principal = admission.inputs[0]
+    create, principal, shortcut_source_event = admission.inputs[0]
     assert create.connection_id == "connection-1"
     assert create.provider_interaction_key == "discord-interaction-1"
     assert create.resource_correlation_key == "channel-1"
@@ -200,6 +380,8 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
     assert principal.provider is ExternalChannelProvider.DISCORD
     assert principal.provider_tenant_id == "guild-1"
     assert principal.provider_user_id == "user-1"
+    assert shortcut_source_event is None
+    assert admission.finished_interaction_ids == []
     persisted = repr((create, principal, result))
     assert "interaction-token" not in persisted
     assert "private command content" not in persisted
@@ -207,11 +389,97 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_command_materializes_safe_source_before_claim() -> None:
+    """The selected source becomes canonical before the transient selector claim."""
+    private_key = Ed25519PrivateKey.generate()
+    admission = _AdmissionDouble()
+    service, _, shortcut_source = _service(
+        configuration=_configuration(
+            private_key.public_key().public_bytes_raw().hex(),
+            app_mode=ExternalChannelAppMode.MULTI,
+        ),
+        admission=admission,
+    )
+    body = _message_command_body()
+    timestamp, signature = _signature(private_key, body)
+
+    result = await service.handle(
+        selector="opaque-selector",
+        raw_body=body,
+        timestamp=timestamp,
+        signature=signature,
+        received_at=_NOW,
+    )
+
+    create, _, source_event = admission.inputs[0]
+    assert create.projection["command_name"] == "Ask an Azents Agent"
+    assert create.projection["source_message_id"] == "100"
+    assert isinstance(source_event, ExternalChannelEventCreate)
+    assert source_event.provider_event_id == (
+        "discord-interaction-source:discord-interaction-1:100"
+    )
+    assert source_event.envelope["message"]["content"] == "Selected source content."
+    serialized = repr((create, source_event))
+    assert "interaction-token" not in serialized
+    assert "cdn.discordapp.com" not in serialized
+    assert "media.discordapp.net" not in serialized
+    assert len(shortcut_source.calls) == 1
+    assert shortcut_source.calls[0][0] is source_event
+    assert admission.claimed_interaction_ids == ["interaction-row-1"]
+    assert admission.finished_interaction_ids == ["interaction-row-1"]
+    assert result.response == {
+        "type": 4,
+        "data": {
+            "flags": 64,
+            "content": "Select an Agent for this conversation.",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_selector_component_keeps_scope_and_route_request_local() -> None:
+    """A component delegates opaque scope without storing selector or route input."""
+    private_key = Ed25519PrivateKey.generate()
+    admission = _AdmissionDouble()
+    service, _, _ = _service(
+        configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
+        admission=admission,
+    )
+    body = _selector_component_body()
+    timestamp, signature = _signature(private_key, body)
+
+    result = await service.handle(
+        selector="opaque-selector",
+        raw_body=body,
+        timestamp=timestamp,
+        signature=signature,
+        received_at=_NOW,
+    )
+
+    create, _, shortcut_source_event = admission.inputs[0]
+    assert create.projection == {
+        "interaction_type": "block_action",
+        "guild_id": "guild-1",
+        "channel_id": "channel-1",
+        "discord_interaction_type": "3",
+    }
+    assert shortcut_source_event is None
+    assert admission.claimed_interaction_ids == ["interaction-row-1"]
+    assert admission.finished_interaction_ids == ["interaction-row-1"]
+    assert result.response == {
+        "type": 7,
+        "data": {"content": "Agent selected.", "components": []},
+    }
+    assert "route-1" not in repr(create)
+    assert "interaction-token" not in repr((create, result))
+
+
+@pytest.mark.asyncio
 async def test_ping_skips_durable_interaction_admission() -> None:
     """Discord endpoint PING authenticates but has no canonical interaction record."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, _ = _service(
+    service, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
     )
@@ -239,7 +507,7 @@ async def test_unsupported_or_cross_scope_interactions_fail_before_admission() -
     """Unsupported types and cross-scope identities cannot create work."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    service, _ = _service(
+    service, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
     )

@@ -82,10 +82,71 @@ def project_discord_gateway_dispatch(
     guild_id = _required_string(message, "guild_id")
     if guild_id != target_guild_id:
         return None
-    message_id = _required_string(message, "id")
-    channel_id = _required_string(message, "channel_id")
     if not dispatch.session_id:
         raise ValueError("Discord Gateway Dispatch is missing a session ID.")
+    projection = project_discord_message(message=message, guild_id=guild_id)
+    channel_id = _required_string(projection, "channel_id")
+    return ExternalChannelEventCreate(
+        connection_id=connection_id,
+        provider_event_id=(
+            f"discord-gateway:{dispatch.session_id}:{dispatch.sequence}"
+        ),
+        transport_envelope_id=(
+            f"discord-gateway:{dispatch.session_id}:{dispatch.sequence}"
+        ),
+        event_type=event_type,
+        provider_app_id=provider_app_id,
+        provider_tenant_id=guild_id,
+        provider_enterprise_id=None,
+        resource_correlation_key=f"{guild_id}:{channel_id}",
+        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+        envelope={"message": projection},
+        status=ExternalChannelEventStatus.ACCEPTED,
+        provider_occurred_at=_discord_timestamp(message.get("timestamp")),
+        received_at=received_at,
+    )
+
+
+def project_discord_message_command_source_event(
+    *,
+    connection_id: str,
+    provider_app_id: str,
+    provider_interaction_id: str,
+    guild_id: str,
+    source_message: dict[str, object],
+    received_at: datetime.datetime,
+) -> ExternalChannelEventCreate:
+    """Project one selected Message Command source without raw interaction data."""
+    projection = project_discord_message(message=source_message, guild_id=guild_id)
+    message_id = _required_string(projection, "id")
+    channel_id = _required_string(projection, "channel_id")
+    return ExternalChannelEventCreate(
+        connection_id=connection_id,
+        provider_event_id=(
+            f"discord-interaction-source:{provider_interaction_id}:{message_id}"
+        ),
+        transport_envelope_id=None,
+        event_type="discord_message_create",
+        provider_app_id=provider_app_id,
+        provider_tenant_id=guild_id,
+        provider_enterprise_id=None,
+        resource_correlation_key=f"{guild_id}:{channel_id}",
+        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+        envelope={"message": projection},
+        status=ExternalChannelEventStatus.ACCEPTED,
+        provider_occurred_at=_discord_timestamp(source_message.get("timestamp")),
+        received_at=received_at,
+    )
+
+
+def project_discord_message(
+    *,
+    message: dict[str, object],
+    guild_id: str,
+) -> dict[str, object]:
+    """Retain bounded canonical message facts shared by Gateway and interactions."""
+    message_id = _required_string(message, "id")
+    channel_id = _required_string(message, "channel_id")
     projection: dict[str, object] = {
         "id": message_id,
         "channel_id": channel_id,
@@ -122,25 +183,7 @@ def project_discord_gateway_dispatch(
     mentions = message.get("mentions")
     if isinstance(mentions, list):
         projection["mentions"] = _project_mentions(mentions)
-    return ExternalChannelEventCreate(
-        connection_id=connection_id,
-        provider_event_id=(
-            f"discord-gateway:{dispatch.session_id}:{dispatch.sequence}"
-        ),
-        transport_envelope_id=(
-            f"discord-gateway:{dispatch.session_id}:{dispatch.sequence}"
-        ),
-        event_type=event_type,
-        provider_app_id=provider_app_id,
-        provider_tenant_id=guild_id,
-        provider_enterprise_id=None,
-        resource_correlation_key=f"{guild_id}:{channel_id}",
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
-        envelope={"message": projection},
-        status=ExternalChannelEventStatus.ACCEPTED,
-        provider_occurred_at=_discord_timestamp(message.get("timestamp")),
-        received_at=received_at,
-    )
+    return projection
 
 
 def normalize_projected_discord_event(

@@ -69,11 +69,44 @@ async def test_ensure_thread_creates_a_missing_root_message_thread() -> None:
         )
 
     assert result.status == "delivered"
+    assert result.provider_message_key == "discord-thread:333"
     assert [request.url.path for request in calls] == [
-        "/api/v10/channels/333",
+        "/api/v10/channels/222/messages/333",
         "/api/v10/channels/222/messages/333/threads",
     ]
     assert json.loads(calls[1].content) == {"name": "Azents"}
+
+
+@pytest.mark.asyncio
+async def test_ensure_thread_reuses_a_thread_returned_by_the_root_message() -> None:
+    """A later durable attempt resolves the same thread without creating another."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "333",
+                "channel_id": "222",
+                "thread": {"id": "444", "parent_id": "222"},
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        result = await DiscordDeliveryClient(http_client).ensure_thread(
+            bot_token="discord-secret",
+            parent_channel_id="222",
+            root_message_id="333",
+        )
+
+    assert result.status == "delivered"
+    assert result.provider_message_key == "discord-thread:444"
+    assert [request.url.path for request in calls] == [
+        "/api/v10/channels/222/messages/333"
+    ]
 
 
 @pytest.mark.asyncio

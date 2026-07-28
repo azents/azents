@@ -16,7 +16,7 @@ from azents.core.auth.deps import (
 from azents.core.auth.permissions import Permission, Permissions
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import ExternalChannelTransport
+from azents.core.enums import ExternalChannelProvider, ExternalChannelTransport
 from azents.repos.external_channel.data import (
     ExternalChannelMultiConnectionImpact,
     ExternalChannelMultiRouteImpact,
@@ -146,6 +146,27 @@ async def list_multi_slack_connections(
     return ManagedMultiConnectionListResponse(
         items=await service.list_multi_connections(
             workspace_id=member.workspace_id,
+            provider=ExternalChannelProvider.SLACK,
+            offset=offset,
+            limit=limit,
+        )
+    )
+
+
+@router.get("/workspaces/{handle}/external-channels/discord/multi")
+async def list_multi_discord_connections(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> ManagedMultiConnectionListResponse:
+    """List Workspace-owned Discord Multi Apps."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_READ)
+    return ManagedMultiConnectionListResponse(
+        items=await service.list_multi_connections(
+            workspace_id=member.workspace_id,
+            provider=ExternalChannelProvider.DISCORD,
             offset=offset,
             limit=limit,
         )
@@ -184,11 +205,13 @@ async def setup_multi_slack_connection(
 async def setup_multi_discord_connection(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ExternalChannelManagementService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
     *,
     request_body: DiscordConnectionSetupRequest,
 ) -> ManagedMultiConnectionSetup:
     """Create a zero-Agent-capable configuring Workspace Discord Multi App."""
     _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    _require_multi_app_enabled(config)
     try:
         return await service.setup_multi_discord(
             workspace_id=member.workspace_id,
@@ -223,6 +246,7 @@ async def get_multi_slack_connection(
         return await service.get_multi_connection(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
             include_disconnected=True,
         )
     except ExternalChannelManagementNotFound as error:
@@ -242,6 +266,7 @@ async def get_multi_slack_connection_impact(
         return await service.get_multi_connection_impact(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
         )
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
@@ -324,6 +349,7 @@ async def validate_multi_slack_connection(
         return await service.validate_multi_connection(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
         )
     except DiscordAPIError as error:
         raise _discord_activation_error(
@@ -357,6 +383,7 @@ async def disconnect_multi_slack_connection(
         return await service.disconnect_multi_connection(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
             expected_generation=request_body.expected_generation,
         )
     except ExternalChannelManagementNotFound as error:
@@ -381,6 +408,7 @@ async def list_multi_slack_routes(
             items=await service.list_multi_routes(
                 workspace_id=member.workspace_id,
                 connection_id=connection_id,
+                provider=ExternalChannelProvider.SLACK,
                 offset=offset,
                 limit=limit,
             )
@@ -408,6 +436,7 @@ async def add_multi_slack_route(
         return await service.add_multi_route(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
             agent_id=request_body.agent_id,
         )
     except ExternalChannelManagementNotFound as error:
@@ -433,6 +462,7 @@ async def get_multi_slack_route_impact(
         return await service.get_multi_route_impact(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
             route_id=route_id,
         )
     except ExternalChannelManagementNotFound as error:
@@ -457,6 +487,7 @@ async def remove_multi_slack_route(
         return await service.remove_multi_route(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
             route_id=route_id,
             user_id=member.user_id,
             expected_generation=request_body.expected_generation,
@@ -486,6 +517,7 @@ async def reenable_multi_slack_route(
         return await service.reenable_multi_route(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
             route_id=route_id,
         )
     except ExternalChannelManagementNotFound as error:
@@ -511,6 +543,7 @@ async def list_multi_slack_channel_defaults(
             items=await service.list_multi_channel_defaults(
                 workspace_id=member.workspace_id,
                 connection_id=connection_id,
+                provider=ExternalChannelProvider.SLACK,
                 offset=offset,
                 limit=limit,
             )
@@ -537,6 +570,7 @@ async def replace_multi_slack_channel_default(
         return await service.replace_multi_channel_default(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
             provider_channel_id=provider_channel_id,
             route_id=request_body.route_id,
             user_id=member.user_id,
@@ -567,6 +601,323 @@ async def clear_multi_slack_channel_default(
         await service.clear_multi_channel_default(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
+            provider=ExternalChannelProvider.SLACK,
+            provider_channel_id=provider_channel_id,
+            expected_generation=request_body.expected_generation,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ExternalChannelManagementGenerationChanged as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/workspaces/{handle}/external-channels/discord/multi/{connection_id}")
+async def get_multi_discord_connection(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+) -> ManagedMultiConnection:
+    """Load one redacted Workspace Discord Multi App."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_READ)
+    try:
+        return await service.get_multi_connection(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
+            include_disconnected=True,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.get(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/impact"
+)
+async def get_multi_discord_connection_impact(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+) -> ExternalChannelMultiConnectionImpact:
+    """Preview sanitized impact before disconnecting one whole Multi App."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_READ)
+    try:
+        return await service.get_multi_connection_impact(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.post(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/validate"
+)
+async def validate_multi_discord_connection(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+) -> ExternalChannelConnectionStatusSnapshot:
+    """Validate one Workspace Multi App."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    try:
+        return await service.validate_multi_connection(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
+        )
+    except DiscordAPIError as error:
+        raise _discord_activation_error(
+            error,
+            operation="validate_multi",
+            connection_id=connection_id,
+        ) from error
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ExternalChannelConnectionStateChanged as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise _discord_activation_error(
+            error,
+            operation="validate_multi",
+            connection_id=connection_id,
+        ) from error
+
+
+@router.delete("/workspaces/{handle}/external-channels/discord/multi/{connection_id}")
+async def disconnect_multi_discord_connection(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    request_body: GenerationFenceRequest,
+) -> ManagedMultiConnectionDisconnect:
+    """Generation-fence terminal disconnect of one Workspace Discord Multi App."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    try:
+        return await service.disconnect_multi_connection(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
+            expected_generation=request_body.expected_generation,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ExternalChannelManagementGenerationChanged as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents"
+)
+async def list_multi_discord_routes(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> ManagedMultiRouteListResponse:
+    """List a paged Multi App Agent catalog, including removed routes."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_READ)
+    try:
+        return ManagedMultiRouteListResponse(
+            items=await service.list_multi_routes(
+                workspace_id=member.workspace_id,
+                connection_id=connection_id,
+                provider=ExternalChannelProvider.DISCORD,
+                offset=offset,
+                limit=limit,
+            )
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.post(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents",
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_multi_discord_route(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    request_body: MultiRouteCreateRequest,
+) -> ManagedMultiRoute:
+    """Add one active Workspace Agent to a Discord Multi App catalog."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    try:
+        return await service.add_multi_route(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
+            agent_id=request_body.agent_id,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.get(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/"
+    "agents/{route_id}/impact"
+)
+async def get_multi_discord_route_impact(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    route_id: str,
+) -> ExternalChannelMultiRouteImpact:
+    """Preview sanitized impact before removing one Multi App Agent route."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_READ)
+    try:
+        return await service.get_multi_route_impact(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
+            route_id=route_id,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.delete(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/"
+    "agents/{route_id}"
+)
+async def remove_multi_discord_route(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    route_id: str,
+    request_body: GenerationFenceRequest,
+) -> ExternalChannelMultiRouteImpact:
+    """Generation-fence destructive removal of one Multi App Agent route."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    try:
+        return await service.remove_multi_route(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
+            route_id=route_id,
+            user_id=member.user_id,
+            expected_generation=request_body.expected_generation,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ExternalChannelManagementGenerationChanged as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/"
+    "agents/{route_id}/reenable"
+)
+async def reenable_multi_discord_route(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    route_id: str,
+) -> ManagedMultiRoute:
+    """Re-enable a previously removed Multi App Agent route."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    try:
+        return await service.reenable_multi_route(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
+            route_id=route_id,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.get(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/"
+    "channel-defaults"
+)
+async def list_multi_discord_channel_defaults(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> ManagedChannelDefaultListResponse:
+    """List paged Multi App channel-default history."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_READ)
+    try:
+        return ManagedChannelDefaultListResponse(
+            items=await service.list_multi_channel_defaults(
+                workspace_id=member.workspace_id,
+                connection_id=connection_id,
+                provider=ExternalChannelProvider.DISCORD,
+                offset=offset,
+                limit=limit,
+            )
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.put(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/"
+    "channel-defaults/{provider_channel_id}"
+)
+async def replace_multi_discord_channel_default(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    provider_channel_id: str,
+    request_body: MultiChannelDefaultRequest,
+) -> ManagedChannelDefault:
+    """Generation-fence replacement of one Multi App channel default."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    try:
+        return await service.replace_multi_channel_default(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
+            provider_channel_id=provider_channel_id,
+            route_id=request_body.route_id,
+            user_id=member.user_id,
+            expected_generation=request_body.expected_generation,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ExternalChannelManagementGenerationChanged as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.delete(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/"
+    "channel-defaults/{provider_channel_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def clear_multi_discord_channel_default(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    provider_channel_id: str,
+    request_body: GenerationFenceRequest,
+) -> None:
+    """Generation-fence clearing one active Multi App channel default."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    try:
+        await service.clear_multi_channel_default(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            provider=ExternalChannelProvider.DISCORD,
             provider_channel_id=provider_channel_id,
             expected_generation=request_body.expected_generation,
         )
@@ -1069,7 +1420,7 @@ def _require_multi_app_enabled(config: Config) -> None:
     if not config.external_channel_multi_app_enabled:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=("Slack Multi App creation is not enabled for this deployment."),
+            detail=("Multi App creation is not enabled for this deployment."),
         )
 
 

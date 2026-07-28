@@ -492,6 +492,7 @@ async def test_add_multi_route_returns_existing_available_association() -> None:
     result = await service.add_multi_route(
         workspace_id="workspace-1",
         connection_id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
         agent_id="agent-1",
     )
 
@@ -500,6 +501,7 @@ async def test_add_multi_route_returns_existing_available_association() -> None:
         session,
         workspace_id="workspace-1",
         connection_id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
         agent_id="agent-1",
     )
     domain_repository.create_agent_route.assert_not_awaited()
@@ -740,6 +742,7 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
     result = await service.disconnect_multi_connection(
         workspace_id="workspace-1",
         connection_id=connection.id,
+        provider=ExternalChannelProvider.SLACK,
         expected_generation=now,
     )
 

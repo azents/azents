@@ -318,14 +318,16 @@ class ExternalChannelManagementService:
         self,
         *,
         workspace_id: str,
+        provider: ExternalChannelProvider,
         offset: int,
         limit: int,
     ) -> list[ManagedMultiConnection]:
-        """List redacted Workspace-owned Slack Multi Apps."""
+        """List redacted Workspace-owned Multi Apps for one provider."""
         async with self.session_manager() as session:
             return await self.repository.list_multi_connections(
                 session,
                 workspace_id=workspace_id,
+                provider=provider,
                 offset=offset,
                 limit=limit,
             )
@@ -335,14 +337,16 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         include_disconnected: bool = False,
     ) -> ManagedMultiConnection:
-        """Load one Workspace-owned Slack Multi App."""
+        """Load one provider-scoped Workspace Multi App."""
         async with self.session_manager() as session:
             connection = await self.repository.get_managed_multi_connection(
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 include_disconnected=include_disconnected,
             )
         if connection is None:
@@ -371,6 +375,7 @@ class ExternalChannelManagementService:
         connection = await self.get_multi_connection(
             workspace_id=workspace_id,
             connection_id=setup.connection.id,
+            provider=ExternalChannelProvider.SLACK,
         )
         return ManagedMultiConnectionSetup(connection=connection)
 
@@ -396,6 +401,7 @@ class ExternalChannelManagementService:
         connection = await self.get_multi_connection(
             workspace_id=workspace_id,
             connection_id=setup.connection.id,
+            provider=ExternalChannelProvider.DISCORD,
         )
         return ManagedMultiConnectionSetup(connection=connection)
 
@@ -404,11 +410,13 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
     ) -> ExternalChannelConnectionStatusSnapshot:
         """Validate one Workspace-owned Multi App without exposing credentials."""
         connection = await self.get_multi_connection(
             workspace_id=workspace_id,
             connection_id=connection_id,
+            provider=provider,
         )
         if connection.provider is ExternalChannelProvider.DISCORD:
             return await self.discord_activation_service.activate(
@@ -503,6 +511,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         offset: int,
         limit: int,
     ) -> list[ManagedMultiRoute]:
@@ -512,6 +521,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 offset=offset,
                 limit=limit,
             )
@@ -524,6 +534,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         agent_id: str,
     ) -> ManagedMultiRoute:
         """Add one active Workspace Agent to a Multi App catalog."""
@@ -533,6 +544,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 lock=True,
             )
             agent = await self.agent_repository.get_by_id(session, agent_id)
@@ -546,6 +558,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection.id,
+                provider=provider,
                 agent_id=agent_id,
             )
             if existing is not None:
@@ -577,6 +590,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 route_id=route.id,
             )
         if managed is None:
@@ -588,6 +602,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         route_id: str,
     ) -> ExternalChannelMultiRouteImpact:
         """Return a sanitized count-only removal impact preview."""
@@ -596,6 +611,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 include_disconnected=True,
             )
             if connection is None:
@@ -614,6 +630,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
     ) -> ExternalChannelMultiConnectionImpact:
         """Return sanitized impact before disconnecting one whole Multi App."""
         async with self.session_manager() as session:
@@ -621,6 +638,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
@@ -637,6 +655,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         route_id: str,
         user_id: str,
         expected_generation: datetime.datetime,
@@ -648,6 +667,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 expected_generation=expected_generation,
                 include_disconnected=True,
             )
@@ -671,6 +691,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         route_id: str,
     ) -> ManagedMultiRoute:
         """Re-enable a removed Multi App route without reviving old state."""
@@ -680,6 +701,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 lock=True,
             )
             if connection is None:
@@ -696,6 +718,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 route_id=route_id,
             )
         if route is None:
@@ -707,6 +730,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         offset: int,
         limit: int,
     ) -> list[ManagedChannelDefault]:
@@ -716,6 +740,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 offset=offset,
                 limit=limit,
             )
@@ -728,6 +753,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         provider_channel_id: str,
         route_id: str,
         user_id: str,
@@ -740,12 +766,14 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 expected_generation=expected_generation,
             )
             channel_default = await self.repository.replace_multi_channel_default(
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection.id,
+                provider=provider,
                 provider_channel_id=provider_channel_id,
                 route_id=route_id,
                 configured_by_user_id=user_id,
@@ -762,6 +790,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         provider_channel_id: str,
         expected_generation: datetime.datetime,
     ) -> None:
@@ -772,12 +801,14 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 expected_generation=expected_generation,
             )
             cleared = await self.repository.clear_multi_channel_default(
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection.id,
+                provider=provider,
                 provider_channel_id=provider_channel_id,
                 now=now,
             )
@@ -793,6 +824,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         expected_generation: datetime.datetime,
     ) -> ManagedMultiConnectionDisconnect:
         """Generation-fence terminal Multi App disconnect around provider I/O."""
@@ -803,6 +835,7 @@ class ExternalChannelManagementService:
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
+                provider=provider,
                 expected_generation=expected_generation,
                 include_disconnected=True,
             )
@@ -1294,6 +1327,7 @@ class ExternalChannelManagementService:
         *,
         workspace_id: str,
         connection_id: str,
+        provider: ExternalChannelProvider,
         expected_generation: datetime.datetime,
         include_disconnected: bool = False,
     ) -> RDBExternalChannelConnection:
@@ -1302,6 +1336,7 @@ class ExternalChannelManagementService:
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
+            provider=provider,
             lock=True,
             include_disconnected=include_disconnected,
         )
