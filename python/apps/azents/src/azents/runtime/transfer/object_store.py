@@ -1,11 +1,40 @@
 """Internal S3 resolution and multipart cleanup for Runtime transfers."""
 
+import asyncio
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
 from azcommon.infra.s3.service import S3MultipartUpload, S3ObjectIdentity, S3Service
 
 from azents.runtime.transfer.data import (
+    RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE,
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
 )
+
+_LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RuntimeTransferOrphanRepairResult:
+    """Bounded aggregate evidence from one state-independent prefix scan."""
+
+    listed_objects: int
+    deleted_objects: int
+    listed_multipart_uploads: int
+    aborted_multipart_uploads: int
+    failed_cleanups: int
+    skipped_storage_entries: int
+
+    @property
+    def observed(self) -> int:
+        """Return the total listed artifact count."""
+        return (
+            self.listed_objects
+            + self.listed_multipart_uploads
+            + self.skipped_storage_entries
+        )
 
 
 class RuntimeTransferS3Cleanup:
@@ -26,7 +55,13 @@ class RuntimeTransferS3Cleanup:
         """
         self._object_store = object_store
         self._bucket = _required(bucket, "Runtime transfer bucket")
-        self._object_prefix = _prefix(object_prefix)
+        self._object_prefix = _required(
+            _prefix(object_prefix),
+            "Runtime transfer object prefix",
+        )
+        self._object_continuation_token: str | None = None
+        self._multipart_key_marker: str | None = None
+        self._multipart_upload_id_marker: str | None = None
 
     async def cleanup(self, record: RuntimeTransferRecord) -> None:
         """Clean one exact stale upload artifact identified by trusted state.
@@ -132,6 +167,110 @@ class RuntimeTransferS3Cleanup:
             raise ValueError("Stale transfer cleanup evidence is unavailable")
         if error is not None:
             raise error
+
+    async def repair_orphans(
+        self,
+        *,
+        now: datetime,
+        maximum_age: timedelta,
+        page_size: int,
+    ) -> RuntimeTransferOrphanRepairResult:
+        """Clean one bounded page of state-independent expired artifacts.
+
+        :param now: Authoritative timezone-aware repair time
+        :param maximum_age: Minimum storage-reported artifact age for cleanup
+        :param page_size: Maximum objects and uploads listed per category
+        :returns: Bounded aggregate cleanup evidence
+        """
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError(
+                "Runtime transfer orphan repair time must be timezone-aware"
+            )
+        if maximum_age <= timedelta():
+            raise ValueError("Runtime transfer orphan maximum age must be positive")
+        if page_size <= 0 or page_size > RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE:
+            raise ValueError(
+                "Runtime transfer orphan page size must be between 1 and 1000"
+            )
+        cutoff = now - maximum_age
+        prefix = f"{self._object_prefix}/"
+        object_page = await self._object_store.list_object_summaries_page(
+            bucket=self._bucket,
+            prefix=prefix,
+            maximum_keys=page_size,
+            continuation_token=self._object_continuation_token,
+        )
+        deleted_objects = 0
+        failed_cleanups = 0
+        for listed in object_page.objects:
+            if listed.last_modified_at > cutoff:
+                continue
+            try:
+                await self._object_store.delete(
+                    bucket=listed.identity.bucket,
+                    key=listed.identity.key,
+                )
+                deleted_objects += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                failed_cleanups += 1
+                _LOGGER.exception(
+                    "Runtime transfer orphan object cleanup failed",
+                    extra={"artifact_kind": "object"},
+                )
+        self._object_continuation_token = object_page.next_continuation_token
+        if object_page.skipped_entries:
+            _LOGGER.warning(
+                "Runtime transfer orphan listing skipped invalid age evidence",
+                extra={
+                    "artifact_kind": "object",
+                    "skipped_entries": object_page.skipped_entries,
+                },
+            )
+
+        multipart_page = await self._object_store.list_multipart_uploads_page(
+            bucket=self._bucket,
+            prefix=prefix,
+            maximum_uploads=page_size,
+            key_marker=self._multipart_key_marker,
+            upload_id_marker=self._multipart_upload_id_marker,
+        )
+        aborted_multipart_uploads = 0
+        for listed in multipart_page.uploads:
+            if listed.initiated_at > cutoff:
+                continue
+            try:
+                await self._object_store.abort_multipart_upload(upload=listed.upload)
+                aborted_multipart_uploads += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                failed_cleanups += 1
+                _LOGGER.exception(
+                    "Runtime transfer orphan multipart cleanup failed",
+                    extra={"artifact_kind": "multipart_upload"},
+                )
+        self._multipart_key_marker = multipart_page.next_key_marker
+        self._multipart_upload_id_marker = multipart_page.next_upload_id_marker
+        if multipart_page.skipped_entries:
+            _LOGGER.warning(
+                "Runtime transfer orphan listing skipped invalid age evidence",
+                extra={
+                    "artifact_kind": "multipart_upload",
+                    "skipped_entries": multipart_page.skipped_entries,
+                },
+            )
+        return RuntimeTransferOrphanRepairResult(
+            listed_objects=len(object_page.objects),
+            deleted_objects=deleted_objects,
+            listed_multipart_uploads=len(multipart_page.uploads),
+            aborted_multipart_uploads=aborted_multipart_uploads,
+            failed_cleanups=failed_cleanups,
+            skipped_storage_entries=(
+                object_page.skipped_entries + multipart_page.skipped_entries
+            ),
+        )
 
 
 def runtime_transfer_object_identity(

@@ -4,6 +4,7 @@ import asyncio
 import inspect
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.fernet import Fernet
@@ -15,6 +16,7 @@ from azents.runtime.control_server import (
     runtime_control_server_lifespan,
     validate_runtime_control_transfer_settings,
 )
+from azents.runtime.transfer.object_store import RuntimeTransferOrphanRepairResult
 
 
 class _Redis:
@@ -63,7 +65,25 @@ class _Coordinator:
 
 
 class _Cleanup:
-    pass
+    def __init__(self) -> None:
+        self.calls: list[tuple[datetime, timedelta, int]] = []
+
+    async def repair_orphans(
+        self,
+        *,
+        now: datetime,
+        maximum_age: timedelta,
+        page_size: int,
+    ) -> RuntimeTransferOrphanRepairResult:
+        self.calls.append((now, maximum_age, page_size))
+        return RuntimeTransferOrphanRepairResult(
+            listed_objects=2,
+            deleted_objects=1,
+            listed_multipart_uploads=1,
+            aborted_multipart_uploads=1,
+            failed_cleanups=0,
+            skipped_storage_entries=0,
+        )
 
 
 def _settings() -> RuntimeControlSettings:
@@ -170,22 +190,32 @@ def test_transfer_settings_reject_unbounded_or_invalid_deployment_values() -> No
     with pytest.raises(ValueError, match="at least 5 MiB"):
         validate_runtime_control_transfer_settings(settings)
 
+    settings = _settings().model_copy(
+        update={"runtime_control_transfer_list_page_size": 1_001}
+    )
+    with pytest.raises(ValueError, match="must not exceed 1000"):
+        validate_runtime_control_transfer_settings(settings)
+
 
 @pytest.mark.asyncio
 async def test_transfer_repair_one_shot_runs_bounded_categories() -> None:
     """One repair pass visits dispatch, generation, and stale-stream work."""
     coordinator = _Coordinator()
+    cleanup = _Cleanup()
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
 
     observed = await repair_transfer_once(
         coordinator,  # type: ignore[arg-type]
-        cleanup=_Cleanup(),  # type: ignore[arg-type]
+        cleanup=cleanup,  # type: ignore[arg-type]
+        now=now,
         page_size=7,
     )
 
-    assert observed == 10
+    assert observed == 13
     assert coordinator.calls == [
         ("terminals", 7),
         ("pending", 7),
         ("generations", 7),
         ("stale", 7),
     ]
+    assert cleanup.calls == [(now, timedelta(hours=1), 7)]

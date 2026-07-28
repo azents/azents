@@ -4,6 +4,9 @@ import enum
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+RUNTIME_TRANSFER_MAXIMUM_AGE = timedelta(hours=1)
+RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE = 1000
+
 
 class RuntimeTransferDirection(enum.StrEnum):
     """Direction between Control and Runner."""
@@ -124,6 +127,8 @@ class RuntimeTransferConfig:
             raise ValueError("terminal_ttl must be at least one second")
         if self.terminal_ttl > timedelta(hours=1):
             raise ValueError("terminal_ttl must not exceed one hour")
+        if self.list_page_size > RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE:
+            raise ValueError("list_page_size must not exceed 1000")
 
 
 @dataclass(frozen=True)
@@ -438,7 +443,7 @@ def logical_expiry(
 ) -> datetime:
     """Return the non-extendable absolute content expiry."""
     _aware(created_at, "created_at")
-    expiry = created_at + timedelta(hours=1)
+    expiry = created_at + RUNTIME_TRANSFER_MAXIMUM_AGE
     if source_expires_at is None:
         return expiry
     _aware(source_expires_at, "source_expires_at")

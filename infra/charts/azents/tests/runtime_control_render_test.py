@@ -227,6 +227,22 @@ def test_runtime_control_rejects_removed_lifecycle_acknowledgement_values() -> N
     assert "lifecycleacknowledgement" in error
 
 
+def test_runtime_control_rejects_transfer_list_page_above_s3_limit() -> None:
+    """Runtime Transfer page bounds remain compatible with S3 list APIs."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.transfer.listPageSize=1001",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+            f"server.runtimeControl.runnerImage.digest={_RUNNER_DIGEST}",
+        )
+
+    error = raised.value.stderr.lower()
+    assert "schema" in error
+    assert "listpagesize" in error
+
+
 def test_runtime_control_rejects_removed_shared_auth_values() -> None:
     """Removed shared-token values fail chart schema validation."""
     with pytest.raises(subprocess.CalledProcessError) as raised:

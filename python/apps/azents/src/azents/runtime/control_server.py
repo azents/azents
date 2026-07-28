@@ -4,7 +4,7 @@ import asyncio
 import dataclasses
 import logging
 import signal
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -79,6 +79,10 @@ from azents.runtime.transfer.control import (
     create_runtime_control_transfer_state_store,
 )
 from azents.runtime.transfer.coordinator import RuntimeTransferCoordinator
+from azents.runtime.transfer.data import (
+    RUNTIME_TRANSFER_MAXIMUM_AGE,
+    RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE,
+)
 from azents.runtime.transfer.object_store import RuntimeTransferS3Cleanup
 from azents.runtime.transfer.result_coordinator import (
     RuntimeRunnerTransferResultCoordinator,
@@ -325,6 +329,7 @@ async def runtime_control_server_lifespan(
         _run_transfer_repair(
             transfer_coordinator,
             cleanup=transfer_cleanup,
+            clock=clock,
             stop=stop_transfer_repair,
             interval_seconds=settings.runtime_control_transfer_repair_interval_seconds,
             page_size=settings.runtime_control_transfer_list_page_size,
@@ -461,6 +466,7 @@ async def _run_transfer_repair(
     coordinator: RuntimeTransferCoordinator,
     *,
     cleanup: RuntimeTransferS3Cleanup,
+    clock: Callable[[], datetime],
     stop: asyncio.Event,
     interval_seconds: float,
     page_size: int,
@@ -473,6 +479,7 @@ async def _run_transfer_repair(
             observed = await repair_transfer_once(
                 coordinator,
                 cleanup=cleanup,
+                now=clock(),
                 page_size=page_size,
             )
             if observed:
@@ -492,12 +499,14 @@ async def repair_transfer_once(
     coordinator: RuntimeTransferCoordinator,
     *,
     cleanup: RuntimeTransferS3Cleanup,
+    now: datetime,
     page_size: int,
 ) -> int:
     """Run one bounded transfer repair pass.
 
     :param coordinator: process-owned transfer coordinator
     :param cleanup: trusted S3 multipart cleanup collaborator
+    :param now: authoritative timezone-aware repair time
     :param page_size: maximum records loaded per state-store list operation
     :returns: number of records observed across repair categories
     """
@@ -510,7 +519,12 @@ async def repair_transfer_once(
         cleanup=cleanup,
         page_size=page_size,
     )
-    return terminals + pending + generations + stale
+    orphans = await cleanup.repair_orphans(
+        now=now,
+        maximum_age=RUNTIME_TRANSFER_MAXIMUM_AGE,
+        page_size=page_size,
+    )
+    return terminals + pending + generations + stale + orphans.observed
 
 
 @asynccontextmanager
@@ -588,6 +602,11 @@ def validate_runtime_control_transfer_settings(
     }
     if any(value <= 0 for value in positive.values()):
         raise ValueError("Runtime transfer limits must be positive")
+    if (
+        settings.runtime_control_transfer_list_page_size
+        > RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE
+    ):
+        raise ValueError("Runtime transfer list page size must not exceed 1000")
     bounded_ttls = {
         "admission lease": settings.runtime_control_transfer_admission_lease_seconds,
         "consumer lease": settings.runtime_control_transfer_consumer_lease_seconds,

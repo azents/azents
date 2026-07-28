@@ -210,3 +210,16 @@ def test_config_requires_positive_bounded_values() -> None:
             terminal_ttl=timedelta(seconds=1),
             list_page_size=1,
         )
+
+    with pytest.raises(ValueError, match="list_page_size must not exceed 1000"):
+        RuntimeTransferConfig(
+            per_runtime_attempts=1,
+            per_runtime_bytes=1,
+            deployment_attempts=1,
+            deployment_bytes=1,
+            admission_lease=timedelta(seconds=1),
+            consumer_lease=timedelta(seconds=1),
+            stream_lease=timedelta(seconds=1),
+            terminal_ttl=timedelta(seconds=1),
+            list_page_size=1_001,
+        )

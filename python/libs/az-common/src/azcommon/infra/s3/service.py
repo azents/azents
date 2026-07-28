@@ -105,6 +105,41 @@ class S3ObjectPage:
 
 
 @dataclass(frozen=True)
+class S3ListedObject:
+    """One listed object with storage-owned age evidence."""
+
+    identity: S3ObjectIdentity
+    last_modified_at: datetime.datetime
+
+
+@dataclass(frozen=True)
+class S3ObjectSummaryPage:
+    """One bounded page of object identities and modification times."""
+
+    objects: tuple[S3ListedObject, ...]
+    next_continuation_token: str | None
+    skipped_entries: int
+
+
+@dataclass(frozen=True)
+class S3ListedMultipartUpload:
+    """One listed incomplete multipart upload with initiation time."""
+
+    upload: S3MultipartUpload
+    initiated_at: datetime.datetime
+
+
+@dataclass(frozen=True)
+class S3MultipartUploadPage:
+    """One bounded page of incomplete multipart uploads."""
+
+    uploads: tuple[S3ListedMultipartUpload, ...]
+    next_key_marker: str | None
+    next_upload_id_marker: str | None
+    skipped_entries: int
+
+
+@dataclass(frozen=True)
 class S3DeleteResult:
     """Bounded deletion evidence including retryable failures."""
 
@@ -873,6 +908,125 @@ class S3Service:
             next_continuation_token=next_token if isinstance(next_token, str) else None,
         )
 
+    async def list_object_summaries_page(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        maximum_keys: int,
+        continuation_token: str | None,
+    ) -> S3ObjectSummaryPage:
+        """Return one bounded page with storage-owned object age evidence.
+
+        :param bucket: Bucket to inspect.
+        :param prefix: Object-key prefix.
+        :param maximum_keys: Maximum objects in the page.
+        :param continuation_token: Token returned by a preceding page.
+        :returns: One page and its optional next token.
+        """
+        _validate_s3_page_size(maximum_keys)
+        args: dict[str, Any] = {
+            "Bucket": bucket,
+            "Prefix": prefix,
+            "MaxKeys": maximum_keys,
+        }
+        if continuation_token is not None:
+            args["ContinuationToken"] = continuation_token
+        response = await self.s3_client.list_objects_v2(**args)
+        objects: list[S3ListedObject] = []
+        skipped_entries = 0
+        for object_summary in response.get("Contents", []):
+            key = _mapping_value(object_summary, "Key")
+            last_modified_at = _mapping_value(object_summary, "LastModified")
+            if (
+                isinstance(key, str)
+                and isinstance(last_modified_at, datetime.datetime)
+                and _datetime_is_aware(last_modified_at)
+            ):
+                objects.append(
+                    S3ListedObject(
+                        identity=S3ObjectIdentity(bucket=bucket, key=key),
+                        last_modified_at=last_modified_at,
+                    )
+                )
+            else:
+                skipped_entries += 1
+        next_token = response.get("NextContinuationToken")
+        return S3ObjectSummaryPage(
+            objects=tuple(objects),
+            next_continuation_token=next_token if isinstance(next_token, str) else None,
+            skipped_entries=skipped_entries,
+        )
+
+    async def list_multipart_uploads_page(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        maximum_uploads: int,
+        key_marker: str | None,
+        upload_id_marker: str | None,
+    ) -> S3MultipartUploadPage:
+        """Return one bounded page of incomplete multipart uploads.
+
+        :param bucket: Bucket to inspect.
+        :param prefix: Object-key prefix.
+        :param maximum_uploads: Maximum uploads in the page.
+        :param key_marker: Key marker returned by a preceding page.
+        :param upload_id_marker: Upload marker returned by a preceding page.
+        :returns: One page and its optional next markers.
+        """
+        _validate_s3_page_size(maximum_uploads)
+        if key_marker is None and upload_id_marker is not None:
+            raise ValueError("upload_id_marker requires key_marker")
+        args: dict[str, Any] = {
+            "Bucket": bucket,
+            "Prefix": prefix,
+            "MaxUploads": maximum_uploads,
+        }
+        if key_marker is not None:
+            args["KeyMarker"] = key_marker
+        if upload_id_marker is not None:
+            args["UploadIdMarker"] = upload_id_marker
+        response = await self.s3_client.list_multipart_uploads(**args)
+        uploads: list[S3ListedMultipartUpload] = []
+        skipped_entries = 0
+        for upload_summary in response.get("Uploads", []):
+            key = _mapping_value(upload_summary, "Key")
+            upload_id = _mapping_value(upload_summary, "UploadId")
+            initiated_at = _mapping_value(upload_summary, "Initiated")
+            if (
+                isinstance(key, str)
+                and isinstance(upload_id, str)
+                and isinstance(initiated_at, datetime.datetime)
+                and _datetime_is_aware(initiated_at)
+            ):
+                uploads.append(
+                    S3ListedMultipartUpload(
+                        upload=S3MultipartUpload(
+                            identity=S3ObjectIdentity(bucket=bucket, key=key),
+                            upload_id=upload_id,
+                        ),
+                        initiated_at=initiated_at,
+                    )
+                )
+            else:
+                skipped_entries += 1
+        next_key_marker = response.get("NextKeyMarker")
+        next_upload_id_marker = response.get("NextUploadIdMarker")
+        return S3MultipartUploadPage(
+            uploads=tuple(uploads),
+            next_key_marker=(
+                next_key_marker if isinstance(next_key_marker, str) else None
+            ),
+            next_upload_id_marker=(
+                next_upload_id_marker
+                if isinstance(next_upload_id_marker, str)
+                else None
+            ),
+            skipped_entries=skipped_entries,
+        )
+
     async def delete_prefix_bounded(
         self,
         *,
@@ -1229,6 +1383,28 @@ def _validate_sha256(value: str) -> None:
         or any(character not in "0123456789abcdef" for character in value)
     ):
         raise ValueError("SHA-256 must be lowercase hexadecimal")
+
+
+def _validate_s3_page_size(value: int) -> None:
+    if value <= 0 or value > 1000:
+        raise ValueError("S3 page size must be between 1 and 1000")
+
+
+def _datetime_is_aware(value: datetime.datetime) -> bool:
+    return value.tzinfo is not None and value.utcoffset() is not None
+
+
+def _mapping_value(value: object, key: str) -> object | None:
+    if not isinstance(value, dict):
+        return None
+    return _known_mapping_value(cast(dict[object, object], value), key)
+
+
+def _known_mapping_value(
+    value: dict[object, object],
+    key: str,
+) -> object | None:
+    return value.get(key)
 
 
 def _checksum_matches(persisted_checksum: str, expected_sha256: str) -> bool:
