@@ -66,6 +66,22 @@ export const ContextOnly = {
   },
 } satisfies Story;
 
+export const Discord = {
+  args: {
+    source: {
+      ...baseSource,
+      provider: "discord",
+      resourceLabel: "deployment",
+      senderDisplayName: "Alice",
+      providerUserId: "123456789012345678",
+      providerMessageKey: "discord:123456789012345678:234567890123456789",
+      originalUrl:
+        "https://discord.com/channels/345678901234567890/456789012345678901/567890123456789012",
+      body: "Please continue investigating the deployment thread.",
+    },
+  },
+} satisfies Story;
+
 export const EditedWithoutOriginalLink = {
   args: {
     source: {

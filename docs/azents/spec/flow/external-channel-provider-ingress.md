@@ -39,7 +39,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-07-28
-spec_version: 13
+spec_version: 15
 ---
 
 # External Channel Provider Ingress
@@ -48,7 +48,7 @@ spec_version: 13
 
 The Slack adapter accepts app-member public or private channel traffic plus the
 supported message-shortcut and selector interaction callbacks. The Discord adapter
-accepts target-Guild Gateway message Dispatches and signed interaction callbacks. Slack
+accepts target-Guild typed SDK message callbacks and signed interaction callbacks. Slack
 Connect, Discord DMs/group DMs, reactions, slash commands, and unrelated bot
 auto-triggers are outside the current scope. A tracked conversation is one provider
 thread rooted by an eligible App mention or message shortcut and resolved to one
@@ -141,15 +141,27 @@ Production permits only secure Slack endpoints. Test-only HTTP and insecure WebS
 The dedicated Discord Gateway Worker, rather than an Agent Worker, owns Gateway
 protocol sessions. It claims a configured Discord connection with a lease owner,
 configuration generation, App-claim generation, and lease generation. A stale claim
-cannot renew, checkpoint, admit, record a gap, or release newer authority.
+cannot renew, admit, record a gap, or release newer authority.
 
-The Worker discovers a secure Gateway endpoint, Identifies or Resumes from the last
-committed encrypted checkpoint, maintains heartbeats, and records reconnect, invalid
-session, close-code, and transport-gap outcomes. It accepts only eligible target-Guild
-message Dispatches. For each accepted Dispatch, canonical event admission and the
-session/sequence checkpoint commit together under the lease fence. The Worker advances
-no checkpoint after a failed admission. `READY` and `RESUMED` establish session state
-but are not canonical message events.
+The Worker uses only the public high-level `discord.py` client API. `Client.start`
+owns Gateway discovery, Identify, heartbeat, reconnect, and in-process Resume. Azents
+does not inspect Gateway frames, opcodes, session IDs, sequence numbers, Resume URLs,
+raw payload dictionaries, or private SDK state, and it does not persist or inject an
+SDK Resume checkpoint across processes.
+
+Ingress consumes the SDK's typed `Message`, `RawMessageUpdateEvent`, and
+`RawMessageDeleteEvent` callbacks. Update admission reads the public typed `message`
+projection rather than the event's raw data dictionary. Delete admission uses only the
+typed message, channel, and Guild identifiers. Cache misses resolve channel or thread
+identity through public `Client.get_channel` and `Client.fetch_channel` methods.
+Callbacks are serialized per connection, and a callback failure closes the high-level
+client so it cannot be logged and ignored while the lease continues.
+
+The Worker accepts only eligible target-Guild message callbacks. Canonical event
+identity derives from message lifecycle, Guild, channel, and message identity; update
+identity additionally includes a bounded typed-projection fingerprint. Provider event
+idempotency and the current lease/configuration/App-claim fence protect durable
+admission without exposing Gateway transport state.
 
 Credential failures and Gateway outcomes that cannot reconnect terminalize the current
 fenced lease in one transaction: they record the reason, release that lease, and move
@@ -157,9 +169,8 @@ the connection to `reconnect_required`. The scheduler excludes that state until 
 validated configuration edit reactivates the connection. Recoverable Gateway and
 network failures retain the normal gap-and-retry behavior.
 
-Production requires `https` REST discovery and `wss` Gateway transport. A deterministic
-fake may use `http`/`ws` only with both explicit Discord test-origin and insecure
-Gateway opt-in configuration.
+Production Gateway transport is selected and validated by `discord.py`; Azents does
+not provide a custom Gateway endpoint override.
 
 ## Asynchronous Processing
 
@@ -200,8 +211,14 @@ The worker claims admitted events in bounded batches with a claim owner and expi
   `SessionAgentContext`. An existing binding is returned unchanged and retains its
   prior snapshot.
 - Slack message normalization prefers non-blank provider fallback text. When it is absent, HTTP and Socket ingestion derive the same bounded readable body from supported section, header, context, and rich-text elements. User and channel elements retain reference syntax, unsupported elements contribute no text, and edit revision identity uses the resulting normalized body.
-- Ingestion enriches revisions with bounded sender/current-channel/in-body Slack reference mappings when provider lookup succeeds. Lookup failure leaves canonical provider IDs and messages intact.
-- Provider permalink resolution is optional and occurs outside the persistence transaction. Controlled provider failures leave `original_url` null and do not hide the message.
+- Ingestion enriches revisions with bounded sender, mentioned-user, current-channel,
+  thread, and parent-channel reference mappings when provider identity is available.
+  The mapping's model-visible size participates in pending-context trimming. Missing
+  optional display identity leaves canonical provider IDs and messages intact.
+- Slack permalink resolution is optional and occurs outside the persistence
+  transaction. Controlled Slack failures leave `original_url` null and do not hide the
+  message. Discord derives its canonical message link only from validated Guild,
+  channel, and message snowflakes.
 - First invocation starts provider-dispatched bounded hydration. Slack reads
   `conversations.replies`; Discord reads only the canonical root source when no thread
   exists and pages an existing thread backward by message cursor. Both normalize pages
@@ -249,6 +266,13 @@ excluded.
 
 ## Changelog
 
+- **2026-07-28** (spec_version 15) — Restricted Discord Gateway ingress to public
+  high-level `discord.py` APIs and complete typed message projections, and removed
+  raw frame parsing, private SDK access, persisted Resume state, and custom endpoint
+  overrides.
+- **2026-07-28** (spec_version 14) — Replaced the custom Discord Gateway protocol
+  loop with `discord.py`, added cache-independent Resume identity recovery and bounded
+  retry backoff, and documented Discord identity/link projection budgets.
 - **2026-07-28** (spec_version 13) — Added bounded Discord root/thread history
   hydration, reconciliation-fenced selector/approval activation, and signed
   Message-Command selector source materialization.

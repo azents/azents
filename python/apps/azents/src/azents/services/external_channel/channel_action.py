@@ -810,6 +810,8 @@ def _discord_agent_content(target: ChannelDeliveryTarget, text: str) -> str:
     if name is None:
         return text
     escaped_name = name.replace("\\", "\\\\").replace("*", "\\*")
+    if not text:
+        return f"**{escaped_name}**"
     return f"**{escaped_name}**\n{text}"
 
 

@@ -19,6 +19,7 @@ from azents.engine.events.types import ExternalChannelMessagePayload
 
 def _payload(
     *,
+    provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
     body: str | None = "hello",
     lifecycle: ExternalChannelMessageLifecycle = (
         ExternalChannelMessageLifecycle.CURRENT
@@ -33,7 +34,7 @@ def _payload(
     attachment_metadata: dict[str, object] | None = None,
 ) -> ExternalChannelMessagePayload:
     return ExternalChannelMessagePayload(
-        provider=ExternalChannelProvider.SLACK,
+        provider=provider,
         provider_tenant_id="tenant-1",
         resource_id="resource-1",
         resource_label="#incident / thread",
@@ -143,10 +144,26 @@ def test_turn_renderer_resolves_visible_references_but_retains_raw_payload() -> 
     rendered = render_external_channel_turn([payload])
 
     assert "Body: @Alice asked #incidents to investigate." in rendered
-    assert "U1" not in rendered
-    assert "C1" not in rendered
+    assert "- User U1: Alice" in rendered
+    assert "- Channel C1: #incidents" in rendered
     assert payload.body == "<@U1> asked <#C1> to investigate."
     assert payload.reference_mappings["users"]["U1"] == "Alice"
+
+
+def test_discord_nickname_mention_uses_visible_identity_mapping() -> None:
+    """Discord nickname mention syntax resolves without changing stored text."""
+    payload = _payload(
+        provider=ExternalChannelProvider.DISCORD,
+        body="<@!123456789> asked for help.",
+        reference_mappings={
+            "users": {"123456789": "Alice"},
+        },
+    )
+
+    rendered = render_external_channel_message(payload)
+
+    assert "@Alice asked for help." in rendered
+    assert payload.body == "<@!123456789> asked for help."
 
 
 def test_visible_reference_resolution_does_not_reprocess_display_names() -> None:

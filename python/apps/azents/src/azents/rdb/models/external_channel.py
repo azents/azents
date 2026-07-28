@@ -547,26 +547,6 @@ class RDBExternalChannelIngressLease(RDBModel):
         nullable=True,
         default=None,
     )
-    encrypted_checkpoint: Mapped[str | None] = mapped_column(
-        sa.Text,
-        nullable=True,
-        default=None,
-    )
-    checkpoint_version: Mapped[int | None] = mapped_column(
-        sa.Integer,
-        nullable=True,
-        default=None,
-    )
-    checkpoint_session_fingerprint: Mapped[str | None] = mapped_column(
-        sa.String(64),
-        nullable=True,
-        default=None,
-    )
-    last_handled_dispatch_sequence: Mapped[int | None] = mapped_column(
-        sa.BigInteger,
-        nullable=True,
-        default=None,
-    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,

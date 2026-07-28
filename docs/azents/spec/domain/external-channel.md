@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-28
-spec_version: 20
+spec_version: 21
 ---
 
 # External Channel
@@ -92,7 +92,7 @@ contain multiple independent bindings.
 
 | Record | Current contract |
 | --- | --- |
-| Connection | Workspace-owned provider App identity, immutable `single` or `multi` mode, encrypted credentials, capability/health snapshot, configuration and App-claim generations, terminal disconnect state, and provider ingress lease/checkpoint/gap state. Slack has one selected HTTP or Socket transport; Discord concurrently uses signed HTTP interactions and a Gateway session. |
+| Connection | Workspace-owned provider App identity, immutable `single` or `multi` mode, encrypted credentials, capability/health snapshot, configuration and App-claim generations, terminal disconnect state, and provider ingress lease/gap state. Slack has one selected HTTP or Socket transport; Discord concurrently uses signed HTTP interactions and a Gateway session. |
 | Agent route | Persistent connection-to-Agent relationship. Single Apps require exactly one current route. Multi Apps retain zero or more available or removed catalog routes; immutable Agent identity snapshots preserve history after Agent deletion. Each active dedicated route defaults to open human access and separately defaults to rejecting external bot messages. |
 | Channel default | Multi App channel-to-route preference. At most one active default exists per connection and provider channel. Removing its route invalidates rather than silently retargets it. |
 | Conversation admission | Durable, expiring unbound-conversation scope that records the initiating provider principal and may become selected exactly once. |
@@ -138,13 +138,14 @@ contain multiple independent bindings.
   never durable External Channel state.
 - The dedicated Discord Gateway Worker claims each connection through owner,
   configuration-generation, App-claim-generation, and lease-generation fences.
-  Heartbeats and lease renewal do not authorize durable mutation by themselves. A
-  Gateway dispatch advances the encrypted Resume checkpoint only in the same durable
-  admission transaction that accepts the canonical event; an unadmitted dispatch is
-  not checkpointed. Gateway `READY` is session state, not a canonical message event.
-- Production Discord REST and Gateway endpoints require `https` and `wss`. The
-  deterministic test origin may use `http` and `ws` only when an explicit test REST
-  origin and an explicit insecure-Gateway opt-in are both configured.
+  Heartbeats and lease renewal do not authorize durable mutation by themselves.
+  The Worker uses only public high-level `discord.py` APIs and typed SDK callbacks.
+  The SDK owns discovery, heartbeat, reconnect, and in-process Resume. Azents neither
+  reads raw Gateway payloads/private SDK state nor persists a cross-process Gateway
+  Resume checkpoint. Durable provider-event idempotency and the current
+  lease/configuration/App-claim fence protect canonical admission.
+- Production Discord Gateway endpoint selection belongs to `discord.py`; Azents does
+  not expose a custom or insecure Gateway endpoint override.
 - Supported first-release inbound files are direct Slack-hosted uploads with a concrete
   ID, non-negative declared size, visible access, and no external or Slack Connect
   classification. Unsupported entries remain metadata-visible with a stable rejection
@@ -265,6 +266,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-28** (spec_version 21) — Replaced custom Discord Gateway transport
+  state with high-level typed `discord.py` callbacks, SDK-owned reconnect/Resume,
+  provider-event idempotency, and lease-fenced canonical admission.
 - **2026-07-28** (spec_version 20) — Added bounded Discord root/thread hydration,
   reconciliation-fenced activation, durable provisioned delivery-thread retention,
   and provider-correct Discord Multi management across public and Workspace surfaces.

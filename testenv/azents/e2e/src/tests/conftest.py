@@ -691,7 +691,6 @@ def _configure_azents_server_container(
             "AZ_TESTENV_DISCORD_API_BASE_URL",
             _DISCORD_PROVIDER_INTERNAL_API_URL,
         )
-        .with_env("AZ_TESTENV_DISCORD_ALLOW_INSECURE_GATEWAY", "true")
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")
         .with_env("AZ_AGENT_HOME_IDLE_TIMEOUT_SECS", "60")

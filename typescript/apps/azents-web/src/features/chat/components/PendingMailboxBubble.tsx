@@ -12,6 +12,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import {
+  IconBrandDiscord,
   IconBrandSlack,
   IconTargetArrow,
   IconTrash,
@@ -117,7 +118,11 @@ export function PendingMailboxBubble({
         >
           <Stack gap="xs">
             <Group gap="xs" wrap="nowrap">
-              <IconBrandSlack size={15} aria-hidden="true" />
+              {presentation.provider === "discord" ? (
+                <IconBrandDiscord size={15} aria-hidden="true" />
+              ) : (
+                <IconBrandSlack size={15} aria-hidden="true" />
+              )}
               <Text size="xs" fw={700} truncate>
                 {presentation.sender_display_name ?? "External sender"}
               </Text>

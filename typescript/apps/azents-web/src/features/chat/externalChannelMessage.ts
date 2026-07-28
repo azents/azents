@@ -105,7 +105,7 @@ export function externalChannelReferenceMappingsMetadata(
 function visibleReferences(body: string, mappings: ReferenceMappings): string {
   return body
     .replace(
-      /<@([A-Z0-9]+)(?:\|[^>]+)?>|@([UW][A-Z0-9]+)/g,
+      /<@!?([A-Z0-9]+)(?:\|[^>]+)?>|@([UW][A-Z0-9]+)/g,
       (match: string, one?: string, two?: string) => {
         const identifier = one ?? two;
         if (!identifier) {
@@ -116,7 +116,7 @@ function visibleReferences(body: string, mappings: ReferenceMappings): string {
       },
     )
     .replace(
-      /<#([CG][A-Z0-9]+)(?:\|[^>]+)?>|#([CG][A-Z0-9]+)/g,
+      /<#([A-Z0-9]+)(?:\|[^>]+)?>|#([CG][A-Z0-9]+)/g,
       (match: string, one?: string, two?: string) => {
         const identifier = one ?? two;
         if (!identifier) {
@@ -132,7 +132,7 @@ function visibleResourceLabel(
   resourceLabel: string,
   mappings: ReferenceMappings,
 ): string {
-  const channelId = resourceLabel.match(/^([CG][A-Z0-9]+)/)?.[1];
+  const channelId = resourceLabel.match(/^([^: /]+)/)?.[1];
   return channelId
     ? (mappings.channels[channelId] ?? resourceLabel)
     : resourceLabel;

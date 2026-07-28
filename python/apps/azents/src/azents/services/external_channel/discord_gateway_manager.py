@@ -1,25 +1,17 @@
-"""Dedicated lease-fenced Discord Gateway worker service."""
+"""Lease-fenced Discord Gateway service backed by discord.py."""
 
 import asyncio
 import dataclasses
 import datetime
-import hashlib
-import json
 import logging
-import math
-from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import uuid4
 
-import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
-from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_config, get_credential_cipher
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -34,20 +26,17 @@ from azents.services.external_channel.connection import (
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import DiscordConnectionCredentials
-from azents.services.external_channel.discord_endpoint import (
-    discord_api_base_url,
-    discord_gateway_url_allowed,
-)
 from azents.services.external_channel.discord_events import (
-    project_discord_gateway_dispatch,
+    project_discord_gateway_event,
 )
 from azents.services.external_channel.discord_gateway import (
-    DiscordGatewayCheckpoint,
     DiscordGatewayClient,
     DiscordGatewayConnectionResult,
-    DiscordGatewayDispatch,
+    DiscordGatewayCredentialError,
     DiscordGatewayError,
-    DiscordGatewayInvalidPayload,
+    DiscordGatewayIntentsError,
+    DiscordGatewayMessageEvent,
+    DiscordGatewayRunner,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,48 +46,21 @@ _RENEW_INTERVAL = datetime.timedelta(seconds=15)
 _RECONNECT_DELAY = datetime.timedelta(seconds=5)
 _RATE_LIMIT_RECONNECT_DELAY = datetime.timedelta(minutes=1)
 _MAX_RECONNECT_DELAY = datetime.timedelta(minutes=5)
-_MAX_RATE_LIMIT_RETRY_AFTER = datetime.timedelta(days=1)
-_CHECKPOINT_VERSION = 1
 
 
-def _checkpoint_session_fingerprint(session_id: str) -> str:
-    """Return a non-reversible fingerprint for a Discord Gateway session."""
-    return hashlib.sha256(session_id.encode()).hexdigest()
-
-
-class DiscordGatewayCredentialError(RuntimeError):
-    """Persisted Discord credentials cannot establish a Gateway session."""
-
-
-class DiscordGatewayRateLimitError(DiscordGatewayError):
-    """Discord Gateway discovery explicitly asked the client to slow down."""
-
-    def __init__(self, retry_after: datetime.timedelta | None) -> None:
-        """Initialize one discovery rate-limit result with bounded delay metadata."""
-        super().__init__("Discord Gateway discovery is rate limited.")
-        self.retry_after = retry_after
-
-
-class DiscordGatewayLeaseLost(RuntimeError):
+class DiscordGatewayLeaseLost(DiscordGatewayError):
     """The current process no longer owns the authoritative Gateway lease."""
 
 
-async def get_discord_gateway_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide the HTTP client used only for Discord Gateway endpoint discovery."""
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        yield client
-
-
-def get_discord_gateway_client() -> DiscordGatewayClient:
-    """Provide one Discord Gateway protocol client."""
+def get_discord_gateway_client() -> DiscordGatewayRunner:
+    """Provide the discord.py-backed Gateway runner."""
     return DiscordGatewayClient()
 
 
 @dataclasses.dataclass
 class DiscordGatewayManagerService:
-    """Own Discord Gateway sessions separately from the Agent Worker role."""
+    """Own one discord.py client per current fenced Discord connection."""
 
-    config: Annotated[Config, Depends(get_config)]
     session_manager: Annotated[
         SessionManager[AsyncSession],
         Depends(get_session_manager),
@@ -111,14 +73,9 @@ class DiscordGatewayManagerService:
         ExternalChannelCredentialsCodec,
         Depends(get_external_channel_credentials_codec),
     ]
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)]
-    http_client: Annotated[
-        httpx.AsyncClient,
-        Depends(get_discord_gateway_http_client),
-    ]
     manager_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
     gateway_client: Annotated[
-        DiscordGatewayClient,
+        DiscordGatewayRunner,
         Depends(get_discord_gateway_client),
     ] = dataclasses.field(default_factory=DiscordGatewayClient)
     poll_interval: datetime.timedelta = _POLL_INTERVAL
@@ -127,7 +84,7 @@ class DiscordGatewayManagerService:
     reconnect_delay: datetime.timedelta = _RECONNECT_DELAY
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
-        """Continuously claim configured Discord Gateway connections until shutdown."""
+        """Continuously claim configured Discord connections until shutdown."""
         tasks: dict[str, asyncio.Task[None]] = {}
         try:
             while not shutdown_event.is_set():
@@ -190,55 +147,20 @@ class DiscordGatewayManagerService:
                 return
             credentials = self._credentials(configuration.encrypted_credentials)
             if configuration.provider_tenant_id is None:
-                raise DiscordGatewayCredentialError
-            checkpoint = _decode_checkpoint(
-                cipher=self.cipher,
-                ciphertext=lease.encrypted_checkpoint,
-                version=lease.checkpoint_version,
-            )
+                raise DiscordGatewayCredentialError(
+                    "Discord Guild identity is unavailable."
+                )
             while not shutdown_event.is_set():
-                retry_after: datetime.timedelta | None = None
-                try:
-                    endpoint_url = (
-                        checkpoint.resume_gateway_url
-                        if checkpoint is not None
-                        else await self._discover_gateway_url(credentials.bot_token)
-                    )
-                    result = await self._run_connection_with_lease(
-                        connection_id=connection_id,
-                        lease=lease,
-                        endpoint_url=endpoint_url,
-                        bot_token=credentials.bot_token,
-                        provider_app_id=configuration.provider_app_id,
-                        target_guild_id=configuration.provider_tenant_id,
-                        checkpoint=checkpoint,
-                        shutdown_event=shutdown_event,
-                    )
-                except DiscordGatewayRateLimitError as error:
-                    retry_after = error.retry_after
-                    result = DiscordGatewayConnectionResult(
-                        reconnect=True,
-                        can_resume=checkpoint is not None,
-                        reason="gateway_rate_limited",
-                        checkpoint=checkpoint,
-                    )
-                except DiscordGatewayInvalidPayload:
-                    result = DiscordGatewayConnectionResult(
-                        reconnect=True,
-                        can_resume=checkpoint is not None,
-                        reason="gateway_protocol_invalid",
-                        checkpoint=checkpoint,
-                    )
-                except DiscordGatewayError, httpx.RequestError, OSError:
-                    result = DiscordGatewayConnectionResult(
-                        reconnect=True,
-                        can_resume=checkpoint is not None,
-                        reason="gateway_transport_unavailable",
-                        checkpoint=checkpoint,
-                    )
+                result = await self._run_connection_with_lease(
+                    connection_id=connection_id,
+                    lease=lease,
+                    bot_token=credentials.bot_token,
+                    provider_app_id=configuration.provider_app_id,
+                    target_guild_id=configuration.provider_tenant_id,
+                    shutdown_event=shutdown_event,
+                )
                 if result is None:
                     return
-                checkpoint = result.checkpoint if result.can_resume else None
                 if not result.reconnect:
                     await self._mark_reconnect_required(
                         connection_id=connection_id,
@@ -261,7 +183,6 @@ class DiscordGatewayManagerService:
                     delay=self._reconnect_delay(
                         reason=result.reason,
                         attempt=reconnect_attempts,
-                        retry_after=retry_after,
                     ),
                 ):
                     return
@@ -271,6 +192,8 @@ class DiscordGatewayManagerService:
             )
             lease_released = True
             raise
+        except DiscordGatewayLeaseLost:
+            lease_released = True
         except DiscordGatewayCredentialError:
             await self._mark_reconnect_required(
                 connection_id=connection_id,
@@ -278,13 +201,14 @@ class DiscordGatewayManagerService:
                 reason="gateway_credentials_invalid",
             )
             lease_released = True
-        except (
-            DiscordGatewayError,
-            httpx.RequestError,
-            OSError,
-            InvalidToken,
-            ValidationError,
-        ):
+        except DiscordGatewayIntentsError:
+            await self._mark_reconnect_required(
+                connection_id=connection_id,
+                lease=lease,
+                reason="intents_disallowed",
+            )
+            lease_released = True
+        except DiscordGatewayError:
             await self._record_gap(
                 connection_id=connection_id,
                 lease=lease,
@@ -299,34 +223,21 @@ class DiscordGatewayManagerService:
         *,
         connection_id: str,
         lease: ExternalChannelIngressLease,
-        endpoint_url: str,
         bot_token: str,
         provider_app_id: str | None,
         target_guild_id: str,
-        checkpoint: DiscordGatewayCheckpoint | None,
         shutdown_event: asyncio.Event,
     ) -> DiscordGatewayConnectionResult | None:
-        async def persist_checkpoint(value: DiscordGatewayCheckpoint) -> None:
-            persisted = await self._persist_checkpoint(
-                connection_id=connection_id,
-                lease=lease,
-                checkpoint=value,
-            )
-            if not persisted:
-                raise DiscordGatewayLeaseLost
-
         connection_task = asyncio.create_task(
             self.gateway_client.run_connection(
-                endpoint_url=endpoint_url,
                 bot_token=bot_token,
-                checkpoint=checkpoint,
-                persist_checkpoint=persist_checkpoint,
-                handle_dispatch=lambda dispatch: self._admit_dispatch(
+                target_guild_id=target_guild_id,
+                handle_event=lambda event: self._admit_gateway_event(
                     connection_id=connection_id,
                     lease=lease,
                     provider_app_id=provider_app_id,
                     target_guild_id=target_guild_id,
-                    dispatch=dispatch,
+                    event=event,
                 ),
             )
         )
@@ -458,82 +369,41 @@ class DiscordGatewayManagerService:
             await session.commit()
             return terminalized
 
-    async def _persist_checkpoint(
-        self,
-        *,
-        connection_id: str,
-        lease: ExternalChannelIngressLease,
-        checkpoint: DiscordGatewayCheckpoint,
-    ) -> bool:
-        now = _utc_now()
-        encrypted_checkpoint = self.cipher.encrypt(
-            json.dumps(dataclasses.asdict(checkpoint), separators=(",", ":"))
-        )
-        async with self.session_manager() as session:
-            persisted = await self.repository.update_discord_gateway_checkpoint(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                lease_generation=lease.lease_generation,
-                now=now,
-                encrypted_checkpoint=encrypted_checkpoint,
-                checkpoint_version=_CHECKPOINT_VERSION,
-                checkpoint_session_fingerprint=_checkpoint_session_fingerprint(
-                    checkpoint.session_id
-                ),
-                sequence=checkpoint.sequence,
-            )
-            await session.commit()
-            return persisted
-
-    async def _admit_dispatch(
+    async def _admit_gateway_event(
         self,
         *,
         connection_id: str,
         lease: ExternalChannelIngressLease,
         provider_app_id: str | None,
         target_guild_id: str,
-        dispatch: DiscordGatewayDispatch,
-    ) -> bool:
-        """Durably admit one supported message dispatch under the lease fence."""
-        create = project_discord_gateway_dispatch(
+        event: DiscordGatewayMessageEvent,
+    ) -> None:
+        """Durably admit one typed high-level discord.py message event."""
+        create = project_discord_gateway_event(
             connection_id=connection_id,
             provider_app_id=provider_app_id,
             target_guild_id=target_guild_id,
-            dispatch=dispatch,
+            event=event,
             received_at=_utc_now(),
         )
         if create is None:
-            return False
-        admitted = await self._admit_event(
+            return
+        admitted = await self._commit_event(
             connection_id=connection_id,
             lease=lease,
             create=create,
-            dispatch=dispatch,
         )
         if not admitted:
             raise DiscordGatewayLeaseLost
-        return True
 
-    async def _admit_event(
+    async def _commit_event(
         self,
         *,
         connection_id: str,
         lease: ExternalChannelIngressLease,
         create: ExternalChannelEventCreate,
-        dispatch: DiscordGatewayDispatch,
     ) -> bool:
-        """Commit canonical admission only while current authority remains fenced."""
-        encrypted_checkpoint = self.cipher.encrypt(
-            json.dumps(
-                {
-                    "session_id": dispatch.session_id,
-                    "resume_gateway_url": dispatch.resume_gateway_url,
-                    "sequence": dispatch.sequence,
-                },
-                separators=(",", ":"),
-            )
-        )
+        """Commit canonical admission under the current lease fence."""
         async with self.session_manager() as session:
             admission = await self.repository.admit_discord_gateway_event(
                 session,
@@ -542,55 +412,11 @@ class DiscordGatewayManagerService:
                 lease_generation=lease.lease_generation,
                 now=_utc_now(),
                 create=create,
-                encrypted_checkpoint=encrypted_checkpoint,
-                checkpoint_version=_CHECKPOINT_VERSION,
-                sequence=dispatch.sequence,
             )
             if admission is None:
                 return False
             await session.commit()
             return True
-
-    async def _discover_gateway_url(self, bot_token: str) -> str:
-        response = await self.http_client.get(
-            f"{discord_api_base_url()}/gateway/bot",
-            headers={"Authorization": f"Bot {bot_token}"},
-        )
-        if response.status_code in {401, 403}:
-            raise DiscordGatewayCredentialError
-        if response.status_code == 429:
-            raise DiscordGatewayRateLimitError(_retry_after_from_response(response))
-        if response.status_code >= 500:
-            raise DiscordGatewayError("Discord Gateway discovery is unavailable.")
-        try:
-            payload: object = response.json()
-        except ValueError as error:
-            raise DiscordGatewayError(
-                "Discord Gateway discovery returned invalid JSON."
-            ) from error
-        if not isinstance(payload, dict):
-            raise DiscordGatewayError("Discord Gateway discovery returned an object.")
-        endpoint_url = payload.get("url")
-        if not isinstance(endpoint_url, str):
-            raise DiscordGatewayError(
-                "Discord Gateway discovery returned an invalid endpoint."
-            )
-        if not discord_gateway_url_allowed(endpoint_url):
-            raise DiscordGatewayError(
-                "Discord Gateway discovery returned an invalid endpoint."
-            )
-        return endpoint_url
-
-    def _credentials(self, ciphertext: str | None) -> DiscordConnectionCredentials:
-        if ciphertext is None:
-            raise DiscordGatewayCredentialError
-        try:
-            credentials = self.credentials_codec.decrypt(ciphertext)
-        except (InvalidToken, ValidationError) as error:
-            raise DiscordGatewayCredentialError from error
-        if not isinstance(credentials, DiscordConnectionCredentials):
-            raise DiscordGatewayCredentialError
-        return credentials
 
     async def _sleep_or_shutdown(
         self,
@@ -600,7 +426,7 @@ class DiscordGatewayManagerService:
         lease: ExternalChannelIngressLease,
         delay: datetime.timedelta,
     ) -> bool:
-        """Wait with periodic lease renewal so a long backoff retains authority."""
+        """Wait with periodic lease renewal during reconnect backoff."""
         deadline = asyncio.get_running_loop().time() + delay.total_seconds()
         while not shutdown_event.is_set():
             remaining_seconds = deadline - asyncio.get_running_loop().time()
@@ -622,94 +448,35 @@ class DiscordGatewayManagerService:
                     lease=lease,
                 ):
                     return False
-        return True
+        return False
 
     def _reconnect_delay(
         self,
         *,
         reason: str,
         attempt: int,
-        retry_after: datetime.timedelta | None,
     ) -> datetime.timedelta:
-        """Return bounded backoff for retryable Gateway outcomes."""
+        """Return bounded exponential backoff for one reconnect outcome."""
         base_delay = self.reconnect_delay
         if reason == "gateway_rate_limited":
             base_delay = max(base_delay, _RATE_LIMIT_RECONNECT_DELAY)
-        delay = min(
+        return min(
             base_delay * 2 ** (attempt - 1),
             _MAX_RECONNECT_DELAY,
         )
-        return max(delay, retry_after) if retry_after is not None else delay
 
-
-def _decode_checkpoint(
-    *,
-    cipher: CredentialCipher,
-    ciphertext: str | None,
-    version: int | None,
-) -> DiscordGatewayCheckpoint | None:
-    """Decrypt and validate one persisted resumable Gateway checkpoint."""
-    if ciphertext is None:
-        return None
-    if version != _CHECKPOINT_VERSION:
-        raise DiscordGatewayError("Discord Gateway checkpoint version is unsupported.")
-    try:
-        value: object = json.loads(cipher.decrypt(ciphertext))
-    except (ValueError, InvalidToken) as error:
-        raise DiscordGatewayError("Discord Gateway checkpoint is invalid.") from error
-    if not isinstance(value, dict):
-        raise DiscordGatewayError("Discord Gateway checkpoint must be an object.")
-    session_id = value.get("session_id")
-    resume_gateway_url = value.get("resume_gateway_url")
-    sequence = value.get("sequence")
-    if (
-        not isinstance(session_id, str)
-        or not session_id
-        or not isinstance(resume_gateway_url, str)
-        or not discord_gateway_url_allowed(resume_gateway_url)
-        or not isinstance(sequence, int)
-        or isinstance(sequence, bool)
-        or sequence < 0
-    ):
-        raise DiscordGatewayError("Discord Gateway checkpoint has invalid fields.")
-    return DiscordGatewayCheckpoint(
-        session_id=session_id,
-        resume_gateway_url=resume_gateway_url,
-        sequence=sequence,
-    )
-
-
-def _retry_after_from_response(
-    response: httpx.Response,
-) -> datetime.timedelta | None:
-    """Extract a bounded numeric retry delay without retaining provider payloads."""
-    header_value = response.headers.get("Retry-After")
-    header_delay = _retry_after_duration(header_value)
-    if header_delay is not None:
-        return header_delay
-    try:
-        payload: object = response.json()
-    except ValueError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return _retry_after_duration(payload.get("retry_after"))
-
-
-def _retry_after_duration(value: object) -> datetime.timedelta | None:
-    """Validate one numeric provider retry delay."""
-    if isinstance(value, bool) or not isinstance(value, int | float | str):
-        return None
-    try:
-        seconds = float(value)
-    except ValueError:
-        return None
-    if not math.isfinite(seconds) or seconds <= 0:
-        return None
-    return min(
-        datetime.timedelta(seconds=seconds),
-        _MAX_RATE_LIMIT_RETRY_AFTER,
-    )
+    def _credentials(self, ciphertext: str | None) -> DiscordConnectionCredentials:
+        if ciphertext is None:
+            raise DiscordGatewayCredentialError("Discord credentials are unavailable.")
+        try:
+            credentials = self.credentials_codec.decrypt(ciphertext)
+        except (InvalidToken, ValidationError) as error:
+            raise DiscordGatewayCredentialError(
+                "Discord credentials are invalid."
+            ) from error
+        if not isinstance(credentials, DiscordConnectionCredentials):
+            raise DiscordGatewayCredentialError("Discord credentials are invalid.")
+        return credentials
 
 
 def _utc_now() -> datetime.datetime:

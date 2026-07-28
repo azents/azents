@@ -5,8 +5,6 @@ import hashlib
 import hmac
 import json
 import time
-from collections.abc import Callable
-from contextlib import AbstractContextManager
 from typing import Any, cast
 from urllib.parse import urlencode
 
@@ -91,7 +89,6 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
-from testcontainers.core.container import DockerContainer
 
 from support.utils import (
     authenticate_user,
@@ -2211,18 +2208,13 @@ def test_connection_management_web_surface_uses_redacted_operational_state(
     assert connection.is_displayed()
 
 
-def test_discord_single_activation_interaction_and_gateway_journey(
+def test_discord_single_activation_and_interaction_journey(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     discord_provider_fake_url: str,
-    azents_engine_worker_container: Container,
-    azents_discord_gateway_worker_factory: Callable[
-        [], AbstractContextManager[DockerContainer]
-    ],
 ) -> None:
-    """Exercise Discord activation, signed ingress, and fenced Gateway admission."""
-    gateway_message_id = "500000000000000001"
+    """Exercise Discord activation and signed interaction ingress."""
     requests.post(
         f"{discord_provider_fake_url}/__testenv/reset",
         timeout=5,
@@ -2231,51 +2223,15 @@ def test_discord_single_activation_interaction_and_gateway_journey(
         f"{discord_provider_fake_url}/__testenv/configure",
         json={
             "allow_synthetic_roots": True,
-            "history_pages": [
-                [
-                    {
-                        "id": gateway_message_id,
-                        "channel_id": _DISCORD_CHANNEL_ID,
-                        "guild_id": _DISCORD_GUILD_ID,
-                        "content": "Private Discord gateway invocation",
-                        "timestamp": "2026-07-26T00:00:00.000000+00:00",
-                        "author": {"id": "600000000000000001"},
-                    }
-                ]
-            ],
             "root_messages": [
                 {
                     "id": "700000000000000002",
                     "channel_id": _DISCORD_CHANNEL_ID,
-                    "content": "Private Discord gateway invocation",
+                    "content": "Private Discord interaction invocation",
                     "timestamp": "2026-07-26T00:00:00.000000+00:00",
                     "author": {"id": "600000000000000001"},
                     "mentions": [{"id": _DISCORD_BOT_USER_ID}],
                     "guild_id": _DISCORD_GUILD_ID,
-                },
-                {
-                    "id": gateway_message_id,
-                    "channel_id": _DISCORD_CHANNEL_ID,
-                    "content": "Private Discord gateway invocation",
-                    "timestamp": "2026-07-26T00:00:00.000000+00:00",
-                    "author": {"id": "600000000000000001"},
-                    "mentions": [{"id": _DISCORD_BOT_USER_ID}],
-                    "guild_id": _DISCORD_GUILD_ID,
-                },
-            ],
-            "gateway_dispatches": [
-                {
-                    "sequence": 2,
-                    "event_type": "MESSAGE_CREATE",
-                    "payload": {
-                        "id": gateway_message_id,
-                        "guild_id": _DISCORD_GUILD_ID,
-                        "channel_id": _DISCORD_CHANNEL_ID,
-                        "content": "Private Discord gateway invocation",
-                        "timestamp": "2026-07-26T00:00:00.000000+00:00",
-                        "author": {"id": "600000000000000001"},
-                        "mentions": [{"id": _DISCORD_BOT_USER_ID}],
-                    },
                 }
             ],
         },
@@ -2337,190 +2293,8 @@ def test_discord_single_activation_interaction_and_gateway_journey(
     command.raise_for_status()
     assert command.json() == {"status": 200, "response_type": 5}
 
-    chat_api = ChatV1Api(public_api_client)
-
-    def discord_binding_projection() -> tuple[Any, Any] | None:
-        """Return one Discord binding and public Session projection."""
-        try:
-            sessions = chat_api.chat_v1_list_sessions(
-                handle=handle,
-                _headers=headers,
-            )
-        except ApiException:
-            return None
-        for session in sessions.items:
-            if session.agent_id != agent_id:
-                continue
-            try:
-                projection = external_api.external_channel_v1_list_session_channels(
-                    agent_id=agent_id,
-                    session_id=session.id,
-                    handle=handle,
-                    _headers=headers,
-                )
-            except ApiException:
-                continue
-            for binding in projection.items:
-                if binding.provider.value == "discord":
-                    return session, binding
-        return None
-
-    def admitted_gateway_state() -> dict[str, object] | None:
-        state = _discord_provider_state(discord_provider_fake_url)
-        gateway = state.get("gateway")
-        if not isinstance(gateway, dict):
-            return None
-        gateway_evidence = cast(dict[str, object], gateway)
-        initial_opcodes = gateway_evidence.get("initial_opcodes")
-        heartbeats = gateway_evidence.get("heartbeats")
-        if (
-            isinstance(initial_opcodes, list)
-            and initial_opcodes
-            and initial_opcodes[0] == 2
-            and isinstance(heartbeats, list)
-            and 2 in heartbeats
-            and gateway_evidence.get("dispatches")
-            == [{"event_type": "MESSAGE_CREATE", "sequence": 2}]
-        ):
-            return state
-        return None
-
-    requests.post(
-        f"{discord_provider_fake_url}/__testenv/barrier",
-        json={"operation": "create_message", "occurrence": 2},
-        timeout=5,
-    ).raise_for_status()
-    with azents_discord_gateway_worker_factory():
-        try:
-            wait_until(
-                lambda: (
-                    requests.get(
-                        f"{discord_provider_fake_url}/__testenv/barrier",
-                        timeout=5,
-                    )
-                    .json()
-                    .get("reached")
-                    is True
-                ),
-                timeout=20,
-                interval=0.1,
-                message="Discord initial delivery barrier was not reached",
-            )
-            waiting_session_binding = cast(
-                tuple[Any, Any],
-                wait_until(
-                    lambda: (
-                        projection
-                        if (
-                            (projection := discord_binding_projection()) is not None
-                            and projection[1].activation_status
-                            is ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-                        )
-                        else None
-                    ),
-                    timeout=10,
-                    interval=0.1,
-                    message=(
-                        "Discord binding did not remain waiting at initial delivery "
-                        "barrier"
-                    ),
-                ),
-            )
-            waiting_session, waiting_binding = waiting_session_binding
-            assert waiting_session.run_state.value == "idle"
-            assert waiting_binding.status.value == "active"
-            barrier_state = requests.get(
-                f"{discord_provider_fake_url}/__testenv/barrier",
-                timeout=5,
-            ).json()
-            assert barrier_state == {
-                "operation": "create_message",
-                "occurrence": 2,
-                "request_count": 2,
-                "reached": True,
-                "released": False,
-            }
-            barrier_operations = _discord_provider_state(discord_provider_fake_url).get(
-                "operations"
-            )
-            assert isinstance(barrier_operations, list)
-            barrier_operations = cast(list[dict[str, object]], barrier_operations)
-            assert (
-                len(
-                    [
-                        operation
-                        for operation in barrier_operations
-                        if isinstance(operation, dict)
-                        and operation.get("event") == "message"
-                    ]
-                )
-                == 1
-            )
-            requests.post(
-                f"{discord_provider_fake_url}/__testenv/barrier/release",
-                timeout=5,
-            ).raise_for_status()
-            state = cast(
-                dict[str, object],
-                wait_until(
-                    admitted_gateway_state,
-                    timeout=20,
-                    interval=0.1,
-                    message=(
-                        "Discord Gateway Dispatch was not durably admitted and "
-                        "checkpointed"
-                    ),
-                ),
-            )
-            active_session_binding = cast(
-                tuple[Any, Any],
-                wait_until(
-                    lambda: (
-                        projection
-                        if (
-                            (projection := discord_binding_projection()) is not None
-                            and projection[1].activation_status
-                            is ExternalChannelBindingActivationStatus.ACTIVE
-                        )
-                        else None
-                    ),
-                    timeout=15,
-                    interval=0.1,
-                    message=(
-                        "Discord binding did not become active after barrier release"
-                    ),
-                ),
-            )
-            assert active_session_binding[1].status.value == "active"
-            execution_session_binding = cast(
-                tuple[Any, Any],
-                wait_until(
-                    lambda: (
-                        projection
-                        if (
-                            (projection := discord_binding_projection()) is not None
-                            and (
-                                projection[0].run_state.value == "running"
-                                or projection[0].unread_terminal_run_id is not None
-                            )
-                        )
-                        else None
-                    ),
-                    timeout=20,
-                    interval=0.1,
-                    message="Discord wake did not produce a public execution effect",
-                ),
-            )
-            assert execution_session_binding[1].activation_status is (
-                ExternalChannelBindingActivationStatus.ACTIVE
-            )
-        finally:
-            requests.post(
-                f"{discord_provider_fake_url}/__testenv/barrier/release",
-                timeout=5,
-            ).raise_for_status()
-    interactions = state.get("interactions")
-    assert interactions == [
+    state = _discord_provider_state(discord_provider_fake_url)
+    assert state["interactions"] == [
         {
             "interaction_id": "700000000000000001",
             "interaction_type": 1,
@@ -2534,24 +2308,9 @@ def test_discord_single_activation_interaction_and_gateway_journey(
             "response_type": 5,
         },
     ]
-    final_operations = _discord_provider_state(discord_provider_fake_url).get(
-        "operations"
-    )
-    assert isinstance(final_operations, list)
-    final_operations = cast(list[dict[str, object]], final_operations)
-    initial_message_operations: list[dict[str, object]] = [
-        operation
-        for operation in final_operations
-        if operation.get("event") == "message"
-    ]
-    assert len(initial_message_operations) == 2
-    assert all(
-        operation.get("outcome") in {"created", "duplicate", "delivered"}
-        for operation in initial_message_operations
-    )
     rendered_state = str(state)
     assert _DISCORD_BOT_TOKEN not in rendered_state
-    assert "Private Discord gateway invocation" not in rendered_state
+    assert "Private Discord interaction invocation" not in rendered_state
     assert "X-Signature-Ed25519" not in rendered_state
 
 

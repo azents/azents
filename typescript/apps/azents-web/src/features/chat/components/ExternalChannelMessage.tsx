@@ -18,6 +18,7 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
+  IconBrandDiscord,
   IconBrandSlack,
   IconCheck,
   IconChevronRight,
@@ -38,6 +39,24 @@ interface ExternalChannelMessageProps {
 }
 
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
+
+function ProviderIcon({ provider }: { provider: string }): React.ReactElement {
+  return provider === "discord" ? (
+    <IconBrandDiscord
+      aria-hidden="true"
+      size={15}
+      stroke={1.8}
+      style={{ flexShrink: 0 }}
+    />
+  ) : (
+    <IconBrandSlack
+      aria-hidden="true"
+      size={15}
+      stroke={1.8}
+      style={{ flexShrink: 0 }}
+    />
+  );
+}
 
 function sourceStatusLabel(
   source: ExternalChannelMessagePresentation,
@@ -170,12 +189,7 @@ export function ExternalChannelMessage({
                 transition: chatChevronTransition,
               }}
             />
-            <IconBrandSlack
-              aria-hidden="true"
-              size={15}
-              stroke={1.8}
-              style={{ flexShrink: 0 }}
-            />
+            <ProviderIcon provider={source.provider} />
             <Text size="xs" fw={600} style={{ flexShrink: 0 }}>
               {source.senderDisplayName}:
             </Text>

@@ -91,6 +91,14 @@ _DISCORD_GATEWAY_CHECKPOINT_SESSION_MIGRATION = (
     / "versions"
     / "17a0f533cc20_add_discord_gateway_checkpoint_session_.py"
 )
+_DISCORD_GATEWAY_CHECKPOINT_REMOVAL_MIGRATION = (
+    PROJECT_ROOT
+    / "db-schemas"
+    / "rdb"
+    / "migrations"
+    / "versions"
+    / "785dfb44ef23_remove_discord_gateway_checkpoint_state.py"
+)
 _DOCKER_V1_MIGRATION = (
     PROJECT_ROOT
     / "db-schemas"
@@ -321,6 +329,9 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     checkpoint_session_source = (
         _DISCORD_GATEWAY_CHECKPOINT_SESSION_MIGRATION.read_text()
     )
+    checkpoint_removal_source = (
+        _DISCORD_GATEWAY_CHECKPOINT_REMOVAL_MIGRATION.read_text()
+    )
     docker_v1_source = _DOCKER_V1_MIGRATION.read_text()
     resource_values = _migration_values(_RESOURCE_V2_MIGRATION)
     route_access_policy_values = _migration_values(
@@ -329,12 +340,16 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     checkpoint_session_values = _migration_values(
         _DISCORD_GATEWAY_CHECKPOINT_SESSION_MIGRATION
     )
+    checkpoint_removal_values = _migration_values(
+        _DISCORD_GATEWAY_CHECKPOINT_REMOVAL_MIGRATION
+    )
     docker_v1_values = _migration_values(_DOCKER_V1_MIGRATION)
 
-    assert revision_file.read_text().strip() == "c51a9e8c6815"
+    assert revision_file.read_text().strip() == "785dfb44ef23"
     assert resource_values["down_revision"] == "e0615474dc27"
     assert route_access_policy_values["down_revision"] == "c1d4e7f2a9b0"
     assert checkpoint_session_values["down_revision"] == "f17b4c8d6a21"
+    assert checkpoint_removal_values["down_revision"] == "c51a9e8c6815"
     assert docker_v1_values["down_revision"] == "17a0f533cc20"
     assert "INSERT INTO workspace_runtime_execution_policies" in seed_source
     assert "INSERT INTO workspace_runtime_execution_profile_allowances" in seed_source
@@ -364,6 +379,30 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     assert '"open_access_enabled"' in route_access_policy_source
     assert '"allow_bot_messages"' in route_access_policy_source
     assert "checkpoint_session_fingerprint" in checkpoint_session_source
+    assert (
+        "op.drop_column(\n"
+        '        "external_channel_ingress_leases",\n'
+        '        "encrypted_checkpoint",\n'
+        "    )"
+    ) in checkpoint_removal_source
+    assert (
+        "op.drop_column(\n"
+        '        "external_channel_ingress_leases",\n'
+        '        "checkpoint_version",\n'
+        "    )"
+    ) in checkpoint_removal_source
+    assert (
+        "op.drop_column(\n"
+        '        "external_channel_ingress_leases",\n'
+        '        "checkpoint_session_fingerprint",\n'
+        "    )"
+    ) in checkpoint_removal_source
+    assert (
+        "op.drop_column(\n"
+        '        "external_channel_ingress_leases",\n'
+        '        "last_handled_dispatch_sequence",\n'
+        "    )"
+    ) in checkpoint_removal_source
     assert '"module_id": "docker"' in docker_v1_source
     assert '"module_id": "runtime.resources"' in docker_v1_source
     assert '"pids"' not in docker_v1_source

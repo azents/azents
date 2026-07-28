@@ -74,7 +74,7 @@ def render_discord_progress(
         return DiscordProgressPresentation(
             pages=(
                 DiscordProgressPage(
-                    text="Agent is checking your message.",
+                    text="",
                     embeds=[
                         {
                             "title": "Agent is checking your message",
@@ -91,10 +91,9 @@ def render_discord_progress(
     if progress.title is None:
         raise AssertionError("Validated working progress must contain a title.")
     summary = _progress_summary(progress.tasks)
-    overview = f"## {progress.title}\n{summary}"
     pages = [
         DiscordProgressPage(
-            text=overview,
+            text="",
             embeds=[
                 {
                     "title": _bounded_embed_title(progress.title),
@@ -109,7 +108,7 @@ def render_discord_progress(
         parts = split_discord_markdown(task_text)
         pages.extend(
             DiscordProgressPage(
-                text=part,
+                text="",
                 embeds=[
                     {
                         "title": _bounded_embed_title(

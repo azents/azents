@@ -115,6 +115,30 @@ export const ExternalChannel: Story = {
   },
 };
 
+export const DiscordExternalChannel: Story = {
+  args: {
+    entry: item("discord-external", {
+      type: "external_channel_message",
+      provider: "discord",
+      resource_label: "deployment",
+      resource_type: "thread",
+      external_message_id: "message-2",
+      revision_id: "revision-2",
+      revision_kind: "message",
+      sender_display_name: "Alice",
+      author_type: "human",
+      authorization: "authorized_invocation",
+      lifecycle: "active",
+      body: "Continue the bound Discord thread without another mention.",
+      original_url: null,
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText(/discord · thread/)).toBeVisible();
+  },
+};
+
 export const TurnAction: Story = {
   args: {
     entry: item("action", {

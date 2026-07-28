@@ -11,8 +11,8 @@ from azents.core.external_channel_file import (
 )
 from azents.engine.events.types import ExternalChannelMessagePayload
 
-_SLACK_VISIBLE_REFERENCE = re.compile(
-    r"<@(?P<user_angle>[A-Z0-9]+)(?:\|[^>]+)?>"
+_VISIBLE_PROVIDER_REFERENCE = re.compile(
+    r"<@!?(?P<user_angle>[A-Z0-9]+)(?:\|[^>]+)?>"
     r"|(?<![A-Za-z0-9])@(?P<user_raw>[UW][A-Z0-9]+)\b"
     r"|<#(?P<channel_angle>[A-Z0-9]+)(?:\|[^>]+)?>"
     r"|(?<![A-Za-z0-9])#(?P<channel_raw>[CG][A-Z0-9]+)\b"
@@ -56,6 +56,8 @@ def external_channel_message_visible_value(
         value["attachments"] = visible_attachments
     if payload.original_url is not None:
         value["original_url"] = payload.original_url
+    if payload.reference_mappings:
+        value["reference_mappings"] = payload.reference_mappings
     if payload.correction_of_revision_id is not None:
         value["correction_of_revision_id"] = payload.correction_of_revision_id
     if payload.truncated_context_message_count or payload.truncated_context_size:
@@ -85,6 +87,7 @@ def render_external_channel_message(
         lines.append(f"Timestamp: {timestamp.isoformat()}")
     if payload.revision_kind.value != "original":
         lines.append(f"Revision: {payload.revision_kind.value}")
+    lines.extend(_identity_mapping_lines((payload,)))
     if payload.correction_of_revision_id is not None:
         lines.append(f"Correction of revision: {payload.correction_of_revision_id}")
     if payload.truncated_context_message_count or payload.truncated_context_size:
@@ -118,6 +121,7 @@ def render_external_channel_turn(
             f"{first.truncated_context_message_count} messages, "
             f"{first.truncated_context_size} bytes"
         )
+    lines.extend(_identity_mapping_lines(payloads))
     lines.append("")
     for index, payload in enumerate(payloads, start=1):
         sender = payload.sender_display_name or payload.provider_user_id or "unknown"
@@ -152,6 +156,34 @@ def _body(payload: ExternalChannelMessagePayload) -> str:
     return _display_body(payload.body, payload.reference_mappings)
 
 
+def _identity_mapping_lines(
+    payloads: Sequence[ExternalChannelMessagePayload],
+) -> list[str]:
+    """Render bounded provider identities and display names together."""
+    users: dict[str, str] = {}
+    channels: dict[str, str] = {}
+    for payload in payloads:
+        users.update(payload.reference_mappings.get("users", {}))
+        channels.update(payload.reference_mappings.get("channels", {}))
+        if (
+            payload.provider_user_id is not None
+            and payload.sender_display_name is not None
+        ):
+            users[payload.provider_user_id] = payload.sender_display_name
+    if not users and not channels:
+        return []
+    lines = ["Identity Mappings:"]
+    lines.extend(
+        f"- User {identifier}: {display_name}"
+        for identifier, display_name in sorted(users.items())
+    )
+    lines.extend(
+        f"- Channel {identifier}: {display_name}"
+        for identifier, display_name in sorted(channels.items())
+    )
+    return lines
+
+
 def _display_body(
     body: str,
     mappings: dict[str, dict[str, str]],
@@ -175,7 +207,7 @@ def _display_body(
             return match.group(0)
         return display_name if display_name.startswith("#") else f"#{display_name}"
 
-    return _SLACK_VISIBLE_REFERENCE.sub(replace, body)
+    return _VISIBLE_PROVIDER_REFERENCE.sub(replace, body)
 
 
 def _visible_attachment_metadata(
