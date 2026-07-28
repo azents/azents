@@ -3127,6 +3127,50 @@ async def test_run_loop_reconciles_open_access_waiting_binding_without_grant(
 
 
 @pytest.mark.asyncio
+async def test_run_loop_resumes_event_claiming_after_reconciliation_failure(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A transient reconciliation failure cannot permanently stop event claims."""
+    (
+        service,
+        _repository,
+        _binding_id,
+        _resource_id,
+    ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
+    shutdown = asyncio.Event()
+    process_calls = 0
+
+    async def process_once() -> int:
+        nonlocal process_calls
+        process_calls += 1
+        if process_calls == 2:
+            shutdown.set()
+        return 0
+
+    service_any = cast(Any, service)
+    service_any.process_once = AsyncMock(side_effect=process_once)
+    service_any.reconcile_waiting_bindings = AsyncMock(
+        side_effect=[RuntimeError("injected reconciliation failure"), 0]
+    )
+    with (
+        patch(
+            "azents.services.external_channel.event_processor._IDLE_POLL_SECONDS",
+            0,
+        ),
+        patch(
+            "azents.services.external_channel.event_processor.logger.exception"
+        ) as exception,
+    ):
+        await service_any.run(shutdown)
+
+    assert service_any.process_once.await_count == 2
+    assert service_any.reconcile_waiting_bindings.await_count == 2
+    exception.assert_called_once_with(
+        "External Channel event processor iteration failed"
+    )
+
+
+@pytest.mark.asyncio
 async def test_reconcile_restricted_waiting_binding_without_grant_stays_waiting(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
