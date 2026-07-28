@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import parse_qs
@@ -639,14 +640,34 @@ class SlackConversationClient:
             private_url=private_url,
         )
 
-    async def download_private_file(
+    def open_private_file_stream(
         self,
         *,
         bot_token: str,
         private_url: str,
         max_bytes: int,
-    ) -> bytes:
-        """Read one authenticated private file while enforcing an actual-byte cap."""
+        maximum_chunk_size: int,
+    ) -> AbstractAsyncContextManager[AsyncIterator[bytes]]:
+        """Return one owned bounded private-file stream."""
+        return self._open_private_file_stream(
+            bot_token=bot_token,
+            private_url=private_url,
+            max_bytes=max_bytes,
+            maximum_chunk_size=maximum_chunk_size,
+        )
+
+    @asynccontextmanager
+    async def _open_private_file_stream(
+        self,
+        *,
+        bot_token: str,
+        private_url: str,
+        max_bytes: int,
+        maximum_chunk_size: int,
+    ) -> AsyncIterator[AsyncIterator[bytes]]:
+        """Open one authenticated private file and close it after stream consumption."""
+        if maximum_chunk_size <= 0:
+            raise ValueError("Slack stream chunk size must be positive")
         if not slack_file_url_allowed(private_url):
             raise SlackProviderTemporaryError(
                 "Slack returned an invalid private file URL."
@@ -699,14 +720,21 @@ class SlackConversationClient:
                         raise SlackProviderFileTooLarge(
                             "Slack file exceeds the configured limit."
                         )
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    if len(body) + len(chunk) > max_bytes:
-                        raise SlackProviderFileTooLarge(
-                            "Slack file exceeds the configured limit."
-                        )
-                    body.extend(chunk)
-                return bytes(body)
+
+                async def chunks() -> AsyncIterator[bytes]:
+                    """Yield bounded response chunks without retaining all bytes."""
+                    actual_size = 0
+                    async for chunk in response.aiter_bytes(
+                        chunk_size=maximum_chunk_size
+                    ):
+                        actual_size += len(chunk)
+                        if actual_size > max_bytes:
+                            raise SlackProviderFileTooLarge(
+                                "Slack file exceeds the configured limit."
+                            )
+                        yield chunk
+
+                yield chunks()
         except httpx.RequestError as error:
             raise SlackProviderTemporaryError(
                 "Slack file download did not produce a complete response."

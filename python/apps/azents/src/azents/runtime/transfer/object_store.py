@@ -2,7 +2,10 @@
 
 from azcommon.infra.s3.service import S3MultipartUpload, S3ObjectIdentity, S3Service
 
-from azents.runtime.transfer.data import RuntimeTransferRecord
+from azents.runtime.transfer.data import (
+    RuntimeTransferPreparationCleanupState,
+    RuntimeTransferRecord,
+)
 
 
 class RuntimeTransferS3Cleanup:
@@ -30,15 +33,65 @@ class RuntimeTransferS3Cleanup:
 
         :param record: exact stale stream record with trusted cleanup evidence
         """
-        if record.object is None:
-            raise ValueError("Stale transfer object cleanup evidence is unavailable")
-        identity = runtime_transfer_object_identity(
-            bucket=self._bucket,
-            object_prefix=self._object_prefix,
-            opaque_key=record.object.key,
-        )
         error: BaseException | None = None
+        if record.preparation_object_handle is not None:
+            preparation_identity = runtime_transfer_object_identity(
+                bucket=self._bucket,
+                object_prefix=self._object_prefix,
+                opaque_key=record.preparation_object_handle,
+            )
+            if (
+                record.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.MULTIPART_PENDING
+            ):
+                assert record.preparation_multipart_cleanup_handle is not None
+                try:
+                    await self._object_store.abort_multipart_upload(
+                        upload=S3MultipartUpload(
+                            identity=preparation_identity,
+                            upload_id=record.preparation_multipart_cleanup_handle,
+                        )
+                    )
+                except BaseException as exc:
+                    error = exc
+            elif (
+                record.preparation_cleanup_state
+                is RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+            ):
+                try:
+                    await self._object_store.delete(
+                        bucket=preparation_identity.bucket,
+                        key=preparation_identity.key,
+                    )
+                except BaseException as exc:
+                    error = exc
+        if record.pre_ready_object_handle is not None:
+            pre_ready_identity = runtime_transfer_object_identity(
+                bucket=self._bucket,
+                object_prefix=self._object_prefix,
+                opaque_key=record.pre_ready_object_handle,
+            )
+            try:
+                await self._object_store.delete(
+                    bucket=pre_ready_identity.bucket,
+                    key=pre_ready_identity.key,
+                )
+            except BaseException as exc:
+                if error is None:
+                    error = exc
+        if record.object is not None:
+            identity = runtime_transfer_object_identity(
+                bucket=self._bucket,
+                object_prefix=self._object_prefix,
+                opaque_key=record.object.key,
+            )
+        else:
+            identity = None
         if record.multipart_cleanup_handle is not None:
+            if identity is None:
+                raise ValueError(
+                    "Stale transfer multipart cleanup object is unavailable"
+                )
             try:
                 await self._object_store.abort_multipart_upload(
                     upload=S3MultipartUpload(
@@ -49,18 +102,26 @@ class RuntimeTransferS3Cleanup:
             except BaseException as exc:
                 error = exc
         if record.completed_object_cleanup_required:
+            object = record.object
+            if identity is None or object is None:
+                raise ValueError(
+                    "Stale transfer object cleanup evidence is unavailable"
+                )
             try:
                 await self._object_store.delete_verified_transfer_object(
                     identity=identity,
-                    expected_size=record.object.size,
-                    expected_sha256=record.object.sha256,
+                    expected_size=object.size,
+                    expected_sha256=object.sha256,
                 )
             except BaseException as exc:
                 if error is None:
                     error = exc
         if (
-            record.multipart_cleanup_handle is None
+            record.preparation_cleanup_state
+            is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+            and record.multipart_cleanup_handle is None
             and not record.completed_object_cleanup_required
+            and record.pre_ready_object_handle is None
         ):
             raise ValueError("Stale transfer cleanup evidence is unavailable")
         if error is not None:

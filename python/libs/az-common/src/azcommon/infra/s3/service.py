@@ -320,6 +320,30 @@ class S3Service:
             raise RuntimeError("S3 did not return a multipart upload ID")
         return S3MultipartUpload(identity=destination, upload_id=upload_id)
 
+    async def create_preparation_multipart_upload(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        content_type: str | None,
+    ) -> S3MultipartUpload:
+        """Create a temporary multipart object before its digest is known.
+
+        :param destination: New trusted temporary-object destination.
+        :param content_type: Optional MIME type for the temporary object.
+        :raises FileExistsError: If the destination already exists.
+        :returns: Opaque upload handle.
+        """
+        await self._ensure_destination_absent(destination)
+        response = await self.s3_client.create_multipart_upload(
+            Bucket=destination.bucket,
+            Key=destination.key,
+            **_content_type_args(content_type),
+        )
+        upload_id = response.get("UploadId")
+        if not isinstance(upload_id, str) or not upload_id:
+            raise RuntimeError("S3 did not return a multipart upload ID")
+        return S3MultipartUpload(identity=destination, upload_id=upload_id)
+
     async def upload_part(
         self,
         *,
@@ -469,6 +493,48 @@ class S3Service:
                 multipart_cleanup_required=multipart_cleanup_required,
                 completed_object_cleanup_required=completed_object_cleanup_required,
             ) from cleanup_error
+
+    async def complete_preparation_multipart_upload(
+        self,
+        *,
+        upload: S3MultipartUpload,
+        completed_parts: tuple[S3CompletedPart, ...],
+        expected_size: int,
+    ) -> S3ObjectMetadata:
+        """Complete a digest-unknown temporary object and verify its exact size.
+
+        The temporary object is not a transfer object and carries no transfer
+        SHA-256 metadata. Callers must copy it into a verified immutable transfer
+        object before marking an attempt READY.
+
+        :param upload: Trusted temporary multipart upload handle.
+        :param completed_parts: Ordered completion evidence.
+        :param expected_size: Exact completed object size.
+        :returns: Persisted temporary-object metadata.
+        """
+        if expected_size <= 0:
+            raise ValueError(
+                "preparation multipart completion requires a positive expected_size"
+            )
+        _validate_completed_parts(completed_parts)
+        await self.s3_client.complete_multipart_upload(
+            Bucket=upload.identity.bucket,
+            Key=upload.identity.key,
+            UploadId=upload.upload_id,
+            MultipartUpload={
+                "Parts": [
+                    {"PartNumber": part.part_number, "ETag": part.etag}
+                    for part in completed_parts
+                ]
+            },
+            IfNoneMatch="*",
+        )
+        metadata = await self.head(upload.identity)
+        if metadata is None:
+            raise FileNotFoundError(upload.identity.key)
+        if metadata.content_length != expected_size:
+            raise ValueError("preparation object size does not match expected_size")
+        return metadata
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
         """Abort a multipart upload idempotently.

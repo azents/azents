@@ -188,7 +188,13 @@ def _toolkit(
     )
     if file_storage is not None:
         store = RuntimeInstructionContextStore()
-        store.set(RuntimeInstructionContext(file_storage=file_storage, projects=()))
+        store.set(
+            RuntimeInstructionContext(
+                file_storage=file_storage,
+                projects=(),
+                transfer_capability=None,
+            )
+        )
         toolkit.set_runtime_context_store(store)
     return toolkit
 
@@ -288,10 +294,13 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
         {
             "session_id": "session-1",
             "agent_id": "agent-1",
+            "operation_id": "run-current",
             "file": "external-file:v1:slack:binding-1:F123",
             "path": "/workspace/agent/report.csv",
             "overwrite": False,
             "file_storage": file_storage,
+            "transfer_service": None,
+            "transfer_target": None,
         }
     ]
 

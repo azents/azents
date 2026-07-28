@@ -3,9 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.runtime.transfer.server_to_runtime import (
+    ServerToRuntimeTarget,
+    ServerToRuntimeTransferRequest,
+)
 from azents.services.file_storage import FileStorage
+
+
+class ServerToRuntimeTransferExecutor(Protocol):
+    """Backend-only terminal-success transfer service capability."""
+
+    async def transfer(self, request: ServerToRuntimeTransferRequest) -> None:
+        """Deliver one source and return only after Runtime commit success."""
+        ...
+
+
+@dataclass(frozen=True)
+class RuntimeTransferCapability:
+    """Current Runtime transfer identity and an injected backend service."""
+
+    service: ServerToRuntimeTransferExecutor
+    target: ServerToRuntimeTarget
 
 
 @dataclass(frozen=True)
@@ -14,6 +35,7 @@ class RuntimeInstructionContext:
 
     file_storage: FileStorage
     projects: tuple[SessionWorkspaceProject, ...]
+    transfer_capability: RuntimeTransferCapability | None
 
 
 class RuntimeInstructionContextStore:

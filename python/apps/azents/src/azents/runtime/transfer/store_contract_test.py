@@ -20,6 +20,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferObject,
     RuntimeTransferOutcome,
     RuntimeTransferPhase,
+    RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
@@ -394,6 +395,114 @@ async def test_dispatch_indexes_stream_lease_and_cleanup_handle(
     assert cleared is not None
     assert cleared.multipart_cleanup_handle is None
     assert cleared.completed_object_cleanup_required is False
+
+
+@pytest.mark.asyncio
+async def test_ready_atomically_consumes_matching_preparation_cleanup(
+    store_harness: _StoreHarness,
+) -> None:
+    """READY atomically claims canonical cleanup responsibility as the object."""
+    store = store_harness.store
+    admitted = await store.admit(
+        replace(_admission(), transfer_id="pre-ready"),
+        lease_id="pre-ready-lease",
+    )
+    assert admitted is not None
+    protected = await store.promote_preparation_cleanup(
+        "pre-ready",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        preparation_object_handle="canonical",
+    )
+    assert protected is not None
+
+    rejected = await store.mark_ready(
+        "pre-ready",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=protected.revision,
+        object=RuntimeTransferObject("different", 1, "a" * 64),
+    )
+
+    assert rejected is None
+    retained = await store.get("pre-ready")
+    assert retained is not None
+    assert retained == protected
+    assert (
+        retained.preparation_cleanup_state
+        is RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
+    )
+    assert retained.preparation_object_handle == "canonical"
+
+    ready = await store.mark_ready(
+        "pre-ready",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=protected.revision,
+        object=RuntimeTransferObject("canonical", 1, "a" * 64),
+    )
+
+    assert ready is not None
+    assert ready.object == RuntimeTransferObject("canonical", 1, "a" * 64)
+    assert (
+        ready.preparation_cleanup_state
+        is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+    )
+    assert ready.preparation_object_handle is None
+    assert ready.pre_ready_object_handle is None
+
+
+@pytest.mark.asyncio
+async def test_ready_consumes_provider_canonical_pre_ready_evidence(
+    store_harness: _StoreHarness,
+) -> None:
+    """READY consumes both provider temporary and canonical cleanup evidence."""
+    store = store_harness.store
+    admitted = await store.admit(
+        replace(_admission(), transfer_id="provider-pre-ready"),
+        lease_id="provider-pre-ready-lease",
+    )
+    assert admitted is not None
+    temporary = await store.promote_preparation_cleanup(
+        "provider-pre-ready",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        preparation_object_handle="provider-temporary",
+    )
+    assert temporary is not None
+    protected = await store.promote_preparation_cleanup(
+        "provider-pre-ready",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=temporary.revision,
+        preparation_object_handle="canonical",
+    )
+    assert protected is not None
+    assert protected.pre_ready_object_handle == "canonical"
+
+    ready = await store.mark_ready(
+        "provider-pre-ready",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=protected.revision,
+        object=RuntimeTransferObject("canonical", 1, "a" * 64),
+    )
+
+    assert ready is not None
+    assert (
+        ready.preparation_cleanup_state
+        is RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+    )
+    assert ready.preparation_object_handle is None
+    assert ready.pre_ready_object_handle is None
 
 
 @pytest.mark.asyncio

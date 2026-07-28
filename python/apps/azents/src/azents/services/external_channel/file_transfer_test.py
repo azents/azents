@@ -1,13 +1,19 @@
 """Explicit External Channel inbound file-transfer tests."""
 
 import datetime
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import Annotated, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.infra.s3.service import S3TransferCleanupRequired
 from azcommon.result import Failure, Success
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorTransferFailure,
+)
+from fastapi import Depends
+from fastapi.dependencies.utils import get_dependant
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -37,6 +43,12 @@ from azents.repos.external_channel.work_data import (
     ExternalChannelFileAccessTarget,
     ExternalChannelFileSource,
 )
+from azents.runtime.transfer.provider_source import ProviderStagingStore
+from azents.runtime.transfer.server_to_runtime import (
+    ServerToRuntimeTarget,
+    ServerToRuntimeTransferError,
+    ServerToRuntimeTransferRequest,
+)
 from azents.services.exchange_file import (
     ExchangeFileDownload,
     ExchangeFileService,
@@ -54,8 +66,11 @@ from azents.services.external_channel.discord_files import (
     DiscordFileTooLarge,
 )
 from azents.services.external_channel.file_transfer import (
+    ExternalChannelFileDownloadResult,
     ExternalChannelFileTransferError,
     ExternalChannelFileTransferService,
+    ExternalChannelInboundStagingConfiguration,
+    ServerToRuntimeTransferExecutor,
     iter_external_channel_outbound_file_chunks,
 )
 from azents.services.external_channel.slack_events import (
@@ -110,6 +125,20 @@ class _Repository:
         return self.source
 
 
+def test_file_transfer_dependency_graph_allows_unconfigured_inbound_staging() -> None:
+    """Non-Worker graphs explicitly disable Worker-only provider staging."""
+
+    def endpoint(
+        service: Annotated[
+            ExternalChannelFileTransferService,
+            Depends(ExternalChannelFileTransferService),
+        ],
+    ) -> None:
+        del service
+
+    assert get_dependant(path="/", call=endpoint).dependencies
+
+
 class _CredentialsCodec:
     def decrypt(self, encrypted: str) -> SlackConnectionCredentials:
         assert encrypted == "ciphertext"
@@ -125,16 +154,20 @@ class _SlackClient:
         self,
         *,
         info: SlackFileDownloadInfo | None = None,
-        body: bytes = b"content",
+        chunks: tuple[bytes, ...] = (b"content",),
         info_error: Exception | None = None,
         download_error: Exception | None = None,
+        stream_error: Exception | None = None,
     ) -> None:
         self.info = info or _file_info()
-        self.body = body
+        self.chunks = chunks
         self.info_error = info_error
         self.download_error = download_error
+        self.stream_error = stream_error
         self.info_file_ids: list[str] = []
-        self.download_limits: list[int] = []
+        self.stream_limits: list[tuple[int, int]] = []
+        self.stream_opened = 0
+        self.stream_closed = 0
 
     async def fetch_file_download_info(
         self,
@@ -148,19 +181,46 @@ class _SlackClient:
             raise self.info_error
         return self.info
 
-    async def download_private_file(
+    @asynccontextmanager
+    async def open_private_file_stream(
         self,
         *,
         bot_token: str,
         private_url: str,
         max_bytes: int,
-    ) -> bytes:
+        maximum_chunk_size: int,
+    ) -> AsyncGenerator[AsyncIterator[bytes], None]:
         assert bot_token == "xoxb-secret"
         assert private_url == "https://files.slack.test/private/F123"
-        self.download_limits.append(max_bytes)
+        self.stream_limits.append((max_bytes, maximum_chunk_size))
         if self.download_error is not None:
             raise self.download_error
-        return self.body
+        self.stream_opened += 1
+
+        async def iterator() -> AsyncIterator[bytes]:
+            for chunk in self.chunks:
+                assert len(chunk) <= maximum_chunk_size
+                yield chunk
+            if self.stream_error is not None:
+                raise self.stream_error
+
+        try:
+            yield iterator()
+        finally:
+            self.stream_closed += 1
+
+
+class _TransferService:
+    """Capture terminal-success transfer requests without Runtime file writes."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.requests: list[ServerToRuntimeTransferRequest] = []
+
+    async def transfer(self, request: ServerToRuntimeTransferRequest) -> None:
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
 
 
 class _DiscordClient:
@@ -168,17 +228,21 @@ class _DiscordClient:
         self,
         *,
         info: DiscordAttachmentDownloadInfo | None = None,
-        body: bytes = b"content",
+        chunks: tuple[bytes, ...] = (b"content",),
         info_error: Exception | None = None,
         download_error: Exception | None = None,
+        stream_error: Exception | None = None,
     ) -> None:
         self.info = info or _discord_file_info()
-        self.body = body
+        self.chunks = chunks
         self.info_error = info_error
         self.download_error = download_error
+        self.stream_error = stream_error
         self.fetch_calls: list[tuple[str, str, str]] = []
         self.download_urls: list[str] = []
-        self.download_limits: list[int] = []
+        self.stream_limits: list[tuple[int, int]] = []
+        self.stream_opened = 0
+        self.stream_closed = 0
 
     async def fetch_attachment_download_info(
         self,
@@ -194,17 +258,31 @@ class _DiscordClient:
             raise self.info_error
         return self.info
 
-    async def download_attachment(
+    @asynccontextmanager
+    async def open_attachment_stream(
         self,
         *,
         download_url: str,
         max_bytes: int,
-    ) -> bytes:
+        maximum_chunk_size: int,
+    ) -> AsyncGenerator[AsyncIterator[bytes], None]:
         self.download_urls.append(download_url)
-        self.download_limits.append(max_bytes)
+        self.stream_limits.append((max_bytes, maximum_chunk_size))
         if self.download_error is not None:
             raise self.download_error
-        return self.body
+        self.stream_opened += 1
+
+        async def iterator() -> AsyncIterator[bytes]:
+            for chunk in self.chunks:
+                assert len(chunk) <= maximum_chunk_size
+                yield chunk
+            if self.stream_error is not None:
+                raise self.stream_error
+
+        try:
+            yield iterator()
+        finally:
+            self.stream_closed += 1
 
 
 class _SystemSettings:
@@ -244,14 +322,18 @@ class _FileStorage:
         *,
         exists: bool = False,
         put_error: Exception | None = None,
+        exists_error: Exception | None = None,
     ) -> None:
         self.existing = exists
         self.put_error = put_error
+        self.exists_error = exists_error
         self.put_calls: list[tuple[str, bytes, str, str]] = []
 
     async def exists(self, path: str, *, agent_id: str) -> bool:
         assert path == "/workspace/agent/report.csv"
         assert agent_id == "agent-1"
+        if self.exists_error is not None:
+            raise self.exists_error
         return self.existing
 
     async def put(
@@ -440,6 +522,7 @@ def _service(
     discord_client: _DiscordClient | None = None,
     settings: _SystemSettings | None = None,
     exchange_file_service: AsyncMock | None = None,
+    staging_configuration: ExternalChannelInboundStagingConfiguration | None = None,
 ) -> ExternalChannelFileTransferService:
     return ExternalChannelFileTransferService(
         session_manager=cast(SessionManager[AsyncSession], _session_manager),
@@ -458,6 +541,19 @@ def _service(
             SystemSettingsService,
             settings or _SystemSettings(),
         ),
+        inbound_staging_configuration=(
+            staging_configuration
+            or ExternalChannelInboundStagingConfiguration(
+                s3_service=cast(ProviderStagingStore, object()),
+                workspace_bucket="workspace",
+                transfer_object_prefix="runtime-transfer",
+                stream_chunk_size=4,
+                multipart_part_size=4,
+                multipart_copy_threshold=4,
+                multipart_copy_part_size=4,
+                deadline_after=datetime.timedelta(minutes=5),
+            )
+        ),
     )
 
 
@@ -475,6 +571,36 @@ def _discord_locator(provider_file_id: str = "555") -> str:
         binding_id="binding-1",
         provider_file_id=provider_file_id,
     ).encode()
+
+
+async def _download(
+    service: ExternalChannelFileTransferService,
+    *,
+    transfer: _TransferService | None = None,
+    session_id: str,
+    agent_id: str,
+    operation_id: str = "run-1",
+    file: str,
+    path: str,
+    overwrite: bool,
+    file_storage: FileStorage,
+) -> ExternalChannelFileDownloadResult:
+    """Invoke one inbound transfer with an explicit Runtime target."""
+    executor = transfer or _TransferService()
+    return await service.download(
+        session_id=session_id,
+        agent_id=agent_id,
+        operation_id=operation_id,
+        file=file,
+        path=path,
+        overwrite=overwrite,
+        file_storage=file_storage,
+        transfer_service=cast(ServerToRuntimeTransferExecutor, executor),
+        transfer_target=ServerToRuntimeTarget(
+            runtime_id="runtime-1",
+            desired_generation=1,
+        ),
+    )
 
 
 def _authority() -> SessionResourceAuthority:
@@ -531,12 +657,14 @@ async def test_download_materializes_only_selected_current_provider_file() -> No
     repository = _Repository(_target())
     slack_client = _SlackClient(
         info=_file_info(provider_file_id="F-MODIFIED"),
-        body=b"content",
     )
     storage = _FileStorage()
     service = _service(repository=repository, slack_client=slack_client)
+    transfer = _TransferService()
 
-    result = await service.download(
+    result = await _download(
+        service,
+        transfer=transfer,
         session_id="session-1",
         agent_id="agent-1",
         file=_locator("F-MODIFIED"),
@@ -551,15 +679,11 @@ async def test_download_materializes_only_selected_current_provider_file() -> No
     assert result.bytes_written == 7
     assert repository.calls == [("session-1", "agent-1", "binding-1")]
     assert slack_client.info_file_ids == ["F-MODIFIED"]
-    assert slack_client.download_limits == [100]
-    assert storage.put_calls == [
-        (
-            "/workspace/agent/report.csv",
-            b"content",
-            "text/csv",
-            "agent-1",
-        )
-    ]
+    assert slack_client.stream_opened == 0
+    assert storage.put_calls == []
+    request = transfer.requests[0]
+    assert request.destination == "/workspace/agent/report.csv"
+    assert request.source.metadata.size == 7
 
 
 @pytest.mark.asyncio
@@ -569,7 +693,8 @@ async def test_inactive_binding_fails_before_provider_access() -> None:
     service = _service(repository=_Repository(None), slack_client=slack_client)
 
     with pytest.raises(ExternalChannelFileTransferError, match="not active"):
-        await service.download(
+        await _download(
+            service,
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
@@ -589,7 +714,8 @@ async def test_relative_runtime_destination_is_rejected() -> None:
     service = _service(repository=repository, slack_client=slack_client)
 
     with pytest.raises(ExternalChannelFileTransferError, match="must be absolute"):
-        await service.download(
+        await _download(
+            service,
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
@@ -614,7 +740,8 @@ async def test_missing_download_capability_fails_before_provider_access() -> Non
     )
 
     with pytest.raises(ExternalChannelFileTransferError, match="cannot download"):
-        await service.download(
+        await _download(
+            service,
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
@@ -633,13 +760,37 @@ async def test_existing_destination_fails_before_provider_access() -> None:
     service = _service(repository=_Repository(_target()), slack_client=slack_client)
 
     with pytest.raises(ExternalChannelFileTransferError, match="already exists"):
-        await service.download(
+        await _download(
+            service,
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
             file_storage=cast(FileStorage, _FileStorage(exists=True)),
+        )
+
+    assert slack_client.info_file_ids == []
+
+
+@pytest.mark.asyncio
+async def test_inaccessible_destination_fails_before_provider_access() -> None:
+    """Destination read-only preflight retains the External Channel contract."""
+    slack_client = _SlackClient()
+    service = _service(repository=_Repository(_target()), slack_client=slack_client)
+
+    with pytest.raises(ExternalChannelFileTransferError, match="not accessible"):
+        await _download(
+            service,
+            session_id="session-1",
+            agent_id="agent-1",
+            file=_locator(),
+            path="/workspace/agent/report.csv",
+            overwrite=False,
+            file_storage=cast(
+                FileStorage,
+                _FileStorage(exists_error=PermissionError("read-only")),
+            ),
         )
 
     assert slack_client.info_file_ids == []
@@ -655,7 +806,10 @@ async def test_explicit_overwrite_skips_existence_rejection() -> None:
         slack_client=slack_client,
     )
 
-    result = await service.download(
+    transfer = _TransferService()
+    result = await _download(
+        service,
+        transfer=transfer,
         session_id="session-1",
         agent_id="agent-1",
         file=_locator(),
@@ -666,7 +820,8 @@ async def test_explicit_overwrite_skips_existence_rejection() -> None:
 
     assert result.bytes_written == 7
     assert slack_client.info_file_ids == ["F123"]
-    assert len(storage.put_calls) == 1
+    assert storage.put_calls == []
+    assert transfer.requests[0].overwrite is True
 
 
 @pytest.mark.asyncio
@@ -679,7 +834,8 @@ async def test_declared_and_actual_oversize_never_write_runtime_file() -> None:
     )
 
     with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
-        await declared_service.download(
+        await _download(
+            declared_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
@@ -691,10 +847,12 @@ async def test_declared_and_actual_oversize_never_write_runtime_file() -> None:
     actual_storage = _FileStorage()
     actual_service = _service(
         repository=_Repository(_target()),
-        slack_client=_SlackClient(download_error=SlackProviderFileTooLarge("oversize")),
+        slack_client=_SlackClient(),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
-        await actual_service.download(
+        await _download(
+            actual_service,
+            transfer=_TransferService(SlackProviderFileTooLarge("oversize")),
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
@@ -715,12 +873,15 @@ async def test_provider_size_mismatch_never_writes_runtime_file() -> None:
         repository=_Repository(_target()),
         slack_client=_SlackClient(
             info=_file_info(declared_size=8),
-            body=b"short",
         ),
     )
 
     with pytest.raises(ExternalChannelFileTransferError, match="does not match"):
-        await service.download(
+        await _download(
+            service,
+            transfer=_TransferService(
+                ValueError("Provider stream size does not match the manifest")
+            ),
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
@@ -741,7 +902,8 @@ async def test_unsupported_or_missing_provider_file_never_writes_runtime() -> No
         slack_client=_SlackClient(info=_file_info(supported=False)),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="external_file"):
-        await unsupported_service.download(
+        await _download(
+            unsupported_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
@@ -756,7 +918,8 @@ async def test_unsupported_or_missing_provider_file_never_writes_runtime() -> No
         slack_client=_SlackClient(info_error=SlackProviderFileNotFound("missing")),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="no longer exposes"):
-        await missing_service.download(
+        await _download(
+            missing_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
@@ -799,7 +962,8 @@ async def test_provider_failures_are_controlled_without_runtime_write(
     )
 
     with pytest.raises(ExternalChannelFileTransferError, match=message):
-        await service.download(
+        await _download(
+            service,
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
@@ -812,25 +976,95 @@ async def test_provider_failures_are_controlled_without_runtime_write(
 
 
 @pytest.mark.asyncio
-async def test_runtime_write_failure_is_not_reported_as_success() -> None:
-    """A complete provider response still fails when the Runtime write fails."""
+async def test_terminal_runtime_failure_is_not_reported_as_success() -> None:
+    """A non-success terminal Runtime result never produces file success."""
     service = _service(
         repository=_Repository(_target()),
         slack_client=_SlackClient(),
     )
 
     with pytest.raises(ExternalChannelFileTransferError, match="Runtime file"):
-        await service.download(
+        await _download(
+            service,
+            transfer=_TransferService(
+                ServerToRuntimeTransferError(
+                    "Runtime transfer failed before destination commit"
+                )
+            ),
             session_id="session-1",
             agent_id="agent-1",
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(
-                FileStorage,
-                _FileStorage(put_error=OSError("write failed")),
-            ),
+            file_storage=cast(FileStorage, _FileStorage()),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            ServerToRuntimeTransferError(
+                "terminal cancellation",
+                failure=CoordinatorTransferFailure.CANCELLED,
+            ),
+            "cancelled before destination commit",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "terminal deadline",
+                failure=CoordinatorTransferFailure.EXPIRED,
+            ),
+            "did not complete before its deadline",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "terminal integrity",
+                failure=CoordinatorTransferFailure.INTEGRITY,
+            ),
+            "integrity verification failed",
+        ),
+        (
+            ServerToRuntimeTransferError(
+                "terminal destination",
+                failure=CoordinatorTransferFailure.CONSUMER,
+            ),
+            "destination is not writable",
+        ),
+        (
+            S3TransferCleanupRequired(
+                "bucket/internal-key must remain hidden",
+                multipart_cleanup_required=True,
+                completed_object_cleanup_required=False,
+            ),
+            "stage the Slack file",
+        ),
+    ],
+)
+async def test_inbound_staging_and_terminal_failures_remain_controlled(
+    error: Exception,
+    message: str,
+) -> None:
+    """Provider staging and terminal outcomes do not leak transfer internals."""
+    service = _service(
+        repository=_Repository(_target()),
+        slack_client=_SlackClient(),
+    )
+
+    with pytest.raises(ExternalChannelFileTransferError, match=message) as raised:
+        await _download(
+            service,
+            transfer=_TransferService(error),
+            session_id="session-1",
+            agent_id="agent-1",
+            file=_locator(),
+            path="/workspace/agent/report.csv",
+            overwrite=False,
+            file_storage=cast(FileStorage, _FileStorage()),
+        )
+
+    assert "bucket/internal-key" not in str(raised.value)
 
 
 @pytest.mark.asyncio
@@ -840,7 +1074,7 @@ async def test_discord_download_materializes_only_current_binding_attachment() -
         _target(provider=ExternalChannelProvider.DISCORD),
         source=_discord_source(),
     )
-    discord_client = _DiscordClient(body=b"content")
+    discord_client = _DiscordClient()
     storage = _FileStorage()
     service = _service(
         repository=repository,
@@ -848,7 +1082,10 @@ async def test_discord_download_materializes_only_current_binding_attachment() -
         discord_client=discord_client,
     )
 
-    result = await service.download(
+    transfer = _TransferService()
+    result = await _download(
+        service,
+        transfer=transfer,
         session_id="session-1",
         agent_id="agent-1",
         file=_discord_locator(),
@@ -863,18 +1100,14 @@ async def test_discord_download_materializes_only_current_binding_attachment() -
     assert result.bytes_written == 7
     assert repository.source_calls == [("resource-1", "555")]
     assert discord_client.fetch_calls == [("333", "444", "555")]
-    assert discord_client.download_urls == [
-        "https://cdn.discordapp.com/attachments/333/555/report.csv"
-    ]
-    assert discord_client.download_limits == [100]
-    assert storage.put_calls == [
-        (
-            "/workspace/agent/report.csv",
-            b"content",
-            "text/csv",
-            "agent-1",
-        )
-    ]
+    assert discord_client.stream_opened == 0
+    assert storage.put_calls == []
+    request = transfer.requests[0]
+    assert request.destination == "/workspace/agent/report.csv"
+    assert request.source.metadata.canonical_uri == (
+        "external-channel://discord/binding-1/555"
+    )
+    assert request.source.metadata.size == 7
 
 
 @pytest.mark.asyncio
@@ -919,7 +1152,8 @@ async def test_discord_source_authority_failures_precede_provider_access(
     )
 
     with pytest.raises(ExternalChannelFileTransferError, match=message):
-        await service.download(
+        await _download(
+            service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -951,7 +1185,8 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
         discord_client=capability_client,
     )
     with pytest.raises(ExternalChannelFileTransferError, match="cannot download"):
-        await capability_service.download(
+        await _download(
+            capability_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -970,7 +1205,8 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
         discord_client=_DiscordClient(info=_discord_file_info(download_url=None)),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="download target"):
-        await url_service.download(
+        await _download(
+            url_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -989,7 +1225,8 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
         discord_client=_DiscordClient(info_error=DiscordFileNotFound("deleted")),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="no longer exposes"):
-        await deleted_service.download(
+        await _download(
+            deleted_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1017,7 +1254,8 @@ async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
         discord_client=_DiscordClient(info=_discord_file_info(declared_size=101)),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
-        await declared_service.download(
+        await _download(
+            declared_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1033,12 +1271,12 @@ async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
             source=_discord_source(),
         ),
         slack_client=_SlackClient(),
-        discord_client=_DiscordClient(
-            download_error=DiscordFileTooLarge("oversize"),
-        ),
+        discord_client=_DiscordClient(),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
-        await actual_service.download(
+        await _download(
+            actual_service,
+            transfer=_TransferService(DiscordFileTooLarge("oversize")),
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1057,7 +1295,11 @@ async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
         discord_client=_DiscordClient(info=_discord_file_info(declared_size=8)),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="does not match"):
-        await mismatch_service.download(
+        await _download(
+            mismatch_service,
+            transfer=_TransferService(
+                ValueError("Provider stream size does not match the manifest")
+            ),
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
@@ -1096,7 +1338,8 @@ async def test_discord_provider_failures_are_controlled_without_runtime_write(
     )
 
     with pytest.raises(ExternalChannelFileTransferError, match=message):
-        await service.download(
+        await _download(
+            service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),

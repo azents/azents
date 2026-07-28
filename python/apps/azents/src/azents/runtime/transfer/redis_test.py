@@ -215,7 +215,7 @@ def test_record_codec_rejects_schema_and_domain_failures() -> None:
         _decode_record_envelope(json.dumps(missing).encode())
 
     wrong_version = _json_payload(record)
-    wrong_version["version"] = 6
+    wrong_version["version"] = 8
     with pytest.raises(ValueError, match="version"):
         _decode_record_envelope(json.dumps(wrong_version).encode())
 

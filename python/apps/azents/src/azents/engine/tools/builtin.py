@@ -59,7 +59,10 @@ from azents.engine.tools.delete_file import make_delete_file_tool
 from azents.engine.tools.edit import RuntimeEditTarget, make_edit_tool
 from azents.engine.tools.glob import make_glob_tool
 from azents.engine.tools.grep import make_grep_tool
-from azents.engine.tools.import_file import make_import_file_tool
+from azents.engine.tools.import_file import (
+    ImportFileStagingConfiguration,
+    make_import_file_tool,
+)
 from azents.engine.tools.memory import (
     make_delete_memory_tool,
     make_get_memory_tool,
@@ -73,6 +76,8 @@ from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContext,
     RuntimeInstructionContextStore,
+    RuntimeTransferCapability,
+    ServerToRuntimeTransferExecutor,
 )
 from azents.engine.tools.runtime_io import (
     RuntimeFileListEntry,
@@ -94,6 +99,7 @@ from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
@@ -561,6 +567,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         agent_runtime_repo: AgentRuntimeRepository,
         execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
         project_repo: SessionWorkspaceProjectRepository,
+        server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
+        import_file_staging_configuration: ImportFileStagingConfiguration | None,
     ) -> None:
         self._config = config
         self.runner_operations = runner_operations
@@ -579,6 +587,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self.execution_policy_application_service = execution_policy_application_service
         self.project_repo = project_repo
         self.agents_store = agents_store
+        self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
+        self.import_file_staging_configuration = import_file_staging_configuration
         self._agents_context: RuntimeInstructionContext | None = None
         self._agents_appendix_lock = asyncio.Lock()
         self._agents_missing_cache: dict[str, float] = {}
@@ -669,6 +679,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             runtime_agent_id=runtime_agent_id,
             owner_session_id=self._runtime_session_id,
         )
+        transfer_capability = await self._transfer_capability(runtime_agent_id)
 
         async def resolve_patch_target() -> RuntimePatchTarget:
             runtime = await _ready_runtime_for_agent(
@@ -742,6 +753,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         artifact_service=self.artifact_service,
                         vfs_projection_service=self.vfs_projection_service,
                         authority=authority,
+                        transfer_capability=transfer_capability,
+                        staging_configuration=self.import_file_staging_configuration,
                     ),
                     make_present_file_tool(
                         session_storage=file_ss,
@@ -799,7 +812,10 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         if self._excluded_tools:
             tools = [t for t in tools if t.spec.name not in self._excluded_tools]
 
-        instruction_context = await self._make_instruction_context(file_ss)
+        instruction_context = await self._make_instruction_context(
+            file_ss,
+            transfer_capability=transfer_capability,
+        )
         self.register_agents_context(instruction_context)
         if self.instruction_context_store is not None:
             self.instruction_context_store.set(instruction_context)
@@ -819,6 +835,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     async def _make_instruction_context(
         self,
         file_storage: FileStorage,
+        *,
+        transfer_capability: RuntimeTransferCapability | None,
     ) -> RuntimeInstructionContext:
         """Build shared Runtime context for instruction appendix providers."""
         projects = sorted(
@@ -828,6 +846,35 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         return RuntimeInstructionContext(
             file_storage=file_storage,
             projects=tuple(projects),
+            transfer_capability=transfer_capability,
+        )
+
+    async def _transfer_capability(
+        self,
+        runtime_agent_id: str,
+    ) -> RuntimeTransferCapability | None:
+        """Build one backend-only capability only when the Runtime is ready."""
+        service = self.server_to_runtime_transfer_service
+        if service is None:
+            return None
+        try:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=self.agent_runtime_repo,
+                session_manager=self.session_manager,
+                execution_policy_application_service=(
+                    self.execution_policy_application_service
+                ),
+                agent_id=runtime_agent_id,
+                wait_timeout_seconds=0,
+            )
+        except RuntimeStorageError:
+            return None
+        return RuntimeTransferCapability(
+            service=service,
+            target=ServerToRuntimeTarget(
+                runtime_id=runtime.id,
+                desired_generation=runtime.runner_generation,
+            ),
         )
 
     async def _load_projects(
@@ -926,6 +973,8 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
         runner_operations: RuntimeRunnerOperationClient,
         project_repo: SessionWorkspaceProjectRepository,
+        server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
+        import_file_staging_configuration: ImportFileStagingConfiguration | None,
     ) -> None:
         self.exchange_file_service = exchange_file_service
         self.artifact_service = artifact_service
@@ -938,6 +987,8 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.runner_operations = runner_operations
         self.project_repo = project_repo
         self.agents_store = agents_store
+        self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
+        self.import_file_staging_configuration = import_file_staging_configuration
 
     async def resolve(
         self,
@@ -969,6 +1020,8 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             ),
             project_repo=self.project_repo,
             agents_store=self.agents_store,
+            server_to_runtime_transfer_service=self.server_to_runtime_transfer_service,
+            import_file_staging_configuration=self.import_file_staging_configuration,
         )
 
     async def resolve_builtin(

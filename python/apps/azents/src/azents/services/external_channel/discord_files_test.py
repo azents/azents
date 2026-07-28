@@ -69,17 +69,19 @@ async def test_download_rejects_non_cdn_urls_without_http_access() -> None:
     ) as http_client:
         client = DiscordChannelClient(http_client)
         with pytest.raises(DiscordFileRequestRejected, match="invalid"):
-            await client.download_attachment(
+            async with client.open_attachment_stream(
                 download_url="https://untrusted.example/attachments/333/555/report.csv",
                 max_bytes=7,
-            )
+                maximum_chunk_size=4,
+            ) as chunks:
+                _ = [chunk async for chunk in chunks]
 
     assert calls == []
 
 
 @pytest.mark.asyncio
 async def test_download_enforces_content_length_and_rejects_redirects() -> None:
-    """Current Discord URLs cannot bypass the bounded in-memory transfer policy."""
+    """Current Discord URLs cannot bypass the bounded streaming policy."""
     responses = [
         httpx.Response(302, headers={"Location": "https://untrusted.example/file"}),
         httpx.Response(200, headers={"Content-Length": "8"}, content=b"12345678"),
@@ -95,17 +97,43 @@ async def test_download_enforces_content_length_and_rejects_redirects() -> None:
     ) as http_client:
         client = DiscordChannelClient(http_client)
         with pytest.raises(DiscordFileRequestRejected, match="redirected"):
-            await client.download_attachment(
+            async with client.open_attachment_stream(
                 download_url="https://cdn.discordapp.com/attachments/333/555/report.csv",
                 max_bytes=7,
-            )
+                maximum_chunk_size=4,
+            ) as chunks:
+                _ = [chunk async for chunk in chunks]
         with pytest.raises(DiscordFileTooLarge, match="limit"):
-            await client.download_attachment(
+            async with client.open_attachment_stream(
                 download_url="https://media.discordapp.net/attachments/333/555/report.csv",
                 max_bytes=7,
-            )
+                maximum_chunk_size=4,
+            ) as chunks:
+                _ = [chunk async for chunk in chunks]
 
     assert responses == []
+
+
+@pytest.mark.asyncio
+async def test_download_yields_bounded_chunks_without_retaining_complete_body() -> None:
+    """The adapter exposes only bounded chunks from one owned HTTP response."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, content=b"1234567")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        client = DiscordChannelClient(http_client)
+        async with client.open_attachment_stream(
+            download_url="https://cdn.discordapp.com/attachments/333/555/report.csv",
+            max_bytes=7,
+            maximum_chunk_size=3,
+        ) as chunks:
+            bodies = [chunk async for chunk in chunks]
+
+    assert bodies == [b"123", b"456", b"7"]
 
 
 def test_discord_attachment_info_repr_excludes_current_url() -> None:

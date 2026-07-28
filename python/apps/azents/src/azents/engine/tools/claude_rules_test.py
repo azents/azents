@@ -213,6 +213,7 @@ def _make_toolkit(storage: FakeSharedStorage) -> ClaudeRulesToolkit:
         RuntimeInstructionContext(
             file_storage=storage,
             projects=(_make_project(),),
+            transfer_capability=None,
         )
     )
     toolkit.set_instruction_context_store(context_store)

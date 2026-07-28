@@ -44,6 +44,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferFailure,
     RuntimeTransferOutcome,
     RuntimeTransferPhase,
+    RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
 )
 
@@ -357,6 +358,106 @@ class RuntimeTransferCoordinatorGrpcServicer(
         )
         return await _status_response_or_abort(context, updated)
 
+    async def RegisterPreparationCleanup(
+        self,
+        request: pb.RegisterPreparationCleanupRequest,
+        context: grpc.aio.ServicerContext[
+            pb.RegisterPreparationCleanupRequest,
+            pb.TransferStatusResponse,
+        ],
+    ) -> pb.TransferStatusResponse:
+        """Register opaque source-preparation multipart cleanup responsibility."""
+        await self._authenticate(
+            context,
+            "RuntimeTransferCoordinator/RegisterPreparationCleanup",
+            request,
+        )
+        record = await self._record(context, request.identity)
+        try:
+            _positive_revision(request.expected_revision)
+            _bounded(
+                request.preparation_object_handle.value,
+                "preparation_object_handle",
+                512,
+            )
+            _bounded(
+                request.multipart_cleanup_handle.value,
+                "multipart_cleanup_handle",
+                512,
+            )
+        except ValueError as exc:
+            await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        updated = await self._coordinator.state_store.register_preparation_cleanup(
+            record.admission.transfer_id,
+            attempt_id=record.admission.attempt_id,
+            runtime_id=record.admission.runtime_id,
+            desired_generation=record.admission.desired_generation,
+            expected_revision=request.expected_revision,
+            preparation_object_handle=request.preparation_object_handle.value,
+            multipart_cleanup_handle=request.multipart_cleanup_handle.value,
+        )
+        return await _status_response_or_abort(context, updated)
+
+    async def PromotePreparationCleanup(
+        self,
+        request: pb.PromotePreparationCleanupRequest,
+        context: grpc.aio.ServicerContext[
+            pb.PromotePreparationCleanupRequest,
+            pb.TransferStatusResponse,
+        ],
+    ) -> pb.TransferStatusResponse:
+        """Promote cleanup responsibility after preparation object completion."""
+        await self._authenticate(
+            context,
+            "RuntimeTransferCoordinator/PromotePreparationCleanup",
+            request,
+        )
+        record = await self._record(context, request.identity)
+        try:
+            _positive_revision(request.expected_revision)
+            _bounded(
+                request.preparation_object_handle.value,
+                "preparation_object_handle",
+                512,
+            )
+        except ValueError as exc:
+            await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        updated = await self._coordinator.state_store.promote_preparation_cleanup(
+            record.admission.transfer_id,
+            attempt_id=record.admission.attempt_id,
+            runtime_id=record.admission.runtime_id,
+            desired_generation=record.admission.desired_generation,
+            expected_revision=request.expected_revision,
+            preparation_object_handle=request.preparation_object_handle.value,
+        )
+        return await _status_response_or_abort(context, updated)
+
+    async def ClearPreparationCleanup(
+        self,
+        request: pb.ClearPreparationCleanupRequest,
+        context: grpc.aio.ServicerContext[
+            pb.ClearPreparationCleanupRequest,
+            pb.TransferStatusResponse,
+        ],
+    ) -> pb.TransferStatusResponse:
+        """Clear exact cleanup evidence after trusted source cleanup succeeds."""
+        await self._authenticate(
+            context,
+            "RuntimeTransferCoordinator/ClearPreparationCleanup",
+            request,
+        )
+        record = await self._record(context, request.identity)
+        try:
+            _positive_revision(request.expected_revision)
+        except ValueError as exc:
+            await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        updated = await self._coordinator.state_store.clear_preparation_cleanup(
+            record.admission.transfer_id,
+            attempt_id=record.admission.attempt_id,
+            expected_revision=request.expected_revision,
+        )
+        return await _status_response_or_abort(context, updated)
+
     async def GetTransferStatus(
         self,
         request: pb.GetTransferStatusRequest,
@@ -516,6 +617,9 @@ def _status_message(
         logical_expires_at=_timestamp(record.logical_expires_at),
         cleanup_status=_cleanup_status_to_proto(record.cleanup_status),
         cancellation_requested=record.cancellation_requested_at is not None,
+        preparation_cleanup_state=_preparation_cleanup_state_to_proto(
+            record.preparation_cleanup_state
+        ),
     )
     if admission.session_id is not None:
         message.identity.session_id = admission.session_id
@@ -678,6 +782,22 @@ def _cleanup_status_to_proto(value: RuntimeTransferCleanupStatus) -> int:
         RuntimeTransferCleanupStatus.PENDING: pb.COORDINATOR_CLEANUP_STATUS_PENDING,
         RuntimeTransferCleanupStatus.COMPLETE: pb.COORDINATOR_CLEANUP_STATUS_COMPLETE,
         RuntimeTransferCleanupStatus.RETRYABLE_FAILURE: pb.COORDINATOR_CLEANUP_STATUS_RETRYABLE_FAILURE,
+    }[value]
+
+
+def _preparation_cleanup_state_to_proto(
+    value: RuntimeTransferPreparationCleanupState,
+) -> int:
+    return {
+        RuntimeTransferPreparationCleanupState.NOT_REQUIRED: (
+            pb.COORDINATOR_PREPARATION_CLEANUP_STATE_NOT_REQUIRED
+        ),
+        RuntimeTransferPreparationCleanupState.MULTIPART_PENDING: (
+            pb.COORDINATOR_PREPARATION_CLEANUP_STATE_MULTIPART_PENDING
+        ),
+        RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING: (
+            pb.COORDINATOR_PREPARATION_CLEANUP_STATE_COMPLETED_OBJECT_PENDING
+        ),
     }[value]
 
 

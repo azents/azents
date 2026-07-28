@@ -87,9 +87,9 @@ and provider semantics.
 
 | Role | Assigned agent | Persistent ownership | Planned phases |
 | --- | --- | --- | --- |
-| Primary orchestrator | `/root` | Planning, phase boundaries, interface decisions, integration verification, accepted review fixes, PR creation, stack management, and final CI | 1-12 |
-| Implementation owner | `/root/runtime-transfer-implementer` | All bounded implementation work across S3, state, Runtime Control, protobuf, Runner, consumers, providers, Helm, and tests | 3-10 |
-| Independent reviewer | `/root/runtime-transfer-reviewer` | Independent phase review after primary verification; security, correctness, resource bounds, rollout, cleanup boundary, and cumulative stack risk | 1-12 |
+| Primary orchestrator | `/root` | Planning, phase boundaries, interface decisions, integration verification, final review verification, PR creation, stack management, and final CI | 1-12 |
+| Implementation owner | `/root/runtime-transfer-implementer` | All bounded implementation work across S3, state, Runtime Control, protobuf, Runner, consumers, providers, Helm, and tests; requests independent review and applies accepted findings directly | 3-10 |
+| Independent reviewer | `/root/runtime-transfer-reviewer` | Independent phase review requested by the implementation owner after primary verification; security, correctness, resource bounds, rollout, cleanup boundary, and cumulative stack risk; rechecks addressed findings | 1-12 |
 
 The implementation and review roles remain separate and persist across the
 complete stack. A phase change alone does not create a new role. Reassignment
@@ -424,6 +424,10 @@ Included behavior:
   buffer.
 - External Channel and Slack inbound provider streaming into admitted multipart
   transfer objects with declared and actual limit enforcement.
+- A narrow trusted coordinator/state extension that records opaque
+  feature-side source-preparation multipart and completed-object cleanup evidence
+  while the attempt remains PREPARING, so Runtime Control can reconcile Worker
+  loss without learning provider credentials or file bytes.
 - Runner intent only after the source snapshot is verified `ready`.
 - Preservation of destination authorization, naming, overwrite, error, and
   explicit-transfer semantics.
@@ -437,10 +441,14 @@ Excluded behavior:
 Primary validation:
 
 - Import resolver/tool and External Channel service tests.
+- Transfer-state and coordinator contract tests for preparation cleanup
+  registration, transition, reconciliation, and READY fencing.
 - Managed-object spy/integration assertions that eager `download_bytes()` is
   not called.
-- Files above 4 MiB for Exchange, Artifact, VFS, and deterministic Slack source
-  preparation with exact destination size/hash.
+- Files above 4 MiB for Exchange, Artifact, and deterministic Slack source
+  preparation with exact destination size/hash. VFS uses its existing 2 MiB
+  product maximum and proves bounded incremental decoding at that accepted
+  boundary without changing the product limit.
 - Admission rejection and preparation failure tests proving no Runner intent or
   partial destination.
 - Adapter cancellation tests proving provider reads stop, multipart work aborts,

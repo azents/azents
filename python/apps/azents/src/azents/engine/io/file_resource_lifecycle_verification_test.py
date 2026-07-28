@@ -9,6 +9,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.infra.s3.service import S3Service
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,11 +36,19 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.engine.run.types import FunctionToolError
-from azents.engine.tools.import_file import make_import_file_tool
+from azents.engine.tools.import_file import (
+    ImportFileStagingConfiguration,
+    make_import_file_tool,
+)
+from azents.engine.tools.runtime_instruction_context import (
+    RuntimeTransferCapability,
+    ServerToRuntimeTransferExecutor,
+)
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.workspace_user.data import WorkspaceUser
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.artifact import ArtifactService
 from azents.services.session_resource_authority import SessionResourceAuthority
 
@@ -363,7 +372,7 @@ def _artifact_service() -> tuple[
 @pytest.mark.asyncio
 async def test_artifact_output_import_and_expiration_e2e_path() -> None:
     """Verify Artifact creation, metadata lower, import, and expiration paths."""
-    service, artifact_repo, _s3 = _artifact_service()
+    service, artifact_repo, s3_service = _artifact_service()
     created = await service.create(
         session_id="session-1",
         user_id="user-1",
@@ -419,17 +428,35 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
     assert "full artifact body" not in lowered_output
 
     storage = FakeSharedStorage()
+    transfer_service = AsyncMock()
     import_tool = make_import_file_tool(
         session_storage=storage,
         exchange_file_service=AsyncMock(),
         artifact_service=service,
         vfs_projection_service=None,
         authority=_authority(),
+        transfer_capability=RuntimeTransferCapability(
+            service=cast(ServerToRuntimeTransferExecutor, transfer_service),
+            target=ServerToRuntimeTarget(
+                runtime_id="runtime-1",
+                desired_generation=1,
+            ),
+        ),
+        staging_configuration=ImportFileStagingConfiguration(
+            s3_service=cast(S3Service, s3_service),
+            workspace_bucket="test-bucket",
+            transfer_object_prefix="runtime-transfer",
+            multipart_copy_threshold=5 * 1024 * 1024,
+            multipart_part_size=5 * 1024 * 1024,
+            maximum_size=16 * 1024 * 1024,
+            deadline_after=datetime.timedelta(minutes=5),
+        ),
     )
     await import_tool.handler(json.dumps({"uri": artifact.uri}))
-    assert storage.put_calls == [
-        ("/tmp/agent/imports/report.txt", b"full artifact body")
-    ]
+    assert storage.put_calls == []
+    transfer_service.transfer.assert_awaited_once()
+    transfer_request = transfer_service.transfer.await_args.args[0]
+    assert transfer_request.source.metadata.canonical_uri == artifact.uri
 
     artifact_repo.artifacts[artifact.id] = artifact.model_copy(
         update={"status": ArtifactStatus.EXPIRED}

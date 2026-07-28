@@ -463,10 +463,21 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                 result = await self.file_transfer_service.download(
                     session_id=self.session_id,
                     agent_id=self.agent_id,
+                    operation_id=self.run_id,
                     file=args.file,
                     path=args.path,
                     overwrite=args.overwrite,
                     file_storage=context.file_storage,
+                    transfer_service=(
+                        None
+                        if context.transfer_capability is None
+                        else context.transfer_capability.service
+                    ),
+                    transfer_target=(
+                        None
+                        if context.transfer_capability is None
+                        else context.transfer_capability.target
+                    ),
                 )
             except ExternalChannelFileTransferError as error:
                 raise FunctionToolError(str(error)) from None

@@ -100,6 +100,24 @@ class RuntimeTransferCoordinatorStub(object):
             response_deserializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
             _registered_method=True,
         )
+        self.RegisterPreparationCleanup = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeTransferCoordinator/RegisterPreparationCleanup",
+            request_serializer=runtime__transfer__coordinator__pb2.RegisterPreparationCleanupRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
+            _registered_method=True,
+        )
+        self.PromotePreparationCleanup = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeTransferCoordinator/PromotePreparationCleanup",
+            request_serializer=runtime__transfer__coordinator__pb2.PromotePreparationCleanupRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
+            _registered_method=True,
+        )
+        self.ClearPreparationCleanup = channel.unary_unary(
+            "/azents.runtime_control.v1.RuntimeTransferCoordinator/ClearPreparationCleanup",
+            request_serializer=runtime__transfer__coordinator__pb2.ClearPreparationCleanupRequest.SerializeToString,
+            response_deserializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
+            _registered_method=True,
+        )
         self.GetTransferStatus = channel.unary_unary(
             "/azents.runtime_control.v1.RuntimeTransferCoordinator/GetTransferStatus",
             request_serializer=runtime__transfer__coordinator__pb2.GetTransferStatusRequest.SerializeToString,
@@ -171,6 +189,24 @@ class RuntimeTransferCoordinatorServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def RegisterPreparationCleanup(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def PromotePreparationCleanup(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def ClearPreparationCleanup(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
     def GetTransferStatus(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -228,6 +264,21 @@ def add_RuntimeTransferCoordinatorServicer_to_server(servicer, server):
         "RecordCleanup": grpc.unary_unary_rpc_method_handler(
             servicer.RecordCleanup,
             request_deserializer=runtime__transfer__coordinator__pb2.RecordCleanupRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.SerializeToString,
+        ),
+        "RegisterPreparationCleanup": grpc.unary_unary_rpc_method_handler(
+            servicer.RegisterPreparationCleanup,
+            request_deserializer=runtime__transfer__coordinator__pb2.RegisterPreparationCleanupRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.SerializeToString,
+        ),
+        "PromotePreparationCleanup": grpc.unary_unary_rpc_method_handler(
+            servicer.PromotePreparationCleanup,
+            request_deserializer=runtime__transfer__coordinator__pb2.PromotePreparationCleanupRequest.FromString,
+            response_serializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.SerializeToString,
+        ),
+        "ClearPreparationCleanup": grpc.unary_unary_rpc_method_handler(
+            servicer.ClearPreparationCleanup,
+            request_deserializer=runtime__transfer__coordinator__pb2.ClearPreparationCleanupRequest.FromString,
             response_serializer=runtime__transfer__coordinator__pb2.TransferStatusResponse.SerializeToString,
         ),
         "GetTransferStatus": grpc.unary_unary_rpc_method_handler(
@@ -537,6 +588,96 @@ class RuntimeTransferCoordinator(object):
             target,
             "/azents.runtime_control.v1.RuntimeTransferCoordinator/RecordCleanup",
             runtime__transfer__coordinator__pb2.RecordCleanupRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def RegisterPreparationCleanup(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeTransferCoordinator/RegisterPreparationCleanup",
+            runtime__transfer__coordinator__pb2.RegisterPreparationCleanupRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def PromotePreparationCleanup(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeTransferCoordinator/PromotePreparationCleanup",
+            runtime__transfer__coordinator__pb2.PromotePreparationCleanupRequest.SerializeToString,
+            runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def ClearPreparationCleanup(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/azents.runtime_control.v1.RuntimeTransferCoordinator/ClearPreparationCleanup",
+            runtime__transfer__coordinator__pb2.ClearPreparationCleanupRequest.SerializeToString,
             runtime__transfer__coordinator__pb2.TransferStatusResponse.FromString,
             options,
             channel_credentials,

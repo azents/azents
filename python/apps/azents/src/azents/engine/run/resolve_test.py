@@ -354,6 +354,8 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
         execution_policy_application_service=AsyncMock(),
         runner_operations=AsyncMock(),
         project_repo=AsyncMock(),
+        server_to_runtime_transfer_service=None,
+        import_file_staging_configuration=None,
     )
 
 

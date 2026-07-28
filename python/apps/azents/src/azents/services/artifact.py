@@ -64,6 +64,13 @@ class ArtifactDownload:
     body: bytes
 
 
+@dataclasses.dataclass(frozen=True)
+class ArtifactTransferSource:
+    """Authorized Artifact metadata for a trusted Runtime transfer."""
+
+    artifact: Artifact
+
+
 ArtifactError = (
     ArtifactSessionNotFound
     | ArtifactNotFound
@@ -327,6 +334,44 @@ class ArtifactService:
             if not await self._has_valid_resource_authority(session, authority):
                 return Failure(ArtifactAccessDenied())
         return Success(ArtifactDownload(artifact=artifact, body=body))
+
+    async def resolve_transfer_source_for_authority(
+        self,
+        *,
+        uri: str,
+        authority: SessionResourceAuthority,
+    ) -> Result[ArtifactTransferSource, ArtifactError]:
+        """Resolve authorized Artifact metadata without reading object bytes."""
+        storage_key = artifact_storage_key_from_uri(uri)
+        if storage_key is None:
+            return Failure(ArtifactNotFound())
+        async with self.session_manager() as session:
+            if not await self._has_valid_resource_authority(session, authority):
+                return Failure(ArtifactAccessDenied())
+            artifact = await self.artifact_repository.get_by_storage_key(
+                session,
+                storage_key,
+            )
+            if (
+                artifact is None
+                or artifact.workspace_id != authority.workspace_id
+                or artifact.agent_id != authority.agent_id
+                or artifact.session_id != authority.session_id
+            ):
+                return Failure(ArtifactNotFound())
+            created_run = await self.agent_run_repository.get_by_id(
+                session,
+                artifact.created_run_id,
+            )
+            if (
+                created_run is None
+                or created_run.session_id != artifact.session_id
+                or created_run.run_index != artifact.created_run_index
+            ):
+                return Failure(ArtifactNotFound())
+        if artifact.status == ArtifactStatus.EXPIRED:
+            return Failure(ArtifactExpired())
+        return Success(ArtifactTransferSource(artifact=artifact))
 
     async def resolve(
         self,

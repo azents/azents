@@ -1,9 +1,16 @@
 """import_file tool."""
 
+import datetime
 import logging
 import posixpath
 import re
+from dataclasses import dataclass
+from typing import assert_never
 
+from azcommon.infra.s3.service import S3Service, S3TransferCleanupRequired
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorTransferFailure,
+)
 from pydantic import BaseModel, Field
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
@@ -15,8 +22,24 @@ from azents.engine.tools.import_resolver import (
     ImportFileResolver,
     ImportFileResolverRegistry,
     ImportResolveError,
+    ResolvedArtifactImportSource,
+    ResolvedExchangeImportSource,
+    ResolvedVfsImportSource,
 )
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
+from azents.engine.tools.runtime_instruction_context import (
+    RuntimeTransferCapability,
+)
+from azents.runtime.transfer.managed_source import (
+    managed_source_from_artifact,
+    managed_source_from_exchange,
+)
+from azents.runtime.transfer.server_to_runtime import (
+    ServerToRuntimeSource,
+    ServerToRuntimeTransferError,
+    ServerToRuntimeTransferRequest,
+)
+from azents.runtime.transfer.vfs_source import VfsServerToRuntimeSource
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.file_storage import FileStorage
@@ -27,6 +50,33 @@ from azents.services.vfs import VfsProjectionService
 logger = logging.getLogger(__name__)
 
 _DEFAULT_IMPORT_DIR = "/tmp/agent/imports"
+
+
+@dataclass(frozen=True)
+class ImportFileStagingConfiguration:
+    """Trusted source-staging dependencies excluded from model-visible context."""
+
+    s3_service: S3Service
+    workspace_bucket: str
+    transfer_object_prefix: str
+    multipart_copy_threshold: int
+    multipart_part_size: int
+    maximum_size: int
+    deadline_after: datetime.timedelta
+
+    def __post_init__(self) -> None:
+        """Validate bounded import transfer settings."""
+        if (
+            min(
+                self.multipart_copy_threshold,
+                self.multipart_part_size,
+                self.maximum_size,
+            )
+            <= 0
+        ):
+            raise ValueError("Import transfer byte limits must be positive")
+        if self.deadline_after <= datetime.timedelta():
+            raise ValueError("Import transfer deadline must be positive")
 
 
 class ImportFileInput(BaseModel):
@@ -58,6 +108,8 @@ def make_import_file_tool(
     artifact_service: ArtifactService,
     vfs_projection_service: VfsProjectionService | None,
     authority: SessionResourceAuthority,
+    transfer_capability: RuntimeTransferCapability | None,
+    staging_configuration: ImportFileStagingConfiguration | None,
 ) -> FunctionTool:
     """Create import_file tool."""
     resolvers: dict[str, ImportFileResolver] = {
@@ -79,10 +131,6 @@ def make_import_file_tool(
 
     async def handler(input: ImportFileInput) -> str:
         """Copy URI file into runtime workspace."""
-        if not await exchange_file_service.validate_resource_authority(authority):
-            raise FunctionToolError(
-                "Session resource authority changed before file import."
-            )
         try:
             resolved = await resolver_registry.resolve(input.uri)
         except ImportResolveError as exc:
@@ -107,27 +155,49 @@ def make_import_file_tool(
                 agent_id=authority.agent_id,
             )
 
-        if not await exchange_file_service.validate_resource_authority(authority):
-            raise FunctionToolError(
-                "Session resource authority changed before file import."
-            )
+        if transfer_capability is None or staging_configuration is None:
+            raise FunctionToolError("Runtime file transfer service is unavailable.")
+
+        source = _server_to_runtime_source(
+            resolved=resolved,
+            staging_configuration=staging_configuration,
+        )
         try:
-            await session_storage.put(
-                destination,
-                resolved.body,
-                resolved.media_type,
-                agent_id=authority.agent_id,
+            await transfer_capability.service.transfer(
+                ServerToRuntimeTransferRequest(
+                    source=source,
+                    target=transfer_capability.target,
+                    agent_id=authority.agent_id,
+                    session_id=authority.session_id,
+                    operation_id=authority.run_id,
+                    destination=destination,
+                    overwrite=input.overwrite,
+                    product_maximum_size=staging_configuration.maximum_size,
+                    provider_maximum_size=staging_configuration.maximum_size,
+                    deadline_at=(
+                        datetime.datetime.now(datetime.UTC)
+                        + staging_configuration.deadline_after
+                    ),
+                )
             )
         except PermissionError:
             raise FunctionToolError(
                 f"Cannot write to read-only scope: {destination}. "
                 f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
             ) from None
+        except FileExistsError:
+            raise FunctionToolError(
+                f"File already exists: {destination}. Set overwrite=true to replace it."
+            ) from None
         except ValueError as exc:
-            raise FunctionToolError(str(exc)) from None
+            raise FunctionToolError(_import_staging_error_message(exc)) from None
         except RuntimeStorageError as exc:
             raise FunctionToolError(
                 f"Failed to write imported file: {exc.detail}"
+            ) from None
+        except S3TransferCleanupRequired:
+            raise FunctionToolError(
+                "Failed to prepare imported file for Runtime transfer."
             ) from None
         except OSError:
             logger.exception(
@@ -142,6 +212,10 @@ def make_import_file_tool(
             raise FunctionToolError(
                 f"Failed to write imported file: {destination}. "
                 f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
+            ) from None
+        except ServerToRuntimeTransferError as exc:
+            raise FunctionToolError(
+                _import_transfer_error_message(exc, destination=destination)
             ) from None
 
         content = (
@@ -167,6 +241,49 @@ def make_import_file_tool(
             "working directory before presenting them."
         ),
     )
+
+
+def _server_to_runtime_source(
+    *,
+    resolved: (
+        ResolvedExchangeImportSource
+        | ResolvedArtifactImportSource
+        | ResolvedVfsImportSource
+    ),
+    staging_configuration: ImportFileStagingConfiguration,
+) -> ServerToRuntimeSource:
+    """Build one closed trusted source adapter from an authorized resolver result."""
+    match resolved:
+        case ResolvedExchangeImportSource():
+            return managed_source_from_exchange(
+                resolved.source,
+                s3_service=staging_configuration.s3_service,
+                bucket=staging_configuration.workspace_bucket,
+                transfer_object_prefix=staging_configuration.transfer_object_prefix,
+                multipart_copy_threshold=staging_configuration.multipart_copy_threshold,
+                multipart_part_size=staging_configuration.multipart_part_size,
+                revalidate_authority=resolved.revalidate,
+            )
+        case ResolvedArtifactImportSource():
+            return managed_source_from_artifact(
+                resolved.source,
+                s3_service=staging_configuration.s3_service,
+                bucket=staging_configuration.workspace_bucket,
+                transfer_object_prefix=staging_configuration.transfer_object_prefix,
+                multipart_copy_threshold=staging_configuration.multipart_copy_threshold,
+                multipart_part_size=staging_configuration.multipart_part_size,
+                revalidate_authority=resolved.revalidate,
+            )
+        case ResolvedVfsImportSource():
+            return VfsServerToRuntimeSource(
+                entry=resolved.source.entry,
+                revalidate_authority=resolved.revalidate,
+                s3_service=staging_configuration.s3_service,
+                bucket=staging_configuration.workspace_bucket,
+                transfer_object_prefix=staging_configuration.transfer_object_prefix,
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _normalize_destination(path: str) -> str | None:
@@ -234,10 +351,62 @@ async def _exists(
     try:
         return await session_storage.exists(destination, agent_id=agent_id)
     except PermissionError:
-        return False
-    except ValueError:
-        return False
+        raise FunctionToolError(
+            f"Cannot write to read-only scope: {destination}. "
+            f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
+        ) from None
+    except ValueError as exc:
+        raise FunctionToolError(str(exc)) from None
     except RuntimeStorageError as exc:
         raise FunctionToolError(
             f"Failed to check destination file: {exc.detail}"
         ) from None
+
+
+def _import_transfer_error_message(
+    error: ServerToRuntimeTransferError,
+    *,
+    destination: str,
+) -> str:
+    """Map bounded transfer outcomes to the established import_file contract."""
+    if error.args[0] == "Transfer source authority changed before dispatch":
+        return "Session resource authority changed before file import."
+    match error.failure:
+        case CoordinatorTransferFailure.CANCELLED:
+            return "Runtime transfer was cancelled before destination commit."
+        case CoordinatorTransferFailure.EXPIRED:
+            return "Runtime transfer did not complete before its deadline."
+        case CoordinatorTransferFailure.INTEGRITY:
+            return (
+                "Imported file integrity verification failed before destination commit."
+            )
+        case CoordinatorTransferFailure.CONSUMER:
+            return (
+                f"Failed to write imported file: Runtime destination is not writable: "
+                f"{destination}."
+            )
+        case (
+            CoordinatorTransferFailure.ADMISSION
+            | CoordinatorTransferFailure.FENCED
+            | CoordinatorTransferFailure.STREAM
+            | None
+        ):
+            return (
+                f"Failed to write imported file: {destination}. "
+                f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
+            )
+        case _:
+            return (
+                f"Failed to write imported file: {destination}. "
+                f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
+            )
+
+
+def _import_staging_error_message(error: ValueError) -> str:
+    """Map source staging validation failures without exposing storage internals."""
+    message = str(error).lower()
+    if "exceeds" in message:
+        return "Imported file exceeds the configured Runtime transfer limit."
+    if "size" in message or "hash" in message or "integrity" in message:
+        return "Imported file integrity verification failed before destination commit."
+    return "Failed to prepare imported file for Runtime transfer."
