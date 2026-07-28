@@ -179,11 +179,11 @@ class ExternalChannelManagementRepository:
         session: AsyncSession,
         *,
         workspace_id: str,
-        provider: ExternalChannelProvider,
+        provider: ExternalChannelProvider | None,
         offset: int,
         limit: int,
     ) -> list[ManagedMultiConnection]:
-        """List one provider's Workspace-owned Multi Apps with redacted state."""
+        """List redacted Workspace-owned Multi Apps in one stable page."""
         if offset < 0 or limit <= 0 or limit > 100:
             raise ValueError("External Channel page is invalid.")
         active_route_counts = (
@@ -236,9 +236,13 @@ class ExternalChannelManagementRepository:
                 )
                 .where(
                     RDBExternalChannelConnection.workspace_id == workspace_id,
-                    RDBExternalChannelConnection.provider == provider,
                     RDBExternalChannelConnection.app_mode
                     == ExternalChannelAppMode.MULTI,
+                    *(
+                        ()
+                        if provider is None
+                        else (RDBExternalChannelConnection.provider == provider,)
+                    ),
                 )
                 .order_by(
                     RDBExternalChannelConnection.created_at,

@@ -64,6 +64,7 @@ from azents.services.external_channel.discord_delivery import (
     DISCORD_DEFAULT_MAX_FILE_BYTES,
 )
 from azents.services.external_channel.discord_presentation import (
+    DiscordProgressPage,
     DiscordProgressPresentation,
     render_discord_persisted_progress,
     split_discord_markdown,
@@ -75,6 +76,78 @@ from azents.services.external_channel.slack_events import (
 
 class ExternalChannelWorkRepository:
     """Own Channel Work transitions and delivery ledger state."""
+
+    async def recover_deleted_discord_progress(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+        resource_labels: dict[str, object] | None,
+        deleted_provider_message_key: str,
+        origin_id: str,
+        now: datetime.datetime,
+    ) -> str | None:
+        """Recreate one confirmed-missing active Discord progress page."""
+        work = await session.scalar(
+            sa.select(RDBExternalChannelWork)
+            .join(
+                RDBExternalChannelBinding,
+                RDBExternalChannelBinding.id == RDBExternalChannelWork.binding_id,
+            )
+            .join(
+                RDBExternalChannelAgentRoute,
+                RDBExternalChannelAgentRoute.id == RDBExternalChannelBinding.route_id,
+            )
+            .join(
+                RDBExternalChannelConnection,
+                RDBExternalChannelConnection.id
+                == RDBExternalChannelAgentRoute.connection_id,
+            )
+            .where(
+                RDBExternalChannelWork.binding_id == binding_id,
+                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+                RDBExternalChannelConnection.provider
+                == ExternalChannelProvider.DISCORD,
+            )
+            .with_for_update()
+        )
+        if work is None:
+            return None
+        part = await session.scalar(
+            sa.select(RDBExternalChannelWorkProjectionPart)
+            .where(
+                RDBExternalChannelWorkProjectionPart.work_id == work.id,
+                RDBExternalChannelWorkProjectionPart.provider_message_key
+                == deleted_provider_message_key,
+                RDBExternalChannelWorkProjectionPart.status
+                == ExternalChannelWorkProjectionStatus.PRESENT,
+            )
+            .with_for_update()
+        )
+        if part is None or work.desired_progress_payload is None:
+            return None
+        part.provider_message_key = None
+        part.status = ExternalChannelWorkProjectionStatus.DELETED
+        part.deleted_at = now
+        presentation = render_discord_persisted_progress(
+            work.desired_progress_payload,
+            work_id=work.id,
+            desired_progress_revision=work.desired_progress_revision,
+        )
+        if part.part_ordinal >= len(presentation.pages):
+            return None
+        return await self._create_discord_progress_attempt(
+            session,
+            work=work,
+            origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+            origin_id=origin_id,
+            channel_action_id=None,
+            binding_id=binding_id,
+            part=part,
+            operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+            labels=resource_labels,
+            page=presentation.pages[part.part_ordinal],
+        )
 
     async def ensure_initial_discord_progress(
         self,
@@ -108,7 +181,7 @@ class ExternalChannelWorkRepository:
             )
         )
         if not parts:
-            for ordinal, text in enumerate(presentation.pages):
+            for ordinal, page in enumerate(presentation.pages):
                 part = RDBExternalChannelWorkProjectionPart(
                     work_id=work.id,
                     part_ordinal=ordinal,
@@ -130,7 +203,7 @@ class ExternalChannelWorkRepository:
                     part=part,
                     operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
                     labels=labels,
-                    text=text,
+                    page=page,
                 )
         return await session.scalar(
             sa.select(RDBExternalChannelDeliveryAttempt.id)
@@ -409,6 +482,13 @@ class ExternalChannelWorkRepository:
                 session,
                 work_id=work.id,
             )
+            projection_parts = list(
+                await session.scalars(
+                    sa.select(RDBExternalChannelWorkProjectionPart)
+                    .where(RDBExternalChannelWorkProjectionPart.work_id == work.id)
+                    .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
+                )
+            )
             snapshots.append(
                 ChannelWorkSnapshot(
                     binding_id=binding.id,
@@ -418,7 +498,11 @@ class ExternalChannelWorkRepository:
                     tasks=[ChannelWorkTask.model_validate(task) for task in work.tasks],
                     state_revision=work.state_revision,
                     desired_progress_revision=work.desired_progress_revision,
-                    progress_provider_message_key=work.progress_provider_message_key,
+                    progress_provider_message_key=(
+                        None
+                        if connection.provider is ExternalChannelProvider.DISCORD
+                        else work.progress_provider_message_key
+                    ),
                     projection_drift=_projection_drift(
                         work,
                         (
@@ -426,6 +510,8 @@ class ExternalChannelWorkRepository:
                             if latest_progress_delivery is None
                             else [latest_progress_delivery]
                         ),
+                        provider=connection.provider,
+                        projection_parts=projection_parts,
                     ),
                     latest_action_mode=None if action is None else action.mode,
                     latest_deliveries=deliveries,
@@ -1289,10 +1375,10 @@ class ExternalChannelWorkRepository:
             tuple[
                 RDBExternalChannelWorkProjectionPart,
                 ExternalChannelDeliveryOperation,
-                str | None,
+                DiscordProgressPage | None,
             ]
         ] = []
-        for ordinal, text in enumerate(presentation.pages):
+        for ordinal, page in enumerate(presentation.pages):
             part = existing.pop(ordinal, None)
             if part is None:
                 part = RDBExternalChannelWorkProjectionPart(
@@ -1309,7 +1395,7 @@ class ExternalChannelWorkRepository:
                     (
                         part,
                         ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                        text,
+                        page,
                     )
                 )
                 continue
@@ -1321,7 +1407,7 @@ class ExternalChannelWorkRepository:
                     (
                         part,
                         ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                        text,
+                        page,
                     )
                 )
                 continue
@@ -1334,7 +1420,7 @@ class ExternalChannelWorkRepository:
                             if part.provider_message_key is not None
                             else ExternalChannelDeliveryOperation.PROGRESS_CREATE
                         ),
-                        text,
+                        page,
                     )
                 )
                 continue
@@ -1344,14 +1430,14 @@ class ExternalChannelWorkRepository:
                 and not await self._discord_progress_page_matches(
                     session,
                     part=part,
-                    text=text,
+                    page=page,
                 )
             ):
                 planned.append(
                     (
                         part,
                         ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                        text,
+                        page,
                     )
                 )
         for part in existing.values():
@@ -1368,7 +1454,7 @@ class ExternalChannelWorkRepository:
                     )
                 )
         await session.flush()
-        for part, operation, text in planned:
+        for part, operation, page in planned:
             await self._create_discord_progress_attempt(
                 session,
                 work=work,
@@ -1379,7 +1465,7 @@ class ExternalChannelWorkRepository:
                 part=part,
                 operation=operation,
                 labels=labels,
-                text=text,
+                page=page,
             )
 
     async def _finish_discord_progress_part(
@@ -1454,7 +1540,7 @@ class ExternalChannelWorkRepository:
                 part=part,
                 operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
                 labels=None,
-                text=presentation.pages[part.part_ordinal],
+                page=presentation.pages[part.part_ordinal],
                 request_payload=dict(attempt.request_payload),
             )
         if part.part_ordinal >= len(presentation.pages):
@@ -1470,14 +1556,14 @@ class ExternalChannelWorkRepository:
                 part=part,
                 operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
                 labels=None,
-                text=None,
+                page=None,
                 request_payload=dict(attempt.request_payload),
             )
-        text = presentation.pages[part.part_ordinal]
+        page = presentation.pages[part.part_ordinal]
         if (
-            attempt.request_payload.get("text") == text
-            or part.provider_message_key is None
-        ):
+            attempt.request_payload.get("text") == page.text
+            and attempt.request_payload.get("embeds") == page.embeds
+        ) or part.provider_message_key is None:
             return None
         return await self._create_discord_progress_attempt(
             session,
@@ -1489,7 +1575,7 @@ class ExternalChannelWorkRepository:
             part=part,
             operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
             labels=None,
-            text=text,
+            page=page,
             request_payload=dict(attempt.request_payload),
         )
 
@@ -1569,7 +1655,7 @@ class ExternalChannelWorkRepository:
                 part=part,
                 operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
                 labels=None,
-                text=None,
+                page=None,
                 request_payload=dict(replies[0].request_payload),
             )
         return await self._next_pending_finished_discord_tracker_delete(
@@ -1615,7 +1701,7 @@ class ExternalChannelWorkRepository:
         part: RDBExternalChannelWorkProjectionPart,
         operation: ExternalChannelDeliveryOperation,
         labels: dict[str, object] | None,
-        text: str | None,
+        page: DiscordProgressPage | None,
         request_payload: dict[str, object] | None = None,
     ) -> str:
         """Create one page intent and make it the sole current page mutation."""
@@ -1623,7 +1709,7 @@ class ExternalChannelWorkRepository:
             _provider_payload(
                 ExternalChannelProvider.DISCORD,
                 labels,
-                text=text,
+                text=None if page is None else page.text,
                 provider_message_key=part.provider_message_key,
                 desired_progress_revision=work.desired_progress_revision,
             )
@@ -1632,10 +1718,12 @@ class ExternalChannelWorkRepository:
         )
         payload["work_id"] = work.id
         payload["desired_progress_revision"] = work.desired_progress_revision
-        if text is None:
+        if page is None:
             payload.pop("text", None)
+            payload.pop("embeds", None)
         else:
-            payload["text"] = text
+            payload["text"] = page.text
+            payload["embeds"] = page.embeds
         if operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
             if part.provider_message_key is None:
                 raise RuntimeError("Discord Tracker page delete has no message key.")
@@ -1676,7 +1764,7 @@ class ExternalChannelWorkRepository:
         session: AsyncSession,
         *,
         part: RDBExternalChannelWorkProjectionPart,
-        text: str,
+        page: DiscordProgressPage,
     ) -> bool:
         """Compare a page with its last committed provider-bound presentation."""
         if part.latest_delivery_attempt_id is None:
@@ -1685,7 +1773,11 @@ class ExternalChannelWorkRepository:
             RDBExternalChannelDeliveryAttempt,
             part.latest_delivery_attempt_id,
         )
-        return attempt is not None and attempt.request_payload.get("text") == text
+        return (
+            attempt is not None
+            and attempt.request_payload.get("text") == page.text
+            and attempt.request_payload.get("embeds") == page.embeds
+        )
 
     async def _provider_for_work(
         self,
@@ -2263,8 +2355,36 @@ def _resource_label(labels: dict[str, object] | None, fallback: str) -> str:
 def _projection_drift(
     work: RDBExternalChannelWork,
     deliveries: Sequence[ChannelWorkDelivery],
+    *,
+    provider: ExternalChannelProvider,
+    projection_parts: Sequence[RDBExternalChannelWorkProjectionPart],
 ) -> str:
     """Derive a bounded progress projection drift label."""
+    if provider is ExternalChannelProvider.DISCORD:
+        if any(
+            part.status is ExternalChannelWorkProjectionStatus.UNKNOWN
+            for part in projection_parts
+        ):
+            return "unknown"
+        if any(
+            part.status
+            in {
+                ExternalChannelWorkProjectionStatus.FAILED,
+                ExternalChannelWorkProjectionStatus.PENDING,
+            }
+            for part in projection_parts
+        ):
+            return "stale"
+        if work.desired_progress_payload is None:
+            return "none" if not projection_parts else "stale"
+        if not projection_parts or any(
+            part.provider_message_key is None
+            or part.status is not ExternalChannelWorkProjectionStatus.PRESENT
+            or part.desired_progress_revision != work.desired_progress_revision
+            for part in projection_parts
+        ):
+            return "missing"
+        return "synchronized"
     progress = [
         item
         for item in deliveries

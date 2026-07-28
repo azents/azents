@@ -35,11 +35,11 @@ It does not change Slack behavior or replace the canonical External Channel doma
 
 | Requirement | ADR decisions | Design mechanism |
 | --- | --- | --- |
-| `discord-260728/REQ-1` | `ADR-D1`, `ADR-D2` | Discord message-command source projection, durable interaction claim, and shared shortcut source materialization |
+| `discord-260728/REQ-1` | `ADR-D1`, `ADR-D2`, `ADR-D8` | Discord message-command source projection, durable interaction claim, shared shortcut source materialization, and bound-thread continuation |
 | `discord-260728/REQ-2` | `ADR-D1`, `ADR-D2` | Discord selector components, signed scope metadata, and existing `ExternalChannelSelectorService` |
-| `discord-260728/REQ-3` | `ADR-D1`, `ADR-D3` | Canonical Discord resource labels and route-resolved thread provisioning |
-| `discord-260728/REQ-4` | `ADR-D1`, `ADR-D4` | Discord history page client and shared hydration reconciliation |
-| `discord-260728/REQ-5` | `ADR-D1`, `ADR-D3`, `ADR-D5` | Provider-neutral activation intents and existing Discord projection-part lifecycle |
+| `discord-260728/REQ-3` | `ADR-D1`, `ADR-D3`, `ADR-D8` | Canonical Discord resource labels, route-resolved thread provisioning, and delivery-thread resource lookup |
+| `discord-260728/REQ-4` | `ADR-D1`, `ADR-D4`, `ADR-D8` | Discord history page client, shared hydration reconciliation, and automatic-access-first continuation |
+| `discord-260728/REQ-5` | `ADR-D1`, `ADR-D3`, `ADR-D5`, `ADR-D8` | Provider-neutral activation intents, Discord projection-part lifecycle, and native rich operational presentation |
 | `discord-260728/REQ-6` | `ADR-D1`, `ADR-D6` | Provider-correct management routes, regenerated clients, generic tRPC, and Workspace UI |
 | `discord-260728/REQ-7` | `ADR-D1`, `ADR-D2`, `ADR-D3`, `ADR-D5` | Current fencing/redaction boundaries, Discord capability validation, and lifecycle cleanup |
 | `discord-260728/REQ-8` | `ADR-D7` | Fake-provider interaction/thread/history evidence and deterministic participant/admin E2E journeys |
@@ -193,6 +193,13 @@ parent identities before lookup. This ensures one resource cannot split when Gat
 messages, Message Commands, and REST history observe the conversation in different
 orders.
 
+After a root resource has a retained `delivery_channel_id`, inbound Discord Gateway
+messages with that channel identity resolve the same resource before ordinary
+unlinked-message handling. The lookup is constrained by connection, provider marker,
+Guild identity, and retained delivery-thread label; it never treats unrelated parent
+channel traffic as conversation input. An active binding then releases every eligible
+human original revision as continuation context without requiring `invocation=True`.
+
 After a route resolves, the service:
 
 1. reuses `thread_channel_id` when the source is already inside a thread;
@@ -204,6 +211,29 @@ After a route resolves, the service:
 
 An access request is not externally delivered until this target is available. Therefore
 approval controls cannot be posted into the parent channel outside the conversation.
+
+### Automatic access and rich operational presentation
+
+Before creating an access request, Discord evaluates block precedence, active
+Agent-scoped or Session-scoped grants, and route automatic access for the current
+principal. An automatic-access result is authoritative across `waiting_hydration`,
+`wake_pending`, and `active` binding states; a missing explicit grant alone cannot
+create an approval intent.
+
+Discord delivery receives a validated provider-specific operational presentation:
+
+- Session navigation embeds the Session context and exposes one labelled link button.
+- Approval embeds explain the decision boundary and expose one labelled review link
+  button only for a genuinely approval-required request.
+- Checking and Channel Work use bounded embeds with title, status summary, ordered task
+  fields, sources, and accessible text fallback. Existing page ordinals and durable
+  create/update/delete/recovery ownership remain unchanged.
+- Conversational replies and file messages remain readable Markdown content; they do
+  not pretend to be a Tracker or approval control.
+
+The delivery ledger stores the validated payload needed for exactly one provider
+mutation, not raw inbound payloads, interaction tokens, or canonical provider-specific
+work state.
 
 ## P1: Context, authorization release, Session link, and Channel Work
 

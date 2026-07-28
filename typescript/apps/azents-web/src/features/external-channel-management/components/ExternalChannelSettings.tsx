@@ -965,7 +965,7 @@ export function ExternalChannelSettings({
                   {canManageWorkspaceMultiApps && (
                     <Button
                       component={Link}
-                      href={`/w/${handle}/integrations/slack`}
+                      href={`/w/${handle}/integrations`}
                       variant="light"
                       size="xs"
                       leftSection={<IconSettings size={rem(14)} />}

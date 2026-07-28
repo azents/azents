@@ -90,6 +90,11 @@ message through the same mention and selected-message capabilities available in 
 - A selected-message command does not require the participant to copy or rewrite the
   source message.
 - Existing bound conversations continue their immutable Agent binding.
+- The first connection may require a Discord mention or selected-message command, but
+  every later eligible human message in the bound Discord conversation continues the
+  same Session without requiring another mention.
+- A later mention inside an already-bound conversation is treated as the same
+  continuation and never creates another binding, approval request, or Session wake.
 - Duplicate, delayed, or repeated provider deliveries do not create another binding,
   invocation batch, or Session wake.
 
@@ -125,6 +130,9 @@ or already-threaded conversation as its provider-visible boundary.
   thread.
 - Concurrent or retried thread provisioning converges on one canonical resource and
   does not create another Session binding.
+- After thread provisioning, Gateway messages whose channel identity is the retained
+  Discord thread resolve the same canonical resource and active binding as the root
+  source message.
 
 ### REQ-4. Equivalent context hydration and authorization release
 
@@ -139,6 +147,10 @@ same bounded and ordered behavior as Slack.
   context or duplicating projected input.
 - Access grants, session-scoped grants, blocks, denials, expiry, and revocation follow
   the current provider-neutral access model.
+- An open-access route immediately creates or continues the binding without creating an
+  access request, approval control, or approval-facing message. Approval controls occur
+  only when the current principal actually lacks automatic access and an applicable
+  grant.
 - Allow releases the retained invocation exactly once and wakes the bound Session after
   commit; deny and block never release new input.
 
@@ -154,6 +166,11 @@ observable Session and Channel Work lifecycle as Slack.
   progress pages through the durable delivery ledger.
 - Replies, continuations, completion, files, and Agent identity presentation are
   delivered in the conversation thread with the same one-attempt outcome semantics.
+- Discord operational messages that are structured in Slack Block Kit, including
+  Session navigation, approval, checking, and Channel Work, use Discord-native rich
+  content such as embeds, labelled link buttons, and message components. They preserve
+  the same title, hierarchy, action, status, and accessible fallback meaning rather
+  than flattening the Slack presentation into plain text.
 - A successfully delivered final reply enables progress cleanup; failed or ambiguous
   delivery does not falsely report cleanup success.
 - A confirmed deleted or missing active progress page is recovered when canonical work
@@ -221,15 +238,18 @@ than inferred from isolated adapter tests.
   persisted or replayed.
 - No backward-compatibility fallback is introduced unless it is explicitly required by
   the current Slack contract.
+- Discord presentation is not considered equivalent merely because the same text is
+  delivered. Slack Block Kit operational semantics must lower to Discord-native rich
+  presentation while conversational replies retain ordinary readable Discord message
+  content.
 
 ## Open Assumptions
 
 - Existing Discord provider credentials can be granted the required Guild permissions
   and application capabilities for message commands, thread delivery, history access,
   and interaction responses.
-- Discord provider-native presentation may use bounded Markdown pages and components
-  where Slack uses Block Kit, provided the required behavior and accessibility outcome
-  are preserved.
+- Discord provider-native presentation supports the required embed and component
+  primitives for the operational messages in scope.
 
 ## Confirmation
 

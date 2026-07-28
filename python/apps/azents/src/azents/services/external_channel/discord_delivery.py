@@ -142,17 +142,24 @@ class DiscordDeliveryClient:
         channel_id: str,
         content: str,
         delivery_attempt_id: str,
+        components: list[dict[str, object]] | None = None,
+        embeds: list[dict[str, object]] | None = None,
     ) -> DiscordDeliveryResult:
         """Create one message with a durable-attempt-derived duplicate nonce."""
+        payload: dict[str, object] = {
+            "content": content,
+            "nonce": discord_delivery_nonce(delivery_attempt_id),
+            "enforce_nonce": True,
+        }
+        if components is not None:
+            payload["components"] = components
+        if embeds is not None:
+            payload["embeds"] = embeds
         response = await self._request(
             "POST",
             f"/channels/{channel_id}/messages",
             bot_token=bot_token,
-            json_body={
-                "content": content,
-                "nonce": discord_delivery_nonce(delivery_attempt_id),
-                "enforce_nonce": True,
-            },
+            json_body=payload,
         )
         if isinstance(response, DiscordDeliveryResult):
             return response
@@ -219,13 +226,17 @@ class DiscordDeliveryClient:
         channel_id: str,
         message_id: str,
         content: str,
+        embeds: list[dict[str, object]] | None = None,
     ) -> DiscordDeliveryResult:
         """Update one currently owned Discord message."""
         response = await self._request(
             "PATCH",
             f"/channels/{channel_id}/messages/{message_id}",
             bot_token=bot_token,
-            json_body={"content": content},
+            json_body={
+                "content": content,
+                **({"embeds": embeds} if embeds is not None else {}),
+            },
         )
         if isinstance(response, DiscordDeliveryResult):
             return response

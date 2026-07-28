@@ -49,6 +49,31 @@ class _SignedInteractionHandler(BaseHTTPRequestHandler):
         del format, args
 
 
+class _SelectorInteractionHandler(_SignedInteractionHandler):
+    """Return a selector-shaped response while keeping IDs request-local."""
+
+    def do_POST(self) -> None:
+        """Verify the signed request and return bounded selector components."""
+        length = int(self.headers["Content-Length"])
+        body = self.rfile.read(length)
+        signature = bytes.fromhex(self.headers["X-Signature-Ed25519"])
+        timestamp = self.headers["X-Signature-Timestamp"].encode()
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(_DISCORD_VERIFY_KEY)).verify(
+            signature, timestamp + body
+        )
+        self.received_bodies.append(body)
+        response = (
+            b'{"type":4,"data":{"flags":64,"content":"Select an Agent.",'
+            b'"components":[{"type":1,"components":[{"type":3,'
+            b'"custom_id":"azents-selector:select:admission:0:signature"}]}]}}'
+        )
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+
 @pytest.fixture
 def discord_fake_urls() -> Generator[tuple[str, str], None, None]:
     """Run isolated fake HTTP and Gateway endpoints with fresh global state."""
@@ -777,6 +802,63 @@ def test_discord_fake_relays_a_real_signed_interaction_without_body_evidence(
     assert "/callback" not in rendered
 
 
+def test_discord_fake_keeps_selector_ids_transient_and_redacted(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Selector component IDs are usable once but absent from durable evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    _SelectorInteractionHandler.received_bodies = []
+    callback_server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        _SelectorInteractionHandler,
+    )
+    callback_thread = threading.Thread(
+        target=callback_server.serve_forever,
+        daemon=True,
+    )
+    callback_thread.start()
+    try:
+        host, port = callback_server.server_address
+        requests.patch(
+            f"{discord_fake_url}/api/v10/applications/100000000000000001",
+            json={"interactions_endpoint_url": f"http://{host}:{port}/callback"},
+            timeout=5,
+        ).raise_for_status()
+        response = requests.post(
+            f"{discord_fake_url}/__testenv/interactions",
+            json={
+                "id": "700000000000000002",
+                "type": 2,
+                "application_id": "100000000000000001",
+                "guild_id": "200000000000000001",
+                "channel_id": "400000000000000001",
+                "member": {"user": {"id": "600000000000000001"}},
+            },
+            timeout=5,
+        )
+        response.raise_for_status()
+    finally:
+        callback_server.shutdown()
+        callback_server.server_close()
+        callback_thread.join(timeout=5)
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    rendered = str(evidence)
+    selector = requests.get(
+        f"{discord_fake_url}/__testenv/transient-selector",
+        timeout=5,
+    )
+    selector.raise_for_status()
+    assert response.json() == {"status": 200, "response_type": 4}
+    assert selector.json()["custom_id"].startswith("azents-selector:")
+    assert requests.get(
+        f"{discord_fake_url}/__testenv/transient-selector",
+        timeout=5,
+    ).json() == {"custom_id": None}
+    assert "azents-selector:select:admission:0:signature" not in rendered
+    assert "Select an Agent." not in rendered
+
+
 def test_discord_fake_records_multipart_file_sizes_without_file_bodies(
     discord_fake_urls: tuple[str, str],
 ) -> None:
@@ -812,6 +894,86 @@ def test_discord_fake_records_multipart_file_sizes_without_file_bodies(
     assert "Private visible content" not in rendered
     assert "private-report.csv" not in rendered
     assert "private-discord-file-content" not in rendered
+
+
+def test_discord_fake_preserves_canonical_thread_progress_and_file_order(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Cover one thread's progress page mutations, confirmed delete, and file output."""
+    discord_fake_url, _ = discord_fake_urls
+    thread = requests.post(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000003/threads",
+        json={"name": "Private thread title"},
+        timeout=5,
+    )
+    thread.raise_for_status()
+    thread_id = thread.json()["id"]
+    first = requests.post(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages",
+        json={"content": "Private checking page", "nonce": "progress-page-1"},
+        timeout=5,
+    )
+    first.raise_for_status()
+    second = requests.post(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages",
+        json={"content": "Private progress page 2", "nonce": "progress-page-2"},
+        timeout=5,
+    )
+    second.raise_for_status()
+    update = requests.patch(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages/{first.json()['id']}",
+        json={"content": "Private updated progress page"},
+        timeout=5,
+    )
+    update.raise_for_status()
+    deleted = requests.delete(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages/{second.json()['id']}",
+        timeout=5,
+    )
+    assert deleted.status_code == 204
+    file_delivery = requests.post(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages",
+        data={"payload_json": '{"content":"Private file output"}'},
+        files={
+            "files[0]": (
+                "private.txt",
+                b"private-file-bytes",
+                "text/plain",
+            )
+        },
+        timeout=5,
+    )
+    file_delivery.raise_for_status()
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    operations = [
+        item
+        for item in evidence["operations"]
+        if item["event"] in {"thread_create", "message"}
+    ]
+    assert [item["operation"] for item in operations] == [
+        "create_thread",
+        "create_message",
+        "create_message",
+        "update_message",
+        "delete_message",
+        "create_message",
+    ]
+    assert [item["outcome"] for item in operations] == [
+        "delivered",
+        "created",
+        "created",
+        "delivered",
+        "delivered",
+        "created",
+    ]
+    assert evidence["deliveries"][-1]["file_count"] == 1
+    rendered = str(evidence)
+    assert "Private checking page" not in rendered
+    assert "Private progress page 2" not in rendered
+    assert "Private updated progress page" not in rendered
+    assert "private-file-bytes" not in rendered
+    assert "private.txt" not in rendered
 
 
 def test_discord_fake_container_uses_the_azents_server_image(

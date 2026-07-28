@@ -107,6 +107,7 @@ _BOT_TOKEN = "xoxb-e2e-private"
 _SIGNING_SECRET = "e2e-signing-private"
 _DISCORD_APPLICATION_ID = "100000000000000001"
 _DISCORD_MULTI_APPLICATION_ID = "100000000000000002"
+_DISCORD_SELECTOR_APPLICATION_ID = "100000000000000003"
 _DISCORD_GUILD_ID = "200000000000000001"
 _DISCORD_BOT_USER_ID = "300000000000000001"
 _DISCORD_CHANNEL_ID = "400000000000000001"
@@ -1118,14 +1119,14 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
     assert historical.credentials_configured is False
 
 
-def test_multi_app_mention_selector_deduplicates_and_preserves_approval_source(
+def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
 ) -> None:
-    """Select once from an unconfigured mention and release its source once."""
+    """Select once from an unconfigured mention and bind the open route once."""
     del azents_engine_worker_container
     app_id = "A-MULTI-SELECTOR"
     team_id = "T-MULTI-SELECTOR"
@@ -1312,76 +1313,40 @@ def test_multi_app_mention_selector_deduplicates_and_preserves_approval_source(
         )
         assert response.status_code == 200
 
-    request_id = wait_until(
-        lambda: _approval_request_id(slack_provider_fake_url),
-        timeout=15,
-        interval=0.2,
-        message="Selected access-required Agent did not request approval",
-    )
+    chat_api = ChatV1Api(public_api_client)
 
-    def hydrated_approval() -> object | None:
-        current = external_api.external_channel_v1_get_approval_request(
-            access_request_id=request_id,
-            _headers=headers,
-        )
-        return current if current.original_url is not None else None
-
-    approval = cast(
-        Any,
-        wait_until(
-            hydrated_approval,
-            timeout=15,
-            interval=0.2,
-            message="Selected source was not hydrated for approval",
-        ),
-    )
-    assert approval.status is ExternalChannelAccessRequestStatus.PENDING
-    assert approval.agent_id == agent_ids[1]
-    assert approval.agent_session_id is None
-    assert approval.source_text == source_text
-
-    decision = ExternalChannelDecisionInput(
-        decision="allow_agent",
-        summary="Multi selector E2E approval",
-    )
-    decided = external_api.external_channel_v1_decide_approval_request(
-        access_request_id=request_id,
-        external_channel_decision_input=decision,
-        _headers=headers,
-    )
-    repeated = external_api.external_channel_v1_decide_approval_request(
-        access_request_id=request_id,
-        external_channel_decision_input=decision,
-        _headers=headers,
-    )
-    assert decided.agent_session_id is not None
-    assert repeated.agent_session_id == decided.agent_session_id
-
-    def active_selected_binding() -> object | None:
-        projection = external_api.external_channel_v1_list_session_channels(
+    def active_selected_binding() -> tuple[Any, Any] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_ids[1],
-            session_id=cast(str, decided.agent_session_id),
-            handle=handle,
             _headers=headers,
         )
-        if (
-            len(projection.items) == 1
-            and projection.items[0].activation_status
-            is ExternalChannelBindingActivationStatus.ACTIVE
-        ):
-            return projection
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_ids[1],
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if (
+                len(projection.items) == 1
+                and projection.items[0].activation_status
+                is ExternalChannelBindingActivationStatus.ACTIVE
+            ):
+                return session, projection.items[0]
         return None
 
-    selected_binding = cast(
-        Any,
+    selected_session, selected_binding = cast(
+        tuple[Any, Any],
         wait_until(
             active_selected_binding,
             timeout=10,
             interval=0.2,
-            message="Selected Multi App route did not create one active binding",
+            message="Selected open-access Multi App route did not bind once",
         ),
     )
-    assert len(selected_binding.items) == 1
+    assert selected_session.agent_id == agent_ids[1]
+    assert selected_binding.provider.value == "slack"
+    assert _approval_request_id(slack_provider_fake_url) == ""
     provider_state = _provider_state(slack_provider_fake_url)
     request_counts = cast(dict[str, int], provider_state["request_counts"])
     assert request_counts["views.open"] == 1
@@ -2588,6 +2553,166 @@ def test_discord_single_activation_interaction_and_gateway_journey(
     assert _DISCORD_BOT_TOKEN not in rendered_state
     assert "Private Discord gateway invocation" not in rendered_state
     assert "X-Signature-Ed25519" not in rendered_state
+
+
+def test_discord_message_command_selector_and_component_journey(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    discord_provider_fake_url: str,
+    azents_engine_worker_container: Container,
+) -> None:
+    """Exercise Message Command source projection and transient selector scope."""
+    del azents_engine_worker_container
+    source_message_id = "500000000000000002"
+    source_content = "Private selected Discord source"
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/configure",
+        json={
+            "application_id": _DISCORD_SELECTOR_APPLICATION_ID,
+            "root_messages": [
+                {
+                    "id": source_message_id,
+                    "channel_id": _DISCORD_CHANNEL_ID,
+                    "content": source_content,
+                    "timestamp": "2026-07-28T00:00:00.000000+00:00",
+                    "author": {"id": "600000000000000002"},
+                }
+            ],
+            "allow_synthetic_roots": True,
+        },
+        timeout=5,
+    ).raise_for_status()
+    owner_token, _, handle, agent_ids = _create_workspace_agents(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        agent_count=2,
+        runtime_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {owner_token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_multi_discord_connection(
+        handle=handle,
+        discord_connection_setup_request=DiscordConnectionSetupRequest(
+            app_id=_DISCORD_SELECTOR_APPLICATION_ID,
+            configuration=DiscordConnectionConfiguration(
+                target_guild_id=_DISCORD_GUILD_ID
+            ),
+            credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
+        ),
+        _headers=headers,
+    )
+
+    def disconnect_connection() -> None:
+        impact = external_api.external_channel_v1_get_multi_discord_connection_impact(
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+        external_api.external_channel_v1_disconnect_multi_discord_connection(
+            connection_id=setup.connection.id,
+            handle=handle,
+            generation_fence_request=GenerationFenceRequest(
+                expected_generation=impact.generation
+            ),
+            _headers=headers,
+        )
+
+    request.addfinalizer(disconnect_connection)
+    wait_until(
+        lambda: bool(
+            _discord_provider_state(discord_provider_fake_url).get(
+                "interaction_configurations"
+            )
+        ),
+        timeout=15,
+        interval=0.2,
+        message="Discord interaction callback was not configured",
+    )
+    routes = [
+        external_api.external_channel_v1_add_multi_discord_route(
+            connection_id=setup.connection.id,
+            handle=handle,
+            multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_id),
+            _headers=headers,
+        )
+        for agent_id in agent_ids
+    ]
+    interaction = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": "700000000000000003",
+            "type": 2,
+            "application_id": _DISCORD_SELECTOR_APPLICATION_ID,
+            "guild_id": _DISCORD_GUILD_ID,
+            "channel_id": _DISCORD_CHANNEL_ID,
+            "member": {"user": {"id": "600000000000000002"}},
+            "data": {
+                "type": 3,
+                "name": "Ask an Azents Agent",
+                "target_id": source_message_id,
+                "resolved": {
+                    "messages": {
+                        source_message_id: {
+                            "id": source_message_id,
+                            "channel_id": _DISCORD_CHANNEL_ID,
+                            "content": source_content,
+                            "timestamp": "2026-07-28T00:00:00.000000+00:00",
+                            "author": {"id": "600000000000000002"},
+                        }
+                    }
+                },
+            },
+        },
+        timeout=10,
+    )
+    interaction.raise_for_status()
+    assert interaction.json() == {"status": 200, "response_type": 4}
+    selector = wait_until(
+        lambda: (
+            requests.get(
+                f"{discord_provider_fake_url}/__testenv/transient-selector",
+                timeout=5,
+            )
+            .json()
+            .get("custom_id")
+        ),
+        timeout=15,
+        interval=0.2,
+        message="Discord Message Command selector response was not rendered",
+    )
+    assert isinstance(selector, str)
+    assert selector.startswith("azents-selector:")
+    component = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": "700000000000000004",
+            "type": 3,
+            "application_id": _DISCORD_SELECTOR_APPLICATION_ID,
+            "guild_id": _DISCORD_GUILD_ID,
+            "channel_id": _DISCORD_CHANNEL_ID,
+            "member": {"user": {"id": "600000000000000002"}},
+            "message": {"id": "800000000000000001"},
+            "data": {"custom_id": selector, "values": [routes[1].id]},
+        },
+        timeout=10,
+    )
+    component.raise_for_status()
+    assert component.json() == {"status": 200, "response_type": 7}
+    state = _discord_provider_state(discord_provider_fake_url)
+    rendered = str(state)
+    interactions = cast(list[dict[str, object]], state["interactions"])
+    assert [item["response_type"] for item in interactions] == [4, 7]
+    assert source_content not in rendered
+    assert _DISCORD_BOT_TOKEN not in rendered
+    assert selector not in rendered
 
 
 def test_discord_multi_management_and_lifecycle_journey(

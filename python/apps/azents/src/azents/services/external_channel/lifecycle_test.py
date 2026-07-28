@@ -9,7 +9,12 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ExternalChannelBindingStatus, ExternalChannelWorkStatus
+from azents.core.enums import (
+    ExternalChannelBindingStatus,
+    ExternalChannelDeliveryOriginType,
+    ExternalChannelWorkProjectionStatus,
+    ExternalChannelWorkStatus,
+)
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecyclePurgeContext,
@@ -17,6 +22,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
     SessionLifecycleTransitionPolicy,
 )
+from azents.rdb.models.external_channel import RDBExternalChannelDeliveryAttempt
 from azents.repos.external_channel.data import (
     ExternalChannelArchiveTermination,
     ExternalChannelPurgeCleanup,
@@ -173,6 +179,9 @@ class _RowsDouble:
 class _ExecutionDouble:
     """Minimal execute result supporting lifecycle row counts and inserts."""
 
+    def __init__(self, rows: list[object] | None = None) -> None:
+        self.rows = rows or []
+
     def scalar_one_or_none(self) -> None:
         """Model an idempotent insert that already has its delivery identity."""
         return None
@@ -181,14 +190,25 @@ class _ExecutionDouble:
         """Model a mutation that affected no rows."""
         return _RowsDouble([])
 
+    def all(self) -> list[object]:
+        """Return one deterministic row sequence for execute-based selects."""
+        return self.rows
+
 
 class _LifecycleSessionDouble:
     """Record lifecycle SQL while supplying deterministic scalar query results."""
 
-    def __init__(self, scalar_rows: list[list[object]]) -> None:
+    def __init__(
+        self,
+        scalar_rows: list[list[object]],
+        *,
+        execute_rows: list[list[object]] | None = None,
+    ) -> None:
         self.scalar_rows = scalar_rows
+        self.execute_rows = execute_rows or []
         self.scalar_statements: list[sa.ClauseElement] = []
         self.execute_statements: list[sa.ClauseElement] = []
+        self.added: list[object] = []
 
     async def scalars(self, statement: sa.ClauseElement) -> _RowsDouble:
         """Return rows for one lifecycle select in call order."""
@@ -198,7 +218,15 @@ class _LifecycleSessionDouble:
     async def execute(self, statement: sa.ClauseElement) -> _ExecutionDouble:
         """Record a lifecycle insert, update, or delete."""
         self.execute_statements.append(statement)
-        return _ExecutionDouble()
+        return _ExecutionDouble(
+            self.execute_rows.pop(0)
+            if isinstance(statement, sa.Select) and self.execute_rows
+            else None
+        )
+
+    def add(self, value: object) -> None:
+        """Record one ORM-owned delivery intent."""
+        self.added.append(value)
 
     async def flush(self) -> None:
         """Model caller-owned transaction flushing."""
@@ -242,11 +270,57 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     assert active_work.desired_progress_revision == 4
     assert progress_insert["id"]
     assert progress_insert["origin_id"] == "binding-1"
-    pending_delete = str(session.execute_statements[1])
+    pending_delete = str(session.execute_statements[2])
     assert (
         "external_channel_pending_contexts.route_id, "
         "external_channel_pending_contexts.resource_id"
     ) in pending_delete
+
+
+@pytest.mark.asyncio
+async def test_discord_projection_cleanup_creates_one_delete_per_present_page() -> None:
+    """Discord cleanup owns each present projection part in stable page order."""
+    part = SimpleNamespace(
+        work_id="work-1",
+        part_ordinal=2,
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="discord:guild-1:555",
+        latest_delivery_attempt_id=None,
+    )
+    work = SimpleNamespace(id="work-1", binding_id="binding-1")
+    resource = SimpleNamespace(
+        labels={
+            "provider": "discord",
+            "guild_id": "guild-1",
+            "delivery_channel_id": "444",
+        }
+    )
+    session = _LifecycleSessionDouble(
+        [],
+        execute_rows=[[(part, work, resource)]],
+    )
+
+    repository = ExternalChannelLifecycleRepository()
+    cleanup = repository._create_discord_projection_delete_intents  # pyright: ignore[reportPrivateUsage]
+    delivery_ids = await cleanup(
+        cast(AsyncSession, session),
+        binding_ids=("binding-1",),
+        origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+        now=datetime.datetime(2026, 7, 21, tzinfo=datetime.UTC),
+    )
+
+    assert len(delivery_ids) == 1
+    assert part.status is ExternalChannelWorkProjectionStatus.PENDING
+    assert part.latest_delivery_attempt_id == delivery_ids[0]
+    attempt = cast(RDBExternalChannelDeliveryAttempt, session.added[0])
+    assert attempt.part_ordinal == 2
+    assert attempt.request_payload == {
+        "provider": "discord",
+        "guild_id": "guild-1",
+        "channel_id": "444",
+        "provider_message_key": "discord:guild-1:555",
+        "work_id": "work-1",
+    }
 
 
 @pytest.mark.asyncio

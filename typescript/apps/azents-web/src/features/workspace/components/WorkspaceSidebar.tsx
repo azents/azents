@@ -39,9 +39,7 @@ export function WorkspaceSidebar({
   const isHome = pathname === basePath;
   const isMembers = pathname === `${basePath}/members`;
   const isToolkits = pathname.startsWith(`${basePath}/toolkits`);
-  const isExternalChannels = pathname.startsWith(
-    `${basePath}/integrations/slack`,
-  );
+  const isExternalChannels = pathname.startsWith(`${basePath}/integrations`);
   const isSettings = pathname === `${basePath}/settings`;
   const isRuntimeExecution = pathname === `${basePath}/runtime-execution`;
   const isProfile = pathname === `${basePath}/profile`;
@@ -94,8 +92,8 @@ export function WorkspaceSidebar({
       />
       <NavLink
         component={Link}
-        href={`${basePath}/integrations/slack`}
-        label={t("slackApps")}
+        href={`${basePath}/integrations`}
+        label={t("integrations")}
         leftSection={<IconPlugConnected size={18} />}
         active={isExternalChannels}
         onClick={onNavigate}

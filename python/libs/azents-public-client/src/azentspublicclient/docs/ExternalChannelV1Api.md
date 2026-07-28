@@ -23,6 +23,7 @@ Method | HTTP request | Description
 [**external_channel_v1_get_multi_slack_route_impact**](ExternalChannelV1Api.md#external_channel_v1_get_multi_slack_route_impact) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}/impact | Get Multi Slack Route Impact
 [**external_channel_v1_list_agent_access**](ExternalChannelV1Api.md#external_channel_v1_list_agent_access) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access | List Agent Access
 [**external_channel_v1_list_connections**](ExternalChannelV1Api.md#external_channel_v1_list_connections) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels | List Connections
+[**external_channel_v1_list_multi_connections**](ExternalChannelV1Api.md#external_channel_v1_list_multi_connections) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/multi | List Multi Connections
 [**external_channel_v1_list_multi_discord_channel_defaults**](ExternalChannelV1Api.md#external_channel_v1_list_multi_discord_channel_defaults) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults | List Multi Discord Channel Defaults
 [**external_channel_v1_list_multi_discord_connections**](ExternalChannelV1Api.md#external_channel_v1_list_multi_discord_connections) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi | List Multi Discord Connections
 [**external_channel_v1_list_multi_discord_routes**](ExternalChannelV1Api.md#external_channel_v1_list_multi_discord_routes) | **GET** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents | List Multi Discord Routes
@@ -1603,6 +1604,89 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**ManagedConnectionListResponse**](ManagedConnectionListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_list_multi_connections**
+> ManagedMultiConnectionListResponse external_channel_v1_list_multi_connections(handle, offset=offset, limit=limit)
+
+List Multi Connections
+
+List Workspace-owned Multi Apps across providers in one stable page.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.managed_multi_connection_list_response import ManagedMultiConnectionListResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    handle = 'handle_example' # str | 
+    offset = 0 # int |  (optional) (default to 0)
+    limit = 50 # int |  (optional) (default to 50)
+
+    try:
+        # List Multi Connections
+        api_response = api_instance.external_channel_v1_list_multi_connections(handle, offset=offset, limit=limit)
+        print("The response of ExternalChannelV1Api->external_channel_v1_list_multi_connections:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_list_multi_connections: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **offset** | **int**|  | [optional] [default to 0]
+ **limit** | **int**|  | [optional] [default to 50]
+
+### Return type
+
+[**ManagedMultiConnectionListResponse**](ManagedMultiConnectionListResponse.md)
 
 ### Authorization
 

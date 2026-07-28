@@ -18,11 +18,10 @@ import {
   externalChannelV1GetMultiSlackRouteImpact,
   externalChannelV1ListAgentAccess,
   externalChannelV1ListConnections,
+  externalChannelV1ListMultiConnections,
   externalChannelV1ListMultiDiscordChannelDefaults,
-  externalChannelV1ListMultiDiscordConnections,
   externalChannelV1ListMultiDiscordRoutes,
   externalChannelV1ListMultiSlackChannelDefaults,
-  externalChannelV1ListMultiSlackConnections,
   externalChannelV1ListMultiSlackRoutes,
   externalChannelV1ListSessionChannels,
   externalChannelV1LoadMultiSlackManagementHandoff,
@@ -126,18 +125,13 @@ export const externalChannelRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
-        provider: providerSchema,
         offset: z.number().int().min(0).default(0),
         limit: z.number().int().min(1).max(100).default(50),
       }),
     )
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await (
-          input.provider === "discord"
-            ? externalChannelV1ListMultiDiscordConnections
-            : externalChannelV1ListMultiSlackConnections
-        )({
+        const { data } = await externalChannelV1ListMultiConnections({
           client: ctx.apiClient,
           path: { handle: input.handle },
           query: { offset: input.offset, limit: input.limit },

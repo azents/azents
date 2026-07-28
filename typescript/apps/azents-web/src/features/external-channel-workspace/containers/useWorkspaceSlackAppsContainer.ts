@@ -153,25 +153,13 @@ export function useWorkspaceSlackAppsContainer({
   const [previewDisconnect, setPreviewDisconnect] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const meQuery = trpc.workspaceMember.me.useQuery({ handle });
-  const slackListQuery = trpc.externalChannel.listMultiConnections.useQuery({
+  const listQuery = trpc.externalChannel.listMultiConnections.useQuery({
     handle,
-    provider: "slack",
     offset: connectionOffset,
     limit: PAGE_SIZE,
   });
-  const discordListQuery = trpc.externalChannel.listMultiConnections.useQuery({
-    handle,
-    provider: "discord",
-    offset: connectionOffset,
-    limit: PAGE_SIZE,
-  });
-  const connections = useMemo(
-    () => [
-      ...(slackListQuery.data?.items ?? []),
-      ...(discordListQuery.data?.items ?? []),
-    ],
-    [discordListQuery.data?.items, slackListQuery.data?.items],
-  );
+  const connectionItems = listQuery.data?.items;
+  const connections = useMemo(() => connectionItems ?? [], [connectionItems]);
   const canManage =
     meQuery.data?.role === "owner" || meQuery.data?.role === "manager";
 
@@ -417,17 +405,13 @@ export function useWorkspaceSlackAppsContainer({
     clearDefaultMutation.isPending ||
     disconnectMutation.isPending;
   const state: WorkspaceMultiAppsState = useMemo(() => {
-    if (
-      meQuery.isPending ||
-      slackListQuery.isPending ||
-      discordListQuery.isPending
-    ) {
+    if (meQuery.isPending || listQuery.isPending) {
       return { type: "LOADING" };
     }
     if (meQuery.isError && errorCode(meQuery.error) === "FORBIDDEN") {
       return { type: "FORBIDDEN", message: meQuery.error.message };
     }
-    const listError = slackListQuery.error ?? discordListQuery.error;
+    const listError = listQuery.error;
     if (listError && errorCode(listError) === "FORBIDDEN") {
       return { type: "FORBIDDEN", message: listError.message };
     }
@@ -444,14 +428,7 @@ export function useWorkspaceSlackAppsContainer({
       return { type: "ERROR", message: listError.message };
     }
     return { type: "LOADED", connections };
-  }, [
-    connections,
-    discordListQuery.error,
-    discordListQuery.isPending,
-    meQuery,
-    slackListQuery.error,
-    slackListQuery.isPending,
-  ]);
+  }, [connections, listQuery.error, listQuery.isPending, meQuery]);
 
   return {
     handle,

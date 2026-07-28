@@ -136,7 +136,7 @@ def discord_interaction_admission_inputs(
                 "discord_interaction_type": str(envelope.interaction_type),
                 **(
                     {
-                        "command_name": DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
+                        "command_kind": "message_command",
                         "source_message_id": envelope.message_command_source["id"],
                     }
                     if envelope.message_command_source is not None

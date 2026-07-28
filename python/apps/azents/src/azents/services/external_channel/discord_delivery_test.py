@@ -49,6 +49,63 @@ async def test_create_message_uses_a_deterministic_nonce_and_returns_identity() 
 
 
 @pytest.mark.asyncio
+async def test_create_and_update_message_preserve_rich_embeds_and_components() -> None:
+    """Operational messages retain their provider-native rich presentation."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"id": "555", "channel_id": "333"})
+
+    embed: dict[str, object] = {
+        "title": "Azents session ready",
+        "description": "Continue in the linked session.",
+        "color": 0x5865F2,
+    }
+    components: list[dict[str, object]] = [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Open Azents session",
+                    "url": "https://azents.example/session",
+                }
+            ],
+        }
+    ]
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        client = DiscordDeliveryClient(http_client)
+        await client.create_message(
+            bot_token="discord-secret",
+            guild_id="111",
+            channel_id="333",
+            content="Your Azents session is ready.",
+            delivery_attempt_id="delivery-1",
+            embeds=[embed],
+            components=components,
+        )
+        await client.update_message(
+            bot_token="discord-secret",
+            guild_id="111",
+            channel_id="333",
+            message_id="555",
+            content="Agent is checking your message.",
+            embeds=[embed],
+        )
+
+    assert json.loads(calls[0].content)["embeds"] == [embed]
+    assert json.loads(calls[0].content)["components"] == components
+    assert json.loads(calls[1].content) == {
+        "content": "Agent is checking your message.",
+        "embeds": [embed],
+    }
+
+
+@pytest.mark.asyncio
 async def test_ensure_thread_creates_a_missing_root_message_thread() -> None:
     """A parent-channel mention gets a usable thread before any reply."""
     calls: list[httpx.Request] = []
