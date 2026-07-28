@@ -931,15 +931,19 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self,
         runtime_agent_id: str,
     ) -> RuntimeToProviderDeliveryCapability | None:
-        """Build one trusted provider-delivery capability for the current Runtime."""
+        """Build provider delivery only when the Runtime is ready."""
         service = self.runtime_to_provider_delivery_service
         if service is None:
             return None
-        runtime = await _ready_runtime_for_agent(
-            agent_runtime_repo=self.agent_runtime_repo,
-            session_manager=self.session_manager,
-            agent_id=runtime_agent_id,
-        )
+        try:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=self.agent_runtime_repo,
+                session_manager=self.session_manager,
+                agent_id=runtime_agent_id,
+                wait_timeout_seconds=0,
+            )
+        except RuntimeStorageError:
+            return None
         return RuntimeToProviderDeliveryCapability(
             service=service,
             target=ServerToRuntimeTarget(

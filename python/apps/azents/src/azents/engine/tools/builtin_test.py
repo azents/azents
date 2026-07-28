@@ -938,6 +938,28 @@ class TestRuntimeToolkitUpdateContext:
         runtime_repo.get_by_agent_id.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_update_context_withholds_provider_delivery_until_runtime_is_ready(
+        self,
+    ) -> None:
+        """An unavailable Runtime withholds trusted provider delivery."""
+        delivery_service = AsyncMock()
+        toolkit = _make_toolkit(
+            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+            runner_state=RuntimeRunnerState.STARTING,
+            runtime_to_provider_delivery_service=cast(
+                RuntimeToProviderDeliveryExecutor,
+                delivery_service,
+            ),
+        )
+
+        await toolkit.update_context(_make_context())
+
+        instruction_context = cast(Any, toolkit)._agents_context
+        assert instruction_context.provider_delivery_capability is None
+        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo.get_by_agent_id.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_update_context_withholds_transfer_until_runtime_is_ready(
         self,
     ) -> None:
