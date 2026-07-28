@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-07-26
-spec_version: 12
+last_verified_at: 2026-07-28
+spec_version: 13
 ---
 
 # Goal Domain Spec
@@ -149,8 +149,6 @@ External Channel provider metadata:
   - `source=external_channel`
   - `provider_slug=external_channel`
   - `active_bindings=<comma-separated binding IDs>`
-  - `active_work_revision=<canonical work revision digest>`
-  - `last_run_id=<completed Run that triggered idle evaluation>`
 
 `goal_updated` event:
 
@@ -270,6 +268,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-28** (spec_version 13) — Reduced External Channel idle-continuation metadata to actionable active binding handles.
 - **2026-07-23** (spec_version 11) — Documented provider-specific `goal_continuation` metadata, lowering, and External Channel UI presentation.
 - **2026-07-16** (spec_version 9) — Clarified that actionable direct Goal control events can start a run without a pending InputBuffer.
 - **2026-07-01** (spec_version 8) — Added unfinished Goal compaction summary enrichment behavior.

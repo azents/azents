@@ -109,10 +109,11 @@ def format_idle_continuation_reminder(metadata: dict[str, str]) -> str:
     return format_system_reminder(
         reminder_type="external_channel_continuation",
         instruction=(
-            "Continue the active External Channel work. Reload the canonical "
-            "Channel Work Snapshot, choose the binding to advance, and use "
-            "`channel_action` for any external publication. If the snapshot is "
-            "empty, this continuation is stale and requires no external action."
+            "Continue the active External Channel work. Use the active binding "
+            "handles and existing conversation or compacted context to choose the "
+            "work to advance. Use `channel_action` for any external publication. "
+            "If no unfinished work remains, this continuation is stale and "
+            "requires no external action."
         ),
         data=data,
     )

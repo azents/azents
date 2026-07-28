@@ -60,6 +60,7 @@ class TurnContext:
     :param session_id: Agent session ID
     :param run_id: Unique ID for message processing unit
     :param run_index: Run index increasing within the session
+    :param tool_search_enabled: Whether deferred Tool Search is active for the run
     :param publish_event: Engine event publish callback
     :param check_stop: Callback that checks whether execution should stop
     """
@@ -70,6 +71,7 @@ class TurnContext:
     publish_event: PublishEventFn
     session_id: str = ""
     run_index: int = 1
+    tool_search_enabled: bool = False
     check_stop: CheckStop | None = None
     resource_authority: SessionResourceAuthority | None = None
     mailbox_activity_observer: object | None = None
