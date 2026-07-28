@@ -496,6 +496,8 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
         _turn_context(tool_search_enabled=True)
     )
     assert "ordinary assistant output is not delivered" in direct_prompt.lower()
+    assert "current input explicitly marked" in direct_prompt
+    assert "ordinary user input" not in direct_prompt
     assert "Tool Search" not in direct_prompt
     assert "Use Tool Search" in search_prompt
     assert "`channel_action` before completing" in search_prompt
@@ -547,6 +549,13 @@ async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
     state = await toolkit.update_context(_turn_context())
 
     channel_action, download_external_file = state.tools
+    assert "ordinary user explicitly requests external publication" in (
+        channel_action.spec.description
+    )
+    assert "active binding or prior External Channel history alone" in (
+        channel_action.spec.description
+    )
+    assert "answer the user normally" in channel_action.spec.description
     assert "Use `finish`" in channel_action.spec.description
     assert "Use `continue`" in channel_action.spec.description
     assert "opaque locator" in download_external_file.spec.description

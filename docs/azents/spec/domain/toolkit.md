@@ -53,7 +53,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-28
-spec_version: 76
+spec_version: 77
 ---
 
 # Toolkit
@@ -295,9 +295,10 @@ Auto-bound core execution and session-control capabilities are direct and remain
 The auto-bound External Channel `channel_action` and `download_external_file`
 capabilities are deferred while Tool Search is enabled. The active External
 Channel Toolkit keeps a minimal static publication-boundary prompt visible before
-discovery. The prompt tells the model to use Tool Search only when the capability
-is enabled. When Tool Search is disabled, the complete catalog remains directly
-visible and the static prompt omits the search instruction.
+discovery. It scopes that boundary to the current input explicitly marked as an
+External Channel turn or continuation and tells the model to use Tool Search only
+when the capability is enabled. When Tool Search is disabled, the complete catalog
+remains directly visible and the static prompt omits the search instruction.
 
 When at least one deferred tool exists, the engine adds the unprefixed direct `tool_search` function. Its schema and description are stable rather than embedding the current Toolkit list. Input contains a non-empty capability `query` and an optional result `limit` with default 5 and maximum 10. Search uses deterministic in-memory BM25 over the current deferred catalog. Documents include final-name tokens, Toolkit slug/type/class/display name, description, parameter names and descriptions, and routing metadata. Positive-score results are ordered by relevance and then final name.
 
@@ -706,9 +707,13 @@ adds the discovery instruction.
 
 Normal turns do not inject canonical Channel Work snapshots dynamically. Tool-specific
 mode, binding, task-list, and file guidance belongs to the relevant tool description
-and input schema. Compaction preserves only unfinished work continuity: binding,
-provider, resource label, current title, and ordered tasks. It omits state revisions,
-latest actions, projection diagnostics, and delivery outcomes.
+and input schema. The `channel_action` description permits calls for the current
+External Channel turn or continuation and for an ordinary user who explicitly asks
+for external publication. Active bindings or prior External Channel history alone do
+not classify the current ordinary user input as an External Channel request.
+Compaction preserves only unfinished work continuity: binding, provider, resource
+label, current title, and ordered tasks. It omits state revisions, latest actions,
+projection diagnostics, and delivery outcomes.
 
 Ingress creates the current work cycle and its initial Slack Activity Tracker before
 Agent execution. The tool atomically commits an optional conversational reply and
@@ -726,6 +731,7 @@ and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-07-28** (spec_version 77) — Scoped the static publication boundary to explicitly marked current Channel input and moved ordinary-user invocation rules into the `channel_action` description.
 - **2026-07-28** (spec_version 76) — Deferred External Channel tools through Tool Search, retained only a capability-aware static publication boundary, moved usage guidance into tool schemas, and reduced compaction to unfinished-work continuity.
 - **2026-07-26** (spec_version 75) — Replaced the legacy `wait_agent` description with the independent
   `wait` Toolkit contract and raised its inclusive timeout maximum to 900 seconds.
