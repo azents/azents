@@ -26,7 +26,6 @@ from azents.engine.tooling.execution_context import client_tool_execution_contex
 from azents.engine.tools.external_channel import (
     ContinueChannelActionInput,
     ExternalChannelToolkit,
-    render_channel_work_prompt,
 )
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContext,
@@ -214,13 +213,14 @@ async def _publish(event: PublishedEvent) -> None:
     del event
 
 
-def _turn_context() -> TurnContext:
+def _turn_context(*, tool_search_enabled: bool = False) -> TurnContext:
     return TurnContext(
         workspace_id="workspace-1",
         model="test-model",
         run_id="run-current",
         publish_event=_publish,
         session_id="session-1",
+        tool_search_enabled=tool_search_enabled,
     )
 
 
@@ -486,18 +486,20 @@ def test_channel_action_rejects_empty_file_lists() -> None:
 
 
 @pytest.mark.asyncio
-async def test_prompt_compaction_and_idle_include_every_active_binding() -> None:
-    """Turn, compaction, and continuation paths share canonical binding state."""
+async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() -> None:
+    """Prompt layers retain only discovery and unfinished-work continuity."""
     service = _ActionService([_snapshot("binding-1"), _snapshot("binding-2")])
     toolkit = _toolkit(service)
 
-    prompt = await toolkit.get_dynamic_prompt(_turn_context())
-    assert "ordinary assistant output is not sent" in prompt.lower()
-    assert "metadata-only until `download_external_file`" in prompt
-    assert "`exchange://` URIs" in prompt
-    assert "`binding-1`" in prompt
-    assert "`binding-2`" in prompt
-    assert prompt == render_channel_work_prompt(service.snapshots)
+    direct_prompt = await toolkit.get_static_prompt(_turn_context())
+    search_prompt = await toolkit.get_static_prompt(
+        _turn_context(tool_search_enabled=True)
+    )
+    assert "ordinary assistant output is not delivered" in direct_prompt.lower()
+    assert "Tool Search" not in direct_prompt
+    assert "Use Tool Search" in search_prompt
+    assert "`channel_action` before completing" in search_prompt
+    assert await toolkit.get_dynamic_prompt(_turn_context()) == ""
 
     compacted = await toolkit._on_compaction_summary(  # pyright: ignore[reportPrivateUsage]
         CompactionSummaryHookContext(
@@ -515,6 +517,10 @@ async def test_prompt_compaction_and_idle_include_every_active_binding() -> None
     assert compacted is not None
     assert compacted.summary.count("## Channel Work Snapshot") == 1
     assert "binding-2" in compacted.summary
+    assert "State revision" not in compacted.summary
+    assert "Progress projection" not in compacted.summary
+    assert "Latest action" not in compacted.summary
+    assert "Latest delivery outcomes" not in compacted.summary
 
     idle = await toolkit._on_session_idle(  # pyright: ignore[reportPrivateUsage]
         SessionIdleHookContext(
@@ -528,3 +534,23 @@ async def test_prompt_compaction_and_idle_include_every_active_binding() -> None
     assert idle is not None
     assert len(idle.continuations) == 1
     assert idle.continuations[0].metadata["active_bindings"] == ("binding-1,binding-2")
+    assert set(idle.continuations[0].metadata) == {"source", "active_bindings"}
+
+
+@pytest.mark.asyncio
+async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
+    """Deferred Channel tools remain searchable without a dynamic prompt."""
+    toolkit = _toolkit(
+        _ActionService([_snapshot()]),
+        file_storage=cast(FileStorage, object()),
+    )
+    state = await toolkit.update_context(_turn_context())
+
+    channel_action, download_external_file = state.tools
+    assert "Use `finish`" in channel_action.spec.description
+    assert "Use `continue`" in channel_action.spec.description
+    assert "opaque locator" in download_external_file.spec.description
+
+    schema_text = json.dumps(channel_action.spec.input_schema)
+    assert "Pass it unchanged" in schema_text
+    assert "independent from the session-scoped update_todo list" in schema_text

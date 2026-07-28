@@ -203,6 +203,22 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
         ),
         handler=_echo,
     )
+    channel_action = FunctionTool(
+        spec=FunctionToolSpec(
+            name="channel_action",
+            description="Publish to an External Channel.",
+            input_schema={"type": "object"},
+        ),
+        handler=_echo,
+    )
+    download_external_file = FunctionTool(
+        spec=FunctionToolSpec(
+            name="download_external_file",
+            description="Download an External Channel file.",
+            input_schema={"type": "object"},
+        ),
+        handler=_echo,
+    )
     catalog = await build_tool_catalog(
         toolkit_bindings=[
             ToolkitBinding(
@@ -223,6 +239,18 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
                 use_prefix=True,
                 toolkit_type="github",
             ),
+            ToolkitBinding(
+                toolkit=_InlineToolkit(channel_action),
+                slug="external_channel",
+                use_prefix=False,
+                toolkit_type=None,
+            ),
+            ToolkitBinding(
+                toolkit=_InlineToolkit(download_external_file),
+                slug="external_channel",
+                use_prefix=False,
+                toolkit_type=None,
+            ),
         ],
         context=TurnContext(
             workspace_id="workspace-1",
@@ -233,7 +261,11 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
     )
 
     assert catalog.direct_tool_names == ["echo", "github__switch_installation"]
-    assert catalog.deferred_tool_names == ["azents__echo"]
+    assert catalog.deferred_tool_names == [
+        "azents__echo",
+        "channel_action",
+        "download_external_file",
+    ]
     assert catalog.entries["azents__echo"].source.slug == "azents"
     assert catalog.entries["azents__echo"].source.toolkit_type == "github"
 

@@ -52,8 +52,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-26
-spec_version: 75
+last_verified_at: 2026-07-28
+spec_version: 76
 ---
 
 # Toolkit
@@ -291,6 +291,13 @@ When `tool_search_enabled` is enabled, the executable Tool Catalog retains every
 For each DB-attached catalog entry, the catalog source retains the ToolkitConfig ID, type, display name, and slug independently of the final model-visible name. When the model invokes that entry, the engine snapshots those source facts onto the durable `client_tool_call` and the matching active/live client-tool projection. UI consumers use this snapshot for product identity and must not infer Toolkit ownership from a tool-name prefix. Built-in and auto-bound entries have no ToolkitConfig source snapshot.
 
 Auto-bound core execution and session-control capabilities are direct and remain pinned in every prepared model call. DB-attached service Toolkit operations are deferred by default, including MCP, GitHub, GCP, AWS, Sentry, Notion, Kubernetes, and Google Analytics operations. A service control tool required to operate its integration may be explicitly direct; the current registered exception is GitHub `switch_installation`.
+
+The auto-bound External Channel `channel_action` and `download_external_file`
+capabilities are deferred while Tool Search is enabled. The active External
+Channel Toolkit keeps a minimal static publication-boundary prompt visible before
+discovery. The prompt tells the model to use Tool Search only when the capability
+is enabled. When Tool Search is disabled, the complete catalog remains directly
+visible and the static prompt omits the search instruction.
 
 When at least one deferred tool exists, the engine adds the unprefixed direct `tool_search` function. Its schema and description are stable rather than embedding the current Toolkit list. Input contains a non-empty capability `query` and an optional result `limit` with default 5 and maximum 10. Search uses deterministic in-memory BM25 over the current deferred catalog. Documents include final-name tokens, Toolkit slug/type/class/display name, description, parameter names and descriptions, and routing metadata. Positive-score results are ordered by relevance and then final name.
 
@@ -688,11 +695,20 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## External Channel Action Tool
 
-`channel_action` is a conditional direct tool, not a Workspace `ToolkitConfig`
-and not an automatic assistant-output relay. Runtime exposes its unprefixed
-name only when the current root AgentSession has an active External Channel
-binding. Execution context includes the binding-scoped Channel Work snapshot,
-and every call must target a binding owned by the current Agent and Session.
+`channel_action` is a conditional auto-bound tool, not a Workspace
+`ToolkitConfig` and not an automatic assistant-output relay. Runtime includes its
+unprefixed executable entry only when the current root AgentSession has an active
+External Channel binding. Tool Search defers its model-visible schema when enabled;
+otherwise the complete catalog exposes it directly. A minimal static prompt always
+states that ordinary assistant output is not delivered externally and that the
+request must publish through `channel_action`; only the Tool Search-enabled variant
+adds the discovery instruction.
+
+Normal turns do not inject canonical Channel Work snapshots dynamically. Tool-specific
+mode, binding, task-list, and file guidance belongs to the relevant tool description
+and input schema. Compaction preserves only unfinished work continuity: binding,
+provider, resource label, current title, and ordered tasks. It omits state revisions,
+latest actions, projection diagnostics, and delivery outcomes.
 
 Ingress creates the current work cycle and its initial Slack Activity Tracker before
 Agent execution. The tool atomically commits an optional conversational reply and
@@ -710,6 +726,7 @@ and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-07-28** (spec_version 76) — Deferred External Channel tools through Tool Search, retained only a capability-aware static publication boundary, moved usage guidance into tool schemas, and reduced compaction to unfinished-work continuity.
 - **2026-07-26** (spec_version 75) — Replaced the legacy `wait_agent` description with the independent
   `wait` Toolkit contract and raised its inclusive timeout maximum to 900 seconds.
 - **2026-07-24** (spec_version 74) — Made Team Session Toolkit execution Userless, stabilized

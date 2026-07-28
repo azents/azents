@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-28
-spec_version: 17
+spec_version: 18
 ---
 
 # External Channel Delivery and Channel Work
@@ -38,9 +38,19 @@ spec_version: 17
 ## Explicit Publication Boundary
 
 Normal model output is never relayed to a provider. The only model-facing publication
-path is the direct unprefixed `channel_action` tool. It is exposed only when the root
-AgentSession has at least one active External Channel binding and receives the current
-binding/work snapshot in its execution context.
+path is the unprefixed `channel_action` tool. It is available only when the root
+AgentSession has at least one active External Channel binding. When Tool Search is
+enabled, `channel_action` and `download_external_file` are deferred discovery targets;
+when disabled, the complete catalog exposes them directly.
+
+The active Toolkit contributes a minimal static prompt stating that ordinary assistant
+output is not delivered and that `channel_action` must publish the response. The
+Tool Search-enabled variant also instructs the model to discover the appropriate
+Channel tool. Normal turns do not reload canonical Channel Work into a dynamic prompt.
+Mode selection, binding-handle, Channel Work, and file-materialization guidance lives
+in tool descriptions and field schemas. Compaction alone preserves unfinished binding,
+provider, resource, title, and ordered task continuity while excluding revisions,
+projection diagnostics, latest actions, and delivery outcomes.
 
 A tool call must identify a binding owned by the current Agent and Session. The tool supports two atomic modes:
 
@@ -261,6 +271,8 @@ A successfully completed run with unfinished Channel Work remains eligible for i
 Binding disconnect, connection disconnect, Session archive, and decommission may commit Tracker-delete intents. Lifecycle transactions never call Slack directly. The post-commit consumer attempts each current cleanup intent once; unresolved attempts remain visible as failed or unknown without rolling back the terminal lifecycle transition.
 
 ## Changelog
+
+- **2026-07-28** (spec_version 18) — Replaced dynamic Channel Work prompt injection with a minimal capability-aware static publication boundary, deferred Channel tools through Tool Search, and kept only unfinished-work continuity in compaction.
 
 - **2026-07-28** (spec_version 17) — Promoted the completed Runtime File Transfer
   cutover for file-bearing replies: every Runtime source uses a verified-object

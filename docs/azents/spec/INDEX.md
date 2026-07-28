@@ -15,12 +15,12 @@ Details of all living specs. Synchronized from frontmatter.
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-27 | 58 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-26 | 133 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-28 | 22 |
-| goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-26 | 12 |
+| goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-28 | 13 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-24 | 6 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-21 | 17 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-07-28 | 13 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-23 | 4 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-26 | 75 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-28 | 76 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-20 | 8 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-27 | 51 |
 
@@ -35,7 +35,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-07-28 | 10 |
-| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-07-28 | 17 |
+| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-07-28 | 18 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-28 | 18 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-28 | 15 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-28 | 32 |
