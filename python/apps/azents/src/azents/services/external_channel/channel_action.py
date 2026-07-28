@@ -75,6 +75,7 @@ from azents.services.external_channel.slack_events import (
     SlackOutboundFile,
     SlackOutboundFileContentError,
 )
+from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.session_resource_authority import SessionResourceAuthority
 
@@ -92,7 +93,10 @@ def get_slack_delivery_client(
     ],
 ) -> SlackConversationClient:
     """Provide the Slack Channel Action adapter."""
-    return SlackConversationClient(http_client)
+    return SlackConversationClient(
+        web_client=create_slack_web_client(),
+        http_client=http_client,
+    )
 
 
 async def get_discord_delivery_http_client() -> AsyncIterator[httpx.AsyncClient]:

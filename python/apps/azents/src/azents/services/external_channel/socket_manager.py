@@ -4,11 +4,9 @@ import asyncio
 import dataclasses
 import datetime
 import logging
-from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import uuid4
 
-import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import Depends
 from pydantic import ValidationError
@@ -40,6 +38,7 @@ from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
 from azents.services.external_channel.slack_http import SlackInteractionCallback
+from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 from azents.services.external_channel.slack_socket import (
     SlackSocketConnectionResult,
     SlackSocketError,
@@ -58,12 +57,6 @@ logger = logging.getLogger(__name__)
 
 class SlackSocketCredentialError(RuntimeError):
     """Persisted Socket Mode credentials cannot establish a connection."""
-
-
-async def get_slack_socket_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide the shared HTTP client used to open Socket Mode endpoints."""
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        yield client
 
 
 @dataclasses.dataclass
@@ -93,10 +86,6 @@ class SlackSocketManagerService:
     shortcut_source_service: Annotated[
         ExternalChannelShortcutSourceService,
         Depends(ExternalChannelShortcutSourceService),
-    ]
-    http_client: Annotated[
-        httpx.AsyncClient,
-        Depends(get_slack_socket_http_client),
     ]
     manager_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
     poll_interval: datetime.timedelta = _DEFAULT_POLL_INTERVAL
@@ -168,7 +157,7 @@ class SlackSocketManagerService:
                 raise SlackSocketCredentialError
             if credentials.app_token is None:
                 raise SlackSocketCredentialError
-            web_api_client = SlackSocketWebAPIClient(self.http_client)
+            web_api_client = SlackSocketWebAPIClient(create_slack_web_client())
 
             async def admit_owned(event: ExternalChannelEventCreate) -> object:
                 if (
@@ -319,7 +308,7 @@ class SlackSocketManagerService:
                 reason="socket_credentials_invalid",
                 status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
             )
-        except SlackSocketError, httpx.RequestError, OSError:
+        except SlackSocketError, OSError:
             await self._release(
                 connection_id,
                 reason="socket_transport_unavailable",

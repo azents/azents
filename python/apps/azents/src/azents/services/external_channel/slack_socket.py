@@ -8,7 +8,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-import httpx
+import aiohttp
+from slack_sdk.errors import SlackApiError
+from slack_sdk.socket_mode.request import SocketModeRequest
+from slack_sdk.socket_mode.response import SocketModeResponse
+from slack_sdk.web.async_client import AsyncWebClient
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
@@ -18,7 +23,6 @@ from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
 )
 from azents.services.external_channel.slack_endpoint import (
-    slack_api_base_url,
     slack_insecure_websocket_allowed,
 )
 from azents.services.external_channel.slack_http import (
@@ -149,8 +153,8 @@ def _utc_now() -> datetime.datetime:
 class SlackSocketWebAPIClient:
     """Open short-lived Slack Socket Mode endpoints with an app-level token."""
 
-    def __init__(self, http_client: httpx.AsyncClient) -> None:
-        self.http_client = http_client
+    def __init__(self, web_client: AsyncWebClient) -> None:
+        self.web_client = web_client
 
     async def open_connection(
         self,
@@ -159,21 +163,23 @@ class SlackSocketWebAPIClient:
     ) -> SlackSocketConnectionOpen:
         """Request a Socket Mode endpoint without retaining the app token."""
         try:
-            response = await self.http_client.post(
-                f"{slack_api_base_url()}/apps.connections.open",
-                headers={"Authorization": f"Bearer {app_token}"},
+            response = await self.web_client.apps_connections_open(
+                app_token=app_token,
             )
-        except httpx.RequestError as error:
-            raise SlackSocketUnavailable(
-                "Slack Socket Mode endpoint is temporarily unavailable."
-            ) from error
-        payload = self._json_object(response)
-        if response.status_code >= 500 or response.status_code == 429:
-            raise SlackSocketUnavailable(
-                "Slack Socket Mode endpoint is temporarily unavailable."
+        except SlackApiError as error:
+            response = error.response
+            payload = (
+                response.data
+                if isinstance(response, AsyncSlackResponse)
+                and isinstance(response.data, dict)
+                else {}
             )
-        url = payload.get("url")
-        if response.status_code >= 400 or payload.get("ok") is not True:
+            if isinstance(response, AsyncSlackResponse) and (
+                response.status_code == 429 or response.status_code >= 500
+            ):
+                raise SlackSocketUnavailable(
+                    "Slack Socket Mode endpoint is temporarily unavailable."
+                ) from error
             if payload.get("error") in {
                 "account_inactive",
                 "invalid_auth",
@@ -182,8 +188,16 @@ class SlackSocketWebAPIClient:
             }:
                 raise SlackSocketReconnectRequired(
                     "Slack rejected the Socket Mode credentials."
-                )
-            raise SlackSocketUnavailable("Slack rejected the Socket Mode app token.")
+                ) from error
+            raise SlackSocketUnavailable(
+                "Slack rejected the Socket Mode app token."
+            ) from error
+        except (aiohttp.ClientError, TimeoutError) as error:
+            raise SlackSocketUnavailable(
+                "Slack Socket Mode endpoint is temporarily unavailable."
+            ) from error
+        payload = response.data if isinstance(response.data, dict) else {}
+        url = payload.get("url")
         secure_url = isinstance(url, str) and url.startswith("wss://")
         testenv_url = (
             isinstance(url, str)
@@ -196,14 +210,6 @@ class SlackSocketWebAPIClient:
             )
         assert isinstance(url, str)
         return SlackSocketConnectionOpen(url=url)
-
-    @staticmethod
-    def _json_object(response: httpx.Response) -> dict[str, object]:
-        try:
-            payload: object = response.json()
-        except ValueError:
-            return {}
-        return payload if isinstance(payload, dict) else {}
 
 
 class SlackSocketModeClient:
@@ -304,9 +310,10 @@ class SlackSocketModeClient:
                     connection_id=connection_id,
                     envelope=envelope,
                 )
+                assert envelope.envelope_id is not None
                 await connection.send(
                     json.dumps(
-                        {"envelope_id": envelope.envelope_id},
+                        SocketModeResponse(envelope_id=envelope.envelope_id).to_dict(),
                         separators=(",", ":"),
                     )
                 )
@@ -387,7 +394,7 @@ class SlackSocketModeClient:
 
 
 def parse_slack_socket_envelope(message: str | bytes) -> SlackSocketEnvelope:
-    """Parse a bounded JSON Socket Mode message without admitting it."""
+    """Parse one bounded SDK Socket Mode request or control message."""
     raw_message = message.encode() if isinstance(message, str) else message
     if len(raw_message) > MAX_SLACK_SOCKET_MESSAGE_BYTES:
         raise SlackSocketInvalidEnvelope(
@@ -403,15 +410,30 @@ def parse_slack_socket_envelope(message: str | bytes) -> SlackSocketEnvelope:
         raise SlackSocketInvalidEnvelope(
             "Slack Socket Mode message must be a JSON object."
         )
-    envelope_type = payload.get("type")
-    if not isinstance(envelope_type, str) or not envelope_type:
-        raise SlackSocketInvalidEnvelope("Slack Socket Mode envelope type is missing.")
-    envelope_id = payload.get("envelope_id")
-    if envelope_id is not None and (
-        not isinstance(envelope_id, str) or not envelope_id
-    ):
+    try:
+        request = SocketModeRequest.from_dict(payload)
+    except (TypeError, ValueError) as error:
         raise SlackSocketInvalidEnvelope(
-            "Slack Socket Mode envelope identifier is invalid."
+            "Slack Socket Mode request is invalid."
+        ) from error
+    if request is not None:
+        if (
+            not isinstance(request.type, str)
+            or not request.type
+            or not isinstance(request.envelope_id, str)
+            or not request.envelope_id
+            or not isinstance(request.payload, dict)
+        ):
+            raise SlackSocketInvalidEnvelope("Slack Socket Mode request is invalid.")
+        return SlackSocketEnvelope(
+            envelope_id=request.envelope_id,
+            type=request.type,
+            payload=request.payload,
+        )
+    envelope_type = payload.get("type")
+    if envelope_type not in {"hello", "disconnect"}:
+        raise SlackSocketInvalidEnvelope(
+            "Slack Socket Mode envelope type is unsupported."
         )
     envelope_payload = payload.get("payload")
     if envelope_payload is not None and not isinstance(envelope_payload, dict):
@@ -419,7 +441,7 @@ def parse_slack_socket_envelope(message: str | bytes) -> SlackSocketEnvelope:
             "Slack Socket Mode envelope payload must be an object."
         )
     return SlackSocketEnvelope(
-        envelope_id=envelope_id,
+        envelope_id=None,
         type=envelope_type,
         payload=envelope_payload,
     )

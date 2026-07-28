@@ -4,15 +4,20 @@ import asyncio
 import datetime
 import json
 from collections.abc import Awaitable, Callable
+from typing import Any
 
+import aiohttp
 import httpx
 import pytest
+from slack_sdk.web.async_client import AsyncWebClient
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
 from websockets.exceptions import ConnectionClosedError
 
 from azents.repos.external_channel.data import ExternalChannelEventCreate
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
 )
+from azents.services.external_channel.slack_endpoint import slack_api_base_url
 from azents.services.external_channel.slack_http import SlackInteractionCallback
 from azents.services.external_channel.slack_socket import (
     MAX_SLACK_SOCKET_MESSAGE_BYTES,
@@ -47,6 +52,60 @@ class FakeSocket:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class _MockSlackSocketWebClient(AsyncWebClient):
+    """Route the public endpoint-open SDK call through deterministic HTTPX."""
+
+    def __init__(self, http_client: httpx.AsyncClient) -> None:
+        super().__init__(retry_handlers=[])
+        self.http_client = http_client
+
+    async def api_call(
+        self,
+        api_method: str,
+        *,
+        http_verb: str = "POST",
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | aiohttp.FormData | None = None,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        auth: dict[str, str] | None = None,
+    ) -> AsyncSlackResponse:
+        del files, auth
+        request_headers = dict(headers or {})
+        request_params = dict(params or {})
+        request_data = dict(data) if isinstance(data, dict) else {}
+        token = request_params.pop("token", None)
+        if token is None:
+            token = request_data.pop("token", None)
+        if isinstance(token, str):
+            request_headers["Authorization"] = f"Bearer {token}"
+        response = await self.http_client.request(
+            http_verb,
+            f"{slack_api_base_url()}/{api_method}",
+            params=request_params or None,
+            json=json,
+            data=request_data or None,
+            headers=request_headers,
+        )
+        payload: object = response.json()
+        return AsyncSlackResponse(
+            client=self,
+            http_verb=http_verb,
+            api_url=str(response.request.url),
+            req_args={},
+            data=payload if isinstance(payload, dict) else {},
+            headers=dict(response.headers),
+            status_code=response.status_code,
+        ).validate()
+
+
+def _socket_web_api_client(
+    http_client: httpx.AsyncClient,
+) -> SlackSocketWebAPIClient:
+    return SlackSocketWebAPIClient(_MockSlackSocketWebClient(http_client))
 
 
 def _events_api_envelope(
@@ -144,7 +203,7 @@ def _client(
         return socket
 
     return SlackSocketModeClient(
-        web_api_client=SlackSocketWebAPIClient(httpx.AsyncClient()),
+        web_api_client=SlackSocketWebAPIClient(AsyncWebClient(retry_handlers=[])),
         admit_event=admit if admit is not None else default_admit,
         admit_interaction=(
             admit_interaction
@@ -188,7 +247,7 @@ async def test_open_connection_uses_app_token_without_returning_it() -> None:
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-        opened = await SlackSocketWebAPIClient(http_client).open_connection(
+        opened = await _socket_web_api_client(http_client).open_connection(
             app_token="xapp-secret"
         )
 
@@ -209,7 +268,7 @@ async def test_open_connection_maps_rejected_token_to_sanitized_failure() -> Non
         )
     ) as http_client:
         with pytest.raises(SlackSocketReconnectRequired) as error:
-            await SlackSocketWebAPIClient(http_client).open_connection(
+            await _socket_web_api_client(http_client).open_connection(
                 app_token="xapp-secret"
             )
 
@@ -238,7 +297,7 @@ async def test_open_connection_allows_insecure_testenv_socket_only_when_enabled(
             SlackSocketUnavailable,
             match="endpoint response is invalid",
         ):
-            await SlackSocketWebAPIClient(http_client).open_connection(
+            await _socket_web_api_client(http_client).open_connection(
                 app_token="xapp-secret"
             )
 
@@ -251,7 +310,7 @@ async def test_open_connection_allows_insecure_testenv_socket_only_when_enabled(
         "http://slack-fake:8083/api",
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-        opened = await SlackSocketWebAPIClient(http_client).open_connection(
+        opened = await _socket_web_api_client(http_client).open_connection(
             app_token="xapp-secret"
         )
 
