@@ -7,7 +7,6 @@ import pytest
 import pytest_asyncio
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from azcommon.testing.images import get_docker_hub_image
 from docker.errors import DockerException, ImageNotFound
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
@@ -67,7 +66,7 @@ def postgres_container(
     check_docker_availability: None,
 ) -> Generator[PostgresContainer, None, None]:
     """PostgreSQL test container."""
-    postgres_image = _ensure_docker_image(get_docker_hub_image("postgres:17"))
+    postgres_image = _ensure_docker_image("postgres:17")
     with PostgresContainer(
         postgres_image,
         driver="psycopg",
@@ -175,7 +174,7 @@ def redis_container(
     check_docker_availability: None,
 ) -> Generator[RedisContainer, None, None]:
     """Redis test container."""
-    valkey_image = _ensure_docker_image(get_docker_hub_image("valkey/valkey:9-alpine"))
+    valkey_image = _ensure_docker_image("valkey/valkey:9-alpine")
     with RedisContainer(
         valkey_image,
     ) as redis:

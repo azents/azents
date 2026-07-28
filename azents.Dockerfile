@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/python:3.14-bookworm AS base
+FROM python:3.14-bookworm AS base
 
 ARG ROOT_DIR=/app
 

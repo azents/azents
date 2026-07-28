@@ -6,7 +6,6 @@ import pytest
 import sqlalchemy as sa
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from azcommon.testing.images import get_docker_hub_image
 from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
@@ -19,7 +18,7 @@ _MAILBOX_REVISION = "8bbe580fddad"
 def _migration_database() -> Generator[tuple[AlembicConfig, sa.Engine], None, None]:
     """Create an isolated PostgreSQL database for migration verification."""
     with PostgresContainer(
-        get_docker_hub_image("postgres:17"),
+        "postgres:17",
         driver="psycopg",
     ) as postgres:
         url = postgres.get_connection_url()

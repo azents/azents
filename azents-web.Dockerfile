@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/node:24-alpine AS base
+FROM node:24-alpine AS base
 
 ARG ROOT_DIR=/app
 

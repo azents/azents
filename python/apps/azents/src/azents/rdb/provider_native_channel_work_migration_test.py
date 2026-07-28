@@ -6,7 +6,6 @@ from collections.abc import Generator, Mapping, Sequence
 import sqlalchemy as sa
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from azcommon.testing.images import get_docker_hub_image
 from testcontainers.postgres import PostgresContainer
 
 from azents.consts import PROJECT_ROOT
@@ -17,7 +16,7 @@ _PROGRESS_REVISION = "1d10cb8faa04"
 
 def _migration_database() -> Generator[tuple[AlembicConfig, sa.Engine], None, None]:
     with PostgresContainer(
-        get_docker_hub_image("postgres:17"),
+        "postgres:17",
         driver="psycopg",
     ) as postgres:
         url = postgres.get_connection_url()

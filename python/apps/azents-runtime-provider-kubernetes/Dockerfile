@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/python:3.14-slim
+FROM python:3.14-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.1 /uv /uvx /bin/
 

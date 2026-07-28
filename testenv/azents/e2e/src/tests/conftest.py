@@ -22,7 +22,6 @@ import boto3
 import docker as docker_py
 import pytest
 import requests
-from azcommon.testing.images import get_docker_hub_image
 from docker.errors import APIError, NotFound
 from docker.models.containers import Container
 from pydantic import TypeAdapter
@@ -161,7 +160,7 @@ def postgres_container(
     container_network: Network,
 ) -> Generator[PostgresContainer, None, None]:
     """PostgreSQL container."""
-    postgres_image = get_docker_hub_image("postgres:18")
+    postgres_image = "postgres:18"
     with (
         PostgresContainer(
             postgres_image,
@@ -186,7 +185,7 @@ def valkey_container(
     container_network: Network,
 ) -> Generator[DockerContainer, None, None]:
     """Valkey (Redis t) container."""
-    valkey_image = get_docker_hub_image("valkey/valkey:9-alpine")
+    valkey_image = "valkey/valkey:9-alpine"
     with (
         DockerContainer(
             valkey_image,
@@ -206,7 +205,7 @@ def rustfs_container(
 ) -> Generator[DockerContainer, None, None]:
     """RustFS (S3 t) container."""
     access_key, secret_key = s3_credentials
-    rustfs_image = get_docker_hub_image("rustfs/rustfs:1.0.0-alpha.90")
+    rustfs_image = "rustfs/rustfs:1.0.0-alpha.90"
     with (
         DockerContainer(
             rustfs_image,
@@ -275,7 +274,7 @@ def openai_proxy_container(
 ) -> Generator[DockerContainer, None, None]:
     """Proxy AIMock and add deterministic Responses image generation."""
     del mock_openai_container
-    python_image = get_docker_hub_image("python:3.14-alpine")
+    python_image = "python:3.14-alpine"
     with (
         DockerContainer(
             python_image,
@@ -312,7 +311,7 @@ def github_validation_proxy_container(
     container_network: Network,
 ) -> Generator[DockerContainer, None, None]:
     """Run the deterministic GitHub App validation boundary."""
-    python_image = get_docker_hub_image("python:3.14-alpine")
+    python_image = "python:3.14-alpine"
     with (
         DockerContainer(
             python_image,
@@ -354,7 +353,7 @@ def slack_provider_fake_container(
     container_network: Network,
 ) -> Generator[DockerContainer, None, None]:
     """Run the deterministic Slack HTTP and Socket Mode boundary."""
-    python_image = get_docker_hub_image("python:3.14-alpine")
+    python_image = "python:3.14-alpine"
     with (
         DockerContainer(
             python_image,
@@ -1779,7 +1778,7 @@ server {
         )
         container = (
             DockerContainer(
-                image=get_docker_hub_image("nginx:1.29-alpine"),
+                image="nginx:1.29-alpine",
                 docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
             )
             .with_name(f"azents-web-gateway-{random_secret(4)}")
@@ -1825,7 +1824,7 @@ def selenium_container(
     del azents_main_web_container, azents_admin_web_container
     container = (
         DockerContainer(
-            image=get_docker_hub_image(_SELENIUM_IMAGE),
+            image=_SELENIUM_IMAGE,
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
         .with_name(f"azents-selenium-{random_secret(4)}")
