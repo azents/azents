@@ -244,7 +244,11 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     assert container.spec.env["AZ_RUNTIME_TRANSFER_ENDPOINT"] == "runtime-transfer:8030"
     assert (
         container.spec.env["AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"]
-        == "/var/run/azents-transfer"
+        == "/workspace/agent/.azents-transfer-staging"
+    )
+    assert all(
+        bind.container_path != "/workspace/agent/.azents-transfer-staging"
+        for bind in container.spec.binds
     )
     assert container.spec.env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-1"
     assert (
@@ -255,9 +259,13 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     assert workspace_path.exists()
     workspace_stat = workspace_path.stat()
     if os.geteuid() == 0:
-        assert workspace_stat.st_uid == 1000
-        assert workspace_stat.st_gid == 1000
-        assert workspace_stat.st_mode & 0o777 == 0o755
+        assert workspace_stat.st_uid == 0
+        assert workspace_stat.st_gid == 0
+        assert workspace_stat.st_mode & 0o7777 == 0o1777
+        staging_stat = (workspace_path / ".azents-transfer-staging").stat()
+        assert staging_stat.st_uid == 0
+        assert staging_stat.st_gid == 0
+        assert staging_stat.st_mode & 0o777 == 0o700
     else:
         assert workspace_stat.st_mode & 0o777 == 0o777
 

@@ -1005,6 +1005,10 @@ def azents_engine_worker_container(
     container = container.with_env("AZ_WORKER_HEALTH_PORT", "8012").with_env(
         "AZ_AGENT_HOME_DOCKER_NETWORK", container_network.name
     )
+    container = container.with_env(
+        "AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT",
+        "runtime-control:8030",
+    ).with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE", "true")
 
     with container:
         host = container.get_container_host_ip()
@@ -1138,8 +1142,17 @@ def azents_runtime_control_container(
         .with_env("AZ_RUNTIME_CONTROL_RECONCILE_INTERVAL_SECONDS", "1")
         .with_env("AZ_RUNTIME_CONTROL_LIFECYCLE_RETRY_DELAY_SECONDS", "1")
         .with_env("AZ_RUNTIME_CONTROL_START_TIMEOUT_SECONDS", "120")
+        .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_BUCKET", s3_bucket_name)
+        .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_PREFIX", "v1")
+        .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ENDPOINT_URL", "http://rustfs:9000")
+        .with_env("AZ_RUNTIME_CONTROL_WORKSPACE_S3_ACCESS_KEY_ID", rustfs_access_key)
+        .with_env(
+            "AZ_RUNTIME_CONTROL_WORKSPACE_S3_SECRET_ACCESS_KEY",
+            rustfs_secret_key,
+        )
         .with_env("AZ_RUNTIME_RUNNER_IMAGE", azents_runtime_runner_image)
         .with_env("AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT", "runtime-control:8030")
+        .with_env("AZ_RUNTIME_RUNNER_TRANSFER_ENDPOINT", "runtime-control:8030")
     )
 
     with container:
@@ -1154,9 +1167,16 @@ def azents_runtime_provider_docker_container(
     azents_runtime_control_container: DockerContainer,
     azents_runtime_provider_docker_image: str,
     runtime_provider_credential: str,
+    azents_admin_server_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
 ) -> Generator[DockerContainer, None, None]:
     """Docker Runtime Provider container."""
     del azents_runtime_control_container
+
+    docker_host = os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock")
+    if not docker_host.startswith("unix://"):
+        pytest.fail("E2E Docker Runtime Provider requires a Unix Docker socket")
+    docker_socket_path = docker_host.removeprefix("unix://")
 
     with tempfile.TemporaryDirectory(
         prefix="azents-runtime-provider-e2e-"
@@ -1168,7 +1188,7 @@ def azents_runtime_provider_docker_container(
             )
             .with_name(f"azents-runtime-provider-docker-{random_secret(4)}")
             .with_network(container_network)
-            .with_volume_mapping("/var/run/docker.sock", "/var/run/docker.sock", "rw")
+            .with_volume_mapping(docker_socket_path, "/var/run/docker.sock", "rw")
             .with_volume_mapping(data_root, data_root, "rw")
             .with_env("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
             .with_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
@@ -1176,24 +1196,57 @@ def azents_runtime_provider_docker_container(
             .with_env("AZ_RUNTIME_PROVIDER_DOCKER_NETWORK", container_network.name)
             .with_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT", data_root)
             .with_env(
+                "AZ_RUNTIME_PROVIDER_DOCKER_HOST",
+                "unix:///var/run/docker.sock",
+            )
+            .with_env(
                 "AZ_RUNTIME_PROVIDER_CREDENTIAL",
                 runtime_provider_credential,
             )
             .with_env("AZ_LOG_LEVEL", "INFO")
             .with_kwargs(user="root")
         )
-        with container:
-            _wait_for_runtime_provider_registered(
-                container,
-                provider_id=_RUNTIME_PROVIDER_ID,
-                secret_values=(runtime_provider_credential,),
+        try:
+            with container:
+                _wait_for_runtime_provider_registered(
+                    container,
+                    provider_id=_RUNTIME_PROVIDER_ID,
+                    secret_values=(runtime_provider_credential,),
+                )
+                _accept_runtime_provider_contract(
+                    admin_server_url=azents_admin_server_url,
+                    access_token=system_bootstrap_evidence.access_token,
+                    provider_id=_RUNTIME_PROVIDER_ID,
+                )
+                yield container
+                _log_sanitized_server_output(
+                    container,
+                    "azents-runtime-provider-docker",
+                    secret_values=(runtime_provider_credential,),
+                )
+        finally:
+            _remove_runtime_provider_data_root(
+                data_root,
+                image=azents_runtime_provider_docker_image,
             )
-            yield container
-            _log_sanitized_server_output(
-                container,
-                "azents-runtime-provider-docker",
-                secret_values=(runtime_provider_credential,),
-            )
+
+
+def _remove_runtime_provider_data_root(data_root: str, *, image: str) -> None:
+    """Delete root-owned Provider data before its host temporary directory exits."""
+    cleanup = (
+        DockerContainer(
+            image=image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_volume_mapping(data_root, "/provider-data", "rw")
+        .with_command(["/bin/sh", "-ec", "find /provider-data -mindepth 1 -delete"])
+        .with_kwargs(user="root")
+    )
+    with cleanup:
+        result = cleanup.get_wrapped_container().wait(timeout=30)
+        logs = b"\n".join(cleanup.get_logs()).decode(errors="replace")
+    if result["StatusCode"] != 0:
+        pytest.fail(f"E2E Runtime Provider data cleanup failed: {logs}")
 
 
 def _wait_for_runtime_provider_registered(
@@ -1223,6 +1276,77 @@ def _wait_for_runtime_provider_registered(
         time.sleep(1)
     pytest.fail(
         f"runtime provider {provider_id} did not register in time\n{last_logs[-4000:]}"
+    )
+
+
+def _accept_runtime_provider_contract(
+    *,
+    admin_server_url: str,
+    access_token: str,
+    provider_id: str,
+) -> None:
+    """Accept the registered Provider capability contract for E2E provisioning."""
+    headers = {"Authorization": f"Bearer {access_token}"}
+    deadline = time.monotonic() + 60
+    last_error = ""
+    while time.monotonic() < deadline:
+        providers_response = requests.get(
+            f"{admin_server_url}/runtime-provider/v1/providers",
+            headers=headers,
+            timeout=10,
+        )
+        if providers_response.status_code != 200:
+            last_error = (
+                "provider inventory returned "
+                f"HTTP {providers_response.status_code}: {providers_response.text}"
+            )
+            time.sleep(1)
+            continue
+        payload = _JSON_OBJECT_ADAPTER.validate_python(providers_response.json())
+        items = _JSON_OBJECT_LIST_ADAPTER.validate_python(payload.get("items"))
+        provider = next(
+            (item for item in items if item.get("provider_id") == provider_id),
+            None,
+        )
+        if provider is None:
+            last_error = f"provider {provider_id} was not present in inventory"
+            time.sleep(1)
+            continue
+        current_revision = provider.get("current_contract_revision_id")
+        accepted_revision = provider.get("accepted_contract_revision_id")
+        admin_version = provider.get("admin_version")
+        if (
+            isinstance(current_revision, str)
+            and current_revision
+            and accepted_revision == current_revision
+        ):
+            return
+        if not isinstance(current_revision, str) or not current_revision:
+            last_error = f"provider {provider_id} has no candidate contract"
+            time.sleep(1)
+            continue
+        if not isinstance(admin_version, int):
+            pytest.fail(
+                f"provider {provider_id} inventory did not contain an admin version"
+            )
+        accept_response = requests.post(
+            (
+                f"{admin_server_url}/runtime-provider/v1/providers/"
+                f"{provider_id}/contracts/{current_revision}/accept"
+            ),
+            headers=headers,
+            json={"expected_admin_version": admin_version},
+            timeout=10,
+        )
+        if accept_response.status_code == 200:
+            return
+        last_error = (
+            "provider contract acceptance returned "
+            f"HTTP {accept_response.status_code}: {accept_response.text}"
+        )
+        time.sleep(1)
+    pytest.fail(
+        f"runtime provider {provider_id} contract did not become accepted: {last_error}"
     )
 
 

@@ -1057,7 +1057,11 @@ def _intent_envelope(
             "runtime_path": record.admission.runtime_path,
             "overwrite": record.admission.overwrite,
             "expected_size": record.admission.expected_size,
-            "expected_sha256": record.admission.expected_sha256,
+            "expected_sha256": (
+                (None if record.object is None else record.object.sha256)
+                if record.admission.direction is RuntimeTransferDirection.DOWNLOAD
+                else record.admission.expected_sha256
+            ),
             "deadline_at": record.admission.deadline_at.isoformat(),
             "dispatch_id": record.dispatch_id or "",
         },

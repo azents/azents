@@ -224,8 +224,14 @@ class FakeState:
             }
             return file_id, upload_path
 
-    def record_upload(self, *, file_id: str, received_length: int) -> bool:
-        """Record only upload size evidence and return whether length matched."""
+    def record_upload(
+        self,
+        *,
+        file_id: str,
+        received_length: int,
+        content_sha256: str,
+    ) -> bool:
+        """Record sanitized upload length and digest evidence."""
         with self.lock:
             upload = self.uploads.get(file_id)
             if upload is None:
@@ -233,6 +239,7 @@ class FakeState:
             expected_length = upload.get("expected_length")
             matched = expected_length == received_length
             upload["received_length"] = received_length
+            upload["content_sha256"] = content_sha256
             upload["uploaded"] = matched
             return matched
 
@@ -656,6 +663,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
                 "file": file_id,
                 "content_length": content_length,
                 "received_length": len(content),
+                "content_sha256": hashlib.sha256(content).hexdigest(),
             },
         )
         if scenario == "ambiguous":
@@ -673,6 +681,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         matched = self.state.record_upload(
             file_id=file_id,
             received_length=len(content),
+            content_sha256=hashlib.sha256(content).hexdigest(),
         )
         if scenario in {"rejected", "size_mismatch"} or not matched:
             self._bytes_response(400, b"rejected")
@@ -821,6 +830,19 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         raw_body = self.rfile.read(content_length)
         if not raw_body:
             return {}
+        content_type = self.headers.get("Content-Type", "")
+        if content_type.startswith("application/x-www-form-urlencoded"):
+            try:
+                encoded = raw_body.decode()
+            except UnicodeDecodeError:
+                return {}
+            return {
+                key: _form_value(key, values)
+                for key, values in parse_qs(
+                    encoded,
+                    keep_blank_values=True,
+                ).items()
+            }
         try:
             payload: object = json.loads(raw_body)
         except UnicodeDecodeError:
@@ -952,6 +974,27 @@ def _object_list_or_empty(value: object) -> list[dict[str, object]]:
         return _object_list(value)
     except ValueError:
         return []
+
+
+def _form_value(key: str, values: list[str]) -> object:
+    """Restore typed Slack form fields while preserving identifiers as strings."""
+    if len(values) != 1:
+        return values
+    value = values[0]
+    if key == "length":
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return value
+        if isinstance(parsed, int) and not isinstance(parsed, bool):
+            return parsed
+        return value
+    if key not in {"files", "blocks"}:
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
 
 
 def _object_pages(value: object) -> list[list[dict[str, object]]]:
