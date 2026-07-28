@@ -291,6 +291,7 @@
       "empty": "Aucun agent pour le moment",
       "viewAllAgents": "Voir tous les agents ({count})",
       "slackApps": "Canaux externes",
+      "integrations": "Canaux externes",
       "runtimeExecution": "Exécution du runtime"
     },
     "llmSettings": {

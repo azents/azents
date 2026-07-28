@@ -291,6 +291,7 @@
       "empty": "エージェントがまだありません",
       "viewAllAgents": "すべてのエージェント ({count})",
       "slackApps": "外部チャンネル",
+      "integrations": "外部チャンネル",
       "runtimeExecution": "ランタイム実行"
     },
     "llmSettings": {

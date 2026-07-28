@@ -291,6 +291,7 @@
       "empty": "아직 에이전트가 없습니다",
       "viewAllAgents": "전체 에이전트 보기 ({count})",
       "slackApps": "외부 채널",
+      "integrations": "외부 채널",
       "runtimeExecution": "런타임 실행"
     },
     "llmSettings": {
