@@ -17,6 +17,7 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelActionMode,
+    ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
@@ -1383,6 +1384,8 @@ def _discord_provider_message_id(
 
 def _discord_agent_content(target: ChannelDeliveryTarget, text: str) -> str:
     """Prefix visible Discord text with a safely rendered current Agent name."""
+    if target.app_mode is not ExternalChannelAppMode.MULTI:
+        return text
     name = normalize_slack_agent_name(target.agent_name)
     if name is None:
         return text

@@ -3326,9 +3326,15 @@ class ExternalChannelEventProcessorService:
                 approval_url=approval_url,
                 participant_label=participant_label,
                 participant_provider_user_id=participant_provider_user_id,
-                agent_name=(None if presentation is None else presentation.name),
+                agent_name=(
+                    None
+                    if presentation is None or not presentation.show_name
+                    else presentation.name
+                ),
                 agent_markdown_line=(
-                    None if presentation is None else presentation.markdown_line
+                    None
+                    if presentation is None or not presentation.show_name
+                    else presentation.markdown_line
                 ),
                 icon_url=(None if presentation is None else presentation.icon_url),
             )

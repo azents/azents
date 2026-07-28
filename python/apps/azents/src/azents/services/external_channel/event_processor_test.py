@@ -1324,6 +1324,7 @@ async def test_bound_shortcut_uses_recorded_agent_after_route_detaches() -> None
             resource_id=None,
             connection_id="connection-1",
             provider=ExternalChannelProvider.SLACK,
+            app_mode=ExternalChannelAppMode.SINGLE,
             encrypted_credentials="ciphertext",
             provider_tenant_id="T1",
             capabilities=None,

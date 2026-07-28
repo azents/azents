@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
     ExternalChannelActionMode,
+    ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
@@ -95,6 +96,7 @@ class _RepositoryDouble:
             resource_id=None,
             connection_id="connection-1",
             provider=ExternalChannelProvider.SLACK,
+            app_mode=ExternalChannelAppMode.SINGLE,
             encrypted_credentials="ciphertext",
             provider_tenant_id="T1",
             capabilities=None,
@@ -769,8 +771,18 @@ async def test_failed_delivery_is_terminal_and_not_reported_as_success() -> None
 
 
 @pytest.mark.asyncio
-async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> None:
-    """Discord reply attempts retain durable ordering and shared-App attribution."""
+@pytest.mark.parametrize(
+    ("app_mode", "expected_content"),
+    [
+        (ExternalChannelAppMode.MULTI, "**Research \\* Agent**\nReply"),
+        (ExternalChannelAppMode.SINGLE, "Reply"),
+    ],
+)
+async def test_discord_reply_agent_prefix_follows_app_mode(
+    app_mode: ExternalChannelAppMode,
+    expected_content: str,
+) -> None:
+    """Discord adds Agent attribution only for shared multi-app delivery."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     repository.target = repository.target.model_copy(
@@ -778,6 +790,7 @@ async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> N
             "provider": ExternalChannelProvider.DISCORD,
             "provider_tenant_id": "111",
             "resource_id": "resource-1",
+            "app_mode": app_mode,
             "agent_name": "Research * Agent",
             "request_payload": {
                 "guild_id": "111",
@@ -828,7 +841,7 @@ async def test_discord_reply_delivery_uses_thread_target_and_agent_prefix() -> N
                 "bot_token": "xoxb-secret",
                 "guild_id": "111",
                 "channel_id": "444",
-                "content": "**Research \\* Agent**\nReply",
+                "content": expected_content,
                 "delivery_attempt_id": "delivery-1",
             },
         ),

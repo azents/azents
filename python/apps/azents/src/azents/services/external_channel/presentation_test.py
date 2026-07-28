@@ -3,6 +3,7 @@
 import datetime
 
 from azents.core.enums import (
+    ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
@@ -26,6 +27,7 @@ from azents.services.uploads.schema import (
 def _target(
     *,
     agent_name: str,
+    app_mode: ExternalChannelAppMode = ExternalChannelAppMode.MULTI,
     capabilities: dict[str, object] | None = None,
     agent_avatar: dict[str, object] | None = None,
 ) -> ChannelDeliveryTarget:
@@ -37,6 +39,7 @@ def _target(
         resource_id=None,
         connection_id="connection-1",
         provider=ExternalChannelProvider.SLACK,
+        app_mode=app_mode,
         encrypted_credentials="ciphertext",
         provider_tenant_id="T-1",
         capabilities=capabilities,
@@ -72,6 +75,25 @@ def test_agent_name_is_bounded_escaped_and_shared_across_surfaces() -> None:
             "text": "*Agent &lt;Ops&gt; &amp; Support*",
         },
     }
+
+
+def test_single_app_omits_visible_agent_name_prefix() -> None:
+    """A dedicated app identity does not repeat the Agent above each message."""
+    presentation = resolve_slack_agent_presentation(
+        _target(
+            agent_name="Agent",
+            app_mode=ExternalChannelAppMode.SINGLE,
+        ),
+        avatar_cdn_base_url=None,
+    )
+
+    assert presentation is not None
+    assert prepend_agent_markdown(presentation, "Answer") == "Answer"
+    assert prepend_agent_fallback(presentation, "Answer") == "Answer"
+    blocks: list[dict[str, object]] = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Answer"}}
+    ]
+    assert prepend_agent_blocks(presentation, blocks) == blocks
 
 
 def test_icon_requires_capability_and_public_https_avatar() -> None:
