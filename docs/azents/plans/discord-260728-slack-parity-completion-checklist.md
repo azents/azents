@@ -354,7 +354,7 @@ focused tests, required E2E evidence, documentation impact, and PR CI are comple
 | --- | --- | --- | --- | --- |
 | 1 | `fix/discord-slack-parity-completion` | [#984](https://github.com/azents/azents/pull/984) | Implementation plan and checklist | Completed |
 | 2 | `fix/discord-parity-delivery-activation` | [#985](https://github.com/azents/azents/pull/985) | Delivery diagnostics and activation ordering | Open; local validation and review complete |
-| 3 | | | Participant, work, and lifecycle completion | Pending |
+| 3 | `fix/discord-parity-participant-lifecycle` | | Participant, work, and lifecycle completion | In progress |
 | 4 | | | Administration UI and browser evidence | Pending |
 | 5 | | | Integrated E2E validation and fixes | Pending |
 | 6 | | | Living-spec promotion | Pending |
