@@ -320,8 +320,13 @@ class ExternalChannelEventProcessorService:
     async def run(self, shutdown_event: asyncio.Event) -> None:
         """Process admitted events and approval activations until shutdown."""
         while not shutdown_event.is_set():
-            processed = await self.process_once()
-            reconciled = await self.reconcile_waiting_bindings()
+            try:
+                processed = await self.process_once()
+                reconciled = await self.reconcile_waiting_bindings()
+            except Exception:
+                logger.exception("External Channel event processor iteration failed")
+                processed = 0
+                reconciled = 0
             if processed or reconciled:
                 continue
             try:
