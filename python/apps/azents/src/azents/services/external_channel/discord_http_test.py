@@ -381,7 +381,7 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
     assert principal.provider_tenant_id == "guild-1"
     assert principal.provider_user_id == "user-1"
     assert shortcut_source_event is None
-    assert admission.finished_interaction_ids == ["interaction-row-1"]
+    assert admission.finished_interaction_ids == []
     persisted = repr((create, principal, result))
     assert "interaction-token" not in persisted
     assert "private command content" not in persisted

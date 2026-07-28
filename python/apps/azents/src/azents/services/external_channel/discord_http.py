@@ -259,15 +259,6 @@ class DiscordHTTPAdmissionService:
                 admission=admission,
                 response=response,
             )
-        else:
-            await self.admission_service.finish_interaction_provider_mutation(
-                interaction_id=admission.interaction.id,
-                status=ExternalChannelInteractionStatus.REJECTED,
-                error_kind="interaction_unsupported",
-                error_summary=(
-                    "Discord interaction is outside the supported selector flow."
-                ),
-            )
         return DiscordHTTPAdmissionResult(envelope=envelope, admission=admission)
 
     async def attempt_control_delivery(
