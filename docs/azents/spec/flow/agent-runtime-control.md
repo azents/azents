@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-07-28
-spec_version: 38
+spec_version: 39
 ---
 
 # Agent Runtime Control
@@ -291,6 +291,7 @@ Production deploys the new path through GitOps:
 
 - ECR repositories and GitHub Actions build/push runtime images.
 - A Docker-enabled Kubernetes Runtime mounts its private DIND Unix socket directly into the Runner.
+- The Runner and DIND sidecar mount the Agent Workspace and Pod-local shared temporary directory at identical absolute paths so ordinary workspace and temporary-file bind mounts resolve against the same files in both containers.
 - The Runner receives Docker and Testcontainers endpoint settings; no Azents component filters or rewrites Docker HTTP requests.
 - The privileged DIND sidecar receives the Profile's Kubernetes resource values and owns a separate bounded temporary data volume.
 - Helm values/templates render runtime-control, runtime-runner, and Kubernetes provider settings.
@@ -309,7 +310,7 @@ Required deterministic coverage:
 - Runner operation tests for process, file, Git, and strict V4A patch operations
 - Runtime Control contract tests for ordered operation cancellation, start/cancel races, terminal cursor authority, and typed patch result folding
 - Provider tests for Docker host bind mount persistence, Kubernetes PVC persistence, direct DIND socket topology, and deployment-owned NetworkPolicy hard caps
-- Docker compatibility tests for CLI, Compose, SDK, Testcontainers Network, PostgreSQL port binding, and Ryuk cleanup
+- Docker compatibility tests for CLI, Buildx, Compose, workspace and temporary-file bind mounts, SDK, Testcontainers Network, PostgreSQL port binding, and Ryuk cleanup
 - azents deterministic E2E for Agent Workspace bootstrap and lifecycle actions
 - credential-free runtime-provider E2E for multi-file `apply_patch`, typed results, final manifests, and traversal rejection
 
@@ -317,6 +318,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-28** (spec_version 39) — Shared the Agent Workspace and Pod-local temporary directory with the DIND sidecar at identical paths so ordinary Docker and Compose bind mounts resolve correctly.
 - **2026-07-28** (spec_version 38) — Removed the Container Policy Gateway, exposed each Runtime's private DIND socket directly, collapsed Docker into one atomic v1 capability, and removed unenforceable nested PID/count and Profile network controls.
 - **2026-07-27** (spec_version 37) — Replaced the Docker client header allowlist with effect-based validation and stripping so SDK metadata cannot break otherwise authorized Engine operations.
 - **2026-07-27** (spec_version 36) — Normalized Docker CLI's unset memory-swappiness sentinel so ordinary `docker run` requests pass the policy Gateway without granting swappiness authority.

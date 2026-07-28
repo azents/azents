@@ -86,9 +86,11 @@ _ENGINE_CONTAINER_NAME = "container-engine"
 _WORKSPACE_VOLUME_NAME = "agent-workspace"
 _ENGINE_SOCKET_VOLUME_NAME = "container-engine-socket"
 _ENGINE_STORAGE_VOLUME_NAME = "container-engine-storage"
+_SHARED_TMP_VOLUME_NAME = "runtime-shared-tmp"
 _ENGINE_SOCKET_DIR = "/var/run/azents-engine"
 _ENGINE_STORAGE_PATH = "/var/lib/azents-engine"
 _ENGINE_SOCKET_PATH = f"{_ENGINE_SOCKET_DIR}/docker.sock"
+_SHARED_TMP_PATH = "/tmp"
 _RUNNER_UID = 1000
 _RUNNER_GID = 1000
 _ENGINE_SOCKET_GROUP = "azents-runner"
@@ -639,8 +641,11 @@ class KubernetesRuntimeProvider:
     ) -> PodResource:
         docker_enabled = policy.docker.enabled
         docker_storage_capacity = policy.docker.storage_capacity_bytes
+        runtime_ephemeral_storage = policy.resources.ephemeral_storage_bytes
         if docker_enabled and docker_storage_capacity is None:
             raise AssertionError("Docker storage capacity is required")
+        if docker_enabled and runtime_ephemeral_storage is None:
+            raise AssertionError("Runtime ephemeral storage is required")
         return PodResource(
             metadata=ObjectMeta(
                 name=_pod_name(command.identity.runtime_id),
@@ -667,6 +672,11 @@ class KubernetesRuntimeProvider:
                                 name=_ENGINE_SOCKET_VOLUME_NAME,
                                 medium="Memory",
                                 size_limit="16Mi",
+                            ),
+                            EmptyDirVolume(
+                                name=_SHARED_TMP_VOLUME_NAME,
+                                medium=None,
+                                size_limit=str(runtime_ephemeral_storage),
                             ),
                             EmptyDirVolume(
                                 name=_ENGINE_STORAGE_VOLUME_NAME,
@@ -702,6 +712,13 @@ class KubernetesRuntimeProvider:
                     name=_ENGINE_SOCKET_VOLUME_NAME,
                     mount_path=_ENGINE_SOCKET_DIR,
                     read_only=True,
+                )
+            )
+            runner_mounts.append(
+                VolumeMount(
+                    name=_SHARED_TMP_VOLUME_NAME,
+                    mount_path=_SHARED_TMP_PATH,
+                    read_only=False,
                 )
             )
             runner_env[_ENV_DOCKER_HOST] = f"unix://{_ENGINE_SOCKET_PATH}"
@@ -745,8 +762,18 @@ class KubernetesRuntimeProvider:
             env=(),
             volume_mounts=(
                 VolumeMount(
+                    name=_WORKSPACE_VOLUME_NAME,
+                    mount_path=self._workspace_mount_path,
+                    read_only=False,
+                ),
+                VolumeMount(
                     name=_ENGINE_SOCKET_VOLUME_NAME,
                     mount_path=_ENGINE_SOCKET_DIR,
+                    read_only=False,
+                ),
+                VolumeMount(
+                    name=_SHARED_TMP_VOLUME_NAME,
+                    mount_path=_SHARED_TMP_PATH,
                     read_only=False,
                 ),
                 VolumeMount(

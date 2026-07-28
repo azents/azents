@@ -22,6 +22,8 @@ POSTGRES_IMAGE = (
     "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
 )
 ENGINE_SOCKET_PATH = "/var/run/azents-engine/docker.sock"
+RUNTIME_WORKSPACE_PATH = "/workspace/agent"
+RUNTIME_TMP_PATH = "/tmp"
 
 
 def _run(
@@ -45,6 +47,8 @@ def _client_command(
     *,
     engine_name: str,
     socket_volume: str,
+    workspace_volume: str,
+    tmp_volume: str,
     image: str,
     connection_mode: bool = False,
 ) -> list[str]:
@@ -57,10 +61,16 @@ def _client_command(
         "1000:1000",
         "--network",
         f"container:{engine_name}",
+        "--workdir",
+        RUNTIME_WORKSPACE_PATH,
         "--volume",
         f"{socket_volume}:/var/run/azents-engine:ro",
+        "--volume",
+        f"{workspace_volume}:{RUNTIME_WORKSPACE_PATH}",
+        "--volume",
+        f"{tmp_volume}:{RUNTIME_TMP_PATH}",
         "--env",
-        "HOME=/tmp",
+        f"HOME={RUNTIME_WORKSPACE_PATH}",
         "--env",
         f"DOCKER_HOST=unix://{ENGINE_SOCKET_PATH}",
     ]
@@ -124,12 +134,84 @@ def _verify_cli(client: list[str]) -> None:
     if result.stdout.strip() != "azents-runtime-docker-ok":
         raise RuntimeError(f"Unexpected Docker run output: {result.stdout!r}")
 
+    workspace_proof = ".azents-docker-workspace-bind-proof"
+    tmp_proof = "azents-docker-tmp-bind-proof"
+    _run(
+        [
+            *client,
+            "sh",
+            "-ec",
+            f"printf runner-workspace > {RUNTIME_WORKSPACE_PATH}/{workspace_proof} "
+            f"&& printf runner-tmp > {RUNTIME_TMP_PATH}/{tmp_proof}",
+        ]
+    )
+    workspace_result = _run(
+        [
+            *client,
+            "docker",
+            "run",
+            "--rm",
+            "--volume",
+            f"{RUNTIME_WORKSPACE_PATH}:/proof-workspace",
+            "azents-runtime-docker-proof:latest",
+            "cat",
+            f"/proof-workspace/{workspace_proof}",
+        ],
+        capture_output=True,
+    )
+    if workspace_result.stdout.strip() != "runner-workspace":
+        raise RuntimeError(f"Unexpected workspace bind output: {workspace_result.stdout!r}")
+    tmp_result = _run(
+        [
+            *client,
+            "docker",
+            "run",
+            "--rm",
+            "--volume",
+            f"{RUNTIME_TMP_PATH}:/proof-tmp",
+            "azents-runtime-docker-proof:latest",
+            "cat",
+            f"/proof-tmp/{tmp_proof}",
+        ],
+        capture_output=True,
+    )
+    if tmp_result.stdout.strip() != "runner-tmp":
+        raise RuntimeError(f"Unexpected temporary bind output: {tmp_result.stdout!r}")
+    _run(
+        [
+            *client,
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            "1000:1000",
+            "--volume",
+            f"{RUNTIME_WORKSPACE_PATH}:/proof-workspace",
+            "azents-runtime-docker-proof:latest",
+            "sh",
+            "-ec",
+            "printf nested-workspace > /proof-workspace/.azents-docker-nested-write-proof",
+        ]
+    )
+    nested_write = _run(
+        [
+            *client,
+            "cat",
+            f"{RUNTIME_WORKSPACE_PATH}/.azents-docker-nested-write-proof",
+        ],
+        capture_output=True,
+    )
+    if nested_write.stdout.strip() != "nested-workspace":
+        raise RuntimeError(f"Unexpected nested bind write: {nested_write.stdout!r}")
+
     compose = textwrap.dedent(
-        """
+        f"""
         services:
           proof:
             image: azents-runtime-docker-proof:latest
-            command: ["cat", "/proof"]
+            volumes:
+              - .:/proof-workspace
+            command: ["cat", "/proof-workspace/{workspace_proof}"]
         """
     )
     compose_command = [
@@ -138,6 +220,8 @@ def _verify_cli(client: list[str]) -> None:
         "compose",
         "--project-name",
         "azents-runtime-docker-proof",
+        "--project-directory",
+        RUNTIME_WORKSPACE_PATH,
         "-f",
         "-",
     ]
@@ -146,7 +230,7 @@ def _verify_cli(client: list[str]) -> None:
         input_text=compose,
     )
     _run([*compose_command, "down", "--remove-orphans"], input_text=compose)
-    print("DOCKER_CLI_BUILD_RUN_COMPOSE_OK")
+    print("DOCKER_CLI_BUILD_RUN_BIND_MOUNT_COMPOSE_OK")
 
 
 def _build_python_client(image: str) -> None:
@@ -208,6 +292,8 @@ def main() -> int:
     engine_name = f"azents-runtime-docker-verify-{suffix}"
     socket_volume = f"{engine_name}-socket"
     data_volume = f"{engine_name}-data"
+    workspace_volume = f"{engine_name}-workspace"
+    tmp_volume = f"{engine_name}-tmp"
     engine_image = f"{engine_name}-engine:latest"
     python_image = f"{engine_name}-python:latest"
 
@@ -223,6 +309,26 @@ def main() -> int:
         )
         _run(["docker", "volume", "create", socket_volume])
         _run(["docker", "volume", "create", data_volume])
+        _run(["docker", "volume", "create", workspace_volume])
+        _run(["docker", "volume", "create", tmp_volume])
+        _run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--volume",
+                f"{workspace_volume}:{RUNTIME_WORKSPACE_PATH}",
+                "--volume",
+                f"{tmp_volume}:{RUNTIME_TMP_PATH}",
+                DOCKER_CLI_IMAGE,
+                "sh",
+                "-ec",
+                f"touch {RUNTIME_WORKSPACE_PATH}/.azents-volume-initialized "
+                f"{RUNTIME_TMP_PATH}/.azents-volume-initialized "
+                f"&& chown -R 1000:1000 {RUNTIME_WORKSPACE_PATH} "
+                f"&& chmod 1777 {RUNTIME_TMP_PATH}",
+            ]
+        )
         _run(
             [
                 "docker",
@@ -235,6 +341,10 @@ def main() -> int:
                 f"{socket_volume}:/var/run/azents-engine",
                 "--volume",
                 f"{data_volume}:/var/lib/docker",
+                "--volume",
+                f"{workspace_volume}:{RUNTIME_WORKSPACE_PATH}",
+                "--volume",
+                f"{tmp_volume}:{RUNTIME_TMP_PATH}",
                 engine_image,
                 f"--host=unix://{ENGINE_SOCKET_PATH}",
                 "--group=azents-runner",
@@ -245,6 +355,8 @@ def main() -> int:
         cli_client = _client_command(
             engine_name=engine_name,
             socket_volume=socket_volume,
+            workspace_volume=workspace_volume,
+            tmp_volume=tmp_volume,
             image=DOCKER_CLI_IMAGE,
         )
         _wait_for_engine(cli_client, engine_name)
@@ -254,6 +366,8 @@ def main() -> int:
         python_client = _client_command(
             engine_name=engine_name,
             socket_volume=socket_volume,
+            workspace_volume=workspace_volume,
+            tmp_volume=tmp_volume,
             image=python_image,
             connection_mode=True,
         )
@@ -264,6 +378,8 @@ def main() -> int:
         _run(["docker", "rm", "--force", engine_name], check=False)
         _run(["docker", "volume", "rm", socket_volume], check=False)
         _run(["docker", "volume", "rm", data_volume], check=False)
+        _run(["docker", "volume", "rm", workspace_volume], check=False)
+        _run(["docker", "volume", "rm", tmp_volume], check=False)
         _run(["docker", "image", "rm", engine_image], check=False)
         _run(["docker", "image", "rm", python_image], check=False)
 
