@@ -877,6 +877,31 @@ class TestRuntimeToolkitUpdateContext:
         assert capability.target.desired_generation == 1
 
     @pytest.mark.asyncio
+    async def test_update_context_withholds_transfer_until_runtime_is_ready(
+        self,
+    ) -> None:
+        """An unavailable Runtime does not prevent the ordinary tool catalog."""
+        transfer_service = AsyncMock()
+        toolkit = _make_toolkit(
+            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+            runner_state=RuntimeRunnerState.STARTING,
+            server_to_runtime_transfer_service=cast(
+                ServerToRuntimeTransferExecutor,
+                transfer_service,
+            ),
+        )
+
+        state = await toolkit.update_context(_make_context())
+
+        assert {"exec_command", "write_stdin", "read"} <= {
+            tool.spec.name for tool in state.tools
+        }
+        instruction_context = cast(Any, toolkit)._agents_context
+        assert instruction_context.transfer_capability is None
+        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo.get_by_agent_id.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_file_storage_propagates_owner_and_reuses_runtime_snapshot(
         self,
     ) -> None:

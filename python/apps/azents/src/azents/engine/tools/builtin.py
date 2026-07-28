@@ -853,15 +853,19 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self,
         runtime_agent_id: str,
     ) -> RuntimeTransferCapability | None:
-        """Build one backend-only transfer capability for the current Runtime."""
+        """Build one backend-only capability only when the Runtime is ready."""
         service = self.server_to_runtime_transfer_service
         if service is None:
             return None
-        runtime = await _ready_runtime_for_agent(
-            agent_runtime_repo=self.agent_runtime_repo,
-            session_manager=self.session_manager,
-            agent_id=runtime_agent_id,
-        )
+        try:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=self.agent_runtime_repo,
+                session_manager=self.session_manager,
+                agent_id=runtime_agent_id,
+                wait_timeout_seconds=0,
+            )
+        except RuntimeStorageError:
+            return None
         return RuntimeTransferCapability(
             service=service,
             target=ServerToRuntimeTarget(
