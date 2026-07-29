@@ -54,6 +54,21 @@ def _at(minute: int) -> datetime.datetime:
     return datetime.datetime(2026, 7, 21, 0, minute, tzinfo=datetime.UTC)
 
 
+def _discord_capabilities() -> dict[str, object]:
+    """Return one complete persisted Discord capability snapshot."""
+    return {
+        "provider": ExternalChannelProvider.DISCORD.value,
+        "transport": ExternalChannelTransport.HTTP.value,
+        "inbound_events": True,
+        "thread_history": True,
+        "post_messages": True,
+        "update_messages": True,
+        "delete_messages": True,
+        "download_files": True,
+        "upload_files": True,
+    }
+
+
 async def _create_workspace(
     session: AsyncSession,
     handle: str = "external-channel-repository-test",
@@ -585,6 +600,7 @@ class TestExternalChannelRepository:
             provider_bot_user_id=None,
             interaction_public_key="a" * 64,
             message_command_id="123456789012345678",
+            capabilities=_discord_capabilities(),
             callback_selector_hash="reclaimed-selector-hash",
             checked_at=_at(1),
         )
@@ -644,10 +660,16 @@ class TestExternalChannelRepository:
             provider_bot_user_id=None,
             interaction_public_key="a" * 64,
             message_command_id="123456789012345678",
+            capabilities=_discord_capabilities(),
             callback_selector_hash="selector-hash",
             checked_at=_at(1),
         )
         assert activated is not None
+        assert activated.capabilities == {
+            **_discord_capabilities(),
+            "interaction_public_key": "a" * 64,
+            "message_command_id": "123456789012345678",
+        }
         claim = await repo.claim_discord_gateway_lease(
             rdb_session,
             connection_id=connection.id,
@@ -783,6 +805,7 @@ class TestExternalChannelRepository:
             provider_bot_user_id=None,
             interaction_public_key="a" * 64,
             message_command_id="123456789012345678",
+            capabilities=_discord_capabilities(),
             callback_selector_hash="terminal-selector-hash",
             checked_at=_at(1),
         )
