@@ -114,34 +114,55 @@ export function PendingMailboxBubble({
           radius="md"
           p="sm"
           mb="md"
-          style={{ opacity: deleting ? 0.45 : 0.6 }}
+          w="100%"
+          style={{
+            minWidth: 0,
+            opacity: deleting ? 0.45 : 0.6,
+            overflow: "hidden",
+          }}
         >
-          <Stack gap="xs">
-            <Group gap="xs" wrap="nowrap">
+          <Stack gap="xs" style={{ minWidth: 0 }}>
+            <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
               {presentation.provider === "discord" ? (
-                <IconBrandDiscord size={15} aria-hidden="true" />
+                <IconBrandDiscord
+                  size={15}
+                  aria-hidden="true"
+                  style={{ flexShrink: 0 }}
+                />
               ) : (
-                <IconBrandSlack size={15} aria-hidden="true" />
+                <IconBrandSlack
+                  size={15}
+                  aria-hidden="true"
+                  style={{ flexShrink: 0 }}
+                />
               )}
-              <Text size="xs" fw={700} truncate>
+              <Text size="xs" fw={700} truncate style={{ minWidth: 0 }}>
                 {presentation.sender_display_name ?? "External sender"}
               </Text>
-              <Text size="xs" c="dimmed" truncate>
+              <Text
+                size="xs"
+                c="dimmed"
+                truncate
+                style={{ minWidth: 0, flex: "1 1 auto" }}
+              >
                 {presentation.resource_label}
               </Text>
-              <Badge size="xs" variant="light">
+              <Badge size="xs" variant="light" style={{ flexShrink: 0 }}>
                 {presentation.lifecycle}
               </Badge>
             </Group>
-            <Text size="xs" c="dimmed">
+            <Text size="xs" c="dimmed" style={{ overflowWrap: "anywhere" }}>
               {presentation.provider} · {presentation.resource_type} ·{" "}
               {presentation.authorization} · {presentation.revision_kind}
             </Text>
-            <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+            <Text
+              size="sm"
+              style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}
+            >
               {presentation.body ?? "[No external message body]"}
             </Text>
             {presentation.original_url && (
-              <Text size="xs" c="blue">
+              <Text size="xs" c="blue" style={{ overflowWrap: "anywhere" }}>
                 Reference: {presentation.original_url}
               </Text>
             )}

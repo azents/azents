@@ -1,4 +1,6 @@
+import { rem } from "@mantine/core";
 import { expect, userEvent, within } from "storybook/test";
+import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { PendingMailboxBubble } from "./PendingMailboxBubble";
 import type { PendingMailboxEntry } from "../hooks/pendingMailboxState";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -136,6 +138,40 @@ export const DiscordExternalChannel: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText(/discord · thread/)).toBeVisible();
+  },
+};
+
+export const MobileExternalChannelOverflow: Story = {
+  args: {
+    entry: item("mobile-discord-external", {
+      type: "external_channel_message",
+      provider: "discord",
+      resource_label:
+        "a-very-long-discord-thread-name-without-natural-break-points",
+      resource_type: "thread",
+      external_message_id: "message-mobile",
+      revision_id: "revision-mobile",
+      revision_kind: "original",
+      sender_display_name: "A participant with a long display name",
+      author_type: "human",
+      authorization: "authorized_invocation",
+      lifecycle: "active",
+      body: "Please investigate this unbroken-reference-without-natural-break-points-and-keep-the-card-inside-the-mobile-viewport.",
+      original_url:
+        "https://discord.com/channels/1440378991704932494/1442342792822263808/1531600000000000000",
+    }),
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(360)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.scrollWidth).toBeLessThanOrEqual(
+      canvasElement.clientWidth,
+    );
   },
 };
 
