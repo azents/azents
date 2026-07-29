@@ -93,14 +93,14 @@ async def test_create_and_update_message_preserve_rich_embeds_and_components() -
             guild_id="111",
             channel_id="333",
             message_id="555",
-            content="Agent is checking your message.",
+            content="",
             embeds=[embed],
         )
 
     assert json.loads(calls[0].content)["embeds"] == [embed]
     assert json.loads(calls[0].content)["components"] == components
     assert json.loads(calls[1].content) == {
-        "content": "Agent is checking your message.",
+        "content": "",
         "embeds": [embed],
     }
 

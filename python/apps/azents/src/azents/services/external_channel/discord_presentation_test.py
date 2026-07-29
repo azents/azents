@@ -38,8 +38,8 @@ def test_reopens_and_closes_fenced_code_when_a_part_crosses_its_body() -> None:
     assert any(part.startswith("```python\n") for part in parts[1:])
 
 
-def test_checking_progress_uses_one_text_tracker() -> None:
-    """Initial Discord activity is one plain-text Tracker without an Embed card."""
+def test_checking_progress_uses_one_embed_tracker() -> None:
+    """Initial Discord activity is one provider-native Channel Work Embed."""
     presentation = render_discord_progress(
         ExternalChannelDesiredProgress(
             schema_version=2,
@@ -52,12 +52,18 @@ def test_checking_progress_uses_one_text_tracker() -> None:
     )
 
     assert len(presentation.pages) == 1
-    assert presentation.pages[0].text == "◉ Agent is checking your message"
-    assert presentation.pages[0].embeds == []
+    assert presentation.pages[0].text == ""
+    assert presentation.pages[0].embeds == [
+        {
+            "title": "Channel Work",
+            "description": "◉ Agent is checking your message",
+            "color": 0x5865F2,
+        }
+    ]
 
 
-def test_progress_uses_one_compact_checklist_message() -> None:
-    """Discord Tracker retains rich tasks in one compact text message."""
+def test_progress_uses_one_compact_checklist_embed() -> None:
+    """Discord Tracker retains rich tasks in one compact Embed."""
     presentation = render_discord_progress(
         ExternalChannelDesiredProgress(
             schema_version=2,
@@ -92,15 +98,21 @@ def test_progress_uses_one_compact_checklist_message() -> None:
     )
 
     assert len(presentation.pages) == 1
-    assert presentation.pages[0].embeds == []
-    assert presentation.pages[0].text == (
-        "**Investigating the issue…** · 1/2 complete\n"
-        "◉ Inspect the current incident\n"
-        "  ↳ Read the provider logs.\n"
-        "✓ Report the outcome\n"
-        "  ↳ Shared the final findings.\n"
-        "  Sources: [Incident report](https://example.com/report)"
-    )
+    assert presentation.pages[0].text == ""
+    assert presentation.pages[0].embeds == [
+        {
+            "title": "Investigating the issue…",
+            "description": (
+                "**1/2 complete**\n"
+                "◉ Inspect the current incident\n"
+                "  ↳ Read the provider logs.\n"
+                "✓ Report the outcome\n"
+                "  ↳ Shared the final findings.\n"
+                "  Sources: [Incident report](https://example.com/report)"
+            ),
+            "color": 0x5865F2,
+        }
+    ]
 
 
 def test_progress_keeps_every_task_in_one_bounded_message() -> None:
@@ -133,7 +145,12 @@ def test_progress_keeps_every_task_in_one_bounded_message() -> None:
     )
 
     assert len(presentation.pages) == 1
-    assert presentation.pages[0].embeds == []
-    assert len(presentation.pages[0].text) <= DISCORD_DELIVERY_TEXT_LIMIT
+    assert presentation.pages[0].text == ""
+    assert len(presentation.pages[0].embeds) == 1
+    embed = presentation.pages[0].embeds[0]
+    assert embed["title"] == "Large plan"
+    description = embed["description"]
+    assert isinstance(description, str)
+    assert len(description) <= DISCORD_DELIVERY_TEXT_LIMIT
     for ordinal in range(49):
-        assert f"Task {ordinal:02d}" in presentation.pages[0].text
+        assert f"Task {ordinal:02d}" in description

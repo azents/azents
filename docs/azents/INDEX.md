@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-27 | 58 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-29 | 134 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-29 | 24 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-29 | 25 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-28 | 13 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
@@ -38,7 +38,7 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-28 | 10 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-28 | 20 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-29 | 21 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-28 | 18 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-29 | 17 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-28 | 33 |

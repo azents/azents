@@ -850,21 +850,39 @@ async def test_discord_reply_agent_prefix_follows_app_mode(
 
 
 @pytest.mark.asyncio
-async def test_discord_progress_update_clears_tracker_embeds() -> None:
-    """A compact Tracker update removes any retained legacy Embed cards."""
+@pytest.mark.parametrize(
+    ("app_mode", "expected_content"),
+    [
+        (ExternalChannelAppMode.SINGLE, ""),
+        (ExternalChannelAppMode.MULTI, "**Research \\* Agent**"),
+    ],
+)
+async def test_discord_progress_update_sends_tracker_embed(
+    app_mode: ExternalChannelAppMode,
+    expected_content: str,
+) -> None:
+    """A Tracker update keeps Multi App attribution outside its current Embed."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     repository.target = repository.target.model_copy(
         update={
             "provider": ExternalChannelProvider.DISCORD,
             "provider_tenant_id": "111",
+            "app_mode": app_mode,
+            "agent_name": "Research * Agent",
             "operation": ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
             "request_payload": {
                 "guild_id": "111",
                 "channel_id": "333",
                 "provider_message_key": "discord:111:555",
-                "text": "**Plan** · 0/1 complete\n◉ Inspect the issue",
-                "embeds": [],
+                "text": "",
+                "embeds": [
+                    {
+                        "title": "Plan",
+                        "description": "**0/1 complete**\n◉ Inspect the issue",
+                        "color": 0x5865F2,
+                    }
+                ],
             },
         }
     )
@@ -901,8 +919,14 @@ async def test_discord_progress_update_clears_tracker_embeds() -> None:
                 "guild_id": "111",
                 "channel_id": "333",
                 "message_id": "555",
-                "content": "**Plan** · 0/1 complete\n◉ Inspect the issue",
-                "embeds": [],
+                "content": expected_content,
+                "embeds": [
+                    {
+                        "title": "Plan",
+                        "description": "**0/1 complete**\n◉ Inspect the issue",
+                        "color": 0x5865F2,
+                    }
+                ],
             },
         )
     ]

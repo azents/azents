@@ -29,8 +29,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-28
-spec_version: 20
+last_verified_at: 2026-07-29
+spec_version: 21
 ---
 
 # External Channel Delivery and Channel Work
@@ -163,10 +163,12 @@ uploaded without the explicit Channel action.
 Discord splits oversized replies into stable ordered message parts. Each part is
 bounded to the provider message limit, preserves balanced fenced Markdown where
 possible, and is delivered through a durable per-part intent. A Channel Work snapshot
-instead becomes one retained compact text Tracker with no Embed cards. Its header
-contains the bounded work title and completion/failure counts; every ordered task
-retains a status marker and bounded title. Remaining message space is assigned to
-status-prioritized details or output and then labeled sources without dropping a task.
+instead becomes one retained compact Embed Tracker. The Embed title contains the
+bounded work title, and its description contains completion/failure counts plus every
+ordered task's status marker and bounded title. Remaining description space is
+assigned to status-prioritized details or output and then labeled sources without
+dropping a task. The functional Tracker body is not duplicated as ordinary message
+content.
 Discord file-bearing messages stream a bounded multipart body from the
 already-authorized Runtime or Exchange source manifest. The multipart request includes
 the same durable-attempt nonce, validates each emitted byte count against preflight
@@ -203,11 +205,12 @@ delivery outcome and never causes an unsafe replay.
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
-- Discord creates one Session-link control and an initial compact
-  `◉ Agent is checking your message` Tracker through the same durable activation
-  release. Later complete snapshots update that retained text message and explicitly
-  clear legacy Embed cards. Update, delete, replacement, recovery, and final-reply
-  cleanup use the same durable Tracker identity and gating.
+- Discord creates one Session-link control and an initial compact Channel Work Embed
+  containing `◉ Agent is checking your message` through the same durable activation
+  release. Later complete snapshots replace that retained message's content with an
+  empty string and its Embed with the current bounded title, status summary, ordered
+  checklist, prioritized context, and labeled sources. Update, delete, replacement,
+  recovery, and final-reply cleanup use the same durable Tracker identity and gating.
 
 The work cycle stores its title, complete provider-neutral version-2 desired
 snapshot, desired revision, and retained provider identity. A matching Slack
@@ -280,6 +283,9 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-29** (spec_version 21) — Moved Discord's retained functional Channel Work
+  Tracker from ordinary message text into one bounded Embed while preserving its
+  durable create, update, replacement, recovery, and cleanup lifecycle.
 - **2026-07-28** (spec_version 20) — Replaced Discord's multi-page Embed Activity
   Tracker with one bounded retained text message that keeps every ordered task visible,
   prioritizes useful task context and sources, and clears legacy Embed cards.
