@@ -570,17 +570,47 @@ class AgentSessionRepository:
         self,
         session: AsyncSession,
         agent_id: str,
+        *,
+        auto_archive_ttl_days: int,
     ) -> list[AgentSessionUnreadTerminalRunProjection]:
-        """Fetch active root Sessions and their shared unread Run boundaries."""
+        """Fetch active roots with unread state and tree archive deadlines."""
         primary_order = sa.case(
             (RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY, 0),
             else_=1,
         )
+        tree_activity = (
+            sa.select(
+                RDBSessionAgent.root_session_agent_id.label("root_session_agent_id"),
+                sa.func.max(RDBAgentSession.last_activity_at).label(
+                    "latest_activity_at"
+                ),
+            )
+            .join(
+                RDBAgentSession,
+                RDBAgentSession.id == RDBSessionAgent.agent_session_id,
+            )
+            .where(RDBAgentSession.agent_id == agent_id)
+            .group_by(RDBSessionAgent.root_session_agent_id)
+            .subquery()
+        )
         result = await session.execute(
-            sa.select(RDBAgentSession, RDBAgentSessionUnreadRun.run_id)
+            sa.select(
+                RDBAgentSession,
+                RDBAgentSessionUnreadRun.run_id,
+                tree_activity.c.latest_activity_at,
+            )
             .outerjoin(
                 RDBAgentSessionUnreadRun,
                 RDBAgentSessionUnreadRun.session_id == RDBAgentSession.id,
+            )
+            .outerjoin(
+                RDBSessionAgent,
+                RDBSessionAgent.agent_session_id == RDBAgentSession.id,
+            )
+            .outerjoin(
+                tree_activity,
+                tree_activity.c.root_session_agent_id
+                == RDBSessionAgent.root_session_agent_id,
             )
             .where(
                 RDBAgentSession.agent_id == agent_id,
@@ -597,8 +627,20 @@ class AgentSessionRepository:
             AgentSessionUnreadTerminalRunProjection(
                 session=self._build(agent_session),
                 unread_terminal_run_id=unread_terminal_run_id,
+                auto_archive_after=(
+                    None
+                    if agent_session.primary_kind
+                    == AgentSessionPrimaryKind.TEAM_PRIMARY
+                    or agent_session.pinned
+                    else (latest_activity_at or agent_session.last_activity_at)
+                    + datetime.timedelta(days=auto_archive_ttl_days)
+                ),
             )
-            for agent_session, unread_terminal_run_id in result.tuples()
+            for (
+                agent_session,
+                unread_terminal_run_id,
+                latest_activity_at,
+            ) in result.tuples()
         ]
 
     async def get_with_unread_terminal_run_by_id(
@@ -622,6 +664,7 @@ class AgentSessionRepository:
         return AgentSessionUnreadTerminalRunProjection(
             session=self._build(agent_session),
             unread_terminal_run_id=unread_terminal_run_id,
+            auto_archive_after=None,
         )
 
     async def list_archived_by_agent_id(

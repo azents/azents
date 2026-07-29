@@ -1046,10 +1046,14 @@ class _AgentSessionRouteChatService:
                 AgentSessionUnreadTerminalRunProjection(
                     session=self.primary_session,
                     unread_terminal_run_id=None,
+                    auto_archive_after=None,
                 ),
                 AgentSessionUnreadTerminalRunProjection(
                     session=self.secondary_session,
                     unread_terminal_run_id="3123456789abcdef0123456789abcdef",
+                    auto_archive_after=datetime.datetime(
+                        2026, 7, 31, tzinfo=datetime.UTC
+                    ),
                 ),
             ]
         )
@@ -1137,6 +1141,7 @@ class _AgentSessionRouteChatService:
             AgentSessionUnreadTerminalRunProjection(
                 session=session,
                 unread_terminal_run_id="3123456789abcdef0123456789abcdef",
+                auto_archive_after=None,
             )
         )
 
@@ -1270,6 +1275,9 @@ class TestAgentSessionRoutes:
         assert response.items[0].run_state == AgentSessionRunState.IDLE
         assert response.items[1].primary_kind is None
         assert response.items[1].run_state == AgentSessionRunState.RUNNING
+        assert response.items[1].auto_archive_after == datetime.datetime(
+            2026, 7, 31, tzinfo=datetime.UTC
+        )
 
     async def test_list_archived_agent_sessions_returns_deadline_snapshot(self) -> None:
         """Archived list exposes immutable retention snapshot and deadline metadata."""

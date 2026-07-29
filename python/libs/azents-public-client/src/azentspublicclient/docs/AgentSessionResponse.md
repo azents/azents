@@ -17,6 +17,7 @@ Name | Type | Description | Notes
 **run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Session execution state | 
 **pinned** | **bool** | Whether automatic archive is disabled for this Session | 
 **unread_terminal_run_id** | **str** |  | 
+**auto_archive_after** | **datetime** |  | 
 **archived_at** | **datetime** |  | 
 **purge_after** | **datetime** |  | 
 **archive_retention_days_snapshot** | **int** |  | 

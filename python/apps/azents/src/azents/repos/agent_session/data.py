@@ -24,6 +24,7 @@ class AgentSessionUnreadTerminalRunProjection:
 
     session: "AgentSession"
     unread_terminal_run_id: str | None
+    auto_archive_after: datetime.datetime | None
 
 
 @dataclasses.dataclass(frozen=True)

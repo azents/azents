@@ -779,6 +779,8 @@
           "archivedTitle": "Archived",
           "archivedEmpty": "No archived sessions.",
           "archivedAt": "Archived {date}",
+          "autoArchiveDueSoonBadge": "Archives soon",
+          "autoArchiveScheduled": "Automatic archive scheduled for {date}",
           "retentionSnapshotUnlimited": "Unlimited retention",
           "retentionSnapshotDays": "{days, plural, =0 {0 days} one {# day} other {# days}} retention",
           "purgeScheduled": "Deletes {date}",

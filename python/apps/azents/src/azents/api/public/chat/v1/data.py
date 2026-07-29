@@ -1983,6 +1983,12 @@ class AgentSessionResponse(BaseModel):
     unread_terminal_run_id: str | None = Field(
         description="Shared terminal AgentRun boundary awaiting review, or null",
     )
+    auto_archive_after: datetime.datetime | None = Field(
+        description=(
+            "Projected automatic archive deadline for eligible active list items, "
+            "or null when unavailable or excluded"
+        ),
+    )
     archived_at: datetime.datetime | None = Field(
         description="Archive boundary timestamp",
     )
@@ -2001,6 +2007,7 @@ class AgentSessionResponse(BaseModel):
         session: AgentSession,
         *,
         unread_terminal_run_id: str | None,
+        auto_archive_after: datetime.datetime | None,
     ) -> Self:
         """Convert from domain model and shared unread boundary."""
         return cls(
@@ -2023,6 +2030,7 @@ class AgentSessionResponse(BaseModel):
             run_state=session.run_state,
             pinned=session.pinned,
             unread_terminal_run_id=unread_terminal_run_id,
+            auto_archive_after=auto_archive_after,
             archived_at=session.archived_at,
             purge_after=session.purge_after,
             archive_retention_days_snapshot=(session.archive_retention_days_snapshot),
@@ -2039,6 +2047,7 @@ class AgentSessionResponse(BaseModel):
         return cls.from_domain(
             projection.session,
             unread_terminal_run_id=projection.unread_terminal_run_id,
+            auto_archive_after=projection.auto_archive_after,
         )
 
 

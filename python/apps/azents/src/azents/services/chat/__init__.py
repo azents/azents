@@ -681,6 +681,7 @@ class ChatSessionService:
                 self.agent_session_repository.list_active_unread_by_agent_id(
                     session,
                     agent_id,
+                    auto_archive_ttl_days=agent.auto_archive_ttl_days,
                 )
             )
             return Success(sessions)

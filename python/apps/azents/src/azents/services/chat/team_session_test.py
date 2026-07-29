@@ -803,6 +803,108 @@ class TestChatSessionTeamSessions:
         assert sessions[0].primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
         assert sessions[1].primary_kind is None
 
+    async def test_list_agent_sessions_projects_tree_auto_archive_deadline(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Automatic archive deadline uses the latest activity in the root tree."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "team-session-auto-archive-deadline",
+        )
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-auto-archive-deadline@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-auto-archive-deadline-agent",
+        )
+        await rdb_session.commit()
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        assert isinstance(create_result, Success)
+        root_session = create_result.value
+        repo = AgentSessionRepository()
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+        child_agent = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=root_agent.id,
+            name="worker",
+            agent_type="default",
+            title=None,
+            last_task_message=None,
+        )
+        root_activity = datetime.datetime(2026, 7, 1, tzinfo=datetime.UTC)
+        child_activity = datetime.datetime(2026, 7, 10, tzinfo=datetime.UTC)
+        await rdb_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == root_session.id)
+            .values(last_activity_at=root_activity)
+        )
+        await rdb_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == child_agent.agent_session_id)
+            .values(last_activity_at=child_activity)
+        )
+        await rdb_session.commit()
+
+        list_result = await _service(
+            rdb_session_manager
+        ).list_agent_sessions_with_unread_terminal_run(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(list_result, Success)
+        projection = next(
+            item for item in list_result.value if item.session.id == root_session.id
+        )
+        assert projection.auto_archive_after == child_activity + datetime.timedelta(
+            days=30
+        )
+        primary = next(
+            item
+            for item in list_result.value
+            if item.session.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
+        )
+        assert primary.auto_archive_after is None
+
+        await rdb_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == root_session.id)
+            .values(pinned=True)
+        )
+        await rdb_session.commit()
+        pinned_list_result = await _service(
+            rdb_session_manager
+        ).list_agent_sessions_with_unread_terminal_run(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        assert isinstance(pinned_list_result, Success)
+        pinned_projection = next(
+            item
+            for item in pinned_list_result.value
+            if item.session.id == root_session.id
+        )
+        assert pinned_projection.auto_archive_after is None
+
     async def test_list_agent_sessions_orders_non_primary_by_latest_user_input(
         self,
         rdb_session: AsyncSession,

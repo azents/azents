@@ -544,7 +544,11 @@ async def list_sessions(
     settings = await retention_service.get_settings()
     return AgentSessionListResponse(
         items=[
-            AgentSessionResponse.from_domain(s, unread_terminal_run_id=None)
+            AgentSessionResponse.from_domain(
+                s,
+                unread_terminal_run_id=None,
+                auto_archive_after=None,
+            )
             for s in sessions
         ],
         current_archive_retention_days=settings.archived_session_retention_days,
@@ -1725,6 +1729,7 @@ async def create_team_agent_session(
             return AgentSessionResponse.from_domain(
                 session,
                 unread_terminal_run_id=None,
+                auto_archive_after=None,
             )
         case Failure(error):
             match error:
@@ -1801,6 +1806,7 @@ async def update_agent_session_pin(
             return AgentSessionResponse.from_domain(
                 session,
                 unread_terminal_run_id=None,
+                auto_archive_after=None,
             )
         case Failure(error):
             match error:
@@ -1898,6 +1904,7 @@ async def list_archived_agent_sessions(
                     AgentSessionResponse.from_domain(
                         item,
                         unread_terminal_run_id=None,
+                        auto_archive_after=None,
                     )
                     for item in items
                 ],

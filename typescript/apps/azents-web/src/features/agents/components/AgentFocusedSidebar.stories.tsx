@@ -52,6 +52,7 @@ const sessions: AgentSessionResponse[] = [
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
+    auto_archive_after: null,
     created_at: "2026-06-24T08:00:00Z",
     updated_at: "2026-06-26T04:30:00Z",
   },
@@ -70,6 +71,7 @@ const sessions: AgentSessionResponse[] = [
     run_state: "running",
     pinned: false,
     unread_terminal_run_id: null,
+    auto_archive_after: "2026-08-10T11:45:00Z",
     created_at: "2026-06-25T09:00:00Z",
     updated_at: "2026-06-25T11:45:00Z",
   },
@@ -88,6 +90,7 @@ const sessions: AgentSessionResponse[] = [
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
+    auto_archive_after: "2026-08-02T03:10:00Z",
     created_at: "2026-06-25T01:00:00Z",
     updated_at: "2026-06-25T03:10:00Z",
   },
@@ -106,6 +109,7 @@ const archivedSessions: AgentSessionResponse[] = [
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
+    auto_archive_after: null,
     archived_at: "2026-07-18T04:30:00Z",
     purge_after: "2026-08-17T04:30:00Z",
     archive_retention_days_snapshot: 30,
@@ -124,6 +128,7 @@ const archivedSessions: AgentSessionResponse[] = [
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
+    auto_archive_after: null,
     archived_at: "2026-07-10T01:00:00Z",
     purge_after: null,
     archive_retention_days_snapshot: null,
@@ -161,6 +166,7 @@ const meta = {
     onArchiveSession: () => {},
     onSetSessionPinned: () => {},
     onRestoreSession: () => {},
+    nowMs: Date.parse("2026-07-29T12:00:00Z"),
   },
 } satisfies Meta<typeof AgentFocusedSidebar>;
 
@@ -195,7 +201,17 @@ export const Pinned = {
   args: {
     sessions: sessions
       .filter((session) => session.id === "sess_ci")
-      .map((session) => ({ ...session, pinned: true })),
+      .map((session) => ({
+        ...session,
+        pinned: true,
+        auto_archive_after: null,
+      })),
+  },
+} satisfies Story;
+
+export const AutoArchiveDueSoon = {
+  args: {
+    sessions: sessions.filter((session) => session.id === "sess_ci"),
   },
 } satisfies Story;
 

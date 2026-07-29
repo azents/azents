@@ -305,6 +305,13 @@ the same archive lifecycle as manual archive, including retention snapshot, life
 external-channel cleanup, and post-commit worktree cleanup. Pinning is preserved through archive and
 restore and only excludes automatic archive; it never changes manual archive eligibility.
 
+The active Agent-session list projects `auto_archive_after` from the maximum `last_activity_at`
+across each complete root tree plus the Agent's current TTL. Team-primary and pinned roots project
+null because automatic archive does not apply to them. The Agent rail shows an Archives soon badge
+when the projected deadline is within `min(floor(auto_archive_ttl_days / 2), 5)` whole days. A
+zero-day result disables the badge, so a one-day TTL has no warning badge. Active Sessions whose
+deadline has already passed remain marked until the asynchronous archive transition completes.
+
 `PATCH /chat/v1/agents/{agent_id}/sessions/{session_id}/pin` accepts `{ "pinned": boolean }` for an
 accessible active non-primary root Session and returns the updated Session projection. Subagent
 Sessions are read-only, while inactive and team-primary roots are not found or rejected,
