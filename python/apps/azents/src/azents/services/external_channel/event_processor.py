@@ -799,21 +799,6 @@ class ExternalChannelEventProcessorService:
             if configuration is None or configuration.encrypted_credentials is None:
                 return False
             if (
-                configuration.provider is ExternalChannelProvider.DISCORD
-                and binding.activation_status
-                is ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-            ):
-                recovered = (
-                    await self.repository.recover_finished_discord_binding_activation(
-                        session,
-                        binding_id=binding.id,
-                        now=now,
-                    )
-                )
-                if recovered is not None:
-                    await session.commit()
-                    return True
-            if (
                 binding.activation_status
                 is ExternalChannelBindingActivationStatus.WAKE_PENDING
             ):

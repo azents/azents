@@ -17,7 +17,6 @@ from sqlalchemy.orm import aliased
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionKind,
-    EventKind,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
@@ -43,13 +42,10 @@ from azents.core.enums import (
     ExternalChannelRouteMode,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
-    MailboxItemKind,
-    MailboxSchedulingMode,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.base import RDBModel
-from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
     RDBExternalChannelAccessRequest,
@@ -75,7 +71,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
 )
-from azents.rdb.models.mailbox_item import RDBMailboxItem
 
 from .data import (
     ExternalChannelAccessGrant,
@@ -3237,174 +3232,6 @@ class ExternalChannelRepository:
         await session.flush()
         await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelBinding.model_validate(rdb)
-
-    async def recover_finished_discord_binding_activation(
-        self,
-        session: AsyncSession,
-        *,
-        binding_id: str,
-        now: datetime.datetime,
-    ) -> ExternalChannelBinding | None:
-        """Activate one completed historical Discord invocation without replay."""
-        binding = await session.scalar(
-            sa.select(RDBExternalChannelBinding)
-            .join(
-                RDBExternalChannelAgentRoute,
-                RDBExternalChannelAgentRoute.id == RDBExternalChannelBinding.route_id,
-            )
-            .join(
-                RDBExternalChannelConnection,
-                RDBExternalChannelConnection.id
-                == RDBExternalChannelAgentRoute.connection_id,
-            )
-            .where(
-                RDBExternalChannelBinding.id == binding_id,
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
-                RDBExternalChannelBinding.activation_status
-                == ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-                RDBExternalChannelBinding.activation_trigger_message_id.is_not(None),
-                RDBExternalChannelConnection.provider
-                == ExternalChannelProvider.DISCORD,
-            )
-            .with_for_update()
-        )
-        if binding is None or binding.activation_trigger_message_id is None:
-            return None
-        batch = await session.scalar(
-            sa.select(RDBExternalChannelInvocationBatch)
-            .where(
-                RDBExternalChannelInvocationBatch.binding_id == binding.id,
-                RDBExternalChannelInvocationBatch.trigger_message_id
-                == binding.activation_trigger_message_id,
-                RDBExternalChannelInvocationBatch.mailbox_item_id.is_not(None),
-            )
-            .with_for_update()
-        )
-        if batch is None or batch.mailbox_item_id is None:
-            return None
-        mailbox_item = await session.scalar(
-            sa.select(RDBMailboxItem)
-            .where(
-                RDBMailboxItem.id == batch.mailbox_item_id,
-                RDBMailboxItem.session_id == binding.agent_session_id,
-                RDBMailboxItem.kind == MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
-                RDBMailboxItem.scheduling_mode == MailboxSchedulingMode.WAKE_SESSION,
-                RDBMailboxItem.idempotency_key
-                == f"external-channel-invocation:{batch.id}",
-            )
-            .with_for_update()
-        )
-        if mailbox_item is None:
-            return None
-        revision_ids = list(
-            await session.scalars(
-                sa.select(
-                    RDBExternalChannelInvocationBatchItem.message_revision_id
-                ).where(RDBExternalChannelInvocationBatchItem.batch_id == batch.id)
-            )
-        )
-        if not revision_ids:
-            return None
-        promoted_revision_ids = set(
-            await session.scalars(
-                sa.select(RDBEvent.payload["revision_id"].astext).where(
-                    RDBEvent.session_id == binding.agent_session_id,
-                    RDBEvent.kind == EventKind.EXTERNAL_CHANNEL_MESSAGE,
-                    RDBEvent.payload["binding_id"].astext == binding.id,
-                    RDBEvent.payload["invocation_batch_id"].astext == batch.id,
-                    RDBEvent.payload["revision_id"].astext.in_(revision_ids),
-                )
-            )
-        )
-        if promoted_revision_ids != set(revision_ids):
-            return None
-        active_work_exists = await session.scalar(
-            sa.select(
-                sa.exists().where(
-                    RDBExternalChannelWork.binding_id == binding.id,
-                    RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
-                )
-            )
-        )
-        if active_work_exists:
-            return None
-        finished_works = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelWork)
-                .where(
-                    RDBExternalChannelWork.binding_id == binding.id,
-                    RDBExternalChannelWork.status == ExternalChannelWorkStatus.FINISHED,
-                    RDBExternalChannelWork.finished_at.is_not(None),
-                )
-                .order_by(
-                    RDBExternalChannelWork.created_at,
-                    RDBExternalChannelWork.id,
-                )
-            )
-        )
-        if len(finished_works) != 1:
-            return None
-        initial_attempts = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelDeliveryAttempt)
-                .where(
-                    RDBExternalChannelDeliveryAttempt.binding_id == binding.id,
-                    RDBExternalChannelDeliveryAttempt.origin_type
-                    == ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                    RDBExternalChannelDeliveryAttempt.channel_action_id.is_(None),
-                    sa.or_(
-                        sa.and_(
-                            RDBExternalChannelDeliveryAttempt.origin_id == binding.id,
-                            RDBExternalChannelDeliveryAttempt.operation
-                            == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                        ),
-                        sa.and_(
-                            RDBExternalChannelDeliveryAttempt.origin_id
-                            == finished_works[0].id,
-                            RDBExternalChannelDeliveryAttempt.operation
-                            == ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                            RDBExternalChannelDeliveryAttempt.request_payload[
-                                "work_id"
-                            ].astext
-                            == finished_works[0].id,
-                        ),
-                    ),
-                )
-                .order_by(
-                    RDBExternalChannelDeliveryAttempt.created_at,
-                    RDBExternalChannelDeliveryAttempt.id,
-                )
-            )
-        )
-        control_attempts = [
-            attempt
-            for attempt in initial_attempts
-            if attempt.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-        ]
-        progress_attempts = [
-            attempt
-            for attempt in initial_attempts
-            if attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE
-        ]
-        if (
-            len(control_attempts) != 1
-            or not progress_attempts
-            or any(
-                attempt.status is not ExternalChannelDeliveryStatus.DELIVERED
-                for attempt in initial_attempts
-            )
-        ):
-            return None
-        await session.delete(mailbox_item)
-        binding.activation_status = ExternalChannelBindingActivationStatus.ACTIVE
-        binding.activation_wake_claimed_at = None
-        binding.activated_at = now
-        binding.projected_through_position = batch.last_provider_position
-        binding.truncated_message_count = 0
-        binding.truncated_size = 0
-        await session.flush()
-        await session.refresh(binding, attribute_names=["updated_at"])
-        return ExternalChannelBinding.model_validate(binding)
 
     async def get_pending_initial_delivery_attempt_ids(
         self,
