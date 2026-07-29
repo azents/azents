@@ -512,6 +512,14 @@ async def test_discord_progress_updates_one_tracker_and_finishes_cleanup(
         )
     )
     assert [row.part_ordinal for row in create_rows] == [0]
+    assert create_rows[0].request_payload["text"] == ""
+    assert create_rows[0].request_payload["embeds"] == [
+        {
+            "title": "Inspecting the incident…",
+            "description": "**0/1 complete**\n◉ Inspect the incident",
+            "color": 0x5865F2,
+        }
+    ]
     for ordinal, row in enumerate(create_rows):
         assert await repository.start_delivery(
             rdb_session,
@@ -557,6 +565,18 @@ async def test_discord_progress_updates_one_tracker_and_finishes_cleanup(
     assert update_row is not None
     assert update_row.part_ordinal == 0
     assert update_row.request_payload["provider_message_key"] == "discord:111:500"
+    assert update_row.request_payload["text"] == ""
+    assert update_row.request_payload["embeds"] == [
+        {
+            "title": "Inspecting the incident…",
+            "description": (
+                "**0/1 complete**\n"
+                "◉ Inspect the incident\n"
+                "  ↳ Inspect current provider logs."
+            ),
+            "color": 0x5865F2,
+        }
+    ]
     assert await repository.start_delivery(
         rdb_session,
         delivery_attempt_id=update_row.id,

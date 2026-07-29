@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-29
-spec_version: 24
+spec_version: 25
 ---
 
 # External Channel
@@ -176,9 +176,11 @@ contain multiple independent bindings.
 - Initial binding activation creates one separate Session navigation message and one
   checking work projection before Session wake-up. Slack lowers work through its
   retained Tracker message; Discord lowers each work snapshot to one retained compact
-  text Tracker with no Embed cards. The Discord Tracker keeps every ordered task title
-  and status marker, then uses the remaining bounded message budget for prioritized
-  details, output, and labeled sources. A
+  Embed Tracker. The Embed title carries the current-work title, while its bounded
+  description carries the status summary, every ordered task title and status marker,
+  then prioritized details, output, and labeled sources. The functional Tracker body is
+  not duplicated as ordinary message content; Multi App Agent attribution remains
+  separate readable content. A
   Discord root source provisions or reuses one delivery thread after route resolution,
   persists that target, and sends approval controls, Session navigation, replies,
   files, progress, recovery, and cleanup to that thread. A delivered final answer
@@ -292,6 +294,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-29** (spec_version 25) — Moved Discord's retained functional Channel Work
+  Tracker into one bounded Embed without duplicating its body as ordinary message
+  content.
 - **2026-07-29** (spec_version 24) — Delegated Slack Socket Mode WebSocket transport
   mechanics to the public aiohttp SDK client while retaining Azents-owned lease,
   admission-before-acknowledgement, endpoint lifecycle policy, and reconnect decisions.

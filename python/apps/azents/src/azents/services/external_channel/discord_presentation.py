@@ -17,6 +17,7 @@ DISCORD_DELIVERY_TEXT_LIMIT = (
 _PROGRESS_TITLE_MAX_LENGTH = 160
 _TASK_TITLE_MAX_LENGTH = 120
 _TASK_CONTEXT_MAX_LENGTH = 240
+_TRACKER_COLOR = 0x5865F2
 
 
 @dataclass(frozen=True)
@@ -77,18 +78,25 @@ def render_discord_progress(
         return DiscordProgressPresentation(
             pages=(
                 DiscordProgressPage(
-                    text="◉ Agent is checking your message",
-                    embeds=[],
+                    text="",
+                    embeds=_tracker_embeds(
+                        title="Channel Work",
+                        description="◉ Agent is checking your message",
+                    ),
                 ),
             )
         )
     if progress.title is None:
         raise AssertionError("Validated working progress must contain a title.")
+    title = _truncate(_single_line(progress.title), _PROGRESS_TITLE_MAX_LENGTH)
     return DiscordProgressPresentation(
         pages=(
             DiscordProgressPage(
-                text=_compact_progress_text(progress),
-                embeds=[],
+                text="",
+                embeds=_tracker_embeds(
+                    title=title,
+                    description=_compact_progress_description(progress),
+                ),
             ),
         )
     )
@@ -145,18 +153,32 @@ def _progress_summary(tasks: list[ExternalChannelWorkTask]) -> str:
     return f"{summary} · {failed} failed" if failed else summary
 
 
-def _compact_progress_text(progress: ExternalChannelDesiredProgress) -> str:
-    """Render every task in one bounded checklist with prioritized context."""
+def _tracker_embeds(
+    *,
+    title: str,
+    description: str,
+) -> list[dict[str, object]]:
+    """Render one bounded Discord-native Channel Work Embed."""
+    return [
+        {
+            "title": title,
+            "description": description,
+            "color": _TRACKER_COLOR,
+        }
+    ]
+
+
+def _compact_progress_description(progress: ExternalChannelDesiredProgress) -> str:
+    """Render every task in one bounded Embed description."""
     if progress.title is None:
         raise AssertionError("Validated working progress must contain a title.")
-    title = _truncate(_single_line(progress.title), _PROGRESS_TITLE_MAX_LENGTH)
-    header = f"**{title}** · {_progress_summary(progress.tasks)}"
+    summary = f"**{_progress_summary(progress.tasks)}**"
     task_lines = _bounded_task_title_lines(
         progress.tasks,
-        maximum=DISCORD_DELIVERY_TEXT_LIMIT - len(header) - 1,
+        maximum=DISCORD_DELIVERY_TEXT_LIMIT - len(summary) - 1,
     )
     extras: list[list[str]] = [[] for _ in progress.tasks]
-    base = "\n".join((header, *task_lines))
+    base = "\n".join((summary, *task_lines))
     remaining = DISCORD_DELIVERY_TEXT_LIMIT - len(base)
 
     task_ordinals = sorted(
@@ -193,13 +215,15 @@ def _compact_progress_text(progress: ExternalChannelDesiredProgress) -> str:
         extras[ordinal].append(source_line)
         remaining -= len(source_line) + 1
 
-    lines = [header]
+    lines = [summary]
     for ordinal, task_line in enumerate(task_lines):
         lines.append(task_line)
         lines.extend(extras[ordinal])
     rendered = "\n".join(lines)
     if len(rendered) > DISCORD_DELIVERY_TEXT_LIMIT:
-        raise AssertionError("Discord Tracker rendering exceeded its bounded limit.")
+        raise AssertionError(
+            "Discord Tracker Embed description exceeded its bounded limit."
+        )
     return rendered
 
 
